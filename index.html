@@ -1,10 +1,10 @@
-<title>Mandelbrot</title>
+<title>Mandelbrot Explorer</title>
 <style>
 body { font-family: Arial; background: #888}
 td.c { height:1px; width: 1px; }
 </style>
 <body>
-<div id=text style=margin:0;background:#aaa;height:100%;width:100%>
+<div id=text style=margin:0;background:#aaa>
 <div style="margin:0;padding:1 4;font-size:9pt;background:#aaa">
 
 <h4 style=margin-top:3;margin-bottom:6>
@@ -12,7 +12,7 @@ Javascript Mandelbrot Set Fractal Viewer
 </h4>
 
 <p style=margin-top:6;margin-bottom:6>
-<em>z<sup>2</sup>+c</em> is iterated for each complex number <em>c</em>.  Points are colored by <a href="http://warp.povusers.org/Mandelbrot/">counting iterations</a> to divergence; black points stay bounded. Click to zoom.
+<em>z<sup>2</sup>+c</em> is iterated for each <a href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Points are colored by <a href="http://warp.povusers.org/Mandelbrot/">counting iterations</a> to divergence; black points stay bounded. Click to zoom.
 
 <p style=margin-top:6;margin-bottom:6>
 Works best in <a href="http://www.google.com/chrome">Chrome</a>.
@@ -23,15 +23,41 @@ Works best in <a href="http://www.google.com/chrome">Chrome</a>.
 </div>
 
 <script>
-
 var gridcols = 5;
+var firstr = -0.5;
+var firstj = 0.0;
+var firstsize = 3.0;
+
+var opts = document.location.search.split('&');
+for (var j in opts) {
+  var m;
+  if (null !== (m = opts[j].match(/grid=(\d+)/))) {
+    gridcols = Math.max(1, parseInt(m[1]));
+  }
+  if (null !== (m = opts[j].match(/c=([-+]?\d?\.?\d+)([-+]\d?\.\d+)i/))) {
+    firstr = parseFloat(m[1]);
+    firstj = parseFloat(m[2]);
+  }
+  if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+)/))) {
+    firstsize = parseFloat(m[1]);
+  }
+}
+
 var dims = Math.max(32,
   Math.floor((document.body.clientWidth - 64) / gridcols) - 16);
 var dims2 = dims * dims;
-var surfaces = [];
+var zz = [];
+var cc = [];
+var bb = [];
+var nn = [];
+var it = [];
+var un = [];
+var ss = [];
+var fi = [];
+var sizes = [];
 var gridboards = 0;
 var steps = 0;
-var unknowncolor = "rgb(0,0,0)";
+var unknowncolor = "rgb(20,0,0)";
 var convergence = 1.0 / (1 << 21);
 
 document.write(
@@ -51,7 +77,8 @@ function grid() {
   return document.getElementById('grid');
 }
 
-grid().rows[1].cells[1].appendChild(document.getElementById('text'));
+grid().rows[1].cells[Math.min(1, gridcols - 1)]
+  .appendChild(document.getElementById('text'));
 
 function compute(m, i, n, z, c, b, converge) {
   if (n[m]) return 0;
@@ -77,16 +104,85 @@ function compute(m, i, n, z, c, b, converge) {
   return 0;
 }
 
-function Surface(k, size, re, im) {
-  this.k = k;
-  this.sizes = [size, re, im];
-  this.it = 1;
-  var z = this.z = [];
-  var c = this.c = [];
-  var n = this.n = [];
-  var b = this.b = [];
-  this.s = null;
-  this.un = dims2;
+function iterate(k) {
+  var i = ++it[k];
+  var z = zz[k];
+  var c = cc[k];
+  var n = nn[k];
+  var b = bb[k];
+  var s = ss[k];
+  var converge = convergence / (1 << (k >> 1));
+  var shift = i;
+  while ((shift & 1) == 0) shift >>= 1;
+  if (s === null && un[k] < 4096) {
+    var news = [];
+    for (var m = 0; m < dims2; ++m) {
+      if (n[m]) continue;
+      news.push(m);
+    }
+    s = ss[k] = news;
+  }
+  if (s === null) {
+    if (shift <= (4 << (k * 2))) {
+      for (var m = 0; m < dims2; ++m) {
+        if (n[m]) continue;
+        b[m * 2] = z[m * 2];
+        b[m * 2 + 1] = z[m * 2 + 1];
+      }
+    }
+    var count = 0;
+    for (var m = 0; m < dims2; ++m) {
+      count += compute(m, i, n, z, c, b, converge);
+    }
+    un[k] -= count;
+  } else {
+    if (s.length < un[k] / 2) {
+      var news = [];
+      for (var t = 0; t < s.length; ++t) {
+        if (n[s[t]]) continue;
+        news.push(s[t]);
+      }
+      s = ss[k] = news;
+    }
+    if (shift <= (4 << (k * 2))) {
+      for (var t = 0; t < s.length; ++t) {
+        var m = s[t];
+        if (n[m]) continue;
+        b[m * 2] = z[m * 2];
+        b[m * 2 + 1] = z[m * 2 + 1];
+      }
+    }
+    var count = 0;
+    for (var t = 0; t < s.length; ++t) {
+      count += compute(s[t], i, n, z, c, b, converge);
+    }
+    un[k] -= count;
+  }
+  if (!fi[k] && un[k] != dims2) {
+    fi[k] = i;
+  }
+}
+
+function setboard(k, size, re, im) {
+  while (it.length <= k) {
+    it.push(0);
+    fi.push(0);
+    zz.push([]);
+    cc.push([]);
+    nn.push([]);
+    bb.push([]);
+    ss.push(null);
+    sizes.push([0, 0, 0]);
+    un.push(dims2);
+  }
+  sizes[k] = [size, re, im];
+  it[k] = 1;
+  var z = zz[k] = [];
+  var c = cc[k] = [];
+  var n = nn[k] = [];
+  var b = bb[k] = [];
+  ss[k] = null;
+  un[k] = dims2;
   for (var y = 0; y < dims; y++) {
     var j = (0.5 - (y / dims)) * size + im;
     for (var x = 0; x < dims; x++) {
@@ -95,85 +191,30 @@ function Surface(k, size, re, im) {
       c.push(r, j);
       if (r * r + j * j > 4) {
         n.push(1);
-        this.un -= 1;
+        un[k] -= 1;
       } else {
         n.push(0);
       }
       b.push(r, j);
     }
   }
-  this.fi = (this.un == dims2 ? 0 : 1);
+  fi[k] = (un[k] == dims2 ? 0 : 1);
 }
 
-Surface.prototype.iterate = function iterate() {
-  this.it += 1;
-  var converge = convergence / (1 << this.k);
-  this.checks();
-  this.checkb();
-  var count = 0;
-  var s = this.s;
-  if (s === null) {
-    for (var m = 0; m < dims2; ++m) {
-      count += compute(m, this.it, this.n, this.z, this.c, this.b, converge);
-    }
-  } else {
-    for (var t = 0; t < s.length; ++t) {
-      count += compute(s[t], this.it, this.n, this.z, this.c, this.b, converge);
-    }
-  }
-  this.un -= count;
-  if (!this.fi && this.un != dims2) {
-    this.fi = this.it;
+function truncateboards(k) {
+  if (it.length > k) {
+    it.length = k;
+    zz.length = k;
+    cc.length = k;
+    nn.length = k;
+    sizes.length = k;
   }
 }
-
-</script>
-<script>
-Surface.prototype.checks = function checks() {
-  if (this.s === null) {
-    if (this.un < 4096) {
-      var news = [];
-      for (var m = 0; m < dims2; ++m) {
-        if (this.n[m]) continue;
-        news.push(m);
-      }
-      this.s = news;
-    }
-  } else if (this.s.length < this.un / 2) {
-    var news = [];
-    for (var t = 0; t < this.s.length; ++t) {
-      if (this.n[this.s[t]]) continue;
-      news.push(this.s[t]);
-    }
-    this.s = news;
-  }
-}
-
-Surface.prototype.checkb = function checkb() {
-  var shift = this.it;
-  while (shift & 1) shift = shift >> 1;
-  if (shift) return;
-  if (s === null) {
-    for (var m = 0; m < dims2; ++m) {
-      if (this.n[m]) continue;
-      this.b[m * 2] = this.z[m * 2];
-      this.b[m * 2 + 1] = this.z[m * 2 + 1];
-    }
-  } else {
-    for (var t = 0; t < s.length; ++t) {
-      var m = this.s[t];
-      if (this.n[m]) continue;
-      this.b[m * 2] = this.z[m * 2];
-      this.b[m * 2 + 1] = this.z[m * 2 + 1];
-    }
-  }
-}
-
 
 function drawcolor(k, i) {
   var color = makecolor(k, i);
   var converged = makecolor(k, -i);
-  var n = surfaces[k].n;
+  var n = nn[k];
   var ctx = board(k).getContext('2d');
   for (var m = 0; m < dims2; ++m) {
     if (n[m] == i || n[m] == -i) {
@@ -194,7 +235,7 @@ function colornum(n) {
 function makecolor(k, i) {
   if (i == 0) return unknowncolor;
   if (i < 0) return "rgb(0,0,0)";
-  i -= surfaces[k].fi;
+  i -= fi[k];
   var r = colornum(Math.max(-2, 8 - Math.abs(12 - k)) +
                    ((i - 2) >> ((k + 1) >> 1)));
   var g = colornum((i - 6 - (k >> 1)) >>
@@ -205,8 +246,8 @@ function makecolor(k, i) {
 }
 
 function draw(k) {
-  if (surfaces.length <= k) return;
-  var n = surfaces[k].n;
+  if (nn.length <= k) return;
+  var n = nn[k];
   var ctx = board(k).getContext('2d');
   for (var m = 0; m < dims2; ++m) {
     var x = m % dims;
@@ -217,7 +258,7 @@ function draw(k) {
 }
 
 function drawall() {
-  for (var k = 0; k < surfaces.length; ++k) {
+  for (var k = 0; k < nn.length; ++k) {
     draw(k);
   }
 }
@@ -231,9 +272,9 @@ function progress() {
   var shift = steps++;
   var k = 0;
   while (1 << k & shift) k += 1;
-  k = surfaces.length - 1 - (k % surfaces.length);
-  surfaces[k].iterate();
-  drawcolor(k, surfaces[k].it);
+  k = it.length - 1 - (k % it.length);
+  iterate(k);
+  drawcolor(k, it[k]);
   setTimeout(progress, 0);
 }
 
@@ -283,11 +324,10 @@ document.onmousemove = function(e) {
       var y = e.clientY + document.body.scrollTop - absoluteTop(target);
       var k = parseInt(m[1]);
       var j = x + y * dims;
-      var title = 'c=' +
-        formatcomplex(k, surfaces[k].c[j * 2], surfaces[k].c[j * 2 + 1]);
-      if (surfaces[k].n[j]) {
-        if (surfaces[k].n[j] > 0) {
-          title += '\ndiverged in ' + surfaces[k].n[j];
+      var title = 'c=' + formatcomplex(k, cc[k][j * 2], cc[k][j * 2 + 1]);
+      if (nn[k][j]) {
+        if (nn[k][j] > 0) {
+          title += '\ndiverged in ' + nn[k][j];
         } else {
           title += '\nconverged';
         }
@@ -298,7 +338,7 @@ document.onmousemove = function(e) {
 }
 
 function formatcomplex(k, re, im) {
-  var pix = surfaces[k].sizes[0] / dims;
+  var pix = sizes[k][0] / dims;
   var digits = 0;
   while (pix < 1.0) {
     pix *= 10;
@@ -369,7 +409,7 @@ function board(k) {
 }
 
 function cellclick(k, m) {
-  if (k >= surfaces.length) return;
+  if (k >= sizes.length) return;
   hideboardspast(k);
   ensurerow(k + 1);
   showpreview(k + 1);
@@ -377,25 +417,25 @@ function cellclick(k, m) {
 }
 
 function cellclickdelay(k, m) {
-  if (k >= surfaces.length) return;
+  if (k >= sizes.length) return;
   makeboard(k + 1);
   hideboardspast(k + 1);
-  osize = surfaces[k].sizes[0];
-  ore = surfaces[k].sizes[1];
-  oim = surfaces[k].sizes[2];
+  osize = sizes[k][0];
+  ore = sizes[k][1];
+  oim = sizes[k][2];
   cx = m % dims;
   cy = (m - cx) / dims;
   nsize = osize / 4;
   nre = ore + ((cx / dims) - 0.5) * osize;
   nim = oim + (0.5 - (cy / dims)) * osize;
-  if (surfaces.length > k + 1) surfaces.length = k + 1;
-  surfaces.push(new Surface(k + 1, nsize, nre, nim));
+  setboard(k + 1, nsize, nre, nim);
+  truncateboards(k + 2);
   hidepreview(k + 1);
   draw(k + 1);
 }
 
 function start() {
-  surfaces.push(new Surface(0, 3.0, -0.5, 0.0));
+  setboard(0, firstsize, firstr, firstj);
   makeboard(0);
   draw(0);
   hidepreview(0);
@@ -405,4 +445,10 @@ function start() {
 ensurerow(0);
 showpreview(0);
 setTimeout(start, 0);
+</script>
+<script src="http://www.google-analytics.com/urchin.js" type="text/javascript"> 
+</script> 
+<script type="text/javascript"> 
+_uacct = "UA-242212-1";
+urchinTracker();
 </script>
