@@ -2,11 +2,13 @@
 <html>
 <head>
 <title>Mandelbrot Explorer</title>
+<meta name="description" content="Quickly explore the Mandelbrot Set
+ in your browser. Click to zoom. Hover for details.">
 <!--
 Written by David Bau as a Javascript example in 2009; updated in 2020
 to handle high device pixel ratios, and to report periodicity.
 
-URL optionis: use ?grid=3 to select 3-column view,
+URL options: use ?grid=3 to select 3-column view,
                    c=-0.14-0.65i to set center,
                and s=0.5 to set viewed size.
 
@@ -17,12 +19,14 @@ unknown points is less than half the visual field, avoids iterating over
 the other points.
 
 TODO: adapt color palette based on mix of convergence rates.
-TODO: on mouseover, show a rectangle where the next zoom level is.
 -->
 <style>
 body { font-family: Arial; background: #888}
-td.c { height:1px; width: 1px; }
+td { position: relative; overflow: hidden; vertical-align: top;}
 canvas { vertical-align:bottom;cursor:crosshair }
+.rect { position: absolute; border: 1px solid yellow; height: 0; width: 0;
+  pointer-events: none; opacity: 0.7; transition: opacity 0.3s; }
+.hiderect .rect { opacity: 0; }
 </style>
 </head>
 <body>
@@ -86,9 +90,8 @@ document.write(
 for (var r = 0; r < 2; ++r) {
   document.write('<tr>');
   for (var s = 0; s < gridcols; ++s) {
-    document.write('<td valign=top ' +
-       'style="height:' + cssDims + 'px;width:' + cssDims + 'px;' +
-       'overflow:hidden;"></td>');
+    document.write('<td ' +
+       'style="height:' + cssDims + 'px;width:' + cssDims + 'px;"></td>')
   }
   document.write('</tr>');
 }
@@ -300,7 +303,7 @@ function drawall() {
 function tablestring(k) {
   return "<canvas id=b_" + k + " width=" + dims + " height=" + dims +
          ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
-         "</canvas>";
+         '</canvas><div class="rect"></div>';
 }
 
 function progress() {
@@ -333,7 +336,6 @@ function absoluteTop(target) {
   
 
 document.onmousedown = function(e) {
-  if (!e) var e = window.target;
   var target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
   if (target.nodeType == 3) target = target.parentNode;
   if (target.id) {
@@ -350,7 +352,6 @@ document.onmousedown = function(e) {
 }
 
 document.onmousemove = function(e) {
-  if (!e) var e = window.target;
   var target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
   if (target.nodeType == 3) target = target.parentNode;
   if (target.id) {
@@ -371,6 +372,23 @@ document.onmousemove = function(e) {
       } 
       target.setAttribute('title', null);
       target.setAttribute('title', title);
+    }
+  }
+}
+
+document.body.onmouseover = function(e) {
+  var target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
+  if (target.nodeType == 3) target = target.parentNode;
+  document.body.className = 'hiderect';
+  if (target.tagName == 'CANVAS') {
+    console.log('enter');
+    var m = target.id.match(/b_(\d+)/);
+    if (m) {
+      k = parseInt(m[1]);
+      for (var i = 0; i < gridboards; ++i) {
+        board(i).parentElement.className = i < k ? '' : 'hiderect';
+      }
+      document.body.className = '';
     }
   }
 }
@@ -426,26 +444,13 @@ function makeboard(k) {
   }
 }
 
-function showpreview(k) {
-  if (k < gridboards) board(k).style.visiblility = 'hidden';
-  var table = grid();
-  var c = k % gridcols;
-  var r = (k - c) / gridcols;
-}
-
-function hidepreview(k) {
-  board(k).style.visiblility = 'visible';
-  var table = grid();
-  var c = k % gridcols;
-  var r = (k - c) / gridcols;
-}
-
 function hideboardspast(k) {
   for (var j = 0; j <= k && j < gridboards; ++j) {
-    board(j).style.visibility = 'visible';
+    board(j).parentElement.style.visibility = 'visible';
   }
   for (var j = k + 1; j < gridboards; ++j) {
-    board(j).style.visibility = 'hidden';
+    board(j).parentElement.style.visibility = 'hidden';
+    removerect(j - 1);
   }
 }
 
@@ -457,7 +462,6 @@ function cellclick(k, m) {
   if (k >= sizes.length) return;
   hideboardspast(k);
   ensurerow(k + 1);
-  showpreview(k + 1);
   setTimeout(function() { cellclickdelay(k, m); }, 1);
 }
 
@@ -473,22 +477,34 @@ function cellclickdelay(k, m) {
   nsize = osize / 4;
   nre = ore + ((cx / dims) - 0.5) * osize;
   nim = oim + (0.5 - (cy / dims)) * osize;
+  showrect(k, cx / dims, cy / dims);
   setboard(k + 1, nsize, nre, nim);
   truncateboards(k + 2);
-  hidepreview(k + 1);
   draw(k + 1);
+}
+
+function showrect(k, x, y) {
+  var s = board(k).nextElementSibling.style;
+  board(k).parentElement.className = '';
+  s.top = parseInt(y * cssDims - cssDims / 8) + 'px';
+  s.left = parseInt(x * cssDims - cssDims / 8) + 'px';
+  s.width = (cssDims / 4) + 'px';
+  s.height = (cssDims / 4) + 'px';
+}
+
+function removerect(k) {
+  var s = board(k).nextElementSibling.style;
+  s.top = s.left = s.width = s.height = '';
 }
 
 function start() {
   setboard(0, firstsize, firstr, firstj);
   makeboard(0);
   draw(0);
-  hidepreview(0);
   progress();
 }
 
 ensurerow(0);
-showpreview(0);
 setTimeout(start, 0);
 </script>
 </body>
