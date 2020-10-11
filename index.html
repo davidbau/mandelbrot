@@ -2,11 +2,29 @@
 <html>
 <head>
 <title>Mandelbrot Explorer</title>
+<!--
+Written by David Bau as a Javascript example in 2009; updated in 2020
+to handle high device pixel ratios, and to report periodicity.
+
+URL optionis: use ?grid=3 to select 3-column view,
+                   c=-0.14-0.65i to set center,
+               and s=0.5 to set viewed size.
+
+Implementation notes.  To minimize computation, the code identifies both
+points that diverge and points that converge.  Can identiify convergence
+to periodic cylces of arbitrarily long length.  After the number of
+unknown points is less than half the visual field, avoids iterating over
+the other points.
+
+TODO: adapt color palette based on mix of convergence rates.
+TODO: on mouseover, show a rectangle where the next zoom level is.
+-->
 <style>
 body { font-family: Arial; background: #888}
 td.c { height:1px; width: 1px; }
 canvas { vertical-align:bottom;cursor:crosshair }
 </style>
+</head>
 <body>
 <div id=text style="margin:0;background:#aaa">
 <div style="margin:0;padding:1px 4px;font-size:9pt;background:#aaa">
@@ -124,7 +142,7 @@ function iterate(k) {
   // head and tail factor i into an odd num and largest power of 2.
   var head = i, tail = 1;
   while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
-  if (s === null && un[k] < 8192) {
+  if (s === null && un[k] <= z.length / 4) {
     var news = [];
     for (var m = 0; m < dims2; ++m) {
       if (n[m]) continue;
