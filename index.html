@@ -27,6 +27,8 @@ canvas { vertical-align:bottom;cursor:crosshair }
 .rect { position: absolute; border: 1px solid yellow; height: 0; width: 0;
   pointer-events: none; opacity: 0.7; transition: opacity 0.3s; }
 .hiderect .rect { opacity: 0; }
+.overlay { position: absolute; pointer-events: none; opacity: 0.8;
+  top:0;left:0;z-index:1; }
 </style>
 </head>
 <body>
@@ -104,12 +106,29 @@ function grid() {
 grid().rows[1].cells[Math.min(1, gridcols - 1)]
   .appendChild(document.getElementById('text'));
 
+function cycle(m, z, c, p) {
+  var len = figureperiod(p[m]);
+  var m2 = m * 2;
+  var m2i = m2 + 1;
+  var r = z[m2];
+  var j = z[m2i];
+  var result = [r, j];
+  while (result.length < len * 2) {
+    var ra = r * r - j * j + c[m2];
+    var ja = 2 * r * j + c[m2i];
+    result.push(ra, ja)
+    r = ra;
+    j = ra;
+  }
+  return result;
+}
+
 function compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
   if (n[m]) return 0;
   var m2 = m * 2;
   var m2i = m2 + 1;
-  var r = z[m2]
-  var j = z[m2i]
+  var r = z[m2];
+  var j = z[m2i];
   var ra = r * r - j * j + c[m2];
   var ja = 2 * r * j + c[m2i];
   var d = ra * ra + ja * ja;
@@ -248,6 +267,26 @@ function truncateboards(k) {
   }
 }
 
+function showcycle(k, cycle) {
+  var ctx = overlay(k).getContext('2d');
+  ctx.clearRect(0, 0, dims, dims);
+  ctx.fillStyle = 'red';
+  var sc = sizes[k];
+  var s = sc[0];
+  var cr = sc[1];
+  var cj = sc[2];
+  for (var i = 0; i < cycle.length; i += 2) {
+    var r = cycle[i], j = cycle[i+1];
+    var x = (r - cr) / s * dims + dims/2;
+    var y = -(j - cj) / s * dims + dims/2;
+    if (x >= 0 && y >= 0 && x < dims && y < dims) {
+      ctx.beginPath();
+      ctx.arc(x, y, 5, 0, 2 * Math.PI, false);
+      ctx.fill();
+    }
+  }
+}
+
 function drawcolor(k, i) {
   var color = makecolor(k, i);
   var converged = makecolor(k, -i);
@@ -301,9 +340,11 @@ function drawall() {
 }
 
 function tablestring(k) {
-  return "<canvas id=b_" + k + " width=" + dims + " height=" + dims +
+  return '<canvas id=b_' + k + ' width=' + dims + ' height=' + dims +
          ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
-         '</canvas><div class="rect"></div>';
+         '</canvas><div class="rect"></div>' +
+         '<canvas class=overlay width=' + dims + ' height=' + dims +
+         ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">'
 }
 
 function progress() {
@@ -366,8 +407,15 @@ document.onmousemove = function(e) {
       if (nn[k][j]) {
         if (nn[k][j] > 0) {
           title += '\ndiverged in ' + nn[k][j];
+          for (var i = 0; i < sizes.length; i++) {
+            showcycle(i, []);
+          }
         } else {
           title += '\nperiod ' + figureperiod(pp[k][j]);
+          var cyc = cycle(j, bb[k], cc[k], pp[k]);
+          for (var i = 0; i < sizes.length; i++) {
+            showcycle(i, cyc);
+          }
         }
       } 
       target.setAttribute('title', null);
@@ -381,7 +429,6 @@ document.body.onmouseover = function(e) {
   if (target.nodeType == 3) target = target.parentNode;
   document.body.className = 'hiderect';
   if (target.tagName == 'CANVAS') {
-    console.log('enter');
     var m = target.id.match(/b_(\d+)/);
     if (m) {
       k = parseInt(m[1]);
@@ -458,12 +505,22 @@ function board(k) {
   return document.getElementById("b_" + k);
 }
 
+function rect(k) {
+  return document.getElementById("b_" + k).nextElementSibling;
+}
+
+function overlay(k) {
+  return document.getElementById("b_" + k).nextElementSibling.nextElementSibling;
+}
+
 function cellclick(k, m) {
   if (k >= sizes.length) return;
   hideboardspast(k);
   ensurerow(k + 1);
   setTimeout(function() { cellclickdelay(k, m); }, 1);
 }
+
+var zoomfactor = 5;
 
 function cellclickdelay(k, m) {
   if (k >= sizes.length) return;
@@ -474,7 +531,7 @@ function cellclickdelay(k, m) {
   oim = sizes[k][2];
   cx = m % dims;
   cy = (m - cx) / dims;
-  nsize = osize / 4;
+  nsize = osize / zoomfactor;
   nre = ore + ((cx / dims) - 0.5) * osize;
   nim = oim + (0.5 - (cy / dims)) * osize;
   showrect(k, cx / dims, cy / dims);
@@ -484,16 +541,16 @@ function cellclickdelay(k, m) {
 }
 
 function showrect(k, x, y) {
-  var s = board(k).nextElementSibling.style;
+  var s = rect(k).style;
   board(k).parentElement.className = '';
-  s.top = parseInt(y * cssDims - cssDims / 8) + 'px';
-  s.left = parseInt(x * cssDims - cssDims / 8) + 'px';
-  s.width = (cssDims / 4) + 'px';
-  s.height = (cssDims / 4) + 'px';
+  s.top = (y * cssDims - cssDims / 2 / zoomfactor) + 'px';
+  s.left = (x * cssDims - cssDims / 2 / zoomfactor) + 'px';
+  s.width = (cssDims / zoomfactor) + 'px';
+  s.height = (cssDims / zoomfactor) + 'px';
 }
 
 function removerect(k) {
-  var s = board(k).nextElementSibling.style;
+  var s = rect(k).style;
   s.top = s.left = s.width = s.height = '';
 }
 
