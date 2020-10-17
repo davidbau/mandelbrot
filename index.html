@@ -60,9 +60,9 @@ for (var j in opts) {
   if (null !== (m = opts[j].match(/grid=(\d+)/))) {
     gridcols = Math.max(1, parseInt(m[1]));
   }
-  if (null !== (m = opts[j].match(/c=([-+]?\d?\.?\d+)([-+]\d?\.\d+)i/))) {
+  if (null !== (m = opts[j].match(/c=([-+]?\d?\.?\d+)(?:([-+]\d?\.\d+)i)?/))) {
     firstr = parseFloat(m[1]);
-    firstj = parseFloat(m[2]);
+    firstj = parseFloat(m[2] || 0);
   }
   if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+)/))) {
     firstsize = parseFloat(m[1]);
