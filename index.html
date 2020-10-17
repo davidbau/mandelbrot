@@ -2,8 +2,8 @@
 <html>
 <head>
 <title>Mandelbrot Explorer</title>
-<meta name="description" content="Quickly explore the Mandelbrot Set
- in your browser. Click to zoom. Hover for details.">
+<meta name="description" content="Quick and beautiful exploration of
+the Mandelbrot Set in your browser. Click to zoom. Hover to see orbits.">
 <!--
 Written by David Bau as a Javascript example in 2009; updated in 2020
 to handle high device pixel ratios, and to report periodicity.
@@ -29,6 +29,7 @@ canvas { vertical-align:bottom;cursor:crosshair }
 .hiderect .rect { opacity: 0; }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
   top:0;left:0;z-index:1; }
+body.hiderect .overlay { opacity: 0; }
 </style>
 </head>
 <body>
@@ -40,7 +41,7 @@ Javascript Mandelbrot Set Fractal Viewer
 </h4>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup>2</sup>+c</em> is iterated for each <a href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Points are colored by <a href="http://warp.povusers.org/Mandelbrot/">counting iterations</a> to divergence; black points stay bounded. Click to zoom.
+<em>z &rightarrow; z<sup>2</sup>+c</em> is iterated for each <a href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Points are colored by <a href="http://warp.povusers.org/Mandelbrot/">counting iterations</a> to divergence; black points stay bounded. Click to zoom. Hover to see orbits.
 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a href="http://davidbau.com/archives/2009/09/27/mandelbrot.html">David Bau</a>
@@ -108,17 +109,26 @@ grid().rows[1].cells[Math.min(1, gridcols - 1)]
 
 function cycle(m, z, c, p) {
   var len = figureperiod(p[m]);
+  return suborbit(m, z, c, len);
+}
+
+function orbit(m, c) {
+  return suborbit(m, c, c, 30);
+}
+
+function suborbit(m, z, c, len) {
   var m2 = m * 2;
   var m2i = m2 + 1;
   var r = z[m2];
   var j = z[m2i];
+  var cr = c[m2];
+  var cj = c[m2i]
   var result = [r, j];
   while (result.length < len * 2) {
-    var ra = r * r - j * j + c[m2];
-    var ja = 2 * r * j + c[m2i];
-    result.push(ra, ja)
+    var ra = r * r - j * j + cr;
+    var j = 2 * r * j + cj;
     r = ra;
-    j = ra;
+    result.push(r, j)
   }
   return result;
 }
@@ -267,21 +277,25 @@ function truncateboards(k) {
   }
 }
 
-function showcycle(k, cycle) {
+function clearseq(k) {
   var ctx = overlay(k).getContext('2d');
   ctx.clearRect(0, 0, dims, dims);
-  ctx.fillStyle = 'red';
+}
+
+function showseq(k, seq, color) {
+  var ctx = overlay(k).getContext('2d');
+  ctx.fillStyle = color;
   var sc = sizes[k];
   var s = sc[0];
   var cr = sc[1];
   var cj = sc[2];
-  for (var i = 0; i < cycle.length; i += 2) {
-    var r = cycle[i], j = cycle[i+1];
+  for (var i = 0; i < seq.length; i += 2) {
+    var r = seq[i], j = seq[i+1];
     var x = (r - cr) / s * dims + dims/2;
     var y = -(j - cj) / s * dims + dims/2;
     if (x >= 0 && y >= 0 && x < dims && y < dims) {
       ctx.beginPath();
-      ctx.arc(x, y, 5, 0, 2 * Math.PI, false);
+      ctx.arc(x, y, 2 * pixelRatio, 0, 2 * Math.PI, false);
       ctx.fill();
     }
   }
@@ -404,20 +418,20 @@ document.onmousemove = function(e) {
       var k = parseInt(m[1]);
       var j = x + y * dims;
       var title = 'c=' + formatcomplex(k, cc[k][j * 2], cc[k][j * 2 + 1]);
+      var orb = orbit(j, cc[k]), cyc = [];
       if (nn[k][j]) {
         if (nn[k][j] > 0) {
           title += '\ndiverged in ' + nn[k][j];
-          for (var i = 0; i < sizes.length; i++) {
-            showcycle(i, []);
-          }
         } else {
           title += '\nperiod ' + figureperiod(pp[k][j]);
           var cyc = cycle(j, bb[k], cc[k], pp[k]);
-          for (var i = 0; i < sizes.length; i++) {
-            showcycle(i, cyc);
-          }
         }
       } 
+      for (var i = 0; i < sizes.length; i++) {
+        clearseq(i);
+        showseq(i, orb, 'yellow');
+        showseq(i, cyc, 'red');
+      }
       target.setAttribute('title', null);
       target.setAttribute('title', title);
     }
