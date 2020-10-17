@@ -24,13 +24,13 @@ td { position: relative; vertical-align: top;}
 canvas { vertical-align:bottom;cursor:crosshair }
 .rect { position: absolute; border: 1px solid yellow; height: 0; width: 0;
   pointer-events: none; opacity: 0.7; transition: opacity 0.3s; }
-.hiderect .rect { opacity: 0; }
+.hidemarks .rect { opacity: 0; }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
   top:0; left:0; z-index:1; transition: opacity 0.3s }
-.zoomnum { position:absolute;display:inline-block;
-  right:0;bottom:-12px;font-size:12px;color:yellow; transition: opacity 0.3s}
-body.hiderect .overlay { opacity: 0; }
-body.hiderect .zoomnum { opacity: 0; }
+.zoomnum { position:absolute; display:inline-block; right:0; bottom:-12px;
+  font-size:12px; color:yellow; transition: opacity 0.3s}
+body.hidemarks .overlay { opacity: 0; }
+body.hidemarks .zoomnum { opacity: 0; }
 </style>
 </head>
 <body>
@@ -54,6 +54,7 @@ var gridcols = 5;
 var firstr = -0.5;
 var firstj = 0.0;
 var firstsize = 3.0;
+var orbitlength = 240;
 var pixelRatio = window.devicePixelRatio || 1;
 
 var opts = document.location.search.split('&');
@@ -94,7 +95,7 @@ document.write(
 for (var r = 0; r < 2; ++r) {
   document.write('<tr>');
   for (var s = 0; s < gridcols; ++s) {
-    document.write('<td class="hiderect" ' +
+    document.write('<td class="hidemarks" ' +
        'style="height:' + cssDims + 'px;width:' + cssDims + 'px;"></td>')
   }
   document.write('</tr>');
@@ -114,7 +115,7 @@ function cycle(m, z, c, p) {
 }
 
 function orbit(m, c) {
-  return suborbit(m, c, c, 30);
+  return suborbit(m, c, c, orbitlength);
 }
 
 function suborbit(m, z, c, len) {
@@ -363,7 +364,7 @@ function tablestring(k) {
   } else {
     factor = factor.toExponential(2);
   }
-  return '<canvas id=b_' + k + ' width=' + dims + ' height=' + dims +
+  return '<canvas width=' + dims + ' height=' + dims +
          ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
          '</canvas>' +
          '<div class="rect"></div>' +
@@ -400,12 +401,20 @@ function absoluteTop(target) {
   }
   return top;
 }
+
+function eventtarget(e) {
+  var target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
+  while (target) {
+    if (target.id) { return target; }
+    target = target.parentNode;
+  }
+  return null;
+}
   
 
 document.onmousedown = function(e) {
-  var target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
-  if (target.nodeType == 3) target = target.parentNode;
-  if (target.id) {
+  var target = eventtarget(e);
+  if (target) {
     var m = target.id.match(/b_(\d+)/);
     if (m) {
       var se = document.scrollingElement || document.body;
@@ -419,9 +428,8 @@ document.onmousedown = function(e) {
 }
 
 document.onmousemove = function(e) {
-  var target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
-  if (target.nodeType == 3) target = target.parentNode;
-  if (target.id) {
+  var target = eventtarget(e);
+  if (target) {
     var m = target.id.match(/b_(\d+)/);
     if (m) {
       var se = document.scrollingElement || document.body;
@@ -429,37 +437,38 @@ document.onmousemove = function(e) {
       var y = (e.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
       var k = parseInt(m[1]);
       var j = x + y * dims;
-      var title = 'c=' + formatcomplex(k, cc[k][j * 2], cc[k][j * 2 + 1]);
-      var orb = orbit(j, cc[k]), cyc = [];
-      if (nn[k][j]) {
-        if (nn[k][j] > 0) {
-          title += '\ndiverged in ' + nn[k][j];
-        } else {
-          title += '\nperiod ' + figureperiod(pp[k][j]);
-          var cyc = cycle(j, bb[k], cc[k], pp[k]);
+      target.setAttribute('title', '');
+      if (j >= 0 && j * 2 < cc[k].length) {
+        var title = 'c=' + formatcomplex(k, cc[k][j * 2], cc[k][j * 2 + 1]);
+        var orb = orbit(j, cc[k]), cyc = [];
+        if (nn[k][j]) {
+          if (nn[k][j] > 0) {
+            title += '\ndiverged in ' + nn[k][j];
+          } else {
+            title += '\nperiod ' + figureperiod(pp[k][j]);
+            var cyc = cycle(j, bb[k], cc[k], pp[k]);
+          }
+        } 
+        for (var i = 0; i < sizes.length; i++) {
+          clearseq(i);
+          showseq(i, orb, 'yellow');
+          showseq(i, cyc, 'red');
         }
-      } 
-      for (var i = 0; i < sizes.length; i++) {
-        clearseq(i);
-        showseq(i, orb, 'yellow');
-        showseq(i, cyc, 'red');
+        target.setAttribute('title', title);
       }
-      target.setAttribute('title', null);
-      target.setAttribute('title', title);
     }
   }
 }
 
 document.body.onmouseover = function(e) {
-  var target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
-  if (target.nodeType == 3) target = target.parentNode;
-  document.body.className = 'hiderect';
-  if (target.tagName == 'CANVAS') {
+  document.body.className = 'hidemarks';
+  var target = eventtarget(e);
+  if (target) {
     var m = target.id.match(/b_(\d+)/);
     if (m) {
       k = parseInt(m[1]);
       for (var i = 0; i < gridboards; ++i) {
-        board(i).parentElement.className = i < k ? '' : 'hiderect';
+        board(i).parentElement.className = i < k ? '' : 'hidemarks';
       }
       document.body.className = '';
     }
@@ -512,7 +521,9 @@ function makeboard(k) {
   while (gridboards <= k) {
     var c = gridboards % gridcols;
     var r = (gridboards - c) / gridcols;
-    table.rows[r].cells[c].innerHTML = tablestring(gridboards);
+    var td = table.rows[r].cells[c];
+    td.id = 'b_' + gridboards;
+    td.innerHTML = tablestring(gridboards);
     gridboards += 1;
   }
 }
@@ -528,15 +539,15 @@ function hideboardspast(k) {
 }
 
 function board(k) {
-  return document.getElementById("b_" + k);
+  return document.getElementById("b_" + k).firstElementChild;
 }
 
 function rect(k) {
-  return document.getElementById("b_" + k).nextElementSibling;
+  return board(k).nextElementSibling;
 }
 
 function overlay(k) {
-  return document.getElementById("b_" + k).nextElementSibling.nextElementSibling;
+  return rect(k).nextElementSibling;
 }
 
 function cellclick(k, m) {
