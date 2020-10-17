@@ -20,18 +20,21 @@ the other points.
 -->
 <style>
 body { font-family: Arial; background: #888}
-td { position: relative; overflow: hidden; vertical-align: top;}
+td { position: relative; vertical-align: top;}
 canvas { vertical-align:bottom;cursor:crosshair }
 .rect { position: absolute; border: 1px solid yellow; height: 0; width: 0;
   pointer-events: none; opacity: 0.7; transition: opacity 0.3s; }
 .hiderect .rect { opacity: 0; }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
-  top:0;left:0;z-index:1; }
+  top:0; left:0; z-index:1; transition: opacity 0.3s }
+.zoomnum { position:absolute;display:inline-block;
+  right:0;bottom:-12px;font-size:12px;color:yellow; transition: opacity 0.3s}
 body.hiderect .overlay { opacity: 0; }
+body.hiderect .zoomnum { opacity: 0; }
 </style>
 </head>
 <body>
-<div id=text style="margin:0;background:#aaa">
+<div id=text style="position:absolute;margin:0;background:#aaa">
 <div style="margin:0;padding:1px 4px;font-size:9pt;background:#aaa">
 
 <h4 style="margin-top:3px;margin-bottom:6px">
@@ -91,7 +94,7 @@ document.write(
 for (var r = 0; r < 2; ++r) {
   document.write('<tr>');
   for (var s = 0; s < gridcols; ++s) {
-    document.write('<td ' +
+    document.write('<td class="hiderect" ' +
        'style="height:' + cssDims + 'px;width:' + cssDims + 'px;"></td>')
   }
   document.write('</tr>');
@@ -354,11 +357,20 @@ function drawall() {
 }
 
 function tablestring(k) {
+  var factor = (Math.pow(zoomfactor, k));
+  if (factor < 100000) {
+    factor = factor + 'x';
+  } else {
+    factor = factor.toExponential(2);
+  }
   return '<canvas id=b_' + k + ' width=' + dims + ' height=' + dims +
          ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
-         '</canvas><div class="rect"></div>' +
+         '</canvas>' +
+         '<div class="rect"></div>' +
          '<canvas class=overlay width=' + dims + ' height=' + dims +
-         ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">'
+         ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
+         '</canvas>' +
+         '<div class="zoomnum">' + factor + '</div>';
 }
 
 function progress() {
