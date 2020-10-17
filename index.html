@@ -330,6 +330,7 @@ function makecolor(k, i) {
   if (i < 0 || p <= 0.0) return "rgb(0,0,0)";
   // Adaptive color choice: brighten the last 0.5% of pixels.
   i = Math.max(i, parseInt((12 << ((k + 1) >> 1)) / (200 * p)));
+  i = Math.min(i, parseInt((36 << ((k + 1) >> 1)) * (1.0 - p)));
   var r = colornum(Math.max(-2, 8 - Math.abs(12 - k)) +
                    ((i - 2) >> ((k + 1) >> 1)));
   var g = colornum((i - 6 - (k >> 1)) >>
