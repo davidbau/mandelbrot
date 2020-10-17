@@ -363,7 +363,7 @@ function drawall() {
 function tablestring(k) {
   var factor = (3.0 / firstsize) * (Math.pow(zoomfactor, k));
   if (factor < 100000) {
-    factor = factor + 'x';
+    factor = +factor.toFixed(3) + 'x';
   } else {
     factor = factor.toExponential(2);
   }
