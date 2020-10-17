@@ -17,8 +17,6 @@ points that diverge and points that converge.  Can identiify convergence
 to periodic cylces of arbitrarily long length.  After the number of
 unknown points is less than half the visual field, avoids iterating over
 the other points.
-
-TODO: adapt color palette based on mix of convergence rates.
 -->
 <style>
 body { font-family: Arial; background: #888}
@@ -324,8 +322,10 @@ function colornum(n) {
 
 function makecolor(k, i) {
   if (i == 0) return unknowncolor;
-  if (i < 0) return "rgb(0,0,0)";
-  i -= fi[k];
+  var p = un[k] / (dims * dims);
+  if (i < 0 || p <= 0.0) return "rgb(0,0,0)";
+  // Adaptive color choice: brighten the last 0.5% of pixels.
+  i = Math.max(i, parseInt((12 << ((k + 1) >> 1)) / (200 * p)));
   var r = colornum(Math.max(-2, 8 - Math.abs(12 - k)) +
                    ((i - 2) >> ((k + 1) >> 1)));
   var g = colornum((i - 6 - (k >> 1)) >>
