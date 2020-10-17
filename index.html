@@ -415,6 +415,7 @@ function eventtarget(e) {
 
 document.onmousedown = function(e) {
   var target = eventtarget(e);
+  if (e.button != 0) { return true; }
   if (target) {
     var m = target.id.match(/b_(\d+)/);
     if (m) {
