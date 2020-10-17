@@ -28,7 +28,9 @@ canvas { vertical-align:bottom;cursor:crosshair }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
   top:0; left:0; z-index:1; transition: opacity 0.3s }
 .zoomnum { position:absolute; display:inline-block; right:0; bottom:-12px;
-  font-size:12px; color:yellow; transition: opacity 0.3s}
+  text-decoration: none; font-size:12px; color:yellow;
+  transition: opacity 0.3s }
+.zoomnum:hover { text-decoration: underline; }
 body.hidemarks .overlay { opacity: 0; }
 body.hidemarks .zoomnum { opacity: 0; }
 </style>
@@ -359,7 +361,7 @@ function drawall() {
 }
 
 function tablestring(k) {
-  var factor = (Math.pow(zoomfactor, k));
+  var factor = (3.0 / firstsize) * (Math.pow(zoomfactor, k));
   if (factor < 100000) {
     factor = factor + 'x';
   } else {
@@ -372,7 +374,7 @@ function tablestring(k) {
          '<canvas class=overlay width=' + dims + ' height=' + dims +
          ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
          '</canvas>' +
-         '<div class="zoomnum">' + factor + '</div>';
+         '<a class="zoomnum" href="?grid=1">' + factor + '</a>';
 }
 
 function progress() {
@@ -418,6 +420,10 @@ document.onmousedown = function(e) {
   if (e.button != 0) { return true; }
   if (target) {
     var m = target.id.match(/b_(\d+)/);
+    if (e.target.tagName == 'A') {
+      e.target.href = bigurl(m[1]);
+      return true;
+    }
     if (m) {
       var se = document.scrollingElement || document.body;
       var x = (e.clientX + se.scrollLeft - absoluteLeft(target)) * pixelRatio;
@@ -565,9 +571,9 @@ function cellclickdelay(k, m) {
   if (k >= sizes.length) return;
   makeboard(k + 1);
   hideboardspast(k + 1);
-  osize = sizes[k][0];
-  ore = sizes[k][1];
-  oim = sizes[k][2];
+  var osize = sizes[k][0];
+  var ore = sizes[k][1];
+  var oim = sizes[k][2];
   cx = m % dims;
   cy = (m - cx) / dims;
   nsize = osize / zoomfactor;
@@ -586,6 +592,14 @@ function showrect(k, x, y) {
   s.left = (x * cssDims - cssDims / 2 / zoomfactor) + 'px';
   s.width = (cssDims / zoomfactor) + 'px';
   s.height = (cssDims / zoomfactor) + 'px';
+}
+
+function bigurl(k) {
+  if (k >= sizes.length) return;
+  var osize = sizes[k][0];
+  var ore = sizes[k][1];
+  var oim = sizes[k][2];
+  return '?grid=1&s=' + osize + '&c=' + ore + (oim < 0 ? '' : '+') + oim + 'i'
 }
 
 function removerect(k) {
