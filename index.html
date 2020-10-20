@@ -591,15 +591,18 @@ function cellclickdelay(k, m) {
   var oim = sizes[k][2];
   cx = m % dims;
   cy = (m - cx) / dims;
-  nsize = osize / zoomfactor;
-  nre = ore + ((cx / dims) - 0.5) * osize;
-  nim = oim + (0.5 - (cy / dims)) * osize;
-  setboard(k + 1, nsize, nre, nim);
-  truncateboards(k + 2);
-  makeboard(k + 1);
   hideboardspast(k + 1);
   showrect(k, cx / dims, cy / dims);
-  draw(k + 1);
+  truncateboards(k + 2);
+  // Do slow parts after a moment.
+  setTimeout(function() {
+    nsize = osize / zoomfactor;
+    nre = ore + ((cx / dims) - 0.5) * osize;
+    nim = oim + (0.5 - (cy / dims)) * osize;
+    setboard(k + 1, nsize, nre, nim);
+    makeboard(k + 1);
+    draw(k + 1);
+  }, 10);
 }
 
 function showrect(k, x, y) {
