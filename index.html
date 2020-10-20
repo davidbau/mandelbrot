@@ -4,6 +4,9 @@
 <title>Mandelbrot Explorer</title>
 <meta name="description" content="Beautiful and fast exploration of
 the Mandelbrot Set in your browser. Click to zoom. Hover to see orbits.">
+<meta name="viewport" content="width=device-width">
+<!--<meta name="viewport" content="initial-scale=1.0">-->
+
 <!--
 Written by David Bau as a Javascript example in 2009; updated in 2020
 to handle high device pixel ratios, and to report periodicity.
@@ -19,7 +22,7 @@ unknown points is less than half the visual field, avoids iterating over
 the other points.
 -->
 <style>
-body { font-family: Arial; background: #888}
+body { font-family: Arial; background: #888; margin: 16px 0;}
 td { position: relative; vertical-align: top;}
 canvas { vertical-align:bottom;cursor:crosshair }
 .rect { position: absolute; border: 1px solid yellow; height: 0; width: 0;
@@ -64,7 +67,8 @@ Details in popup.
 </div>
 
 <script>
-var gridcols = 5;
+var vw = window.innerWidth || document.documentElement.clientWidth;
+var gridcols = Math.max(1, Math.min(5, Math.floor((vw - 32) / 200)));
 var firstr = -0.5;
 var firstj = 0.0;
 var firstsize = 3.0;
@@ -87,8 +91,8 @@ for (var j in opts) {
 }
 
 var cssDims = Math.max(32,
-  Math.floor((document.body.clientWidth - 64) / gridcols) - 16);
-var dims = cssDims * pixelRatio;
+  Math.floor((vw - 48) / gridcols) - 16);
+var dims = Math.floor(cssDims * pixelRatio);
 var dims2 = dims * dims;
 var it = [];  // the current iteration num
 var cc = [];  // the constant at every pixel
