@@ -463,7 +463,7 @@ document.onmousemove = function(e) {
       var k = parseInt(m[1]);
       var j = x + y * dims;
       target.setAttribute('title', '');
-      if (j >= 0 && j * 2 < cc[k].length) {
+      if (cc[k] && j >= 0 && j * 2 < cc[k].length) {
         var title = 'c=' + formatcomplex(k, cc[k][j * 2], cc[k][j * 2 + 1]);
         var orb = orbit(j, cc[k]), cyc = [];
         if (nn[k][j]) {
