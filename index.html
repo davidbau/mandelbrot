@@ -41,6 +41,12 @@ body.hidemarks .zoomnum { opacity: 0; }
 </style>
 </head>
 <body>
+<center><table id="grid"
+  style="table-layout:fixed" border=0 cellpadding=0 cellspacing=16
+><tr><td class="hidemarks" id="b_0" style="width:200px;height:200px"
+></td></tr></table></center>
+
+
 <div id=text style="position:absolute;margin:0;background:#aaa">
 <div style="margin:0;padding:1px 4px;font-size:9pt;background:#aaa">
 
@@ -62,7 +68,8 @@ Details in popup.
 </p>
 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a href="http://davidbau.com/archives/2009/09/27/mandelbrot.html">David Bau</a>
+- <a href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a>
 </div>
 </div>
 
@@ -94,6 +101,31 @@ var cssDims = Math.max(32,
   Math.floor((vw - 48) / gridcols) - 16);
 var dims = Math.floor(cssDims * pixelRatio);
 var dims2 = dims * dims;
+
+function grid() {
+  return document.getElementById('grid');
+}
+
+function ensurerow(k) {
+  var rn = Math.max(2, (k - (k % gridcols)) / gridcols);
+  var table = grid();
+  for (var r = 0; r < rn; ++r) {
+    var row = (r >= table.rows.length) ?
+      table.insertRow(table.rows.length) : table.rows[r];
+    for (var c = 0; c < gridcols; ++c) {
+      var cell = (c >= row.cells.length) ?
+        cell = row.insertCell(c) : cell = row.cells[c];
+      cell.style.height = cell.style.width = cssDims + 'px';
+    }
+  }
+}
+
+ensurerow(1);
+
+grid().rows[1].cells[Math.min(1, gridcols - 1)]
+  .appendChild(document.getElementById('text'));
+
+
 var it = [];  // the current iteration num
 var cc = [];  // the constant at every pixel
 var zz = [];  // the current iterate value
@@ -107,29 +139,6 @@ var sizes = [];
 var gridboards = 0;
 var steps = 0;
 var unknowncolor = "rgb(32,16,64)";
-
-document.write(
-  '<center><table style="table-layout:fixed" ' +
-  'border=0 cellpadding=0 cellspacing=16 id=grid>');
-var i = 0;
-for (var r = 0; r < 2; ++r) {
-  document.write('<tr>');
-  for (var s = 0; s < gridcols; ++s) {
-    document.write('<td class="hidemarks" id="b_' + i + '" ' +
-       'style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
-       '</td>')
-    i += 1;
-  }
-  document.write('</tr>');
-}
-document.write('</table></center>')
-
-function grid() {
-  return document.getElementById('grid');
-}
-
-grid().rows[1].cells[Math.min(1, gridcols - 1)]
-  .appendChild(document.getElementById('text'));
 
 function cycle(m, z, c, p) {
   var len = figureperiod(p[m]);
@@ -529,24 +538,6 @@ function formatcomplex(k, re, im) {
   return rs + rd + is + id + 'i';
 }
 
-function grid() {
-  return document.getElementById('grid');
-}
-
-function ensurerow(k) {
-  var r = (k - (k % gridcols)) / gridcols;
-  var table = grid();
-  while (table.rows.length <= r) {
-    var index = table.rows.length;
-    var row = table.insertRow(index);
-    for (var c = 0; c < gridcols; ++c) {
-      var cell = row.insertCell(c);
-      cell.style.width = cssDims + 'px';
-      cell.style.height = cssDims + 'px';
-    }
-  }
-}
-
 function makeboard(k) {
   var table = grid();
   while (gridboards <= k) {
@@ -640,8 +631,12 @@ function start() {
   progress();
 }
 
-ensurerow(0);
-setTimeout(start, 1);
+if (dims > 800) {
+  document.getElementById("b_0").innerHTML = '<p>Starting...';
+  setTimeout(start, 100);
+} else{
+  setTimeout(start, 1);
+}
 </script>
 </body>
 <script src="http://www.google-analytics.com/urchin.js" type="text/javascript">
