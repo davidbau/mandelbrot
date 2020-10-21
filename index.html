@@ -492,6 +492,7 @@ document.body.onmouseover = function(e) {
     var m = target.id.match(/b_(\d+)/);
     if (m) {
       k = parseInt(m[1]);
+      if (nn.length <= k) return;
       for (var i = 0; i < gridboards; ++i) {
         board(i).parentElement.className = i < k ? '' : 'hidemarks';
       }
