@@ -497,6 +497,11 @@ document.body.onmouseover = function(e) {
         board(i).parentElement.className = i < k ? '' : 'hidemarks';
       }
       document.body.className = '';
+      if (e.target.tagName == 'A') {
+        e.target.href = bigurl(k)
+        e.target.title = 'centered at ' +
+            formatcomplex(k, sizes[k][1], sizes[k][2]);
+      }
     }
   }
 }
