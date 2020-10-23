@@ -508,8 +508,10 @@ document.body.onmouseover = function(e) {
       document.body.className = '';
       if (e.target.tagName == 'A') {
         e.target.href = bigurl(k)
-        e.target.title = 'centered at ' +
-            formatcomplex(k, sizes[k][1], sizes[k][2]);
+        e.target.title = ('centered at ' +
+            formatcomplex(k, sizes[k][1], sizes[k][2]) + '\n'
+          + Math.floor(1000 * (1.0 - un[k] / dims2))/10.0  + '% done '
+          + 'after ' + it[k] + ' iters');
       }
     }
   }
