@@ -409,8 +409,11 @@ function progress() {
   var k = 0;
   while (1 << k & shift) k += 1;
   k = it.length - 1 - (k % it.length);
-  iterate(k);
-  drawcolor(k, it[k]);
+  // Do at least 1000 pixel-steps.
+  for (var amt = 0; amt < 1000; amt += (un[k] + 1)) {
+    iterate(k);
+    drawcolor(k, it[k]);
+  }
   setTimeout(progress, 0);
 }
 
