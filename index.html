@@ -109,7 +109,7 @@ function grid() {
 function ensurerow(k) {
   var rn = Math.max(2, (k - (k % gridcols)) / gridcols);
   var table = grid();
-  for (var r = 0; r < rn; ++r) {
+  for (var r = 0; r <= rn; ++r) {
     var row = (r >= table.rows.length) ?
       table.insertRow(table.rows.length) : table.rows[r];
     for (var c = 0; c < gridcols; ++c) {
