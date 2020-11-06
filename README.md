@@ -3,10 +3,12 @@ Interactive Mandelbrot Explorer
 
 [<img src="media/mandelbrot.png">](http://davidbau.com/mandelbrot/)
 
-Javascipt Mandelbrot explorer.  Click to zoom.
+[Javascipt Mandelbrot explorer.](http://davidbau.com/mandelbrot/)
+Click to zoom.
 Click yellow zoom number to enlarge.
 
-The page shows more fractal detail over time by refining
+[The page](http://davidbau.com/mandelbrot/)
+shows more fractal detail over time by refining
 iterations infinitely as you explore.
 
 Yellow dots show orbits. Red dots show limit cycles.
@@ -24,6 +26,7 @@ Implementation notes.  To minimize computation, the code identifies both
 points that diverge and points that converge.  The algorithm can
 identiify convergence to periodic cylces of arbitrarily long length.
 Does a sparse computation, iterating only points that have not yet
-diverged or converged to a cycle.
+diverged or converged to a cycle, and continues computation to an
+infinite number of iterations to render crisp fractals over time.
 
 [David Bau](http://davidbau.com/archives/2009/09/27/mandelbrot.html)
