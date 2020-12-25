@@ -5,8 +5,6 @@
 <meta name="description" content="Beautiful and fast exploration of
 the Mandelbrot Set in your browser. Click to zoom. Hover to see orbits.">
 <meta name="viewport" content="width=device-width">
-<!--<meta name="viewport" content="initial-scale=1.0">-->
-
 <!--
 Written by David Bau as a Javascript example in 2009; updated in 2020
 to handle high device pixel ratios, show orbits, and report periodicity.
@@ -16,10 +14,11 @@ URL options: use ?grid=3 to select 3-column view,
                and s=0.5 to set viewed size.
 
 Implementation notes.  To minimize computation, the code identifies both
-points that diverge and points that converge.  Can identiify convergence
-to periodic cylces of arbitrarily long length.  After the number of
-unknown points is less than half the visual field, avoids iterating over
-the other points.
+points that diverge and points that converge.  It uses a method that can
+identiify convergence to periodic cylces of arbitrarily long length.
+After the number of unknown points is less than half the visual field,
+it computes the remaining points sparsely, avoiding iterating over the
+already-known points.
 -->
 <style>
 body { font-family: Arial; background: #888; margin: 16px 0;}
@@ -45,7 +44,6 @@ body.hidemarks .zoomnum { opacity: 0; }
   style="table-layout:fixed" border=0 cellpadding=0 cellspacing=16
 ><tr><td class="hidemarks" id="b_0" style="width:200px;height:200px"
 ></td></tr></table></center>
-
 
 <div id=text style="position:absolute;margin:0;background:#aaa">
 <div style="margin:0;padding:1px 4px;font-size:9pt;background:#aaa">
@@ -134,8 +132,9 @@ var cc = [];  // the constant at every pixel
 var zz = [];  // the current iterate value
 var bb = [];  // the recent value at iteration r
 var pp = [];  // the point at which the value was first closer than epsilon2
-var nn = [];  // the number of iterations until divergence (or neg cycle after r)
+var nn = [];  // the number of iterations until divergence (or convergence, neg)
 var un = [];  // number of uncomputed pixels
+var hi = [];  // list of [uncomputed, iter]
 var ss = [];  // list of uncomputed indexes
 var fi = [];  // 1 if finished.
 var sizes = [];
@@ -203,7 +202,7 @@ function iterate(k) {
   var c = cc[k];    // current constant for each pixel
   var n = nn[k];    // number of iterations before conv/divergence
   var b = bb[k];    // recent remembered z
-  var p = pp[k];    // iteration at which converged withiin epsilon2
+  var p = pp[k];    // iteration at which converged within epsilon2
   var s = ss[k];    // speedy list of indexes to compute
   var epsilon = 1e-15;
   var epsilon2 = 1e-10;
@@ -256,6 +255,9 @@ function iterate(k) {
     }
     un[k] -= count;
   }
+  if (hi[k][0][0] - un[k] >= dims2 / 256) {
+    hi[k].unshift([un[k], i]);
+  }
   if (!fi[k] && un[k] != dims2) {
     fi[k] = i;
   }
@@ -273,6 +275,7 @@ function setboard(k, size, re, im) {
     ss.push(null);
     sizes.push([0, 0, 0]);
     un.push(dims2);
+    hi.push([[dims2, 0]]);
   }
   sizes[k] = [size, re, im];
   it[k] = 1;
@@ -281,6 +284,7 @@ function setboard(k, size, re, im) {
   var p = pp[k] = [];
   ss[k] = null;
   un[k] = dims2;
+  hi[k] = [[dims2, 1]];
   for (var y = 0; y < dims; y++) {
     var j = (0.5 - (y / dims)) * size + im;
     for (var x = 0; x < dims; x++) {
@@ -356,19 +360,25 @@ function colornum(n) {
   return "255";
 }
 
+function intcolor(n) {
+  if (n <= 0) { return "0"; }
+  if (n >= 1) { return "255"; }
+  return (n * 255).toString(10);
+}
+
 function makecolor(k, i) {
   if (i == 0) return unknowncolor;
-  var p = un[k] / (dims * dims);
-  if (i < 0 || p <= 0.0) return "rgb(0,0,0)";
-  // Adaptive color choice: brighten the last 0.5% of pixels.
-  i = Math.max(i, parseInt((12 << ((k + 1) >> 1)) / (200 * p)));
-  i = Math.min(i, parseInt((36 << ((k + 1) >> 1)) * (1.0 - p)));
-  var r = colornum(Math.max(-2, 8 - Math.abs(12 - k)) +
-                   ((i - 2) >> ((k + 1) >> 1)));
-  var g = colornum((i - 6 - (k >> 1)) >>
-                   Math.min(6, ((k + 1) >> 1)));
-  var b = colornum(Math.max(0, 12 - k) + ((i - 1) >>
-                   Math.min(5, ((k + 1) >> 1))));
+  if (i < 0) return 'black';
+  for (var j = 0; i < hi[k][j][1]; j += 1) {}
+  var frac = (dims2 - hi[k][j][0]) / dims2;
+  var ff = Math.pow(frac, 2);
+  var fr = Math.pow(frac, 0.5);
+  var fg = Math.pow(frac, 3);
+  var g = intcolor(Math.max(fg, Math.min(fr,
+       (1 + ((i - 2) / Math.pow(2, (k + 2) / 2))) / 16)));
+  var r = intcolor(Math.min(fr * 1.03,
+       ((i - 6 - (k / 2)) / Math.pow(2, Math.min(6, (k + 1) / 2))) / 16));
+  var b = intcolor(ff / 3 + 0.66);
   return "rgb(" + r + "," + g + "," + b + ")";
 }
 
