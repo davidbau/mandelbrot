@@ -134,6 +134,7 @@ var bb = [];  // the recent value at iteration r
 var pp = [];  // the point at which the value was first closer than epsilon2
 var nn = [];  // the number of iterations until divergence (or convergence, neg)
 var un = [];  // number of uncomputed pixels
+var di = [];  // number of known diverged pixels
 var hi = [];  // list of [uncomputed, iter]
 var ss = [];  // list of uncomputed indexes
 var fi = [];  // 1 if finished.
@@ -190,7 +191,7 @@ function compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
     if (!p[m]) { p[m] = i; }
     if (db <= epsilon) {
       n[m] = -i;
-      return 1;
+      return -1;
     }
   }
   return 0;
@@ -226,11 +227,14 @@ function iterate(k) {
         p[m] = 0;
       }
     }
-    var count = 0;
+    var count = 0, diverged = 0, a;
     for (var m = 0; m < dims2; ++m) {
-      count += compute(m, i, n, z, c, b, p, epsilon, epsilon2);
+      a = compute(m, i, n, z, c, b, p, epsilon, epsilon2);
+      if (a) { count += 1; }
+      if (a > 0) { diverged += 1; }
     }
     un[k] -= count;
+    di[k] += diverged;
   } else {
     if (s.length > un[k] * 1.25) {
       var news = [];
@@ -249,14 +253,17 @@ function iterate(k) {
         p[m] = 0;
       }
     }
-    var count = 0;
+    var count = 0, diverged = 0, a;
     for (var t = 0; t < s.length; ++t) {
-      count += compute(s[t], i, n, z, c, b, p, epsilon, epsilon2);
+      a = compute(s[t], i, n, z, c, b, p, epsilon, epsilon2);
+      if (a) { count += 1; }
+      if (a > 0) { diverged += 1; }
     }
     un[k] -= count;
+    di[k] += diverged;
   }
   if (hi[k][0][0] - un[k] >= dims2 / 256) {
-    hi[k].unshift([un[k], i]);
+    hi[k].unshift([un[k], di[k], i]);
   }
   if (!fi[k] && un[k] != dims2) {
     fi[k] = i;
@@ -275,6 +282,7 @@ function setboard(k, size, re, im) {
     ss.push(null);
     sizes.push([0, 0, 0]);
     un.push(dims2);
+    di.push(0);
     hi.push([[dims2, 0]]);
   }
   sizes[k] = [size, re, im];
@@ -284,7 +292,8 @@ function setboard(k, size, re, im) {
   var p = pp[k] = [];
   ss[k] = null;
   un[k] = dims2;
-  hi[k] = [[dims2, 1]];
+  di[k] = 0;
+  hi[k] = [[dims2, 0, 1]];
   for (var y = 0; y < dims; y++) {
     var j = (0.5 - (y / dims)) * size + im;
     for (var x = 0; x < dims; x++) {
@@ -369,10 +378,23 @@ function intcolor(n) {
 function makecolor(k, i) {
   if (i == 0) return unknowncolor;
   if (i < 0) return 'black';
-  for (var j = 0; i < hi[k][j][1]; j += 1) {}
-  var frac = (dims2 - hi[k][j][0]) / dims2;
+  for (var j = 0; i < hi[k][j][2]; j += 1) {}
+  var frac = (dims2 - hi[k][j][0]) / dims2; // frac of pixels done.
+  var len = hi[k].length, half = Math.floor((len + j) / 2);
+  if (k > 1 && len > 10 + j) {
+    // estimate progress toward asymptote
+    var slope1 = (hi[k][len-1][1] - hi[k][j][1])
+               / (hi[k][len-1][2] - hi[k][j][2]),
+        slope3 = (hi[k][j+4][1] - hi[k][j][1])
+               / (hi[k][j+4][2] - hi[k][j][2]);
+    var frac2 = 1.0 - (slope3 / slope1);
+    var fl = Math.pow(frac2, 2);
+    if (frac2 > 0 && fl > frac) {
+      frac = frac2;
+    }
+  }
   var ff = Math.pow(frac, 2);
-  var fr = Math.pow(frac, 0.5);
+  var fr = Math.pow(frac, 0.333);
   var fg = Math.pow(frac, 3);
   var g = intcolor(Math.max(fg, Math.min(fr,
        (1 + ((i - 2) / Math.pow(2, (k + 2) / 2))) / 16)));
