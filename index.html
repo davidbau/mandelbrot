@@ -381,13 +381,15 @@ function makecolor(k, i) {
   for (var j = 0; i < hi[k][j][2]; j += 1) {}
   var frac = (dims2 - hi[k][j][0]) / dims2; // frac of pixels done.
   var len = hi[k].length, half = Math.floor((len + j) / 2);
-  if (k > 1 && len > 10 + j) {
+  if (len > 10 + j) {
     // estimate progress toward asymptote
     var slope1 = (hi[k][len-1][1] - hi[k][j][1])
                / (hi[k][len-1][2] - hi[k][j][2]),
-        slope3 = (hi[k][j+4][1] - hi[k][j][1])
-               / (hi[k][j+4][2] - hi[k][j][2]);
-    var frac2 = 1.0 - (slope3 / slope1);
+        slope2 = (hi[k][j+3][1] - hi[k][j][1])
+               / (hi[k][j+3][2] - hi[k][j][2]),
+        slope3 = (hi[k][j+5][1] - hi[k][j][1])
+               / (hi[k][j+5][2] - hi[k][j][2]);
+    var frac2 = 1.0 - (Math.max(slope2, slope3) / slope1);
     var fl = Math.pow(frac2, 2);
     if (frac2 > 0 && fl > frac) {
       frac = frac2;
