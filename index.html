@@ -93,7 +93,7 @@ for (var j in opts) {
     firstr = parseFloat(m[1]);
     firstj = parseFloat(m[2] || 0);
   }
-  if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+)/))) {
+  if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+(?:e[-+]\d+)?)/))) {
     firstsize = parseFloat(m[1]);
   }
 }
