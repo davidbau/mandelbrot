@@ -381,6 +381,7 @@ function makecolor(k, i) {
   for (var j = 0; i < hi[k][j][2]; j += 1) {}
   var frac = (dims2 - hi[k][j][0]) / dims2; // frac of pixels done.
   var len = hi[k].length, half = Math.floor((len + j) / 2);
+  var s = sizes[k][0];
   if (len > 10 + j) {
     // estimate progress toward asymptote
     var slope1 = (hi[k][len-1][1] - hi[k][j][1])
@@ -391,18 +392,14 @@ function makecolor(k, i) {
                / (hi[k][j+5][2] - hi[k][j][2]);
     var frac2 = 1.0 - (Math.max(slope2, slope3) / slope1);
     var fl = Math.pow(frac2, 2);
-    if (frac2 > 0 && fl > frac) {
-      frac = frac2;
-    }
+    if (frac2 > 0 && fl > frac) { frac = fl; }
   }
   var ff = Math.pow(frac, 2);
   var fr = Math.pow(frac, 0.333);
   var fg = Math.pow(frac, 3);
-  var g = intcolor(Math.max(fg, Math.min(fr,
-       (1 + ((i - 2) / Math.pow(2, (k + 2) / 2))) / 16)));
-  var r = intcolor(Math.min(fr * 1.03,
-       ((i - 6 - (k / 2)) / Math.pow(2, Math.min(6, (k + 1) / 2))) / 16));
-  var b = intcolor(ff / 3 + 0.66);
+  var g = intcolor(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
+  var r = intcolor(Math.min(fr, i * Math.pow(s, 0.25) / 64));
+  var b = intcolor(ff / 3 + 0.667);
   return "rgb(" + r + "," + g + "," + b + ")";
 }
 
@@ -660,6 +657,8 @@ function showrect(k, x, y) {
 function bigurl(k) {
   if (k >= sizes.length) return;
   var osize = sizes[k][0];
+  osize = parseFloat(osize.toPrecision(
+     Math.max(2, -Math.ceil(Math.log(osize)/2.5))))
   var ore = sizes[k][1];
   var oim = sizes[k][2];
   return '?grid=1&s=' + osize + '&c=' + ore + (oim < 0 ? '' : '+') + oim + 'i'
