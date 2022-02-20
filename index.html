@@ -37,15 +37,15 @@ td#b_0 { background-color: navy; vertical-align: middle; }
 td#b_0 p { color:white; text-align: center; font-size: 16px; }
 body.hidemarks .overlay { opacity: 0; }
 body.hidemarks .zoomnum { opacity: 0; }
-a[status]::before { /* tootltips */
- position: absolute; bottom: -2.5rem; right: 0; width: auto;
+a[status]::after { /* tootltips */
+ position: absolute; bottom: -2.2rem; right: 0; width: auto;
  background-color: #ddd; color: #444; font: 9pt Arial;
  padding: 3px 7px; box-shadow: 2px 2px 5px #777;
  content: attr(status); text-align: right; white-space: pre;
  pointer-events: none; z-index: 10;
  opacity: 0; transition: all 0.25s ease;
 }
-a[status]:focus::before, a[status]:hover::before { opacity: 0.95; }
+a[status]:focus::after, a[status]:hover::after { opacity: 0.95; }
 </style>
 </head>
 <body>
@@ -372,6 +372,11 @@ function drawcolor(k, i) {
   }
 }
 
+function clearboard(k) {
+  var ctx = board(k).getContext('2d');
+  ctx.clearRect(0, 0, dims, dims);
+}
+
 function colornum(n) {
   if (n <= 0) { return "0"; }
   if (n < 16) { return (n * 17).toString(10); }
@@ -546,6 +551,14 @@ document.onmousemove = function(e) {
   }
 }
 
+document.body.onkeydown = function(e) {
+  // Pressing backspace will delete the last zoom.
+  if (e.key != 'Backspace' || sizes.length <= 1) { return; }
+  var k = sizes.length - 1;
+  hideboardspast(k - 1);
+  truncateboards(k);
+}
+
 document.body.onmouseover = function(e) {
   document.body.className = 'hidemarks';
   var target = eventtarget(e);
@@ -617,6 +630,8 @@ function hideboardspast(k) {
   }
   for (var j = k + 1; j < gridboards; ++j) {
     board(j).parentElement.style.visibility = 'hidden';
+    clearboard(j);
+    clearseq(j);
     removerect(j - 1);
   }
 }
