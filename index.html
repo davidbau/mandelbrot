@@ -674,6 +674,7 @@ function cellclickdelay(k, m) {
     nim = oim + (0.5 - (cy / dims)) * osize;
     setboard(k + 1, nsize, nre, nim);
     makeboard(k + 1);
+    board(k + 1).parentElement.className = 'hidemarks';
     draw(k + 1);
   }, 10);
 }
