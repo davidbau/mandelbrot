@@ -37,6 +37,15 @@ td#b_0 { background-color: navy; vertical-align: middle; }
 td#b_0 p { color:white; text-align: center; font-size: 16px; }
 body.hidemarks .overlay { opacity: 0; }
 body.hidemarks .zoomnum { opacity: 0; }
+a[status]::before { /* tootltips */
+ position: absolute; bottom: -2.5rem; right: 0; width: auto;
+ background-color: #ddd; color: #444; font: 9pt Arial;
+ padding: 3px 7px; box-shadow: 2px 2px 5px #777;
+ content: attr(status); text-align: right; white-space: pre;
+ pointer-events: none; z-index: 10;
+ opacity: 0; transition: all 0.25s ease;
+}
+a[status]:focus::before, a[status]:hover::before { opacity: 0.95; }
 </style>
 </head>
 <body>
@@ -439,10 +448,12 @@ function tablestring(k) {
 }
 
 function progress() {
+  // Contribute to every unfinished cell, concentrating on latest.
   var shift = steps++;
-  var k = 0;
-  while (1 << k & shift) k += 1;
-  k = it.length - 1 - (k % it.length);
+  for (var p = 0; 1 << p & shift; p += 1) { }
+  for (var k = it.length - 1; p > 0 && k > 0; p -= 1) {
+    for (k -= 1; k > 0 && un[k] <= 0; k -= 1) { }
+  }
   // Do at least 1000 pixel-steps.
   var u = un[k];
   for (var amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
@@ -547,13 +558,20 @@ document.body.onmouseover = function(e) {
         board(i).parentElement.className = i < k ? '' : 'hidemarks';
       }
       document.body.className = '';
-      if (e.target.tagName == 'A') {
-        e.target.href = bigurl(k)
-        e.target.title = ('centered at ' +
-            formatcomplex(k, sizes[k][1], sizes[k][2]) + '\n'
-          + Math.floor(1000 * (1.0 - un[k] / dims2))/10.0  + '% done '
-          + 'after ' + it[k] + ' iters');
+      var overtarget = e.target;
+      function update_progress() {
+        if (overtarget.tagName == 'A') {
+          overtarget.href = bigurl(k)
+          overtarget.setAttribute('status', ('centered at ' +
+              formatcomplex(k, sizes[k][1], sizes[k][2]) + '\n'
+            + Math.floor(1000 * (1.0 - un[k] / dims2))/10.0  + '% done '
+            + 'after ' + it[k] + ' iters'));
+        }
+        if (overtarget.matches(':hover')) {
+          setTimeout(update_progress, 100);
+        }
       }
+      update_progress();
     }
   }
 }
