@@ -145,13 +145,14 @@ var pp = [];  // the point at which the value was first closer than epsilon2
 var nn = [];  // the number of iterations until divergence (or convergence, neg)
 var un = [];  // number of uncomputed pixels
 var di = [];  // number of known diverged pixels
-var hi = [];  // list of [uncomputed, iter]
+var hi = [];  // history of up to 256 of [uncomputed, iter]
 var ss = [];  // list of uncomputed indexes
 var fi = [];  // 1 if finished.
 var sizes = [];
 var gridboards = 0;
 var steps = 0;
-var unknowncolor = "rgb(32,16,64)";
+var ukcs = ["rgb(32,16,64)", "#888", "#fff", "yellow", "red", "#000"];
+var unknowncolor = ukcs[0];
 
 function cycle(m, z, c, p) {
   var len = figureperiod(p[m]);
@@ -575,6 +576,26 @@ document.body.onkeydown = function(e) {
         clearseq(k);
       }
     }
+  }
+  // Pressing U will cycle through the uncomputed colors.
+  if (e.key == 'u') {
+    unknowncolor = ukcs[(ukcs.indexOf(unknowncolor) + 1) % ukcs.length];
+    for (var k = 0; k < nn.length; ++k) {
+      drawcolor(k, 0);
+    }
+  }
+  // Pressing I will zoom in at the same position.
+  if (e.key == 'i') {
+    var k = sizes.length - 1;
+    var osize = sizes[k][0];
+    var ore = sizes[k][1];
+    var oim = sizes[k][2];
+    showrect(k, 0.5, 0.5);
+    nsize = osize / zoomfactor;
+    setboard(k + 1, nsize, ore, oim);
+    makeboard(k + 1);
+    board(k + 1).parentElement.className = 'hidemarks';
+    draw(k + 1);
   }
 }
 
