@@ -186,13 +186,14 @@ function compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
   var m2i = m2 + 1;
   var r = z[m2];
   var j = z[m2i];
-  var ra = r * r - j * j + c[m2];
-  var ja = 2 * r * j + c[m2i];
-  var d = ra * ra + ja * ja;
-  if (d > 4.0) {
+  var r2 = r * r;
+  var j2 = j * j;
+  if (r2 + j2 > 4.0) {
     n[m] = i;
     return 1;
   }
+  var ra = r2 - j2 + c[m2];
+  var ja = 2 * r * j + c[m2i];
   z[m2] = ra;
   z[m2i] = ja;
   var rb = b[m2];
