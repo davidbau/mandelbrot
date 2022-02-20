@@ -8,6 +8,7 @@ the Mandelbrot Set in your browser. Click to zoom. Hover to see orbits.">
 <!--
 Written by David Bau as a Javascript example in 2009; updated in 2020
 to handle high device pixel ratios, show orbits, and report periodicity.
+Keyboard controls added in 2022.
 
 URL options: use ?grid=3 to select 3-column view,
                    c=-0.14-0.65i to set center,
@@ -374,7 +375,8 @@ function drawcolor(k, i) {
 
 function clearboard(k) {
   var ctx = board(k).getContext('2d');
-  ctx.clearRect(0, 0, dims, dims);
+  ctx.fillStyle = makecolor(k, 0);
+  ctx.fillRect(0, 0, dims, dims);
 }
 
 function colornum(n) {
@@ -553,10 +555,27 @@ document.onmousemove = function(e) {
 
 document.body.onkeydown = function(e) {
   // Pressing backspace will delete the last zoom.
-  if (e.key != 'Backspace' || sizes.length <= 1) { return; }
-  var k = sizes.length - 1;
-  hideboardspast(k - 1);
-  truncateboards(k);
+  if (e.key == 'Backspace' && sizes.length > 1) {
+    var k = sizes.length - 1;
+    hideboardspast(k - 1);
+    truncateboards(k);
+  }
+  // Pressing C will center all the zoom positions.
+  if (e.key == 'c' && sizes.length > 1) {
+    var k = sizes.length - 1;
+    var ore = sizes[k][1];
+    var oim = sizes[k][2];
+    showrect(0, 0.5 + (ore - sizes[0][1]) / sizes[0][0],
+                0.5 - (oim - sizes[0][2]) / sizes[0][0]);
+    for (k = 1; k < sizes.length - 1; k += 1) {
+      showrect(k, 0.5, 0.5);
+      if (sizes[k][1] != ore || sizes[k][2] != oim) {
+        setboard(k, sizes[k][0], ore, oim);
+        clearboard(k);
+        clearseq(k);
+      }
+    }
+  }
 }
 
 document.body.onmouseover = function(e) {
