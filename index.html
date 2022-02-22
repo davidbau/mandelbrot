@@ -25,6 +25,13 @@ already-known points.
 body { font-family: Arial; background: #888; margin: 16px 0;}
 td { position: relative; vertical-align: top;}
 canvas { vertical-align:bottom;cursor:crosshair }
+#grid > div, #text { display: inline-block; margin: 8px; position: relative;
+ vertical-align: top; }
+#text { text-align: left; width: 50%; background:#aaa; position: relative;
+            padding:1px 4px;font-size:9pt }
+.closebox { position: absolute; right: 3px; top: 0; cursor: pointer }
+.closebox::after { content: '\00d7'; font-size: 20px; }
+.closebox:hover { font-weight: bold; }
 .rect { position: absolute; border: 1px solid yellow; height: 0; width: 0;
   pointer-events: none; opacity: 0.7; transition: opacity 0.3s; }
 .hidemarks .rect { opacity: 0; }
@@ -50,13 +57,11 @@ a[status]:focus::after, a[status]:hover::after { opacity: 0.95; }
 </style>
 </head>
 <body>
-<center><table id="grid"
-  style="table-layout:fixed" border=0 cellpadding=0 cellspacing=16
-><tr><td class="hidemarks" id="b_0" style="width:200px;height:200px"
-></td></tr></table></center>
+<center>
+<div id=grid></div>
 
-<div id=text style="position:absolute;margin:0;background:#aaa">
-<div style="margin:0;padding:1px 4px;font-size:9pt;background:#aaa">
+<div id=text>
+<div class=closebox></div>
 
 <h4 style="margin-top:3px;margin-bottom:6px">
 Javascript Mandelbrot Set Fractal Viewer
@@ -82,7 +87,8 @@ This page shows more fractal detail over time by refining iterations infinitely 
 - <a href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 >David Bau</a>
 </div>
-</div>
+
+</center>
 
 <script>
 var vw = window.innerWidth || document.documentElement.clientWidth;
@@ -116,26 +122,6 @@ var dims2 = dims * dims;
 function grid() {
   return document.getElementById('grid');
 }
-
-function ensurerow(k) {
-  var rn = Math.max(2, (k - (k % gridcols)) / gridcols);
-  var table = grid();
-  for (var r = 0; r <= rn; ++r) {
-    var row = (r >= table.rows.length) ?
-      table.insertRow(table.rows.length) : table.rows[r];
-    for (var c = 0; c < gridcols; ++c) {
-      var cell = (c >= row.cells.length) ?
-        cell = row.insertCell(c) : cell = row.cells[c];
-      cell.style.height = cell.style.width = cssDims + 'px';
-    }
-  }
-}
-
-ensurerow(1);
-
-grid().rows[1].cells[Math.min(1, gridcols - 1)]
-  .appendChild(document.getElementById('text'));
-
 
 var it = [];  // the current iteration num
 var cc = [];  // the constant at every pixel
@@ -439,7 +425,19 @@ function drawall() {
   }
 }
 
-function tablestring(k) {
+function makeboard(k) {
+  var gd = grid();
+  while (gridboards <= k) {
+    var dd = document.createElement('div');
+    dd.id = 'b_' + gridboards;
+    dd.innerHTML = boardstring(gridboards);
+    dd.className = 'hidemarks';
+    gd.appendChild(dd);
+    gridboards += 1;
+  }
+}
+
+function boardstring(k) {
   var factor = (3.0 / firstsize) * (Math.pow(zoomfactor, k));
   if (factor < 100000) {
     factor = +factor.toFixed(3) + 'x';
@@ -595,8 +593,13 @@ document.body.onkeydown = function(e) {
     nsize = osize / zoomfactor;
     setboard(k + 1, nsize, ore, oim);
     makeboard(k + 1);
+    hideboardspast(k + 1);
     board(k + 1).parentElement.className = 'hidemarks';
     draw(k + 1);
+  }
+  // Pressing ? will show the help window
+  if (e.key == '?') {
+    document.getElementById('text').style.display = 'block';
   }
 }
 
@@ -653,18 +656,6 @@ function formatcomplex(k, re, im) {
   return rs + rd + is + id + 'i';
 }
 
-function makeboard(k) {
-  var table = grid();
-  while (gridboards <= k) {
-    var c = gridboards % gridcols;
-    var r = (gridboards - c) / gridcols;
-    var td = table.rows[r].cells[c];
-    td.id = 'b_' + gridboards;
-    td.innerHTML = tablestring(gridboards);
-    gridboards += 1;
-  }
-}
-
 function hideboardspast(k) {
   for (var j = 0; j <= k && j < gridboards; ++j) {
     board(j).parentElement.style.visibility = 'visible';
@@ -692,7 +683,6 @@ function overlay(k) {
 function cellclick(k, m) {
   if (k >= sizes.length) return;
   hideboardspast(k);
-  ensurerow(k + 1);
   setTimeout(function() { cellclickdelay(k, m); }, 1);
 }
 
@@ -749,6 +739,12 @@ function start() {
   makeboard(0);
   draw(0);
   progress();
+}
+
+for (var closebox of document.getElementsByClassName('closebox')) {
+  closebox.addEventListener('click', function(e) {
+    e.target.parentElement.style.display = 'none';
+  });
 }
 
 if (dims > 800) {
