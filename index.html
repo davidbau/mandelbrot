@@ -54,6 +54,10 @@ a[status]::after { /* tootltips */
  opacity: 0; transition: all 0.25s ease;
 }
 a[status]:focus::after, a[status]:hover::after { opacity: 0.95; }
+div#b_0::after { display: flex; position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; align-items: center; justify-content: center;
+  content:"Starting...";color:white;z-index: -1;background: rgb(32,16,64); }
+}
 </style>
 </head>
 <body>
@@ -402,7 +406,7 @@ function makecolor(k, i) {
   var fr = Math.pow(frac, 0.333);
   var fg = Math.pow(frac, 3);
   var g = intcolor(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
-  var r = intcolor(Math.min(fr, i * Math.pow(s, 0.25) / 64));
+  var r = intcolor(Math.min(fr, i * Math.pow(s, 0.22) / 64));
   var b = intcolor(ff / 3 + 0.667);
   return "rgb(" + r + "," + g + "," + b + ")";
 }
@@ -557,8 +561,8 @@ document.body.onkeydown = function(e) {
   // Pressing backspace will delete the last zoom.
   if (e.key == 'Backspace' && sizes.length > 1) {
     var k = sizes.length - 1;
-    hideboardspast(k - 1);
     truncateboards(k);
+    removeboardspast(k - 1);
   }
   // Pressing C will center all the zoom positions.
   if (e.key == 'c' && sizes.length > 1) {
@@ -656,6 +660,15 @@ function formatcomplex(k, re, im) {
   return rs + rd + is + id + 'i';
 }
 
+function removeboardspast(k) {
+  if (gridboards > k) {
+    for (var j = k + 1; j < gridboards; ++j) {
+      board(j).parentElement.remove();
+    }
+    gridboards = k + 1;
+  }
+}
+
 function hideboardspast(k) {
   for (var j = 0; j <= k && j < gridboards; ++j) {
     board(j).parentElement.style.visibility = 'visible';
@@ -748,7 +761,7 @@ for (var closebox of document.getElementsByClassName('closebox')) {
 }
 
 if (dims > 800) {
-  document.getElementById("b_0").innerHTML = '<p>Starting...';
+  makeboard(0);
   setTimeout(start, 100);
 } else{
   setTimeout(start, 1);
