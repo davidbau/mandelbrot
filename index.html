@@ -84,7 +84,11 @@ Details in popup.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-This page shows more fractal detail over time by refining iterations infinitely as you explore.</p>
+This page shows more fractal detail over time by refining iterations infinitely as you explore: the longer you wait, the more detail is shown. After you zoom beyond several billion-fold magnification (about 18 clicks), a slower quad-precision algorithm resolves very the highest resolution details possible using the finest pixels of your display.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+Keys: <b>I</b> zooms in; <b>delete</b> goes back; <b>C</b> recenters; <b>U</b> highlights unfinished pixels; <b>?</b> shows this help.</p>
 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
@@ -94,8 +98,13 @@ This page shows more fractal detail over time by refining iterations infinitely 
 </center>
 
 <script>
+// Helper function to convert a regular number to quad-precision
+function toQd(x) {
+    return [x, 0];
+}
+
 var vw = window.innerWidth || document.documentElement.clientWidth;
-var gridcols = Math.max(1, Math.min(5, Math.floor((vw - 32) / 200)));
+var gridcols = Math.max(1, Math.min(3, Math.floor((vw - 32) / 200)));
 var firstr = -0.5;
 var firstj = 0.0;
 var firstsize = 3.0;
@@ -174,23 +183,48 @@ function suborbit(m, z, c, len) {
 
 function compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
   if (n[m]) return 0;
-  var m2 = m * 2;
-  var m2i = m2 + 1;
-  var r = z[m2];
-  var j = z[m2i];
-  var r2 = r * r;
-  var j2 = j * j;
-  if (r2 + j2 > 4.0) {
-    n[m] = i;
-    return 1;
+  let m2 = m * 2;
+  let m2i = m2 + 1;
+  let useQuad = Array.isArray(z[0]);
+
+  let r, j, r2, j2, ra, ja, rb, jb, db;
+
+  if (useQuad) {
+    r = z[m2]
+    j = z[m2i]
+
+    let r2 = qdSquare(r);
+    let j2 = qdSquare(j);
+    if (qdCompare(qdAdd(r2, j2), [4, 0]) > 0) {
+      n[m] = i;
+      return 1;
+    }
+    ra = qdAdd(qdSub(r2, j2), c[m2]);
+    ja = qdAdd(qdMul(qdMul([2, 0], r), j), c[m2i]);
+    z[m2] = ra;
+    z[m2i] = ja;
+    rb = b[m2];
+    jb = b[m2i];
+    db = qdAdd(qdAbs(qdSub(rb, ra)), qdAbs(qdSub(jb, ja)));
+    db = db[0] + db[1];
+  } else {
+    r = z[m2];
+    j = z[m2i];
+    r2 = r * r;
+    j2 = j * j;
+    if (r2 + j2 > 4.0) {
+      n[m] = i;
+      return 1;
+    }
+    ra = r2 - j2 + c[m2];
+    ja = 2 * r * j + c[m2i];
+    z[m2] = ra;
+    z[m2i] = ja;
+    rb = b[m2];
+    jb = b[m2i];
+    db = Math.abs(rb - ra) + Math.abs(jb - ja);
   }
-  var ra = r2 - j2 + c[m2];
-  var ja = 2 * r * j + c[m2i];
-  z[m2] = ra;
-  z[m2i] = ja;
-  var rb = b[m2];
-  var jb = b[m2i];
-  var db = Math.abs(rb - ra) + Math.abs(jb - ja);
+
   if (db <= epsilon2) {
     if (!p[m]) { p[m] = i; }
     if (db <= epsilon) {
@@ -209,8 +243,9 @@ function iterate(k) {
   var b = bb[k];    // recent remembered z
   var p = pp[k];    // iteration at which converged within epsilon2
   var s = ss[k];    // speedy list of indexes to compute
-  var epsilon = 1e-15;
-  var epsilon2 = 1e-10;
+  var pix = sizes[k][0] / dims;  // current for quad-precision check
+  var epsilon = Math.min(1e-15, pix / 10);
+  var epsilon2 = Math.min(1e-10, pix * 1000);
   // head and tail factor i into an odd num and largest power of 2.
   var head = i, tail = 1;
   while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
@@ -298,18 +333,41 @@ function setboard(k, size, re, im) {
   un[k] = dims2;
   di[k] = 0;
   hi[k] = [[dims2, 0, 1]];
+
+  var useQuad = size / dims < 3e-16;
+
   for (var y = 0; y < dims; y++) {
-    var j = (0.5 - (y / dims)) * size + im;
+    var jFrac = (0.5 - (y / dims));
+    var j = (useQuad
+        ? qdAdd(toQd(im), qdMul(toQd(jFrac), toQd(size)))
+        : jFrac * size + im);
+
     for (var x = 0; x < dims; x++) {
-      var r = ((x / dims) - 0.5) * size + re;
-      c.push(r, j);
-      if (r * r + j * j > 4) {
-        n.push(1);
-        p.push(0);
-        un[k] -= 1;
+      var rFrac = ((x / dims) - 0.5);
+
+      if (useQuad) {
+        var r = qdAdd(toQd(re), qdMul(toQd(rFrac), toQd(size)));
+        c.push(r, j);
+        var r2j2 = qdAdd(qdMul(r, r), qdMul(j, j));
+        if (qdCompare(r2j2, [4, 0]) > 0) {
+          n.push(1);
+          p.push(0);
+          un[k] -= 1;
+        } else {
+          n.push(0);
+          p.push(0);
+        }
       } else {
-        n.push(0);
-        p.push(0);
+        var r = rFrac * size + re;
+        c.push(r, j);
+        if (r * r + j * j > 4) {
+          n.push(1);
+          p.push(0);
+          un[k] -= 1;
+        } else {
+          n.push(0);
+          p.push(0);
+        }
       }
     }
   }
@@ -519,7 +577,7 @@ document.onmousedown = function(e) {
       var se = document.scrollingElement || document.body;
       var x = (e.clientX + se.scrollLeft - absoluteLeft(target)) * pixelRatio;
       var y = (e.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
-      cellclick(parseInt(m[1]), x + y * dims );
+      cellclick(parseInt(m[1]), x + y * dims);
       return false;
     }
   }
@@ -595,7 +653,12 @@ document.body.onkeydown = function(e) {
     var osize = sizes[k][0];
     var ore = sizes[k][1];
     var oim = sizes[k][2];
-    showrect(k, 0.5, 0.5);
+    var rre = 0.5;
+    if (k == 0 && ore == -0.5 && oim == 0) {
+      ore = -1.786440255563652; // Feigenbaum constant
+      rre = (ore - sizes[0][1]) / sizes[0][0] + 0.5;
+    }
+    showrect(k, rre, 0.5);
     nsize = osize / zoomfactor;
     setboard(k + 1, nsize, ore, oim);
     makeboard(k + 1);
@@ -653,12 +716,22 @@ function formatcomplex(k, re, im) {
     pix *= 10;
     digits += 1;
   }
-  var rd = '' + Math.abs(re);
-  var id = '' + Math.abs(im);
-  var rs = re < 0.0 ? '\u2212' : '+';
-  var is = im < 0.0 ? '\u2212' : '+';
-  if (rd.length > digits + 2) rd = rd.substring(0, digits + 2);
-  if (id.length > digits + 2) id = id.substring(0, digits + 2);
+  var useQuad = Array.isArray(re);
+  if (useQuad) {
+    var ra = qdFormat(qdAbs(re)).split('e');
+    var ia = qdFormat(qdAbs(im)).split('e');
+    var rs = re[0] < 0.0 ? '\u2212' : '+';
+    var is = im[0] < 0.0 ? '\u2212' : '+';
+  } else {
+    var ra = ('' + Math.abs(re)).split('e');
+    var ia = ('' + Math.abs(im)).split('e');
+    var rs = re < 0.0 ? '\u2212' : '+';
+    var is = im < 0.0 ? '\u2212' : '+';
+  }
+  if (ra[0].length > digits + 2) ra[0] = ra[0].substring(0, digits + 2);
+  if (ia[0].length > digits + 2) ia[0] = ia[0].substring(0, digits + 2);
+  var rd = ra[0] + (ra[1] ? 'e' + ra[1] : '');
+  var id = ia[0] + (ia[1] ? 'e' + ia[1] : '');
   return rs + rd + is + id + 'i';
 }
 
@@ -767,6 +840,281 @@ if (dims > 800) {
   setTimeout(start, 100);
 } else{
   setTimeout(start, 1);
+}
+
+//////////// quad-precision (qd, double double), aided by claude.ai ///////////
+
+function fast2Sum(a, b) {
+  let s = a + b;
+  let t = b - (s - a);
+  return [s, t];
+}
+
+function slow2Sum(a, b) {
+  let s = a + b;
+  let c = s - a;
+  return [s, (a - (s - c)) + (b - c)];
+}
+
+function qdSplit(a) {
+  const c = (134217729) * a;  // 2^27 + 1, Veltkamp-Dekker constant
+  const x = c - (c - a);
+  const y = a - x;
+  return [x, y];
+}
+
+function twoProduct(a, b) {
+  let p = a * b;
+  let [ah, al] = qdSplit(a);
+  let [bh, bl] = qdSplit(b);
+  let err = ((ah * bh - p) + ah * bl + al * bh) + al * bl;
+  return [p, err];
+}
+
+function twoSquare(a) {
+  let p = a * a;
+  let [ah, al] = qdSplit(a);
+  let err = ((ah * ah - p) + 2 * ah * al) + al * al;
+  return [p, err];
+}
+
+function qdAdd(a, b) {
+  let [a1, a0] = a;
+  let [b1, b0] = b;
+  let [h1, h2] = slow2Sum(a1, b1);
+  let [l1, l2] = slow2Sum(a0, b0);
+  let [v1, v2] = fast2Sum(h1, h2 + l1);
+  return fast2Sum(v1, v2 + l2);
+}
+
+function qdMul(a, b) {
+  let [a1, a0] = a;
+  let [b1, b0] = b;
+  let [p1, p2] = twoProduct(a1, b1);
+  return fast2Sum(p1, p2 + a1 * b0 + b1 * a0);
+}
+
+function qdSquare(a) {
+  let [a1, a0] = a;
+  let [p1, p2] = twoSquare(a1);
+  return fast2Sum(p1, p2 + 2 * a1 * a0);
+}
+
+function qdNegate(a) {
+  let [a1, a0] = a;
+  return [-a1, -a0];
+}
+
+function qdSub(a, b) {
+  return qdAdd(a, qdNegate(b));
+}
+
+function qdDiv(a, b) {
+  let reciprocal = qdReciprocal(b);
+  return qdMul(a, reciprocal);
+}
+
+function qdReciprocal(b, iters = 2) {
+  if (b[0] === 0 && b[1] === 0) {
+    return [NaN, 0];  // Return NaN for division by zero
+  }
+  // Refine the approximation using Newton-Raphson iteration
+  let x = [1 / b[0], 0];
+  for (let i = 0; i < iters; i++) {
+    x = qdMul(x, qdSub([2, 0], qdMul(x, b)));
+  }
+  return x;
+}
+
+function qdParse(s) {
+  s = s.trim().toLowerCase();
+  if (s === "infinity" || s === "+infinity") return [Infinity, 0];
+  if (s === "-infinity") return [-Infinity, 0];
+  if (s === "nan") return [NaN, 0];
+  let sign = 1;
+  if (s[0] === '-') {
+    sign = -1;
+    s = s.slice(1);
+  } else if (s[0] === '+') {
+    s = s.slice(1);
+  }
+  let e = 0;
+  let parts = s.split('e');
+  if (parts.length > 1) {
+    s = parts[0];
+    e = parseInt(parts[1]);
+  }
+  let decimalPos = s.indexOf('.');
+  if (decimalPos !== -1) {
+    s = s.replace('.', '');
+    e -= s.length - decimalPos;
+  }
+  s = s.replace(/^0+/, '');
+  if (s === '') return [0, 0];
+
+  let result = [0, 0];
+  for (let digit of s) {
+    result = qdAdd(qdMul(result, [10, 0]), [parseInt(digit), 0]);
+  }
+  if (e !== 0) {
+    result = qdMul(result, qdPow10(e));
+  }
+  if (sign === -1) {
+    result = qdNegate(result);
+  }
+  return result;
+}
+
+function qdPow10(e) {
+  if (e === 0) return [1, 0];
+  let result = [1, 0];
+  for (let i = 0; i < Math.abs(e); i++) {
+    result = qdMul(result, [10, 0]);
+  }
+  return (e < 0) ? qdReciprocal(result) : result;
+}
+
+function qdFloor(q) {
+  let [a, b] = q;
+  let fl = Math.floor(a);
+  let [r0, r1] = qdSub([a, b], [fl, 0]);
+  if (r0 < 0 || (r0 === 0 && r1 < 0)) {
+    fl -= 1;
+  }
+  return [fl, 0];
+}
+
+function qdCompare(a, b) {
+  if (a[0] < b[0]) return -1;
+  if (a[0] > b[0]) return 1;
+  if (a[1] < b[1]) return -1;
+  if (a[1] > b[1]) return 1;
+  return 0;
+}
+
+function qdAbs(q) {
+  return q[0] < 0 || (q[0] === 0 && q[1] < 0) ? qdNegate(q) : q;
+}
+
+function qdFixed(q, digits = 0) {
+  // With fixed-point notation, digits specifies the number of digits after the decimal point.
+  return qdFormat(q, digits, true);
+}
+
+const qdTen = [10, 0];
+
+function qdFormat(q, digits = 'auto', useFixedPoint = false) {
+  // With scientific notation, digits specifies the number of significant digits.
+
+  let [a, b] = q;
+  let s = a < 0 || (a === 0 && b < 0) ? '-' : '';
+  let autoFormat = (digits == 'auto');
+  if (autoFormat) {
+     digits = 32;
+  }
+  q = qdAbs(q);
+
+  if (!isFinite(a) || !isFinite(b)) return a.toString();
+  if (a === 0 && b === 0) {
+     if (autoFormat) return '0';
+     if (usedFixedPoint) digits += 1;
+     return '0' + (digits > 1 ? '.' + '0'.repeat(digits - 1) : '');
+  }
+
+  // Scale q to be between 1 and 10, avoiding cumulative rounding
+  let e = 0;
+  let ex = [1, 0];
+  while (qdCompare(q, qdMul(ex, qdTen)) >= 0) {
+    ex = qdMul(ex, qdTen);
+    e += 1;
+  }
+  while (qdCompare(qdMul(ex, q), [1, 0]) < 0) {
+    ex = qdMul(ex, qdTen);
+    e -= 1;
+  }
+  if (e) {
+    q = (e > 0 ? qdDiv(q, ex) : qdMul(q, ex));
+  }
+  if (qdCompare(q, qdTen) >= 0) { // Hit boundary condition
+    q = qdDiv(q, qdTen);
+    e += 1;
+  }
+
+  let result = '';
+  let nonzeroDigits = digits;
+
+  if (useFixedPoint && !autoFormat) {
+     nonzeroDigits = nonzeroDigits + e + 1;
+  }
+
+  for (let i = 0; i < nonzeroDigits + 1; i++) {
+    let floorQ = qdFloor(q);
+    let digit = floorQ[0];
+    result += digit;
+    q = qdSub(q, floorQ);
+    q = qdMul(q, qdTen);
+  }
+
+  if (autoFormat) {
+    if (parseInt(result.slice(result.length - 3)) > 970 ||
+      parseInt(result.slice(result.length - 3)) < 30 ||
+      parseInt(result.slice(result.length - 2)) > 92) {
+      nonzeroDigits -= 1; // one fewer digit if near 99 or 00
+    }
+  }
+
+  // Rounding
+  if (parseInt(result[nonzeroDigits]) >= 5) {
+    let carry = 1;
+    for (let i = nonzeroDigits - 1; i >= 0; i--) {
+      let digit = parseInt(result[i]) + carry;
+      if (digit < 10) {
+        result = result.slice(0, i) + digit + result.slice(i + 1);
+        carry = 0;
+        break;
+      } else {
+        result = result.slice(0, i) + '0' + result.slice(i + 1);
+        carry = 1;
+      }
+    }
+    if (carry) {
+      result = '1' + result;
+      e++;
+    }
+  }
+  result = result.slice(0, nonzeroDigits);
+
+  epart = '';
+  if (!useFixedPoint && (!autoFormat || e < -6 || e > 32)) {
+    // Scientific notation
+    if (result.length > 1) {
+      result = result[0] + '.' + result.slice(1);
+    }
+    if (e !== 0) {
+      epart = 'e' + e;
+    }
+  } else {
+    // Fixed-point notation
+    if (e >= 0) {
+      result = result.padEnd(e + 1, '0');
+      result = result.slice(0, e + 1) + '.' + result.slice(e + 1);
+    } else {
+      result = '0.' + '0'.repeat(-e - 1) + result;
+    }
+    // Ensure the correct number of digits after the decimal point
+    let [intPart, fracPart] = result.split('.');
+    if (digits <= 0) {
+      result = intPart;
+    } else {
+      fracPart = (fracPart || '').padEnd(digits, '0');
+      result = intPart + '.' + fracPart;
+    }
+  }
+  if (autoFormat) {
+    // Auto digit selection: trim trailing zeros
+    result = result.replace(/\.0+$|(\.\d*[1-9])0+$/, "$1");
+  }
+  return s + result + epart;
 }
 </script>
 </body>
