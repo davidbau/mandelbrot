@@ -100,13 +100,13 @@ Keys: <b>I</b> zooms in; <b>delete</b> goes back; <b>C</b> recenters; <b>U</b> h
 <script>
 // Helper function to convert a regular number to quad-precision
 function toQd(x) {
-    return [x, 0];
+  return Array.isArray(x) ? x : [x, 0];
 }
 
 var vw = window.innerWidth || document.documentElement.clientWidth;
 var gridcols = Math.max(1, Math.min(3, Math.floor((vw - 32) / 200)));
-var firstr = -0.5;
-var firstj = 0.0;
+var firstr = [-0.5, 0];
+var firstj = [0.0, 0];
 var firstsize = 3.0;
 var orbitlength = 240;
 var pixelRatio = Math.ceil(window.devicePixelRatio || 1);
@@ -118,8 +118,8 @@ for (var j in opts) {
     gridcols = Math.max(1, parseInt(m[1]));
   }
   if (null !== (m = opts[j].match(/c=([-+]?\d?\.?\d+)(?:([-+]\d?\.\d+)i)?/))) {
-    firstr = parseFloat(m[1]);
-    firstj = parseFloat(m[2] || 0);
+    firstr = qdParse(m[1]);
+    firstj = qdParse(m[2] || 0);
   }
   if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+(?:e[-+]\d+)?)/))) {
     firstsize = parseFloat(m[1]);
@@ -167,16 +167,21 @@ function orbit(m, c) {
 function suborbit(m, z, c, len) {
   var m2 = m * 2;
   var m2i = m2 + 1;
-  var r = z[m2];
-  var j = z[m2i];
-  var cr = c[m2];
-  var cj = c[m2i]
-  var result = [r, j];
-  while (result.length < len * 2) {
-    var ra = r * r - j * j + cr;
-    var j = 2 * r * j + cj;
+
+  // Always convert to quad precision
+  var r = toQd(z[m2]);
+  var j = toQd(z[m2i]);
+  var cr = toQd(c[m2]);
+  var cj = toQd(c[m2i]);
+
+  var result = [r[0], r[1], j[0], j[1]];
+  while (result.length < len * 4) {
+    var r2 = qdSquare(r);
+    var j2 = qdSquare(j);
+    var ra = qdAdd(qdSub(r2, j2), cr);
+    j = qdAdd(qdMul(qdDouble(r), j), cj);
     r = ra;
-    result.push(r, j)
+    result.push(r[0], r[1], j[0], j[1]);
   }
   return result;
 }
@@ -324,7 +329,7 @@ function setboard(k, size, re, im) {
     di.push(0);
     hi.push([[dims2, 0]]);
   }
-  sizes[k] = [size, re, im];
+  sizes[k] = [size, toQd(re), toQd(im)];
   it[k] = 1;
   var c = cc[k] = [];
   var n = nn[k] = [];
@@ -340,7 +345,7 @@ function setboard(k, size, re, im) {
     var jFrac = (0.5 - (y / dims));
     var j = (useQuad
         ? qdAdd(toQd(im), qdMul(toQd(jFrac), toQd(size)))
-        : jFrac * size + im);
+        : jFrac * size + im[0]);
 
     for (var x = 0; x < dims; x++) {
       var rFrac = ((x / dims) - 0.5);
@@ -358,7 +363,7 @@ function setboard(k, size, re, im) {
           p.push(0);
         }
       } else {
-        var r = rFrac * size + re;
+        var r = rFrac * size + re[0];
         c.push(r, j);
         if (r * r + j * j > 4) {
           n.push(1);
@@ -398,10 +403,13 @@ function showseq(k, seq, color) {
   var s = sc[0];
   var cr = sc[1];
   var cj = sc[2];
-  for (var i = 0; i < seq.length; i += 2) {
-    var r = seq[i], j = seq[i+1];
-    var x = (r - cr) / s * dims + dims/2;
-    var y = -(j - cj) / s * dims + dims/2;
+  for (var i = 0; i < seq.length; i += 4) {
+    var r = [seq[i], seq[i+1]];
+    var j = [seq[i+2], seq[i+3]];
+    var x = qdMul(qdSub(r, cr), [dims/s, 0]);
+    var y = qdMul(qdSub(cj, j), [dims/s, 0]);
+    x = x[0] + dims/2;
+    y = y[0] + dims/2;
     if (x >= 0 && y >= 0 && x < dims && y < dims) {
       ctx.beginPath();
       ctx.arc(x, y, 2 * pixelRatio, 0, 2 * Math.PI, false);
@@ -596,14 +604,18 @@ document.onmousemove = function(e) {
       var j = x + y * dims;
       target.setAttribute('title', '');
       if (cc[k] && j >= 0 && j * 2 < cc[k].length) {
-        var title = 'c=' + formatcomplex(k, cc[k][j * 2], cc[k][j * 2 + 1]);
-        var orb = orbit(j, cc[k]), cyc = [];
+        // Convert to quad precision if necessary
+        var cr = Array.isArray(cc[k][j * 2]) ? cc[k][j * 2] : [cc[k][j * 2], 0];
+        var cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
+        var title = 'c=' + formatcomplex(k, cr, cj);
+        var orb = orbit(j, cc[k]);
+        var cyc = [];
         if (nn[k][j]) {
           if (nn[k][j] > 0) {
             title += '\ndiverged in ' + nn[k][j];
           } else {
             title += '\nperiod ' + figureperiod(pp[k][j]);
-            var cyc = cycle(j, bb[k], cc[k], pp[k]);
+            var cyc = cycle(j, zz[k], cc[k], pp[k]);
           }
         }
         for (var i = 0; i < sizes.length; i++) {
@@ -792,8 +804,8 @@ function cellclickdelay(k, m) {
   // Do slow parts after a moment.
   setTimeout(function() {
     nsize = osize / zoomfactor;
-    nre = ore + ((cx / dims) - 0.5) * osize;
-    nim = oim + (0.5 - (cy / dims)) * osize;
+    nre = qdAdd(ore, [((cx / dims) - 0.5) * osize, 0]);
+    nim = qdAdd(oim, [(0.5 - (cy / dims)) * osize, 0]);
     setboard(k + 1, nsize, nre, nim);
     makeboard(k + 1);
     board(k + 1).parentElement.className = 'hidemarks';
@@ -818,7 +830,8 @@ function bigurl(k) {
      Math.max(2, -Math.ceil(Math.log(osize)/2.5))))
   var ore = sizes[k][1];
   var oim = sizes[k][2];
-  return '?grid=1&s=' + osize + '&c=' + ore + (oim < 0 ? '' : '+') + oim + 'i'
+  return '?grid=1&s=' + osize + '&c=' + qdFormat(ore) +
+         (qdLt(oim, 0) ? '' : '+') + qdFormat(oim) + 'i';
 }
 
 function removerect(k) {
