@@ -27,7 +27,7 @@ td { position: relative; vertical-align: top;}
 canvas { vertical-align:bottom;cursor:crosshair }
 #grid > div, #text { display: inline-block; margin: 8px; position: relative;
  vertical-align: top; }
-#text { text-align: left; width: 388px; max-width: 82%; background:#aaa;
+#text { text-align: left; width: 439px; max-width: 82%; background:#aaa;
  position:relative;padding:1px 4px;font-size:9pt }
 .closebox { position: absolute; right: 3px; top: 0; cursor: pointer }
 .closebox::after { content: '\00d7'; font-size: 20px; }
@@ -57,7 +57,6 @@ a[status]:focus::after, a[status]:hover::after { opacity: 0.95; }
 div#b_0::after { display: flex; position: absolute; top: 0; left: 0;
   width: 100%; height: 100%; align-items: center; justify-content: center;
   content:"Starting...";color:white;z-index: -1;background: rgb(32,16,64); }
-}
 </style>
 </head>
 <body>
@@ -85,7 +84,7 @@ Details in popup.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-This page shows more fractal detail over time by refining iterations infinitely as you explore: the longer you wait, the more detail is shown. After you zoom beyond several billion-fold magnification (about 18 clicks), a slower quad-precision algorithm resolves very the highest resolution details possible using the finest pixels of your display.
+This page shows more fractal detail over time by refining iterations to infinity as you explore: the longer you wait, the more detail is shown. After you zoom beyond several billion-fold magnification (about 18 clicks), a slower quad-precision algorithm resolves very the highest resolution details possible using the finest pixels of your display.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -196,12 +195,12 @@ function compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
 
     let r2 = qdSquare(r);
     let j2 = qdSquare(j);
-    if (qdCompare(qdAdd(r2, j2), [4, 0]) > 0) {
+    if (qdGt(qdAdd(r2, j2), 4)) {
       n[m] = i;
       return 1;
     }
     ra = qdAdd(qdSub(r2, j2), c[m2]);
-    ja = qdAdd(qdMul(qdMul([2, 0], r), j), c[m2i]);
+    ja = qdAdd(qdMul(qdDouble(r), j), c[m2i]);
     z[m2] = ra;
     z[m2i] = ja;
     rb = b[m2];
@@ -245,8 +244,8 @@ function iterate(k) {
   var p = pp[k];    // iteration at which converged within epsilon2
   var s = ss[k];    // speedy list of indexes to compute
   var pix = sizes[k][0] / dims;  // current for quad-precision check
-  var epsilon = Math.min(1e-15, pix / 10);
-  var epsilon2 = Math.min(1e-10, pix * 1000);
+  var epsilon = Math.min(1e-15, pix);
+  var epsilon2 = Math.min(1e-10, pix * 10000);
   // head and tail factor i into an odd num and largest power of 2.
   var head = i, tail = 1;
   while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
@@ -335,7 +334,7 @@ function setboard(k, size, re, im) {
   di[k] = 0;
   hi[k] = [[dims2, 0, 1]];
 
-  var useQuad = size / dims < 3e-16;
+  var useQuad = size / dims < 1e-15;
 
   for (var y = 0; y < dims; y++) {
     var jFrac = (0.5 - (y / dims));
@@ -350,7 +349,7 @@ function setboard(k, size, re, im) {
         var r = qdAdd(toQd(re), qdMul(toQd(rFrac), toQd(size)));
         c.push(r, j);
         var r2j2 = qdAdd(qdMul(r, r), qdMul(j, j));
-        if (qdCompare(r2j2, [4, 0]) > 0) {
+        if (qdGt(r2j2, 4)) {
           n.push(1);
           p.push(0);
           un[k] -= 1;
@@ -651,6 +650,7 @@ document.body.onkeydown = function(e) {
   // Pressing I will zoom in at the same position.
   if (e.key == 'i') {
     var k = sizes.length - 1;
+    if (di[k] == 0) { return; }
     var osize = sizes[k][0];
     var ore = sizes[k][1];
     var oim = sizes[k][2];
@@ -665,6 +665,7 @@ document.body.onkeydown = function(e) {
     makeboard(k + 1);
     hideboardspast(k + 1);
     board(k + 1).parentElement.className = 'hidemarks';
+    board(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
     draw(k + 1);
   }
   // Pressing ? will show the help window
@@ -770,7 +771,8 @@ function overlay(k) {
 }
 
 function cellclick(k, m) {
-  if (k >= sizes.length) return;
+  // Only accept clicks on cells with something computed in them.
+  if (k >= sizes.length || di[k] <= 0) return;
   hideboardspast(k);
   setTimeout(function() { cellclickdelay(k, m); }, 1);
 }
@@ -795,6 +797,7 @@ function cellclickdelay(k, m) {
     setboard(k + 1, nsize, nre, nim);
     makeboard(k + 1);
     board(k + 1).parentElement.className = 'hidemarks';
+    board(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
     draw(k + 1);
   }, 10);
 }
@@ -895,6 +898,10 @@ function qdMul(a, b) {
   return fast2Sum(p1, p2 + a1 * b0 + b1 * a0);
 }
 
+function qdDouble(a) {
+  return [a[0] * 2, a[1] * 2];
+}
+
 function qdSquare(a) {
   let [a1, a0] = a;
   let [p1, p2] = twoSquare(a1);
@@ -952,7 +959,6 @@ function qdParse(s) {
   }
   s = s.replace(/^0+/, '');
   if (s === '') return [0, 0];
-
   let result = [0, 0];
   for (let digit of s) {
     result = qdAdd(qdMul(result, [10, 0]), [parseInt(digit), 0]);
@@ -993,8 +999,16 @@ function qdCompare(a, b) {
   return 0;
 }
 
+function qdLt(a, s) {
+  return a[0] + a[1] < s;
+}
+
+function qdGt(a, s) {
+  return a[0] + a[1] > s;
+}
+
 function qdAbs(q) {
-  return q[0] < 0 || (q[0] === 0 && q[1] < 0) ? qdNegate(q) : q;
+  return (q[0] + q[1] < 0) ? qdNegate(q) : q;
 }
 
 function qdFixed(q, digits = 0) {
@@ -1029,14 +1043,14 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
     ex = qdMul(ex, qdTen);
     e += 1;
   }
-  while (qdCompare(qdMul(ex, q), [1, 0]) < 0) {
+  while (qdLt(qdMul(ex, q), 1)) {
     ex = qdMul(ex, qdTen);
     e -= 1;
   }
   if (e) {
     q = (e > 0 ? qdDiv(q, ex) : qdMul(q, ex));
   }
-  if (qdCompare(q, qdTen) >= 0) { // Hit boundary condition
+  if (!qdLt(q, 10)) { // Hit boundary condition
     q = qdDiv(q, qdTen);
     e += 1;
   }
@@ -1060,7 +1074,7 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
     if (parseInt(result.slice(result.length - 3)) > 970 ||
       parseInt(result.slice(result.length - 3)) < 30 ||
       parseInt(result.slice(result.length - 2)) > 92) {
-      nonzeroDigits -= 1; // one fewer digit if near 99 or 00
+      nonzeroDigits -= 1; // round to one fewer digit
     }
   }
 
