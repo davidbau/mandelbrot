@@ -3,7 +3,7 @@ Interactive Mandelbrot Explorer
 
 [<img src="media/mandelbrot.png">](http://davidbau.com/mandelbrot/)
 
-[Javascipt Mandelbrot explorer.](http://davidbau.com/mandelbrot/)
+[Javascript Mandelbrot explorer.](https://mandelbrot.page/)
 Click to zoom.
 Click yellow zoom number to enlarge.
 
@@ -16,7 +16,7 @@ The popup shows details at a point.
 
 Written by David Bau as a Javascript example in 2009; updated in 2020
 to handle high device pixel ratios, show orbits, and calculate
-periodicity.
+periodicity. Updated again in 2024 to add double-double quad precision.
 
 URL parameter options: use `?grid=3` to select 3-column view,
                    `c=-0.14-0.65ii` to set center,
