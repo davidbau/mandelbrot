@@ -84,11 +84,14 @@ Details in popup.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-This page shows more fractal detail over time by refining iterations to infinity as you explore: the longer you wait, the more detail is shown. After you zoom beyond several billion-fold magnification (about 18 clicks), a slower quad-precision algorithm resolves very the highest resolution details possible using the finest pixels of your display.
+This page shows more fractal detail over time by refining iterations to infinity as you explore: the longer you wait, the more detail is shown. If you have a super-high resolution monitor like a retina display, the full resolution is used. After you zoom beyond trillion-fold magnification, a quad-precision algorithm resolves fine details to more than 30 digits of accuracy.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-Keys: <b>I</b> zooms in; <b>delete</b> goes back; <b>C</b> recenters; <b>U</b> highlights unfinished pixels; <b>?</b> shows this help.</p>
+Keys:
+<b>H</b> shrinks and <b>G</b> grows the size of each field;
+<b>I</b> zooms in; <b>delete</b> goes back; <b>C</b> recenters all;
+<b>U</b> highlights unfinished pixels; <nobr><b>?</b> shows this help.</nobr></p>
 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
@@ -154,6 +157,34 @@ var gridboards = 0;
 var steps = 0;
 var ukcs = ["rgb(32,16,64)", "#888", "#fff", "yellow", "red", "#000"];
 var unknowncolor = ukcs[0];
+
+function updateGridLayout(newColumns) {
+  gridcols = Math.max(1, newColumns);
+  cssDims = Math.max(32, Math.floor((vw - 48) / gridcols) - 16);
+  dims = Math.floor(cssDims * pixelRatio);
+  dims2 = dims * dims;
+
+  // Recreate the grid
+  var gridElement = grid();
+  gridElement.innerHTML = '';
+  gridboards = 0;
+
+  // Recreate all boards
+  for (let k = 0; k < sizes.length; k++) {
+    makeboard(k);
+    setboard(k, sizes[k][0], sizes[k][1], sizes[k][2]);
+    draw(k);
+  }
+
+  // Update zoom rectangles
+  for (let k = 1; k < sizes.length; k++) {
+    let prevBoard = sizes[k-1];
+    let currBoard = sizes[k];
+    let x = (currBoard[1][0] - prevBoard[1][0]) / prevBoard[0] + 0.5;
+    let y = 0.5 - (currBoard[2][0] - prevBoard[2][0]) / prevBoard[0];
+    showrect(k-1, x, y);
+  }
+}
 
 function cycle(m, z, c, p) {
   var len = figureperiod(p[m]);
@@ -683,6 +714,13 @@ document.body.onkeydown = function(e) {
   // Pressing ? will show the help window
   if (e.key == '?') {
     document.getElementById('text').style.display = 'block';
+  }
+  // G reduces the grid column and H increases
+  if (e.key.toLowerCase() === 'g' && gridcols > 1) {
+    updateGridLayout(gridcols - 1);
+  }
+  if (e.key.toLowerCase() === 'h') {
+    updateGridLayout(gridcols + 1);
   }
 }
 
