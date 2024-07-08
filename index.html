@@ -280,8 +280,8 @@ function iterate(k) {
   var p = pp[k];    // iteration at which converged within epsilon2
   var s = ss[k];    // speedy list of indexes to compute
   var pix = sizes[k][0] / dims;  // current for quad-precision check
-  var epsilon = Math.min(1e-15, pix);
-  var epsilon2 = Math.min(1e-10, pix * 10000);
+  var epsilon = Math.min(1e-12, pix);
+  var epsilon2 = Math.min(1e-9, pix * 10000);
   // head and tail factor i into an odd num and largest power of 2.
   var head = i, tail = 1;
   while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
@@ -645,7 +645,7 @@ document.onmousemove = function(e) {
           if (nn[k][j] > 0) {
             title += '\ndiverged in ' + nn[k][j];
           } else {
-            title += '\nperiod ' + figureperiod(pp[k][j]);
+            title += '\nafter ' + pp[k][j] + ', period ' + figureperiod(pp[k][j]);
             var cyc = cycle(j, zz[k], cc[k], pp[k]);
           }
         }
