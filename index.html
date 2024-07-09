@@ -115,7 +115,7 @@ var gridcols = Math.max(1, Math.min(3, Math.floor((vw - 32) / 200)));
 var firstr = [-0.5, 0];
 var firstj = [0.0, 0];
 var firstsize = 3.0;
-var orbitlength = 240;
+var orbitlength = 100000; // show very long orbits
 var pixelRatio = Math.ceil(window.devicePixelRatio || 1);
 
 var opts = document.location.search.split('&');
@@ -648,7 +648,8 @@ document.onmousemove = function(e) {
         var cr = Array.isArray(cc[k][j * 2]) ? cc[k][j * 2] : [cc[k][j * 2], 0];
         var cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
         var title = 'c=' + formatcomplex(k, cr, cj);
-        var orb = orbit(j, cc[k], Math.max(pp[k][m], nn[k][m]) || Math.max(it[k], orbitlength));
+        var len = Math.min(Math.max(pp[k][j], nn[k][j]) || Math.max(it[k], 8), orbitlength);
+        var orb = orbit(j, cc[k], len);
         var cyc = [];
         if (nn[k][j]) {
           if (nn[k][j] > 0) {
@@ -664,9 +665,11 @@ document.onmousemove = function(e) {
           }
         }
         for (var i = 0; i < sizes.length; i++) {
-          clearseq(i);
-          showseq(i, orb, 'yellow');
-          showseq(i, cyc, 'red');
+          if (!hiddenboard(i)) {
+            clearseq(i);
+            showseq(i, orb, 'yellow');
+            showseq(i, cyc, 'red');
+          }
         }
         target.setAttribute('title', title);
       }
@@ -815,9 +818,13 @@ function showboard(k) {
   board(k).parentElement.style.display = '';
 }
 
+function hiddenboard(k) {
+  return board(k).parentElement.style.display == 'none';
+}
+
 function truncatehiddenboards(k) {
   for (var j = gridboards - 1; j > 0; j--) {
-    if (board(j).parentElement.style.display == '') {
+    if (!hiddenboard(j)) {
       break;
     }
   }
