@@ -195,8 +195,7 @@ function cycle(m, z, c, p) {
   return suborbit(m, z, c, len);
 }
 
-function orbit(m, c, p, n) {
-  var len = Math.max(p[m], n[m], orbitlength);
+function orbit(m, c, len) {
   return suborbit(m, c, c, len);
 }
 
@@ -649,11 +648,11 @@ document.onmousemove = function(e) {
         var cr = Array.isArray(cc[k][j * 2]) ? cc[k][j * 2] : [cc[k][j * 2], 0];
         var cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
         var title = 'c=' + formatcomplex(k, cr, cj);
-        var orb = orbit(j, cc[k], pp[k], nn[k]);
+        var orb = orbit(j, cc[k], Math.max(pp[k][m], nn[k][m]) || Math.max(it[k], orbitlength));
         var cyc = [];
         if (nn[k][j]) {
           if (nn[k][j] > 0) {
-            title += '\ndiverged in ' + nn[k][j];
+            title += '\ndiverges in ' + nn[k][j];
           } else {
             var period = figureperiod(pp[k][j]);
             if (period == 1) {
@@ -756,7 +755,7 @@ document.body.onmouseover = function(e) {
       function update_progress() {
         if (overtarget.tagName == 'A') {
           overtarget.href = bigurl(k)
-          overtarget.setAttribute('status', ('centered at ' +
+          overtarget.setAttribute('status', ('center at ' +
               formatcomplex(k, sizes[k][1], sizes[k][2]) + '\n'
             + Math.floor(1000 * (1.0 - un[k] / dims2))/10.0  + '% done '
             + 'after ' + it[k] + ' iters'));
