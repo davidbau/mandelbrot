@@ -8,7 +8,7 @@
 <!--
 Written by David Bau as a Javascript example in 2009; updated in 2020
 to handle high device pixel ratios, show orbits, and report periodicity.
-Keyboard controls added in 2022.
+Keyboard controls added in 2022, and quad-precision added in 2024.
 
 URL options: use ?grid=3 to select 3-column view,
                    c=-0.14-0.65i to set center,
@@ -26,10 +26,13 @@ body { font-family: Arial; background: #888; margin: 16px 0;}
 td { position: relative; vertical-align: top;}
 canvas { vertical-align:bottom;cursor:crosshair }
 #grid > div, #text { display: inline-block; margin: 8px; position: relative;
- vertical-align: top; }
+  vertical-align: top }
+#grid { color: yellow }
+#grid > div:only-child .closebox { display: none; }
 #text { text-align: left; width: 439px; max-width: 82%; background:#aaa;
- position:relative;padding:1px 4px;font-size:9pt }
-.closebox { position: absolute; right: 3px; top: 0; cursor: pointer }
+  position:relative;padding:1px 4px;font-size:9pt }
+.closebox { position: absolute; right: 3px; top: 0; cursor: pointer;
+  transition: opacity 0.3s }
 .closebox::after { content: '\00d7'; font-size: 20px; }
 .closebox:hover { font-weight: bold; }
 .rect { position: absolute; border: 1px solid yellow; height: 0; width: 0;
@@ -38,20 +41,21 @@ canvas { vertical-align:bottom;cursor:crosshair }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
   top:0; left:0; z-index:1; transition: opacity 0.3s }
 .zoomnum { position:absolute; display:inline-block; right:0; bottom:-12px;
-  text-decoration: none; font-size:12px; color:yellow;
-  transition: opacity 0.3s }
+  text-decoration: none; font-size:12px; color: yellow;
+  transition: opacity 0.3s; z-index: 1 }
 .zoomnum:hover { text-decoration: underline; }
 td#b_0 { background-color: navy; vertical-align: middle; }
 td#b_0 p { color:white; text-align: center; font-size: 16px; }
 body.hidemarks .overlay { opacity: 0; }
 body.hidemarks .zoomnum { opacity: 0; }
-a[status]::after { /* tootltips */
+body.hidemarks #grid .closebox { opacity: 0; }
+a[status]::after { /* tooltips */
  position: absolute; bottom: -2.2rem; right: 0; width: auto;
  background-color: #ddd; color: #444; font: 9pt Arial;
  padding: 3px 7px; box-shadow: 2px 2px 5px #777;
  content: attr(status); text-align: right; white-space: pre;
- pointer-events: none; z-index: 10;
- opacity: 0; transition: all 0.25s ease;
+ pointer-events: none; z-index: 2;
+ opacity: 0; transition: opacity 0.25s ease;
 }
 a[status]:focus::after, a[status]:hover::after { opacity: 0.95; }
 div#b_0::after { display: flex; position: absolute; top: 0; left: 0;
@@ -191,8 +195,9 @@ function cycle(m, z, c, p) {
   return suborbit(m, z, c, len);
 }
 
-function orbit(m, c) {
-  return suborbit(m, c, c, orbitlength);
+function orbit(m, c, p, n) {
+  var len = Math.max(p[m], n[m], orbitlength);
+  return suborbit(m, c, c, len);
 }
 
 function suborbit(m, z, c, len) {
@@ -443,7 +448,7 @@ function showseq(k, seq, color) {
     y = y[0] + dims/2;
     if (x >= 0 && y >= 0 && x < dims && y < dims) {
       ctx.beginPath();
-      ctx.arc(x, y, 2 * pixelRatio, 0, 2 * Math.PI, false);
+      ctx.arc(x, y, 1 * pixelRatio, 0, 2 * Math.PI, false);
       ctx.fill();
     }
   }
@@ -550,6 +555,7 @@ function boardstring(k) {
   return '<canvas width=' + dims + ' height=' + dims +
          ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
          '</canvas>' +
+         '<div class="closebox"></div>' +
          '<div class="rect"></div>' +
          '<canvas class=overlay width=' + dims + ' height=' + dims +
          ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
@@ -558,20 +564,24 @@ function boardstring(k) {
 }
 
 function progress() {
-  // Contribute to every unfinished cell, concentrating on latest.
-  var shift = steps++;
-  for (var p = 0; 1 << p & shift; p += 1) { }
-  for (var k = it.length - 1; p > 0 && k > 0; p -= 1) {
-    for (k -= 1; k > 0 && un[k] <= 0; k -= 1) { }
-  }
-  // Do at least 1000 pixel-steps.
-  var u = un[k];
-  for (var amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
-    iterate(k);
-    if (un[k] < u) {
-      drawcolor(k, it[k]);
-      u = un[k];
+  try {
+    // Contribute to every unfinished cell, concentrating on latest.
+    var shift = steps++;
+    for (var p = 0; 1 << p & shift; p += 1) { }
+    for (var k = it.length - 1; p > 0 && k > 0; p -= 1) {
+      for (k -= 1; k > 0 && un[k] <= 0; k -= 1) { }
     }
+    // Do at least 1000 pixel-steps.
+    var u = un[k];
+    for (var amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
+      iterate(k);
+      if (un[k] < u) {
+        drawcolor(k, it[k]);
+        u = un[k];
+      }
+    }
+  } catch (e) {
+    console.log(e);
   }
   setTimeout(progress, 0);
 }
@@ -639,7 +649,7 @@ document.onmousemove = function(e) {
         var cr = Array.isArray(cc[k][j * 2]) ? cc[k][j * 2] : [cc[k][j * 2], 0];
         var cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
         var title = 'c=' + formatcomplex(k, cr, cj);
-        var orb = orbit(j, cc[k]);
+        var orb = orbit(j, cc[k], pp[k], nn[k]);
         var cyc = [];
         if (nn[k][j]) {
           if (nn[k][j] > 0) {
@@ -666,6 +676,7 @@ document.body.onkeydown = function(e) {
     var k = sizes.length - 1;
     truncateboards(k);
     removeboardspast(k - 1);
+    truncatehiddenboards();
   }
   // Pressing C will center all the zoom positions.
   if (e.key == 'c' && sizes.length > 1) {
@@ -706,7 +717,7 @@ document.body.onkeydown = function(e) {
     nsize = osize / zoomfactor;
     setboard(k + 1, nsize, ore, oim);
     makeboard(k + 1);
-    hideboardspast(k + 1);
+    removeboardspast(k + 1);
     board(k + 1).parentElement.className = 'hidemarks';
     board(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
     draw(k + 1);
@@ -796,15 +807,20 @@ function removeboardspast(k) {
   }
 }
 
-function hideboardspast(k) {
-  for (var j = 0; j <= k && j < gridboards; ++j) {
-    board(j).parentElement.style.visibility = 'visible';
+function showboard(k) {
+  board(k).parentElement.style.display = '';
+}
+
+function truncatehiddenboards(k) {
+  for (var j = gridboards - 1; j > 0; j--) {
+    if (board(j).parentElement.style.display == '') {
+      break;
+    }
   }
-  for (var j = k + 1; j < gridboards; ++j) {
-    board(j).parentElement.style.visibility = 'hidden';
-    clearboard(j);
-    clearseq(j);
-    removerect(j - 1);
+  truncateboards(j + 1);
+  removeboardspast(j);
+  if (j == 0) {
+    showboard(j);
   }
 }
 
@@ -812,8 +828,12 @@ function board(k) {
   return document.getElementById("b_" + k).firstElementChild;
 }
 
-function rect(k) {
+function closebutton(k) {
   return board(k).nextElementSibling;
+}
+
+function rect(k) {
+  return closebutton(k).nextElementSibling;
 }
 
 function overlay(k) {
@@ -823,7 +843,7 @@ function overlay(k) {
 function cellclick(k, m) {
   // Only accept clicks on cells with something computed in them.
   if (k >= sizes.length || di[k] <= 0) return;
-  hideboardspast(k);
+  removeboardspast(k + 1);
   setTimeout(function() { cellclickdelay(k, m); }, 1);
 }
 
@@ -836,7 +856,7 @@ function cellclickdelay(k, m) {
   var oim = sizes[k][2];
   cx = m % dims;
   cy = (m - cx) / dims;
-  hideboardspast(k + 1);
+  removeboardspast(k + 1);
   showrect(k, cx / dims, cy / dims);
   truncateboards(k + 2);
   // Do slow parts after a moment.
@@ -849,6 +869,7 @@ function cellclickdelay(k, m) {
     board(k + 1).parentElement.className = 'hidemarks';
     board(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
     draw(k + 1);
+    showboard(k + 1);
   }, 10);
 }
 
@@ -884,10 +905,16 @@ function start() {
   progress();
 }
 
-for (var closebox of document.getElementsByClassName('closebox')) {
-  closebox.addEventListener('click', function(e) {
+document.body.onmousedown = function(e) {
+  if (e.target.className == 'closebox') {
+    e.stopPropagation();
+  }
+}
+document.body.onclick = function(e) {
+  if (e.target.className == 'closebox') {
     e.target.parentElement.style.display = 'none';
-  });
+    truncatehiddenboards();
+  }
 }
 
 if (dims > 800) {
