@@ -655,7 +655,12 @@ document.onmousemove = function(e) {
           if (nn[k][j] > 0) {
             title += '\ndiverged in ' + nn[k][j];
           } else {
-            title += '\nafter ' + pp[k][j] + ', period ' + figureperiod(pp[k][j]);
+            var period = figureperiod(pp[k][j]);
+            if (period == 1) {
+              title += '\nconverges after ' + pp[k][j];
+            } else {
+              title += '\nafter ' + pp[k][j] + ', period ' + figureperiod(pp[k][j]);
+            }
             var cyc = cycle(j, zz[k], cc[k], pp[k]);
           }
         }
