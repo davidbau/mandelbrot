@@ -94,8 +94,11 @@ This page shows more fractal detail over time by refining iterations to infinity
 <p style="margin-top:6px;margin-bottom:6px">
 Keys:
 <b>H</b> shrinks and <b>G</b> grows the size of each field;
-<b>I</b> zooms in; <b>delete</b> goes back; <b>C</b> recenters all;
-<b>U</b> highlights unfinished pixels; <nobr><b>?</b> shows this help.</nobr></p>
+<b>I</b> zooms in;
+<b>R</b> reopens midway windows;
+<b>C</b> recenters all;
+<b>U</b> highlights unfinished pixels;
+<nobr><b>?</b> shows this help.</nobr></p>
 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
@@ -167,6 +170,10 @@ function updateGridLayout(newColumns) {
   cssDims = Math.max(32, Math.floor((vw - 48) / gridcols) - 16);
   dims = Math.floor(cssDims * pixelRatio);
   dims2 = dims * dims;
+  var hidden = [];
+  for (let k = 0; k < sizes.length; k++) {
+    hidden.push(hiddenboard(k));
+  }
 
   // Recreate the grid
   var gridElement = grid();
@@ -178,6 +185,7 @@ function updateGridLayout(newColumns) {
     makeboard(k);
     setboard(k, sizes[k][0], sizes[k][1], sizes[k][2]);
     draw(k);
+    if (hidden[k]) { hideboard(k); }
   }
 
   // Update zoom rectangles
@@ -570,13 +578,15 @@ function progress() {
     for (var k = it.length - 1; p > 0 && k > 0; p -= 1) {
       for (k -= 1; k > 0 && un[k] <= 0; k -= 1) { }
     }
-    // Do at least 1000 pixel-steps.
-    var u = un[k];
-    for (var amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
-      iterate(k);
-      if (un[k] < u) {
-        drawcolor(k, it[k]);
-        u = un[k];
+    if (!hiddenboard(k)) {
+      // Do at least 1000 pixel-steps.
+      var u = un[k];
+      for (var amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
+        iterate(k);
+        if (un[k] < u) {
+          drawcolor(k, it[k]);
+          u = un[k];
+        }
       }
     }
   } catch (e) {
@@ -734,11 +744,15 @@ document.body.onkeydown = function(e) {
     document.getElementById('text').style.display = 'block';
   }
   // G reduces the grid column and H increases
-  if (e.key.toLowerCase() === 'g' && gridcols > 1) {
+  if (e.key === 'g' && gridcols > 1) {
     updateGridLayout(gridcols - 1);
   }
-  if (e.key.toLowerCase() === 'h') {
+  if (e.key === 'h') {
     updateGridLayout(gridcols + 1);
+  }
+  // R will restore any hidden boards
+  if (e.key === 'r') {
+    showallboards();
   }
 }
 
@@ -816,6 +830,16 @@ function removeboardspast(k) {
 
 function showboard(k) {
   board(k).parentElement.style.display = '';
+}
+
+function hideboard(k) {
+  board(k).parentElement.style.display = 'none';
+}
+
+function showallboards() {
+  for (var j = 0; j < gridboards; ++j) {
+    showboard(j);
+  }
 }
 
 function hiddenboard(k) {
