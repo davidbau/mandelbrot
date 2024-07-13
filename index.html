@@ -35,7 +35,7 @@ canvas { vertical-align:bottom;cursor:crosshair }
   transition: opacity 0.3s }
 .closebox::after { content: '\00d7'; font-size: 20px; }
 .closebox:hover { font-weight: bold; }
-.rect { position: absolute; border: 1px solid yellow; height: 0; width: 0;
+.rect { position: absolute; outline: 1px solid yellow; height: 0; width: 0;
   pointer-events: none; opacity: 0.7; transition: opacity 0.3s; }
 .hidemarks .rect { opacity: 0; }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
@@ -187,14 +187,24 @@ function updateGridLayout(newColumns) {
     draw(k);
     if (hidden[k]) { hideboard(k); }
   }
+  updateZoomRectangles();
+}
 
-  // Update zoom rectangles
-  for (let k = 1; k < sizes.length; k++) {
-    let prevBoard = sizes[k-1];
+function updateZoomRectangles() {
+  let prevBoard = null;
+  let prevK = 0;
+  for (let k = 0; k < sizes.length; k++) {
+    if (hiddenboard(k)) { continue; }
     let currBoard = sizes[k];
-    let x = (currBoard[1][0] - prevBoard[1][0]) / prevBoard[0] + 0.5;
-    let y = 0.5 - (currBoard[2][0] - prevBoard[2][0]) / prevBoard[0];
-    showrect(k-1, x, y);
+    if (prevBoard != null) {
+      let x = (currBoard[1][0] - prevBoard[1][0]) / prevBoard[0] + 0.5;
+      let y = 0.5 - (currBoard[2][0] - prevBoard[2][0]) / prevBoard[0];
+      let zf = prevBoard[0] / currBoard[0];
+      console.log(k, prevK, zf);
+      showrect(prevK, x, y, zf);
+    }
+    prevBoard = currBoard;
+    prevK = k;
   }
 }
 
@@ -652,6 +662,8 @@ document.onmousemove = function(e) {
       var y = (e.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
       var k = parseInt(m[1]);
       var j = x + y * dims;
+      var orb = [];
+      var cyc = [];
       target.setAttribute('title', '');
       if (cc[k] && j >= 0 && j * 2 < cc[k].length) {
         // Convert to quad precision if necessary
@@ -659,8 +671,7 @@ document.onmousemove = function(e) {
         var cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
         var title = 'c=' + formatcomplex(k, cr, cj);
         var len = Math.min(Math.max(pp[k][j], nn[k][j]) || Math.max(it[k], 8), orbitlength);
-        var orb = orbit(j, cc[k], len);
-        var cyc = [];
+        orb = orbit(j, cc[k], len);
         if (nn[k][j]) {
           if (nn[k][j] > 0) {
             title += '\ndiverges in ' + nn[k][j];
@@ -674,14 +685,14 @@ document.onmousemove = function(e) {
             var cyc = cycle(j, zz[k], cc[k], pp[k]);
           }
         }
-        for (var i = 0; i < sizes.length; i++) {
-          if (!hiddenboard(i)) {
-            clearseq(i);
-            showseq(i, orb, 'yellow');
-            showseq(i, cyc, 'red');
-          }
-        }
         target.setAttribute('title', title);
+      }
+      for (var i = 0; i < sizes.length; i++) {
+        if (!hiddenboard(i)) {
+          clearseq(i);
+          showseq(i, orb, 'yellow');
+          showseq(i, cyc, 'red');
+        }
       }
     }
   }
@@ -701,9 +712,10 @@ document.body.onkeydown = function(e) {
     var ore = sizes[k][1];
     var oim = sizes[k][2];
     showrect(0, 0.5 + (ore - sizes[0][1]) / sizes[0][0],
-                0.5 - (oim - sizes[0][2]) / sizes[0][0]);
+                0.5 - (oim - sizes[0][2]) / sizes[0][0],
+                sizes[0][0] / sizes[1][0]);
     for (k = 1; k < sizes.length - 1; k += 1) {
-      showrect(k, 0.5, 0.5);
+      showrect(k, 0.5, 0.5, sizes[k][0] / sizes[k+1][0]);
       if (sizes[k][1] != ore || sizes[k][2] != oim) {
         setboard(k, sizes[k][0], ore, oim);
         clearboard(k);
@@ -730,7 +742,7 @@ document.body.onkeydown = function(e) {
       ore = -1.786440255563652; // Feigenbaum constant
       rre = (ore - sizes[0][1]) / sizes[0][0] + 0.5;
     }
-    showrect(k, rre, 0.5);
+    showrect(k, rre, 0.5, zoomfactor);
     nsize = osize / zoomfactor;
     setboard(k + 1, nsize, ore, oim);
     makeboard(k + 1);
@@ -840,6 +852,7 @@ function showallboards() {
   for (var j = 0; j < gridboards; ++j) {
     showboard(j);
   }
+  updateZoomRectangles();
 }
 
 function hiddenboard(k) {
@@ -892,7 +905,7 @@ function cellclickdelay(k, m) {
   cx = m % dims;
   cy = (m - cx) / dims;
   removeboardspast(k + 1);
-  showrect(k, cx / dims, cy / dims);
+  showrect(k, cx / dims, cy / dims, zoomfactor);
   truncateboards(k + 2);
   // Do slow parts after a moment.
   setTimeout(function() {
@@ -908,13 +921,14 @@ function cellclickdelay(k, m) {
   }, 10);
 }
 
-function showrect(k, x, y) {
+function showrect(k, x, y, zf) {
   var s = rect(k).style;
+  zf = Math.min(125, zf); // Make rectangle visible if it is tiny.
   board(k).parentElement.className = '';
-  s.top = (y * cssDims - cssDims / 2 / zoomfactor) + 'px';
-  s.left = (x * cssDims - cssDims / 2 / zoomfactor) + 'px';
-  s.width = (cssDims / zoomfactor) + 'px';
-  s.height = (cssDims / zoomfactor) + 'px';
+  s.top = (y * cssDims - cssDims / 2 / zf) + 'px';
+  s.left = (x * cssDims - cssDims / 2 / zf) + 'px';
+  s.width = (cssDims / zf) + 'px';
+  s.height = (cssDims / zf) + 'px';
 }
 
 function bigurl(k) {
@@ -949,6 +963,7 @@ document.body.onclick = function(e) {
   if (e.target.className == 'closebox') {
     e.target.parentElement.style.display = 'none';
     truncatehiddenboards();
+    updateZoomRectangles();
   }
 }
 
