@@ -75,7 +75,7 @@ Javascript Mandelbrot Set Fractal Viewer
 </h4>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup>2</sup>+c</em> is iterated for each <a href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Points are colored by <a href="http://warp.povusers.org/Mandelbrot/">counting iterations</a> to divergence; black points converge or cycle.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each <a href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Points are colored by <a href="http://warp.povusers.org/Mandelbrot/">counting iterations</a> to divergence; black points converge or cycle.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -98,6 +98,7 @@ Keys:
 <b>R</b> reopens midway windows;
 <b>C</b> recenters all;
 <b>U</b> highlights unfinished pixels;
+<b>X</b> increases and <b>Z</b> decreases the <em>z</em> exponent;
 <nobr><b>?</b> shows this help.</nobr></p>
 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
@@ -115,6 +116,7 @@ function toQd(x) {
 
 var vw = window.innerWidth || document.documentElement.clientWidth;
 var gridcols = Math.max(1, Math.min(3, Math.floor((vw - 32) / 200)));
+var exponent = 2;
 var firstr = [-0.5, 0];
 var firstj = [0.0, 0];
 var firstsize = 3.0;
@@ -124,6 +126,13 @@ var pixelRatio = Math.ceil(window.devicePixelRatio || 1);
 var opts = document.location.search.split('&');
 for (var j in opts) {
   var m;
+  if (null !== (m = opts[j].match(/exponent=(\d+)/))) {
+    exponent = Math.max(2, parseInt(m[1]));
+    if (exponent > 2) { firstr = [0.0, 0]; }
+    for (var el of document.getElementsByClassName('exponent')) {
+      el.innerText = exponent;
+    }
+  }
   if (null !== (m = opts[j].match(/grid=(\d+)/))) {
     gridcols = Math.max(1, parseInt(m[1]));
   }
@@ -190,6 +199,25 @@ function updateGridLayout(newColumns) {
   updateZoomRectangles();
 }
 
+function updateExponent(newExponent) {
+  if (newExponent < 2) { return; }
+  exponent = newExponent;
+  for (var el of document.getElementsByClassName('exponent')) {
+    el.innerText = exponent;
+  }
+  truncateboards(1);
+  removeboardspast(0);
+  if (firstsize == 3) {
+    firstr = [exponent > 2 ? 0.0 : -0.5, 0];
+    firstj = [0.0, 0];
+  }
+  setboard(0, firstsize, firstr, firstj);
+  makeboard(0);
+  draw(0);
+  clearseq(0);
+  updateZoomRectangles();
+}
+
 function updateZoomRectangles() {
   let prevBoard = null;
   let prevK = 0;
@@ -229,11 +257,17 @@ function suborbit(m, z, c, len) {
 
   var result = [r[0], r[1], j[0], j[1]];
   while (result.length < len * 4) {
-    var r2 = qdSquare(r);
     var j2 = qdSquare(j);
-    var ra = qdAdd(qdSub(r2, j2), cr);
-    j = qdAdd(qdMul(qdDouble(r), j), cj);
-    r = ra;
+    var ja = qdMul(qdDouble(r), j);
+    var r2 = qdSquare(r);
+    var ra = qdSub(r2, j2);
+    for (let ord = 2; ord < exponent; ord++) {
+      let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
+      ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
+      ra = rt;
+    }
+    r = qdAdd(ra, cr);
+    j = qdAdd(ja, cj);
     result.push(r[0], r[1], j[0], j[1]);
   }
   return result;
@@ -257,8 +291,15 @@ function compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
       n[m] = i;
       return 1;
     }
-    ra = qdAdd(qdSub(r2, j2), c[m2]);
-    ja = qdAdd(qdMul(qdDouble(r), j), c[m2i]);
+    ra = qdSub(r2, j2);
+    ja = qdMul(qdDouble(r), j);
+    for (let ord = 2; ord < exponent; ord++) {
+      let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
+      ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
+      ra = rt;
+    }
+    ra = qdAdd(ra, c[m2]);
+    ja = qdAdd(jq, c[m2i]);
     z[m2] = ra;
     z[m2i] = ja;
     rb = b[m2];
@@ -274,8 +315,15 @@ function compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
       n[m] = i;
       return 1;
     }
-    ra = r2 - j2 + c[m2];
-    ja = 2 * r * j + c[m2i];
+    ra = r2 - j2;
+    ja = 2 * r * j;
+    for (let ord = 2; ord < exponent; ord++) {
+      let rt = r * ra - j * ja;
+      ja = r * ja + j * ra;
+      ra = rt;
+    }
+    ra += c[m2];
+    ja += c[m2i];
     z[m2] = ra;
     z[m2i] = ja;
     rb = b[m2];
@@ -586,17 +634,15 @@ function progress() {
     var shift = steps++;
     for (var p = 0; 1 << p & shift; p += 1) { }
     for (var k = it.length - 1; p > 0 && k > 0; p -= 1) {
-      for (k -= 1; k > 0 && un[k] <= 0; k -= 1) { }
+      for (k -= 1; k > 0 && (un[k] <= 0 || hiddenboard(k)); k -= 1) { }
     }
-    if (!hiddenboard(k)) {
-      // Do at least 1000 pixel-steps.
-      var u = un[k];
-      for (var amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
-        iterate(k);
-        if (un[k] < u) {
-          drawcolor(k, it[k]);
-          u = un[k];
-        }
+    // Do at least 1000 pixel-steps.
+    var u = un[k];
+    for (var amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
+      iterate(k);
+      if (un[k] < u) {
+        drawcolor(k, it[k]);
+        u = un[k];
       }
     }
   } catch (e) {
@@ -765,6 +811,14 @@ document.body.onkeydown = function(e) {
   // R will restore any hidden boards
   if (e.key === 'r') {
     showallboards();
+  }
+  // Increase the exponent
+  if (e.key === 'x') {
+    updateExponent(exponent + 1);
+  }
+  // Decrease the exponent
+  if (e.key === 'z') {
+    updateExponent(exponent - 1);
   }
 }
 
@@ -936,6 +990,9 @@ function bigurl(k) {
   var osize = sizes[k][0];
   osize = parseFloat(osize.toPrecision(
      Math.max(2, -Math.ceil(Math.log(osize)/2.5))))
+  if (exponent != 2) {
+    osize += '&exponent=' + exponent;
+  }
   var ore = sizes[k][1];
   var oim = sizes[k][2];
   return '?grid=1&s=' + osize + '&c=' + qdFormat(ore) +
