@@ -1067,8 +1067,8 @@ function preRenderFrames(after) {
     return (function () {
       document.getElementById('moviescale').textContent =
         `Rendering ${formatScale(3.0 / sizes[k][0])}`;
-      const canvas1 = null;
-      const canvas2 = null;
+      let canvas1 = null;
+      let canvas2 = null;
       const n = nn[k];
       // Render with k-1 palette
       if (k > 0) {
@@ -1088,7 +1088,7 @@ function preRenderFrames(after) {
       if (k < sizes.length - 1) {
         canvas2 = document.createElement('canvas');
         canvas2.width = canvas2.height = dims;
-        const ctx1 = canvas2.getContext('2d');
+        const ctx2 = canvas2.getContext('2d');
         for (let y = 0; y < dims; y++) {
           for (let x = 0; x < dims; x++) {
             const m = y * dims + x;
