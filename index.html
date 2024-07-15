@@ -607,7 +607,7 @@ function formatScale(scale) {
   } else if (scale < 100000) {
     return +scale.toFixed(0) + 'x';
   } else {
-    return +scale.toExponential(2);
+    return scale.toExponential(2);
   }
 }
 
@@ -1024,7 +1024,7 @@ function createMovieCanvas() {
   movieContainer.innerHTML = '<div>' +
     `<canvas width=${dims} height=${dims} ` +
     `style="width:${cssDims}px;height:${cssDims}px"></canvas>` +
-    `<a id="movieScaleText" class="zoomnum">&#8618;</a></div>`;
+    `<a id="movieScaleText" class="zoomnum">Rendering...</a></div>`;
   movieCanvas = movieContainer.firstElementChild.firstElementChild;
   movieCtx = movieCanvas.getContext('2d');
   movieCtx.drawImage(board(0), 0, 0);
@@ -1047,8 +1047,10 @@ function toggleMovieMode() {
     createMovieCanvas();
     movieContainer.scrollIntoView({ behavior: 'smooth' });
     setTimeout(function() {
-      preRenderFrames();
-      startMovieAnimation();
+      document.body.className = '';
+      preRenderFrames(function() {
+        startMovieAnimation();
+      });
     }, 20);
   } else {
     grid().style.display = 'block';
@@ -1058,35 +1060,42 @@ function toggleMovieMode() {
   }
 }
 
-function preRenderFrames() {
+function preRenderFrames(after) {
   frameCanvases = [];
-  for (let k = 0; k < sizes.length; k++) {
-    const canvas1 = document.createElement('canvas');
-    const canvas2 = document.createElement('canvas');
-    canvas1.width = canvas2.width = dims;
-    canvas1.height = canvas2.height = dims;
-    const ctx1 = canvas1.getContext('2d');
-    const ctx2 = canvas2.getContext('2d');
-    // Render with k-1 palette
-    for (let y = 0; y < dims; y++) {
-      for (let x = 0; x < dims; x++) {
-        const m = y * dims + x;
-        const i = nn[k][m];
-        ctx1.fillStyle = makecolor(Math.max(0, k - 1), i);
-        ctx1.fillRect(x, y, 1, 1);
+  function queueOneFrame(k, after) {
+    return (function () {
+      const canvas1 = document.createElement('canvas');
+      const canvas2 = document.createElement('canvas');
+      canvas1.width = canvas2.width = dims;
+      canvas1.height = canvas2.height = dims;
+      const ctx1 = canvas1.getContext('2d');
+      const ctx2 = canvas2.getContext('2d');
+      // Render with k-1 palette
+      for (let y = 0; y < dims; y++) {
+        for (let x = 0; x < dims; x++) {
+          const m = y * dims + x;
+          const i = nn[k][m];
+          ctx1.fillStyle = makecolor(Math.max(0, k - 1), i);
+          ctx1.fillRect(x, y, 1, 1);
+        }
       }
-    }
-    // Render with k+1 palette
-    for (let y = 0; y < dims; y++) {
-      for (let x = 0; x < dims; x++) {
-        const m = y * dims + x;
-        const i = nn[k][m];
-        ctx2.fillStyle = makecolor(Math.min(sizes.length - 1, k + 1), i);
-        ctx2.fillRect(x, y, 1, 1);
+      // Render with k+1 palette
+      for (let y = 0; y < dims; y++) {
+        for (let x = 0; x < dims; x++) {
+          const m = y * dims + x;
+          const i = nn[k][m];
+          ctx2.fillStyle = makecolor(Math.min(sizes.length - 1, k + 1), i);
+          ctx2.fillRect(x, y, 1, 1);
+        }
       }
-    }
-    frameCanvases.push({ prev: canvas1, next: canvas2 });
+      frameCanvases.push({ prev: canvas1, next: canvas2 });
+      setTimeout(after, 1);
+    });
   }
+  for (let k = sizes.length - 1; k >= 0; k--) {
+    after = queueOneFrame(k, after);
+  }
+  setTimeout(after, 0);
 }
 
 function startMovieAnimation() {
@@ -1111,60 +1120,59 @@ function stopMovieAnimation() {
 }
 
 function drawMovieFrame(kk) {
-    const k = Math.floor(kk);
-    const t = kk - k;
-    const sourceSize = sizes[k][0];
-    const targetSize = k + 1 < sizes.length ? sizes[k + 1][0] : sourceSize;
-    const zoomRatio = targetSize / sourceSize;
-    // Use zoom ratio for exponential interpolation
-    const expT = zoomRatio == 1.0 ? 1.0 :
-                 (Math.pow(zoomRatio, t) - 1) / (zoomRatio - 1);
-    const colorT = expT * expT;
-    const interpolatedSize = sourceSize * Math.pow(zoomRatio, t);
-    const sourceCenter = [sizes[k][1][0], sizes[k][2][0]];
-    const targetCenter = k + 1 < sizes.length ?
-                         [sizes[k + 1][1][0], sizes[k + 1][2][0]] : sourceCenter;
-    const interpolatedCenter = [
-        sourceCenter[0] + (targetCenter[0] - sourceCenter[0]) * expT,
-        sourceCenter[1] + (targetCenter[1] - sourceCenter[1]) * expT
-    ];
-    // Clear the movie canvas
-    movieCtx.clearRect(0, 0, dims, dims);
-    // Draw the current frame
-    const scale = sourceSize / interpolatedSize;
-    const offsetX = (interpolatedCenter[0] - sourceCenter[0]) / sourceSize * dims;
-    const offsetY = -(interpolatedCenter[1] - sourceCenter[1]) / sourceSize * dims;
+  const k = Math.floor(kk);
+  const t = kk - k;
+  const sourceSize = sizes[k][0];
+  const targetSize = k + 1 < sizes.length ? sizes[k + 1][0] : sourceSize;
+  const zoomRatio = targetSize / sourceSize;
+  // Use zoom ratio for exponential interpolation
+  const expT = zoomRatio == 1.0 ? 1.0 :
+         (Math.pow(zoomRatio, t) - 1) / (zoomRatio - 1);
+  const colorT = expT * expT;
+  const interpolatedSize = sourceSize * Math.pow(zoomRatio, t);
+  const sourceCenter = [sizes[k][1][0], sizes[k][2][0]];
+  const targetCenter = k + 1 < sizes.length ?
+             [sizes[k + 1][1][0], sizes[k + 1][2][0]] : sourceCenter;
+  const interpolatedCenter = [
+    sourceCenter[0] + (targetCenter[0] - sourceCenter[0]) * expT,
+    sourceCenter[1] + (targetCenter[1] - sourceCenter[1]) * expT
+  ];
+  // Clear the movie canvas
+  movieCtx.clearRect(0, 0, dims, dims);
+  // Draw the current frame
+  const scale = sourceSize / interpolatedSize;
+  const offsetX = (interpolatedCenter[0] - sourceCenter[0]) / sourceSize * dims;
+  const offsetY = -(interpolatedCenter[1] - sourceCenter[1]) / sourceSize * dims;
+  movieCtx.save();
+  movieCtx.translate(dims / 2, dims / 2);
+  movieCtx.scale(scale, scale);
+  movieCtx.translate(-dims / 2 - offsetX, -dims / 2 - offsetY);
+  movieCtx.globalAlpha = 1;
+  movieCtx.drawImage(board(k), 0, 0);
+  movieCtx.globalAlpha = colorT;
+  movieCtx.drawImage(frameCanvases[k].next, 0, 0);
+  movieCtx.restore();
+  // Draw the next frame
+  if (k < sizes.length - 1) {
+    const targetScale = targetSize / interpolatedSize;
+    const targetOffsetX = (interpolatedCenter[0] - targetCenter[0]) / targetSize * dims;
+    const targetOffsetY = -(interpolatedCenter[1] - targetCenter[1]) / targetSize * dims;
     movieCtx.save();
     movieCtx.translate(dims / 2, dims / 2);
-    movieCtx.scale(scale, scale);
-    movieCtx.translate(-dims / 2 - offsetX, -dims / 2 - offsetY);
-    movieCtx.globalAlpha = 1 - colorT;
-    movieCtx.drawImage(board(k), 0, 0);
+    movieCtx.scale(targetScale, targetScale);
+    movieCtx.translate(-dims / 2 - targetOffsetX, -dims / 2 - targetOffsetY);
+    movieCtx.globalAlpha = 1;
+    movieCtx.drawImage(frameCanvases[k + 1].prev, 0, 0);
     movieCtx.globalAlpha = colorT;
-    movieCtx.drawImage(frameCanvases[k].next, 0, 0);
+    movieCtx.drawImage(board(k + 1), 0, 0);
     movieCtx.restore();
-    // Draw the next frame
-    if (k < sizes.length - 1) {
-        const targetScale = targetSize / interpolatedSize;
-        const targetOffsetX = (interpolatedCenter[0] - targetCenter[0]) / targetSize * dims;
-        const targetOffsetY = -(interpolatedCenter[1] - targetCenter[1]) / targetSize * dims;
-        movieCtx.save();
-        movieCtx.globalCompositeOperation = 'source-atop';
-        movieCtx.translate(dims / 2, dims / 2);
-        movieCtx.scale(targetScale, targetScale);
-        movieCtx.translate(-dims / 2 - targetOffsetX, -dims / 2 - targetOffsetY);
-        movieCtx.globalAlpha = 1 - colorT;
-        movieCtx.drawImage(frameCanvases[k + 1].prev, 0, 0);
-        movieCtx.globalAlpha = colorT;
-        movieCtx.drawImage(board(k + 1), 0, 0);
-        movieCtx.restore();
-    }
-    // Update scale text
-    const currentScale = (3.0 / firstsize) * (Math.pow(zoomfactor, kk));
-    const scaleText = document.getElementById('movieScaleText');
-    if (scaleText) {
-        scaleText.textContent = formatScale(currentScale);
-    }
+  }
+  // Update scale text
+  const currentScale = (3.0 / firstsize) * (Math.pow(zoomfactor, kk));
+  const scaleText = document.getElementById('movieScaleText');
+  if (scaleText) {
+    scaleText.textContent = formatScale(currentScale);
+  }
 }
 
 function start() {
