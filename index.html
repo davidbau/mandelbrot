@@ -632,16 +632,20 @@ function progress() {
     return;
   }
   try {
-    // Contribute to every unfinished cell, concentrating on most unfinished.
-    var shift = steps++;
-    for (var p = 0; 1 << p & shift; p += 1) { }
-    const ord = Array.from(un.keys())
-      .filter(k => un[k] > 0 && !hiddenboard(k))
-      .sort((a, b) => un[a] - un[b]);
-    for (var ok = it.length - 1; p > 0 && ok > 0; p -= 1) {
-      ok -= 1;
+    // Contribute to every unfinished cell
+    var pri = Array.from(un.keys())
+      .filter(k => un[k] > 0 && !hiddenboard(k));
+    if (steps % 2) {
+      // Prioritize most unfinished half the time.
+      pri = pri.sort((a, b) => un[b] - un[a]);
+    } else {
+      // Prioritize the most recent half the time.
+      pri = pri.reverse();
     }
-    var k = ord[ok];
+    // Exponential scheduling policy
+    var shift = Math.floor(steps++ / 2);
+    for (var p = 0; 1 << p & shift; p += 1) { }
+    var k = pri[Math.min(p, pri.length)];
     // Do at least 1000 pixel-steps.
     var u = un[k];
     for (var amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
