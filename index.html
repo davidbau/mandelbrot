@@ -25,8 +25,8 @@ already-known points.
 body { font-family: Arial; background: #888; margin: 16px 0;}
 td { position: relative; vertical-align: top;}
 canvas { vertical-align:bottom;cursor:crosshair }
-#grid > div, #text { display: inline-block; margin: 8px; position: relative;
-  vertical-align: top }
+#grid > div, #text, #movie > div { display: inline-block; margin: 8px;
+  position: relative; vertical-align: top }
 #grid { color: yellow }
 #grid > div:only-child .closebox { display: none; }
 #text { text-align: left; width: 439px; max-width: 82%; background:#aaa;
@@ -43,7 +43,7 @@ canvas { vertical-align:bottom;cursor:crosshair }
 .zoomnum { position:absolute; display:inline-block; right:0; bottom:-12px;
   text-decoration: none; font-size:12px; color: yellow;
   transition: opacity 0.3s; z-index: 1 }
-.zoomnum:hover { text-decoration: underline; }
+.zoomnum[href]:hover { text-decoration: underline; }
 td#b_0 { background-color: navy; vertical-align: middle; }
 td#b_0 p { color:white; text-align: center; font-size: 16px; }
 body.hidemarks .overlay { opacity: 0; }
@@ -66,6 +66,8 @@ div#b_0::after { display: flex; position: absolute; top: 0; left: 0;
 <body>
 <center>
 <div id=grid></div>
+
+<div id=movie></div>
 
 <div id=text>
 <div class=closebox></div>
@@ -99,6 +101,7 @@ Keys:
 <b>C</b> recenters all;
 <b>U</b> highlights unfinished pixels;
 <b>X</b> increases and <b>Z</b> decreases the <em>z</em> exponent;
+<b>M</b> makes a movie;
 <nobr><b>?</b> shows this help.</nobr></p>
 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
@@ -299,7 +302,7 @@ function compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
       ra = rt;
     }
     ra = qdAdd(ra, c[m2]);
-    ja = qdAdd(jq, c[m2i]);
+    ja = qdAdd(ja, c[m2i]);
     z[m2] = ra;
     z[m2i] = ja;
     rb = b[m2];
@@ -559,18 +562,6 @@ function makecolor(k, i) {
   var frac = (dims2 - hi[k][j][0]) / dims2; // frac of pixels done.
   var len = hi[k].length, half = Math.floor((len + j) / 2);
   var s = sizes[k][0];
-  if (len > 10 + j) {
-    // estimate progress toward asymptote
-    var slope1 = (hi[k][len-1][1] - hi[k][j][1])
-               / (hi[k][len-1][2] - hi[k][j][2]),
-        slope2 = (hi[k][j+3][1] - hi[k][j][1])
-               / (hi[k][j+3][2] - hi[k][j][2]),
-        slope3 = (hi[k][j+5][1] - hi[k][j][1])
-               / (hi[k][j+5][2] - hi[k][j][2]);
-    var frac2 = 1.0 - (Math.max(slope2, slope3) / slope1);
-    var fl = Math.pow(frac2, 2);
-    if (frac2 > 0 && fl > frac) { frac = fl; }
-  }
   var ff = Math.pow(frac, 2);
   var fr = Math.pow(frac, 0.333);
   var fg = Math.pow(frac, 3);
@@ -610,13 +601,17 @@ function makeboard(k) {
   }
 }
 
+function formatScale(scale) {
+  if (scale < 100000) {
+    return +scale.toFixed(3) + 'x';
+  } else {
+    return +scale.toExponential(2);
+  }
+}
+
 function boardstring(k) {
   var factor = (3.0 / firstsize) * (Math.pow(zoomfactor, k));
-  if (factor < 100000) {
-    factor = +factor.toFixed(3) + 'x';
-  } else {
-    factor = factor.toExponential(2);
-  }
+  factor = formatScale(factor);
   return '<canvas width=' + dims + ' height=' + dims +
          ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
          '</canvas>' +
@@ -629,6 +624,10 @@ function boardstring(k) {
 }
 
 function progress() {
+  if (computationPaused) {
+    setTimeout(progress, 100); // Check less frequently when paused
+    return;
+  }
   try {
     // Contribute to every unfinished cell, concentrating on latest.
     var shift = steps++;
@@ -679,6 +678,7 @@ function eventtarget(e) {
 }
 
 document.onmousedown = function(e) {
+  if (movieMode) { toggleMovieMode(); }
   var target = eventtarget(e);
   if (e.button != 0) { return true; }
   if (target) {
@@ -745,6 +745,7 @@ document.onmousemove = function(e) {
 }
 
 document.body.onkeydown = function(e) {
+  if (movieMode) { toggleMovieMode(); return; }
   // Pressing backspace will delete the last zoom.
   if (e.key == 'Backspace' && sizes.length > 1) {
     var k = sizes.length - 1;
@@ -820,6 +821,10 @@ document.body.onkeydown = function(e) {
   if (e.key === 'z') {
     updateExponent(exponent - 1);
   }
+  // Toggle movie mode
+  if (e.key === 'm') {
+    toggleMovieMode();
+  }
 }
 
 document.body.onmouseover = function(e) {
@@ -848,6 +853,8 @@ document.body.onmouseover = function(e) {
         }
       }
       update_progress();
+    } else if (target.id == 'm') {
+      document.body.className = '';
     }
   }
 }
@@ -1002,6 +1009,168 @@ function bigurl(k) {
 function removerect(k) {
   var s = rect(k).style;
   s.top = s.left = s.width = s.height = '';
+}
+
+let movieCanvas, movieCtx;
+let movieContainer = document.getElementById('movie');
+let movieMode = false;
+let animationFrame = null;
+let computationPaused = false;
+let frameCanvases = [];
+
+function createMovieCanvas() {
+  let container = document.createElement('div');
+  container.style.position = 'relative';
+  movieCanvas = document.createElement('canvas');
+  movieCanvas.id = 'm';
+  movieCanvas.width = dims;
+  movieCanvas.height = dims;
+  movieCanvas.style.width = cssDims + 'px';
+  movieCanvas.style.height = cssDims + 'px';
+  movieCtx = movieCanvas.getContext('2d');
+  movieCtx.drawImage(board(0), 0, 0);
+  let scaleText = document.createElement('a');
+  scaleText.id = 'movieScaleText';
+  scaleText.className = 'zoomnum';
+  container.appendChild(movieCanvas);
+  container.appendChild(scaleText);
+  movieContainer.appendChild(container);
+}
+
+function removeMovieCanvas() {
+  while (movieContainer.firstChild) {
+    movieContainer.removeChild(movieContainer.firstChild);
+  }
+  movieCanvas = null;
+  movieCtx = null;
+}
+
+function toggleMovieMode() {
+  movieMode = !movieMode;
+  computationPaused = movieMode;
+  if (movieMode) {
+    grid().style.display = 'none';
+    movieContainer.style.display = 'block';
+    createMovieCanvas();
+    setTimeout(function() {
+      preRenderFrames();
+      startMovieAnimation();
+    }, 10);
+  } else {
+    grid().style.display = 'block';
+    movieContainer.style.display = 'none';
+    stopMovieAnimation();
+    removeMovieCanvas();
+  }
+}
+
+function preRenderFrames() {
+  frameCanvases = [];
+  for (let k = 0; k < sizes.length; k++) {
+    const canvas1 = document.createElement('canvas');
+    const canvas2 = document.createElement('canvas');
+    canvas1.width = canvas2.width = dims;
+    canvas1.height = canvas2.height = dims;
+    const ctx1 = canvas1.getContext('2d');
+    const ctx2 = canvas2.getContext('2d');
+    // Render with k-1 palette
+    for (let y = 0; y < dims; y++) {
+      for (let x = 0; x < dims; x++) {
+        const m = y * dims + x;
+        const i = nn[k][m];
+        ctx1.fillStyle = makecolor(Math.max(0, k - 1), i);
+        ctx1.fillRect(x, y, 1, 1);
+      }
+    }
+    // Render with k+1 palette
+    for (let y = 0; y < dims; y++) {
+      for (let x = 0; x < dims; x++) {
+        const m = y * dims + x;
+        const i = nn[k][m];
+        ctx2.fillStyle = makecolor(Math.min(sizes.length - 1, k + 1), i);
+        ctx2.fillRect(x, y, 1, 1);
+      }
+    }
+    frameCanvases.push({ prev: canvas1, next: canvas2 });
+  }
+}
+
+function startMovieAnimation() {
+  let frame = 0;
+  let framesteps = 300;
+  let endpause = 120;
+  const totalFrames = (sizes.length - 1) * framesteps;
+  function animate() {
+    const kk = Math.min(frame, totalFrames) / framesteps;
+    drawMovieFrame(kk);
+    frame = (frame + 1) % (totalFrames + endpause);
+    animationFrame = requestAnimationFrame(animate);
+  }
+  animate();
+}
+
+function stopMovieAnimation() {
+  if (animationFrame) {
+    cancelAnimationFrame(animationFrame);
+    animationFrame = null;
+  }
+}
+
+function drawMovieFrame(kk) {
+    const k = Math.floor(kk);
+    const t = kk - k;
+    const sourceSize = sizes[k][0];
+    const targetSize = k + 1 < sizes.length ? sizes[k + 1][0] : sourceSize;
+    const zoomRatio = targetSize / sourceSize;
+    // Use zoom ratio for exponential interpolation
+    const expT = zoomRatio == 1.0 ? 1.0 :
+                 (Math.pow(zoomRatio, t) - 1) / (zoomRatio - 1);
+    const colorT = expT * expT;
+    const interpolatedSize = sourceSize * Math.pow(zoomRatio, t);
+    const sourceCenter = [sizes[k][1][0], sizes[k][2][0]];
+    const targetCenter = k + 1 < sizes.length ?
+                         [sizes[k + 1][1][0], sizes[k + 1][2][0]] : sourceCenter;
+    const interpolatedCenter = [
+        sourceCenter[0] + (targetCenter[0] - sourceCenter[0]) * expT,
+        sourceCenter[1] + (targetCenter[1] - sourceCenter[1]) * expT
+    ];
+    // Clear the movie canvas
+    movieCtx.clearRect(0, 0, dims, dims);
+    // Draw the current frame
+    const scale = sourceSize / interpolatedSize;
+    const offsetX = (interpolatedCenter[0] - sourceCenter[0]) / sourceSize * dims;
+    const offsetY = -(interpolatedCenter[1] - sourceCenter[1]) / sourceSize * dims;
+    movieCtx.save();
+    movieCtx.translate(dims / 2, dims / 2);
+    movieCtx.scale(scale, scale);
+    movieCtx.translate(-dims / 2 - offsetX, -dims / 2 - offsetY);
+    movieCtx.globalAlpha = 1 - colorT;
+    movieCtx.drawImage(board(k), 0, 0);
+    movieCtx.globalAlpha = colorT;
+    movieCtx.drawImage(frameCanvases[k].next, 0, 0);
+    movieCtx.restore();
+    // Draw the next frame
+    if (k < sizes.length - 1) {
+        const targetScale = targetSize / interpolatedSize;
+        const targetOffsetX = (interpolatedCenter[0] - targetCenter[0]) / targetSize * dims;
+        const targetOffsetY = -(interpolatedCenter[1] - targetCenter[1]) / targetSize * dims;
+        movieCtx.save();
+        movieCtx.globalCompositeOperation = 'source-atop';
+        movieCtx.translate(dims / 2, dims / 2);
+        movieCtx.scale(targetScale, targetScale);
+        movieCtx.translate(-dims / 2 - targetOffsetX, -dims / 2 - targetOffsetY);
+        movieCtx.globalAlpha = 1 - colorT;
+        movieCtx.drawImage(frameCanvases[k + 1].prev, 0, 0);
+        movieCtx.globalAlpha = colorT;
+        movieCtx.drawImage(board(k + 1), 0, 0);
+        movieCtx.restore();
+    }
+    // Update scale text
+    const currentScale = (3.0 / firstsize) * (Math.pow(zoomfactor, kk));
+    const scaleText = document.getElementById('movieScaleText');
+    if (scaleText) {
+        scaleText.textContent = formatScale(currentScale);
+    }
 }
 
 function start() {
