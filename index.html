@@ -41,8 +41,8 @@ canvas { vertical-align:bottom;cursor:crosshair }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
   top:0; left:0; z-index:1; transition: opacity 0.3s }
 .zoomnum { position:absolute; display:inline-block; right:0; bottom:-12px;
-  text-decoration: none; font-size:12px; color: yellow;
-  transition: opacity 0.3s; z-index: 1 }
+  text-decoration: none; font-size:12px; color: yellow; min-width: 25%;
+  text-align:right; transition: opacity 0.3s; z-index: 1; cursor: pointer }
 .zoomnum[href]:hover { text-decoration: underline; }
 td#b_0 { background-color: navy; vertical-align: middle; }
 td#b_0 p { color:white; text-align: center; font-size: 16px; }
@@ -602,8 +602,10 @@ function makeboard(k) {
 }
 
 function formatScale(scale) {
-  if (scale < 100000) {
-    return +scale.toFixed(3) + 'x';
+  if (scale < 10) {
+    return +scale.toFixed(1) + 'x';
+  } else if (scale < 100000) {
+    return +scale.toFixed(0) + 'x';
   } else {
     return +scale.toExponential(2);
   }
@@ -853,7 +855,7 @@ document.body.onmouseover = function(e) {
         }
       }
       update_progress();
-    } else if (target.id == 'm') {
+    } else if (target.id.startsWith('movie') && e.target.id != 'movie') {
       document.body.className = '';
     }
   }
@@ -1019,22 +1021,13 @@ let computationPaused = false;
 let frameCanvases = [];
 
 function createMovieCanvas() {
-  let container = document.createElement('div');
-  container.style.position = 'relative';
-  movieCanvas = document.createElement('canvas');
-  movieCanvas.id = 'm';
-  movieCanvas.width = dims;
-  movieCanvas.height = dims;
-  movieCanvas.style.width = cssDims + 'px';
-  movieCanvas.style.height = cssDims + 'px';
+  movieContainer.innerHTML = '<div>' +
+    `<canvas width=${dims} height=${dims} ` +
+    `style="width:${cssDims}px;height:${cssDims}px"></canvas>` +
+    `<a id="movieScaleText" class="zoomnum">&#8618;</a></div>`;
+  movieCanvas = movieContainer.firstElementChild.firstElementChild;
   movieCtx = movieCanvas.getContext('2d');
   movieCtx.drawImage(board(0), 0, 0);
-  let scaleText = document.createElement('a');
-  scaleText.id = 'movieScaleText';
-  scaleText.className = 'zoomnum';
-  container.appendChild(movieCanvas);
-  container.appendChild(scaleText);
-  movieContainer.appendChild(container);
 }
 
 function removeMovieCanvas() {
@@ -1052,10 +1045,11 @@ function toggleMovieMode() {
     grid().style.display = 'none';
     movieContainer.style.display = 'block';
     createMovieCanvas();
+    movieContainer.scrollIntoView({ behavior: 'smooth' });
     setTimeout(function() {
       preRenderFrames();
       startMovieAnimation();
-    }, 10);
+    }, 20);
   } else {
     grid().style.display = 'block';
     movieContainer.style.display = 'none';
@@ -1098,7 +1092,7 @@ function preRenderFrames() {
 function startMovieAnimation() {
   let frame = 0;
   let framesteps = 300;
-  let endpause = 120;
+  let endpause = 180;
   const totalFrames = (sizes.length - 1) * framesteps;
   function animate() {
     const kk = Math.min(frame, totalFrames) / framesteps;
