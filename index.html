@@ -1148,19 +1148,19 @@ function drawMovieFrame(kk) {
          (Math.pow(zoomRatio, t) - 1) / (zoomRatio - 1);
   const colorT = expT * expT;
   const interpolatedSize = sourceSize * Math.pow(zoomRatio, t);
-  const sourceCenter = [sizes[k][1][0], sizes[k][2][0]];
+  const sourceCenter = [sizes[k][1], sizes[k][2]];
   const targetCenter = k + 1 < sizes.length ?
-             [sizes[k + 1][1][0], sizes[k + 1][2][0]] : sourceCenter;
+             [sizes[k + 1][1], sizes[k + 1][2]] : sourceCenter;
   const interpolatedCenter = [
-    sourceCenter[0] + (targetCenter[0] - sourceCenter[0]) * expT,
-    sourceCenter[1] + (targetCenter[1] - sourceCenter[1]) * expT
+    qdAdd(sourceCenter[0], qdMul(qdSub(targetCenter[0], sourceCenter[0]), [expT, 0])),
+    qdAdd(sourceCenter[1], qdMul(qdSub(targetCenter[1], sourceCenter[1]), [expT, 0]))
   ];
   // Clear the movie canvas
   movieCtx.clearRect(0, 0, dims, dims);
   // Draw the current frame
   const scale = sourceSize / interpolatedSize;
-  const offsetX = (interpolatedCenter[0] - sourceCenter[0]) / sourceSize * dims;
-  const offsetY = -(interpolatedCenter[1] - sourceCenter[1]) / sourceSize * dims;
+  const offsetX = qdSub(interpolatedCenter[0], sourceCenter[0])[0] / sourceSize * dims;
+  const offsetY = qdSub(sourceCenter[1], interpolatedCenter[1])[0] / sourceSize * dims;
   movieCtx.save();
   movieCtx.translate(dims / 2, dims / 2);
   movieCtx.scale(scale, scale);
@@ -1176,8 +1176,8 @@ function drawMovieFrame(kk) {
   // Draw the next frame
   if (k < sizes.length - 1) {
     const targetScale = targetSize / interpolatedSize;
-    const targetOffsetX = (interpolatedCenter[0] - targetCenter[0]) / targetSize * dims;
-    const targetOffsetY = -(interpolatedCenter[1] - targetCenter[1]) / targetSize * dims;
+    const targetOffsetX = qdSub(interpolatedCenter[0], targetCenter[0])[0] / targetSize * dims;
+    const targetOffsetY = qdSub(targetCenter[1], interpolatedCenter[1])[0] / targetSize * dims;
     movieCtx.save();
     movieCtx.translate(dims / 2, dims / 2);
     movieCtx.scale(targetScale, targetScale);
