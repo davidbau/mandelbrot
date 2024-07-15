@@ -194,8 +194,8 @@ function updateGridLayout(newColumns) {
 
   // Recreate all boards
   for (let k = 0; k < sizes.length; k++) {
-    makeboard(k);
     setboard(k, sizes[k][0], sizes[k][1], sizes[k][2]);
+    makeboard(k);
     draw(k);
     if (hidden[k]) { hideboard(k); }
   }
@@ -612,7 +612,8 @@ function formatScale(scale) {
 }
 
 function boardstring(k) {
-  var factor = (3.0 / firstsize) * (Math.pow(zoomfactor, k));
+  var factor = 3.0 / (k < sizes.length ? sizes[k][0] :
+    firstsize / Math.pow(zoomfactor, k));
   factor = formatScale(factor);
   return '<canvas width=' + dims + ' height=' + dims +
          ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
@@ -1024,7 +1025,7 @@ function createMovieCanvas() {
   movieContainer.innerHTML = '<div>' +
     `<canvas width=${dims} height=${dims} ` +
     `style="width:${cssDims}px;height:${cssDims}px"></canvas>` +
-    `<a id="movieScaleText" class="zoomnum">Rendering...</a></div>`;
+    `<a id="moviescale" class="zoomnum">Rendering...</a></div>`;
   movieCanvas = movieContainer.firstElementChild.firstElementChild;
   movieCtx = movieCanvas.getContext('2d');
   movieCtx.drawImage(board(0), 0, 0);
@@ -1064,28 +1065,37 @@ function preRenderFrames(after) {
   frameCanvases = [];
   function queueOneFrame(k, after) {
     return (function () {
-      const canvas1 = document.createElement('canvas');
-      const canvas2 = document.createElement('canvas');
-      canvas1.width = canvas2.width = dims;
-      canvas1.height = canvas2.height = dims;
-      const ctx1 = canvas1.getContext('2d');
-      const ctx2 = canvas2.getContext('2d');
+      document.getElementById('moviescale').textContent =
+        `Rendering ${formatScale(3.0 / sizes[k][0])}`;
+      const canvas1 = null;
+      const canvas2 = null;
+      const n = nn[k];
       // Render with k-1 palette
-      for (let y = 0; y < dims; y++) {
-        for (let x = 0; x < dims; x++) {
-          const m = y * dims + x;
-          const i = nn[k][m];
-          ctx1.fillStyle = makecolor(Math.max(0, k - 1), i);
-          ctx1.fillRect(x, y, 1, 1);
+      if (k > 0) {
+        canvas1 = document.createElement('canvas');
+        canvas1.width = canvas1.height = dims;
+        const ctx1 = canvas1.getContext('2d');
+        for (let y = 0; y < dims; y++) {
+          for (let x = 0; x < dims; x++) {
+            const m = y * dims + x;
+            const i = n[m];
+            ctx1.fillStyle = makecolor(k - 1, i);
+            ctx1.fillRect(x, y, 1, 1);
+          }
         }
       }
       // Render with k+1 palette
-      for (let y = 0; y < dims; y++) {
-        for (let x = 0; x < dims; x++) {
-          const m = y * dims + x;
-          const i = nn[k][m];
-          ctx2.fillStyle = makecolor(Math.min(sizes.length - 1, k + 1), i);
-          ctx2.fillRect(x, y, 1, 1);
+      if (k < sizes.length - 1) {
+        canvas2 = document.createElement('canvas');
+        canvas2.width = canvas2.height = dims;
+        const ctx1 = canvas2.getContext('2d');
+        for (let y = 0; y < dims; y++) {
+          for (let x = 0; x < dims; x++) {
+            const m = y * dims + x;
+            const i = n[m];
+            ctx2.fillStyle = makecolor(k + 1, i);
+            ctx2.fillRect(x, y, 1, 1);
+          }
         }
       }
       frameCanvases.push({ prev: canvas1, next: canvas2 });
@@ -1169,10 +1179,7 @@ function drawMovieFrame(kk) {
   }
   // Update scale text
   const currentScale = (3.0 / firstsize) * (Math.pow(zoomfactor, kk));
-  const scaleText = document.getElementById('movieScaleText');
-  if (scaleText) {
-    scaleText.textContent = formatScale(currentScale);
-  }
+  document.getElementById('moviescale').textContent = formatScale(currentScale);
 }
 
 function start() {
