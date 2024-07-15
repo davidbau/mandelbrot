@@ -824,7 +824,7 @@ document.body.onkeydown = function(e) {
     updateExponent(exponent - 1);
   }
   // Toggle movie mode
-  if (e.key === 'm') {
+  if (e.key === 'm' && sizes.length > 1) {
     toggleMovieMode();
   }
 }
