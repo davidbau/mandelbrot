@@ -1177,7 +1177,6 @@ function drawMovieFrame(kk) {
   const scale = sourceSize / interpolatedSize;
   const offsetX = qdSub(interpolatedCenter[0], sourceCenter[0])[0] / sourceSize * dims;
   const offsetY = qdSub(sourceCenter[1], interpolatedCenter[1])[0] / sourceSize * dims;
-
   movieCtx.save();
   movieCtx.translate(dims / 2, dims / 2);
   movieCtx.scale(scale, scale);
@@ -1197,7 +1196,6 @@ function drawMovieFrame(kk) {
     const targetScale = targetSize / interpolatedSize;
     const targetOffsetX = qdSub(interpolatedCenter[0], targetCenter[0])[0] / targetSize * dims;
     const targetOffsetY = qdSub(targetCenter[1], interpolatedCenter[1])[0] / targetSize * dims;
-
     movieCtx.save();
     movieCtx.translate(dims / 2, dims / 2);
     movieCtx.scale(targetScale, targetScale);
