@@ -174,7 +174,7 @@ var fi = [];  // 1 if finished.
 var sizes = [];
 var gridboards = 0;
 var steps = 0;
-var ukcs = ["rgb(32,16,64)", "#888", "#fff", "yellow", "red", "#000"];
+var ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
 var unknowncolor = ukcs[0];
 
 function updateGridLayout(newColumns) {
@@ -1094,6 +1094,11 @@ function preRenderFrames(after) {
             ctx1.fillRect(x, y, 1, 1);
           }
         }
+        if (unknowncolor != '#000') {
+          ctx1.strokeStyle = 'yellow';
+          ctx1.lineWidth = pixelRatio * zoomfactor;
+          ctx1.strokeRect(0, 0, dims, dims);
+        }
       }
       // Render with k+1 palette
       if (k < sizes.length - 1) {
@@ -1141,46 +1146,58 @@ function stopMovieAnimation() {
 }
 
 function drawMovieFrame(kk) {
+  if (movieCtx == null) { return; }
   const k = Math.floor(kk);
   const t = kk - k;
   const sourceSize = sizes[k][0];
-  const targetSize = k + 1 < sizes.length ? sizes[k + 1][0] : sourceSize;
+  const targetSize = k+1 < sizes.length ? sizes[k+1][0] : sourceSize;
   const zoomRatio = targetSize / sourceSize;
+
   // Use zoom ratio for exponential interpolation
-  const expT = zoomRatio == 1.0 ? 1.0 :
-         (Math.pow(zoomRatio, t) - 1) / (zoomRatio - 1);
+  const mulT = Math.pow(zoomRatio, t);
+  const expT = (zoomRatio == 1.0 ? t : (mulT - 1) / (zoomRatio - 1));
   const colorT = expT * expT;
-  const interpolatedSize = sourceSize * Math.pow(zoomRatio, t);
+  const interpolatedSize = sourceSize * mulT;
+
+  // Use spline interpolation for center coordinates
   const sourceCenter = [sizes[k][1], sizes[k][2]];
-  const targetCenter = k + 1 < sizes.length ?
-             [sizes[k + 1][1], sizes[k + 1][2]] : sourceCenter;
-  const interpolatedCenter = [
-    qdAdd(sourceCenter[0], qdMul(qdSub(targetCenter[0], sourceCenter[0]), [expT, 0])),
-    qdAdd(sourceCenter[1], qdMul(qdSub(targetCenter[1], sourceCenter[1]), [expT, 0]))
-  ];
+  const targetCenter = k+1 < sizes.length ?
+             [sizes[k+1][1], sizes[k+1][2]] : sourceCenter;
+
+  const p0 = k > 0 ? [sizes[k-1][1], sizes[k-1][2]] : sourceCenter;
+  const p1 = sourceCenter;
+  const p2 = targetCenter
+  const p3 = k+2 < sizes.length ? [sizes[k+2][1], sizes[k+2][2]] : targetCenter;
+  const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t)
+
   // Clear the movie canvas
   movieCtx.clearRect(0, 0, dims, dims);
+
   // Draw the current frame
   const scale = sourceSize / interpolatedSize;
   const offsetX = qdSub(interpolatedCenter[0], sourceCenter[0])[0] / sourceSize * dims;
   const offsetY = qdSub(sourceCenter[1], interpolatedCenter[1])[0] / sourceSize * dims;
+
   movieCtx.save();
   movieCtx.translate(dims / 2, dims / 2);
   movieCtx.scale(scale, scale);
   movieCtx.translate(-dims / 2 - offsetX, -dims / 2 - offsetY);
   movieCtx.globalAlpha = 1;
   movieCtx.drawImage(board(k), 0, 0);
+
   // Blend the color palette of the next frame
   if (frameCanvases[k].next) {
     movieCtx.globalAlpha = colorT;
     movieCtx.drawImage(frameCanvases[k].next, 0, 0);
   }
   movieCtx.restore();
+
   // Draw the next frame
   if (k < sizes.length - 1) {
     const targetScale = targetSize / interpolatedSize;
     const targetOffsetX = qdSub(interpolatedCenter[0], targetCenter[0])[0] / targetSize * dims;
     const targetOffsetY = qdSub(targetCenter[1], interpolatedCenter[1])[0] / targetSize * dims;
+
     movieCtx.save();
     movieCtx.translate(dims / 2, dims / 2);
     movieCtx.scale(targetScale, targetScale);
@@ -1191,9 +1208,28 @@ function drawMovieFrame(kk) {
     movieCtx.drawImage(board(k + 1), 0, 0);
     movieCtx.restore();
   }
+
   // Update scale text
   const currentScale = (3.0 / firstsize) * (Math.pow(zoomfactor, kk));
   document.getElementById('moviescale').textContent = formatScale(currentScale);
+}
+
+function catmullRom1D(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const c0 = (-t3 + 2*t2 - t) / 2;
+  const c1 = (3*t3 - 5*t2 + 2) / 2;
+  const c2 = (-3*t3 + 4*t2 + t) / 2;
+  const c3 = (t3 - t2) / 2;
+  return qdAdd(qdAdd(qdScale(p0, c0), qdScale(p1, c1)),
+               qdAdd(qdScale(p2, c2), qdScale(p3, c3)));
+}
+
+function catmullRomSpline(p0, p1, p2, p3, t) {
+  return [
+    catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),
+    catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)
+  ];
 }
 
 function start() {
@@ -1277,6 +1313,10 @@ function qdMul(a, b) {
 
 function qdDouble(a) {
   return [a[0] * 2, a[1] * 2];
+}
+
+function qdScale(q, s) {
+  return [q[0] * s, q[1] * s];
 }
 
 function qdSquare(a) {
