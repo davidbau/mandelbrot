@@ -90,7 +90,9 @@ Details in popup.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-This page shows more fractal detail over time by refining iterations to infinity as you explore: the longer you wait, the more detail is shown. If you have a super-high resolution monitor like a retina display, the full resolution is used. After you zoom beyond trillion-fold magnification, a quad-precision algorithm resolves fine details to more than 30 digits of accuracy.
+This page shows more fractal detail over time by refining iterations to infinity as you explore: the longer you wait, the more detail is shown.
+After you zoom beyond trillion-fold magnification, a quad-precision algorithm resolves fine details to more than 30 digits of accuracy.
+The display computes subpixels with a <span class="pixelratio">1</span>:1 ratio.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -101,6 +103,7 @@ Keys:
 <b>C</b> recenters all;
 <b>U</b> highlights unfinished pixels;
 <b>X</b> increases and <b>Z</b> decreases the <em>z</em> exponent;
+<b>F</b> increases and <b>D</b> decreases the pixel ratio;
 <b>M</b> makes a movie;
 <nobr><b>?</b> shows this help.</nobr></p>
 
@@ -200,6 +203,13 @@ function updateGridLayout(newColumns) {
     if (hidden[k]) { hideboard(k); }
   }
   updateZoomRectangles();
+  updatePixelRatioUI();
+}
+
+function updatePixelRatioUI() {
+  for (var el of document.getElementsByClassName('pixelratio')) {
+    el.innerText = pixelRatio;
+  }
 }
 
 function updateExponent(newExponent) {
@@ -832,6 +842,16 @@ document.body.onkeydown = function(e) {
   if (e.key === 'z') {
     updateExponent(exponent - 1);
   }
+  // Increase the pixel ratio
+  if (e.key === 'f') {
+    pixelRatio += 1;
+    updateGridLayout(gridcols);
+  }
+  // Increase the pixel ratio
+  if (e.key === 'd' && pixelRatio > 1) {
+    pixelRatio -= 1;
+    updateGridLayout(gridcols);
+  }
   // Toggle movie mode
   if (e.key === 'm' && sizes.length > 1) {
     toggleMovieMode();
@@ -1178,6 +1198,8 @@ function drawMovieFrame(kk) {
   const offsetX = qdSub(interpolatedCenter[0], sourceCenter[0])[0] / sourceSize * dims;
   const offsetY = qdSub(sourceCenter[1], interpolatedCenter[1])[0] / sourceSize * dims;
   movieCtx.save();
+  movieCtx.imageSmoothingEnabled = true;
+  movieCtx.imageSmoothingQuality = 'high';
   movieCtx.translate(dims / 2, dims / 2);
   movieCtx.scale(scale, scale);
   movieCtx.translate(-dims / 2 - offsetX, -dims / 2 - offsetY);
@@ -1197,6 +1219,8 @@ function drawMovieFrame(kk) {
     const targetOffsetX = qdSub(interpolatedCenter[0], targetCenter[0])[0] / targetSize * dims;
     const targetOffsetY = qdSub(targetCenter[1], interpolatedCenter[1])[0] / targetSize * dims;
     movieCtx.save();
+    movieCtx.imageSmoothingEnabled = true;
+    movieCtx.imageSmoothingQuality = 'high';
     movieCtx.translate(dims / 2, dims / 2);
     movieCtx.scale(targetScale, targetScale);
     movieCtx.translate(-dims / 2 - targetOffsetX, -dims / 2 - targetOffsetY);
