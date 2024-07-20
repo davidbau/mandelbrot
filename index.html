@@ -180,14 +180,16 @@ var steps = 0;
 var ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
 var unknowncolor = ukcs[0];
 
-function updateGridLayout(newColumns) {
-  gridcols = Math.max(1, newColumns);
+var gridLayoutTimer = null;
+function updateGridLayout() {
   cssDims = Math.max(32, Math.floor((vw - 48) / gridcols) - 16);
   dims = Math.floor(cssDims * pixelRatio);
   dims2 = dims * dims;
   var hidden = [];
+  var ssizes = [];
   for (let k = 0; k < sizes.length; k++) {
     hidden.push(hiddenboard(k));
+    ssizes.push(sizes[k]);
   }
 
   // Recreate the grid
@@ -195,12 +197,14 @@ function updateGridLayout(newColumns) {
   gridElement.innerHTML = '';
   gridboards = 0;
 
-  // Recreate all boards
-  for (let k = 0; k < sizes.length; k++) {
-    setboard(k, sizes[k][0], sizes[k][1], sizes[k][2]);
+  // Recreate all canvases
+  for (let k = 0; k < ssizes.length; k++) {
     makeboard(k);
-    draw(k);
     if (hidden[k]) { hideboard(k); }
+  }
+  for (let k = 0; k < ssizes.length; k++) {
+    setboard(k, ssizes[k][0], ssizes[k][1], ssizes[k][2]);
+    draw(k);
   }
   updateZoomRectangles();
   updatePixelRatioUI();
@@ -497,10 +501,16 @@ function setboard(k, size, re, im) {
 function truncateboards(k) {
   if (it.length > k) {
     it.length = k;
-    zz.length = k;
     cc.length = k;
+    zz.length = k;
+    bb.length = k;
+    pp.length = k;
     nn.length = k;
     un.length = k;
+    di.length = k;
+    hi.length = k;
+    ss.length = k;
+    fi.length = k;
     sizes.length = k;
   }
 }
@@ -699,13 +709,13 @@ function eventtarget(e) {
 }
 
 document.onmousedown = function(e) {
-  if (movieMode) { toggleMovieMode(); }
   var target = eventtarget(e);
+  if (movieMode && (target.id != 'moviescale')) { toggleMovieMode(); }
   if (e.button != 0) { return true; }
   if (target) {
     var m = target.id.match(/b_(\d+)/);
     if (e.target.tagName == 'A') {
-      e.target.href = bigurl(m[1]);
+      if (m) { e.target.href = bigurl(m[1]); }
       return true;
     }
     if (m) {
@@ -825,10 +835,12 @@ document.body.onkeydown = function(e) {
   }
   // G reduces the grid column and H increases
   if (e.key === 'g' && gridcols > 1) {
-    updateGridLayout(gridcols - 1);
+    gridcols -= 1;
+    updateGridLayout();
   }
   if (e.key === 'h') {
-    updateGridLayout(gridcols + 1);
+    gridcols += 1;
+    updateGridLayout();
   }
   // R will restore any hidden boards
   if (e.key === 'r') {
@@ -845,12 +857,12 @@ document.body.onkeydown = function(e) {
   // Increase the pixel ratio
   if (e.key === 'f') {
     pixelRatio += 1;
-    updateGridLayout(gridcols);
+    updateGridLayout();
   }
   // Increase the pixel ratio
   if (e.key === 'd' && pixelRatio > 1) {
     pixelRatio -= 1;
-    updateGridLayout(gridcols);
+    updateGridLayout();
   }
   // Toggle movie mode
   if (e.key === 'm' && sizes.length > 1) {
@@ -1051,6 +1063,19 @@ let movieMode = false;
 let animationFrame = null;
 let computationPaused = false;
 let frameCanvases = [];
+let mediaRecorder;
+let recordedChunks = [];
+let isRecording = false;
+let recordedBlob = null;
+let recordingMimeType = null;
+let recordingMimeTypes = [
+  'video/webm; codecs="vp9"',
+  'video/webm; codecs="avc1.640029"',
+  'video/webm',
+  'video/mp4; codecs="avc1.640029"',
+  'video/mp4',
+];
+
 
 function createMovieCanvas() {
   movieContainer.innerHTML = '<div>' +
@@ -1149,10 +1174,26 @@ function startMovieAnimation() {
   let framesteps = 300;
   let endpause = 180;
   const totalFrames = (sizes.length - 1) * framesteps;
+  
+  const scaleElement = document.getElementById('moviescale');
+  scaleElement.removeAttribute('href');
+
+  if (!isRecording) {
+    recordedBlob = null;
+    isRecording = true;
+    startRecording();
+  }
+  
   function animate() {
     const kk = Math.min(frame, totalFrames) / framesteps;
     drawMovieFrame(kk);
     frame = (frame + 1) % (totalFrames + endpause);
+    
+    if (isRecording && frame >= totalFrames) {
+      stopRecording();
+      isRecording = false;
+    }
+    
     animationFrame = requestAnimationFrame(animate);
   }
   animate();
@@ -1163,6 +1204,56 @@ function stopMovieAnimation() {
     cancelAnimationFrame(animationFrame);
     animationFrame = null;
   }
+  mp4Blob = null;
+}
+
+function startRecording() {
+  const stream = movieCanvas.captureStream(60); // 60 FPS
+
+  recordingMimeType = null;
+  for (let tryType of recordingMimeTypes) {
+     if (MediaRecorder.isTypeSupported(tryType)) {
+        recordingMimeType = tryType;
+        break;
+     }
+  }
+  if (recordingMimeType == null) {
+    console.error('Neither MP4 nor WebM recording is supported');
+    return;
+  }
+  
+  mediaRecorder = new MediaRecorder(stream, {
+    mimeType: recordingMimeType,
+    videoBitsPerSecond: 10000000,
+  });
+  
+  mediaRecorder.ondataavailable = (event) => {
+    if (event.data.size > 0) {
+      recordedChunks.push(event.data);
+    }
+  };
+  
+  mediaRecorder.onstop = () => {
+    recordedBlob = new Blob(recordedChunks, { type: recordingMimeType });
+    updateDownloadLink();
+  };
+  
+  mediaRecorder.start(1000); // one-second blobs
+}
+
+function stopRecording() {
+  mediaRecorder.stop();
+}
+
+function updateDownloadLink() {
+  const scaleElement = document.getElementById('moviescale');
+  const extension = (recordingMimeType.includes('mp4') ? 'mp4' : 'webm');
+  scaleElement.textContent = 'Download ' + extension;
+  scaleElement.href = URL.createObjectURL(recordedBlob);
+  const k = sizes.length - 1;
+  scaleElement.download = 'mandelbrot' + 
+              formatcomplex(k, sizes[k][1], sizes[k][2]) +
+              '.' + extension;
 }
 
 function drawMovieFrame(kk) {
@@ -1232,8 +1323,10 @@ function drawMovieFrame(kk) {
   }
 
   // Update scale text
-  const currentScale = (3.0 / firstsize) * (Math.pow(zoomfactor, kk));
-  document.getElementById('moviescale').textContent = formatScale(currentScale);
+  if (!recordedBlob) {
+    const currentScale = (3.0 / firstsize) * (Math.pow(zoomfactor, kk));
+    document.getElementById('moviescale').textContent = formatScale(currentScale);
+  }
 }
 
 function catmullRom1D(p0, p1, p2, p3, t) {
