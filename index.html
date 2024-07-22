@@ -127,7 +127,7 @@ var firstr = [-0.5, 0];
 var firstj = [0.0, 0];
 var firstsize = 3.0;
 var orbitlength = 100000; // show very long orbits
-var pixelRatio = Math.ceil(window.devicePixelRatio || 1);
+var pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
 
 var opts = document.location.search.split('&');
 for (var j in opts) {
