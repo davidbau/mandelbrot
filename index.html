@@ -1223,6 +1223,7 @@ function startMovieAnimation() {
   let frame = 0;
   let framesteps = 300;
   let endpause = 180;
+  let endrecord = 60;
   const totalFrames = (sizes.length - 1) * framesteps;
   
   const scaleElement = document.getElementById('moviescale');
@@ -1239,7 +1240,7 @@ function startMovieAnimation() {
     drawMovieFrame(kk);
     frame = (frame + 1) % (totalFrames + endpause);
     
-    if (isRecording && frame > totalFrames) {
+    if (isRecording && frame > totalFrames + endrecord) {
       stopRecording();
       isRecording = false;
     }
