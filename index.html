@@ -1304,6 +1304,7 @@ function updateDownloadLink() {
   const k = sizes.length - 1;
   scaleElement.download = 'mandelbrot' + 
               formatcomplex(k, sizes[k][1], sizes[k][2]) +
+              '-' + it[k] +
               '.' + extension;
 }
 
