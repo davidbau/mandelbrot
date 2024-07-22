@@ -180,8 +180,13 @@ var steps = 0;
 var ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
 var unknowncolor = ukcs[0];
 
-var gridLayoutTimer = null;
+let currentUpdateProcess = null;
+
 function updateGridLayout() {
+  if (currentUpdateProcess) {
+    currentUpdateProcess.abort();
+  }
+
   cssDims = Math.max(32, Math.floor((vw - 48) / gridcols) - 16);
   dims = Math.floor(cssDims * pixelRatio);
   dims2 = dims * dims;
@@ -202,12 +207,53 @@ function updateGridLayout() {
     makeboard(k);
     if (hidden[k]) { hideboard(k); }
   }
-  for (let k = 0; k < ssizes.length; k++) {
+  updatePixelRatioUI();
+
+  currentUpdateProcess = createUpdateProcess(ssizes, hidden);
+  currentUpdateProcess.start();
+}
+
+function createUpdateProcess(ssizes, hidden) {
+  let aborted = false;
+  let currentIndex = 0;
+
+  function processNext() {
+    if (aborted || currentIndex >= ssizes.length) {
+      if (!aborted) {
+        updateZoomRectangles();
+      }
+      currentUpdateProcess = null;
+      return;
+    }
+
+    const k = currentIndex;
     setboard(k, ssizes[k][0], ssizes[k][1], ssizes[k][2]);
     draw(k);
+    if (hidden[k]) { hideboard(k); }
+
+    currentIndex++;
+    setTimeout(processNext, 0);
   }
-  updateZoomRectangles();
-  updatePixelRatioUI();
+
+  return {
+    start: function() {
+      processNext();
+    },
+    abort: function() {
+      aborted = true;
+    },
+    restart: function() {
+      aborted = false;
+      currentIndex = 0;
+      this.start();
+    }
+  };
+}
+
+function abortGridLayout() {
+  if (currentUpdateProcess) {
+    currentUpdateProcess.abort();
+  }
 }
 
 function updatePixelRatioUI() {
@@ -222,6 +268,7 @@ function updateExponent(newExponent) {
   for (var el of document.getElementsByClassName('exponent')) {
     el.innerText = exponent;
   }
+  abortGridLayout();
   truncateboards(1);
   removeboardspast(0);
   if (firstsize == 3) {
@@ -779,6 +826,7 @@ document.body.onkeydown = function(e) {
   if (movieMode) { toggleMovieMode(); return; }
   // Pressing backspace will delete the last zoom.
   if (e.key == 'Backspace' && sizes.length > 1) {
+    abortGridLayout();
     var k = sizes.length - 1;
     truncateboards(k);
     removeboardspast(k - 1);
@@ -997,6 +1045,7 @@ function overlay(k) {
 function cellclick(k, m) {
   // Only accept clicks on cells with something computed in them.
   if (k >= sizes.length || di[k] <= 0) return;
+  abortGridLayout();
   truncateboards(k + 2);
   removeboardspast(k + 1);
   setTimeout(function() { cellclickdelay(k, m); }, 1);
@@ -1011,6 +1060,7 @@ function cellclickdelay(k, m) {
   var oim = sizes[k][2];
   cx = m % dims;
   cy = (m - cx) / dims;
+  abortGridLayout();
   removeboardspast(k + 1);
   showrect(k, cx / dims, cy / dims, zoomfactor);
   truncateboards(k + 2);
@@ -1189,7 +1239,7 @@ function startMovieAnimation() {
     drawMovieFrame(kk);
     frame = (frame + 1) % (totalFrames + endpause);
     
-    if (isRecording && frame >= totalFrames) {
+    if (isRecording && frame > totalFrames) {
       stopRecording();
       isRecording = false;
     }
@@ -1348,6 +1398,7 @@ function catmullRomSpline(p0, p1, p2, p3, t) {
 }
 
 function start() {
+  updatePixelRatioUI();
   setboard(0, firstsize, firstr, firstj);
   makeboard(0);
   draw(0);
@@ -1362,6 +1413,7 @@ document.body.onmousedown = function(e) {
 document.body.onclick = function(e) {
   if (e.target.className == 'closebox') {
     e.target.parentElement.style.display = 'none';
+    abortGridLayout();
     truncatehiddenboards();
     updateZoomRectangles();
   }
