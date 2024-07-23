@@ -825,8 +825,7 @@ document.onmousemove = function(e) {
 document.body.onkeydown = function(e) {
   if (movieMode) { toggleMovieMode(); return; }
   // Pressing backspace will delete the last zoom.
-  if (e.key == 'Backspace' && sizes.length > 1) {
-    abortGridLayout();
+  if (e.key == 'Backspace' && sizes.length > 1 && !currentUpdateProcess) {
     var k = sizes.length - 1;
     truncateboards(k);
     removeboardspast(k - 1);
@@ -864,9 +863,11 @@ document.body.onkeydown = function(e) {
     var ore = sizes[k][1];
     var oim = sizes[k][2];
     var rre = 0.5;
-    if (k == 0 && ore == -0.5 && oim == 0) {
-      ore = -1.786440255563652; // Feigenbaum constant
-      rre = (ore - sizes[0][1]) / sizes[0][0] + 0.5;
+    console.log('check', ore, oim);
+    if (k == 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
+      console.log('hit');
+      ore = [-1.401155189093314712, 0]; // -1.786440255563652; // Feigenbaum point
+      rre = (ore[0] - sizes[0][1][0]) / sizes[0][0] + 0.5;
     }
     showrect(k, rre, 0.5, zoomfactor);
     nsize = osize / zoomfactor;
@@ -1044,8 +1045,7 @@ function overlay(k) {
 
 function cellclick(k, m) {
   // Only accept clicks on cells with something computed in them.
-  if (k >= sizes.length || di[k] <= 0) return;
-  abortGridLayout();
+  if (k >= sizes.length || di[k] <= 0 || currentUpdateProcess) return;
   truncateboards(k + 2);
   removeboardspast(k + 1);
   setTimeout(function() { cellclickdelay(k, m); }, 1);
@@ -1054,13 +1054,12 @@ function cellclick(k, m) {
 var zoomfactor = 5;
 
 function cellclickdelay(k, m) {
-  if (k >= sizes.length) return;
+  if (k >= sizes.length || currentUpdateProcess) return;
   var osize = sizes[k][0];
   var ore = sizes[k][1];
   var oim = sizes[k][2];
   cx = m % dims;
   cy = (m - cx) / dims;
-  abortGridLayout();
   removeboardspast(k + 1);
   showrect(k, cx / dims, cy / dims, zoomfactor);
   truncateboards(k + 2);
@@ -1413,9 +1412,8 @@ document.body.onmousedown = function(e) {
   }
 }
 document.body.onclick = function(e) {
-  if (e.target.className == 'closebox') {
+  if (e.target.className == 'closebox' && !currentUpdateProcess) {
     e.target.parentElement.style.display = 'none';
-    abortGridLayout();
     truncatehiddenboards();
     updateZoomRectangles();
   }
@@ -1591,6 +1589,10 @@ function qdLt(a, s) {
 
 function qdGt(a, s) {
   return a[0] + a[1] > s;
+}
+
+function qdEq(a, s) {
+  return a[0] == s && a[1] == 0;
 }
 
 function qdAbs(q) {
