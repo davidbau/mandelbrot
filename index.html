@@ -58,12 +58,13 @@ a[status]::after { /* tooltips */
  opacity: 0; transition: opacity 0.25s ease;
 }
 a[status]:focus::after, a[status]:hover::after { opacity: 0.95; }
-div#b_0::after { display: flex; position: absolute; top: 0; left: 0;
-  width: 100%; height: 100%; align-items: center; justify-content: center;
-  content:"Starting...";color:white;z-index: -1;background: rgb(32,16,64); }
+body.starting div#b_0::after { display: flex; position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%; align-items: center;
+  justify-content: center; content:"Starting..."; color: white;
+  z-index: -1; background: rgb(32,16,64); }
 </style>
 </head>
-<body>
+<body class="starting">
 <center>
 <div id=grid></div>
 
@@ -142,9 +143,10 @@ for (var j in opts) {
   if (null !== (m = opts[j].match(/grid=(\d+)/))) {
     gridcols = Math.max(1, parseInt(m[1]));
   }
-  if (null !== (m = opts[j].match(/c=([-+]?\d?\.?\d+)(?:([-+]\d?\.\d+)i)?/))) {
+  if (null !== (m = opts[j].match(
+      /c=([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/))) {
     firstr = qdParse(m[1]);
-    firstj = qdParse(m[2] || 0);
+    firstj = qdParse(m[2] || "0");
   }
   if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+(?:e[-+]\d+)?)/))) {
     firstsize = parseFloat(m[1]);
@@ -863,10 +865,10 @@ document.body.onkeydown = function(e) {
     var ore = sizes[k][1];
     var oim = sizes[k][2];
     var rre = 0.5;
-    console.log('check', ore, oim);
     if (k == 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
-      console.log('hit');
-      ore = [-1.401155189093314712, 0]; // -1.786440255563652; // Feigenbaum point
+      // Myreberg / Feigenbaum point, https://oeis.org/A218453
+      // qdParse('-1.40115518909205060052382678789386129222630')
+      ore = [-1.4011551890920506, 1.196330130384937e-17];
       rre = (ore[0] - sizes[0][1][0]) / sizes[0][0] + 0.5;
     }
     showrect(k, rre, 0.5, zoomfactor);
@@ -1118,7 +1120,7 @@ let isRecording = false;
 let recordedBlob = null;
 let recordingMimeType = null;
 let recordingMimeTypes = [
-  'video/webm; codecs="vp9"',
+  'video/webm; codecs="vp8"',
   'video/webm; codecs="avc1.640029"',
   'video/webm',
   'video/mp4; codecs="avc1.640029"',
