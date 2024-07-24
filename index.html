@@ -1263,6 +1263,7 @@ function startRecording() {
   const stream = movieCanvas.captureStream(60); // 60 FPS
 
   recordingMimeType = null;
+  recordedChunks = [];
   for (let tryType of recordingMimeTypes) {
      if (MediaRecorder.isTypeSupported(tryType)) {
         recordingMimeType = tryType;
@@ -1287,6 +1288,7 @@ function startRecording() {
   
   mediaRecorder.onstop = () => {
     recordedBlob = new Blob(recordedChunks, { type: recordingMimeType });
+    recordedChunks = [];
     updateDownloadLink();
   };
   
