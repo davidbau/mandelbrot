@@ -2,7 +2,7 @@
 <html>
 <head>
 <title>Mandelbrot Explorer</title>
-<meta name="description" content="Beautiful, fast, and accurate exploration of the Mandelbrot Set in your browser. Click to zoom. Press M to make a movie. Hover to see orbits.">
+<meta name="description" content="Beautiful, fast, and accurate exploration of the Mandelbrot Set in your browser. Click to zoom. Hover to see orbits. M makes a smooth webm animation.">
 <meta name="viewport" content="width=device-width">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <!--
@@ -78,7 +78,7 @@ Javascript Mandelbrot Set Fractal Viewer
 </h4>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each <a href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Points are colored by <a href="http://warp.povusers.org/Mandelbrot/">counting iterations</a> to divergence; black points converge or cycle.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Points are colored by <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">counting iterations</a> to divergence; black points converge or cycle.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -86,7 +86,7 @@ Javascript Mandelbrot Set Fractal Viewer
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Yellow dots show <a href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbits</a></b>.  Red dots show limit cycles.
+<b>Yellow dots show <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbits</a></b>.  Red dots show limit cycles.
 Details in popup.
 </p>
 
@@ -109,7 +109,8 @@ Keys:
 <nobr><b>?</b> shows this help.</nobr></p>
 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 >David Bau</a>
 </div>
 
@@ -692,7 +693,8 @@ function boardstring(k) {
          '<canvas class=overlay width=' + dims + ' height=' + dims +
          ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
          '</canvas>' +
-         '<a class="zoomnum" href="?grid=1">' + factor + '</a>';
+         '<a class="zoomnum" target="_blank" href="?grid=1">' + factor +
+         '</a>';
 }
 
 function progress() {
