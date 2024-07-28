@@ -482,41 +482,33 @@ function iterate(k) {
 }
 
 function setboard(k, size, re, im) {
-  while (it.length <= k) {
-    it.push(0);
-    fi.push(0);
-    zz.push([]);
-    cc.push([]);
-    nn.push([]);
-    bb.push([]);
-    pp.push([]);
-    ss.push(null);
-    sizes.push([0, 0, 0]);
-    un.push(dims2);
-    di.push(0);
-    hi.push([[dims2, 0]]);
+  for (var j = Math.min(it.length, k); j <= k; j++) { 
+    it[j] = 0;
+    fi[j] = 0;
+    zz[j] = [];
+    cc[j] = [];
+    nn[j] = [];
+    bb[j] = [];
+    pp[j] = [];
+    ss[j] = null;
+    un[j] = dims2;
+    di[j] = 0;
+    hi[j] = [[dims2, 0, 0]];
+    sizes[j] = [0, [0, 0], [0, 0]];
   }
   sizes[k] = [size, toQd(re), toQd(im)];
   it[k] = 1;
-  var c = cc[k] = [];
-  var n = nn[k] = [];
-  var p = pp[k] = [];
-  ss[k] = null;
-  un[k] = dims2;
-  di[k] = 0;
-  hi[k] = [[dims2, 0, 1]];
-
-  var useQuad = size / dims < 1e-15;
-
+  var c = cc[k];
+  var n = nn[k];
+  var p = pp[k];
+  var useQuad = (size / dims) < 1e-15;
   for (var y = 0; y < dims; y++) {
     var jFrac = (0.5 - (y / dims));
     var j = (useQuad
         ? qdAdd(toQd(im), qdMul(toQd(jFrac), toQd(size)))
         : jFrac * size + im[0]);
-
     for (var x = 0; x < dims; x++) {
       var rFrac = ((x / dims) - 0.5);
-
       if (useQuad) {
         var r = qdAdd(toQd(re), qdMul(toQd(rFrac), toQd(size)));
         c.push(r, j);
@@ -845,9 +837,10 @@ document.body.onkeydown = function(e) {
                 sizes[0][0] / sizes[1][0]);
     for (k = 1; k < sizes.length - 1; k += 1) {
       showrect(k, 0.5, 0.5, sizes[k][0] / sizes[k+1][0]);
-      if (sizes[k][1] != ore || sizes[k][2] != oim) {
-        setboard(k, sizes[k][0], ore, oim);
+      if (qdCompare(sizes[k][1], ore) || qdCompare(sizes[k][2], oim)) {
         clearboard(k);
+        setboard(k, sizes[k][0], ore, oim);
+        drawcolor(k, 1);
         clearseq(k);
       }
     }
