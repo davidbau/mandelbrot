@@ -634,6 +634,17 @@ function makecolor(k, i) {
 }
 
 function draw(k) {
+  var colorcache = {};
+  function fastcolor(num) {
+    var result = colorcache[num];
+    if (!result) {
+      result = makecolor(k, num);
+      if (colorcache.length < 10000) {
+        colorcache[num] = result;
+      }
+    }
+    return result;
+  }
   if (nn.length <= k) return;
   var n = nn[k];
   var ctx = board(k).getContext('2d');
