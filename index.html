@@ -130,7 +130,9 @@ var firstj = [0.0, 0];
 var firstsize = 3.0;
 var orbitlength = 100000; // show very long orbits
 var pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
+var zoomfactor = 5;
 
+var startstate = { hidden: [], sizes: [] };
 var opts = document.location.search.split('&');
 for (var j in opts) {
   var m;
@@ -144,27 +146,37 @@ for (var j in opts) {
   if (null !== (m = opts[j].match(/grid=(\d+)/))) {
     gridcols = Math.max(1, parseInt(m[1]));
   }
-  if (null !== (m = opts[j].match(
-      /c=([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/))) {
-    firstr = qdParse(m[1]);
-    firstj = qdParse(m[2] || "0");
-  }
   if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+(?:e[-+]\d+)?)/))) {
     firstsize = parseFloat(m[1]);
   }
   if (null !== (m = opts[j].match(/pixelratio=(\d+)/))) {
     pixelRatio = Math.max(1, parseInt(m[1]));
   }
+  if (null !== (m = opts[j].match(/c=([-+\d\.ei,]+)/))) {
+    for (var coords of m[1].split(',')) {
+      m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/);
+      startstate.sizes.push([
+        firstsize / Math.pow(zoomfactor, startstate.sizes.length),
+        m != null && m[1] ? qdParse(m[1]) : (startstate.sizes.length > 0 ?
+            startstate.sizes[startstate.sizes.length - 1][1] : firstr),
+        m != null && m[2] ? qdParse(m[2]) : (startstate.sizes.length > 0 ?
+            startstate.sizes[startstate.sizes.length - 1][2] : firstj)
+      ]);
+    }
+  }
+  if (null !== (m = opts[j].match(/h=([\d,]+)/))) {
+    startstate.hidden = m[1].split(',').map(x=>parseInt(x));
+  }
+}
+
+if (startstate.sizes.length == 0) {
+  startstate.sizes.push([firstsize, firstr, firstj]);
 }
 
 var cssDims = Math.max(32,
   Math.floor((vw - 48) / gridcols) - 16);
 var dims = Math.floor(cssDims * pixelRatio);
 var dims2 = dims * dims;
-
-function grid() {
-  return document.getElementById('grid');
-}
 
 var it = [];  // the current iteration num
 var cc = [];  // the constant at every pixel
@@ -185,19 +197,21 @@ var unknowncolor = ukcs[0];
 
 let currentUpdateProcess = null;
 
-function updateGridLayout() {
+function start() {
+  updatePixelRatioUI();
+  updateGridLayout(startstate);
+  progress();
+}
+
+function updateGridLayout(state = null) {
   if (currentUpdateProcess) {
     currentUpdateProcess.abort();
   }
-
   cssDims = Math.max(32, Math.floor((vw - 48) / gridcols) - 16);
   dims = Math.floor(cssDims * pixelRatio);
   dims2 = dims * dims;
-  var hidden = [];
-  var ssizes = [];
-  for (let k = 0; k < sizes.length; k++) {
-    hidden.push(hiddenboard(k));
-    ssizes.push(sizes[k]);
+  if (state == null) {
+    state = currentGridState();
   }
 
   // Recreate the grid
@@ -206,22 +220,33 @@ function updateGridLayout() {
   gridboards = 0;
 
   // Recreate all canvases
-  for (let k = 0; k < ssizes.length; k++) {
+  for (let k = 0; k < state.sizes.length; k++) {
     makeboard(k);
-    if (hidden[k]) { hideboard(k); }
+    if (state.hidden.indexOf(k) >= 0) { hideboard(k); }
   }
   updatePixelRatioUI();
 
-  currentUpdateProcess = createUpdateProcess(ssizes, hidden);
+  currentUpdateProcess = createUpdateProcess(state);
   currentUpdateProcess.start();
 }
 
-function createUpdateProcess(ssizes, hidden) {
+function currentGridState() {
+  var state = { hidden: [], sizes: [] };
+  for (let k = 0; k < sizes.length; k++) {
+    if (hiddenboard(k)) {
+      state.hidden.push(k);
+    }
+    state.sizes.push(sizes[k]);
+  }
+  return state;
+}
+
+function createUpdateProcess(state) {
   let aborted = false;
   let currentIndex = 0;
 
   function processNext() {
-    if (aborted || currentIndex >= ssizes.length) {
+    if (aborted || currentIndex >= state.sizes.length) {
       if (!aborted) {
         updateZoomRectangles();
       }
@@ -230,9 +255,9 @@ function createUpdateProcess(ssizes, hidden) {
     }
 
     const k = currentIndex;
-    setboard(k, ssizes[k][0], ssizes[k][1], ssizes[k][2]);
+    setboard(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
     draw(k);
-    if (hidden[k]) { hideboard(k); }
+    if (state.hidden[k]) { hideboard(k); }
 
     currentIndex++;
     setTimeout(processNext, 0);
@@ -651,7 +676,7 @@ function draw(k) {
   for (var m = 0; m < dims2; ++m) {
     var x = m % dims;
     var y = (m - x) / dims;
-    ctx.fillStyle = makecolor(k, n[m]);
+    ctx.fillStyle = fastcolor(n[m]);
     ctx.fillRect(x, y, 1, 1);
   }
 }
@@ -1034,6 +1059,10 @@ function truncatehiddenboards(k) {
   }
 }
 
+function grid() {
+  return document.getElementById('grid');
+}
+
 function board(k) {
   var b = document.getElementById("b_" + k);
   return b && b.firstElementChild;
@@ -1058,8 +1087,6 @@ function cellclick(k, m) {
   removeboardspast(k + 1);
   setTimeout(function() { cellclickdelay(k, m); }, 1);
 }
-
-var zoomfactor = 5;
 
 function cellclickdelay(k, m) {
   if (k >= sizes.length || currentUpdateProcess) return;
@@ -1093,6 +1120,17 @@ function showrect(k, x, y, zf) {
   s.left = (x * cssDims - cssDims / 2 / zf) + 'px';
   s.width = (cssDims / zf) + 'px';
   s.height = (cssDims / zf) + 'px';
+}
+
+function currenturl() {
+  var k = sizes.length - 1;
+  var state = currentGridState();
+  return '?' +
+         (grid != 3 ? '&grid=' + gridcols : '') +
+         (exponent != 2 ? '&exponent=' + exponent : '') +
+         (k > 1 ? '&k=' + k : '') +
+         '&c=' + qdFormat(ore) + (qdLt(oim, 0) ? '' : '+') + qdFormat(oim) + 'i' +
+         (pixelRatio != 2 ? '&pixelRatio=' + pixelRatio : '');
 }
 
 function bigurl(k) {
@@ -1408,14 +1446,6 @@ function catmullRomSpline(p0, p1, p2, p3, t) {
     catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),
     catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)
   ];
-}
-
-function start() {
-  updatePixelRatioUI();
-  setboard(0, firstsize, firstr, firstj);
-  makeboard(0);
-  draw(0);
-  progress();
 }
 
 document.body.onmousedown = function(e) {
