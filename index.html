@@ -248,6 +248,7 @@ function createUpdateProcess(state) {
   function processNext() {
     if (aborted || currentIndex >= state.sizes.length) {
       if (!aborted) {
+        updateurl();
         updateZoomRectangles();
       }
       currentUpdateProcess = null;
@@ -258,7 +259,6 @@ function createUpdateProcess(state) {
     setboard(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
     draw(k);
     if (state.hidden[k]) { hideboard(k); }
-
     currentIndex++;
     setTimeout(processNext, 0);
   }
@@ -308,6 +308,7 @@ function updateExponent(newExponent) {
   draw(0);
   clearseq(0);
   updateZoomRectangles();
+  updateurl();
 }
 
 function updateZoomRectangles() {
@@ -825,7 +826,7 @@ document.onmousemove = function(e) {
         // Convert to quad precision if necessary
         var cr = Array.isArray(cc[k][j * 2]) ? cc[k][j * 2] : [cc[k][j * 2], 0];
         var cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
-        var title = 'c=' + formatcomplex(k, cr, cj);
+        var title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
         var len = Math.min(Math.max(pp[k][j], nn[k][j]) || Math.max(it[k], 8), orbitlength);
         orb = orbit(j, cc[k], len);
         if (nn[k][j]) {
@@ -862,6 +863,7 @@ document.body.onkeydown = function(e) {
     truncateboards(k);
     removeboardspast(k - 1);
     truncatehiddenboards();
+    updateurl();
   }
   // Pressing C will center all the zoom positions.
   if (e.key == 'c' && sizes.length > 1) {
@@ -880,6 +882,7 @@ document.body.onkeydown = function(e) {
         clearseq(k);
       }
     }
+    updateurl();
   }
   // Pressing U will cycle through the uncomputed colors.
   if (e.key == 'u') {
@@ -910,6 +913,7 @@ document.body.onkeydown = function(e) {
     board(k + 1).parentElement.className = 'hidemarks';
     board(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
     draw(k + 1);
+    updateurl();
   }
   // Pressing ? will show the help window
   if (e.key == '?') {
@@ -927,6 +931,7 @@ document.body.onkeydown = function(e) {
   // R will restore any hidden boards
   if (e.key === 'r') {
     showallboards();
+    updateurl();
   }
   // Increase the exponent
   if (e.key === 'x') {
@@ -969,9 +974,9 @@ document.body.onmouseover = function(e) {
         if (overtarget.tagName == 'A') {
           overtarget.href = bigurl(k)
           overtarget.setAttribute('status', ('center at ' +
-              formatcomplex(k, sizes[k][1], sizes[k][2]) + '\n'
-            + Math.floor(1000 * (1.0 - un[k] / dims2))/10.0  + '% done '
-            + 'after ' + it[k] + ' iters'));
+              formatcomplex(k, sizes[k][1], sizes[k][2]).replaceAll('-', '\u2212') +
+              '\n' + Math.floor(1000 * (1.0 - un[k] / dims2))/10.0  + '% done ' +
+              'after ' + it[k] + ' iters'));
         }
         if (overtarget.matches(':hover')) {
           setTimeout(update_progress, 100);
@@ -991,6 +996,11 @@ function figureperiod(i) {
   return i - (head * tail) + 1;
 }
 
+function formatscale(s) {
+  return parseFloat(s.toPrecision(
+              Math.max(2, -Math.ceil(Math.log(s)/2.5))));
+}
+
 function formatcomplex(k, re, im) {
   var pix = sizes[k][0] / dims;
   var digits = 0;
@@ -1002,13 +1012,13 @@ function formatcomplex(k, re, im) {
   if (useQuad) {
     var ra = qdFormat(qdAbs(re)).split('e');
     var ia = qdFormat(qdAbs(im)).split('e');
-    var rs = re[0] < 0.0 ? '\u2212' : '+';
-    var is = im[0] < 0.0 ? '\u2212' : '+';
+    var rs = re[0] < 0.0 ? '-' : '+';
+    var is = im[0] < 0.0 ? '-' : '+';
   } else {
     var ra = ('' + Math.abs(re)).split('e');
     var ia = ('' + Math.abs(im)).split('e');
-    var rs = re < 0.0 ? '\u2212' : '+';
-    var is = im < 0.0 ? '\u2212' : '+';
+    var rs = re < 0.0 ? '-' : '+';
+    var is = im < 0.0 ? '-' : '+';
   }
   if (ra[0].length > digits + 2) ra[0] = ra[0].substring(0, digits + 2);
   if (ia[0].length > digits + 2) ia[0] = ia[0].substring(0, digits + 2);
@@ -1109,6 +1119,7 @@ function cellclickdelay(k, m) {
     board(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
     draw(k + 1);
     showboard(k + 1);
+    updateurl();
   }, 10);
 }
 
@@ -1122,29 +1133,55 @@ function showrect(k, x, y, zf) {
   s.height = (cssDims / zf) + 'px';
 }
 
+function updateurl() {
+  if (history.replaceState) {
+    history.replaceState(null, '', currenturl());
+  }
+}
+
 function currenturl() {
-  var k = sizes.length - 1;
   var state = currentGridState();
-  return '?' +
-         (grid != 3 ? '&grid=' + gridcols : '') +
+  var compactc = '';
+  var commas = '';
+  var prev = [firstr, firstj];
+  var prevj = -1;
+  for (var j = 0; j <= state.sizes.length; j++) {
+    if (j < state.sizes.length &&
+        !qdCompare(state.sizes[j][1], prev[0]) &&
+        !qdCompare(state.sizes[j][2], prev[1])) {
+      commas += ',';
+    } else {
+      if (prevj >= 0) {
+        compactc += formatcomplex(j - 1, state.sizes[prevj][1], state.sizes[prevj][2]) + ',';
+      }
+      compactc += commas;
+      if (j < state.sizes.length) {
+        commas = '';
+        prev = [state.sizes[j][1], state.sizes[j][2]];
+        prevj = j;
+      }
+    }
+  }
+  compactc = compactc.slice(0, -1);
+  var url =
+         (state.sizes[0][0] != 3.0 ? '&s=' + formatscale(sizes[0][0]) : '') +
+         (compactc.length ? '&c=' + compactc : '') +
          (exponent != 2 ? '&exponent=' + exponent : '') +
-         (k > 1 ? '&k=' + k : '') +
-         '&c=' + qdFormat(ore) + (qdLt(oim, 0) ? '' : '+') + qdFormat(oim) + 'i' +
+         (gridcols != 3 ? '&grid=' + gridcols : '') +
+         (state.hidden.length ? '&h=' + state.hidden : '') +
          (pixelRatio != 2 ? '&pixelRatio=' + pixelRatio : '');
+  return '?' + url.replace('&', '');
 }
 
 function bigurl(k) {
   if (k >= sizes.length) return;
   var osize = sizes[k][0];
-  osize = parseFloat(osize.toPrecision(
-     Math.max(2, -Math.ceil(Math.log(osize)/2.5))))
   if (exponent != 2) {
     osize += '&exponent=' + exponent;
   }
   var ore = sizes[k][1];
   var oim = sizes[k][2];
-  return '?grid=1&s=' + osize + '&c=' + qdFormat(ore) +
-         (qdLt(oim, 0) ? '' : '+') + qdFormat(oim) + 'i';
+  return '?s=' + formatscale(osize) + '&c=' + formatcomplex(k, ore, oim) + '&grid=1';
 }
 
 function removerect(k) {
@@ -1458,6 +1495,7 @@ document.body.onclick = function(e) {
     e.target.parentElement.style.display = 'none';
     truncatehiddenboards();
     updateZoomRectangles();
+    updateurl();
   }
 }
 
