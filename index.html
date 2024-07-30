@@ -93,7 +93,7 @@ Details in popup.
 <p style="margin-top:6px;margin-bottom:6px">
 This page shows more fractal detail over time by refining iterations to infinity as you explore: the longer you wait, the more detail is shown.
 After you zoom beyond trillion-fold magnification, a quad-precision algorithm resolves fine details to more than 30 digits of accuracy.
-The display computes subpixels with a <span class="pixelratio">1</span>:1 ratio.
+The display computes subpixels with a <span class="pixelratio">2</span>:1 ratio.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -105,7 +105,7 @@ Keys:
 <b>U</b> highlights unfinished pixels;
 <b>X</b> increases and <b>Z</b> decreases the <em>z</em> exponent;
 <b>F</b> increases and <b>D</b> decreases the pixel ratio;
-<b>M</b> makes a movie for your path;
+<b>M</b> makes a movie that follows your path;
 <nobr><b>?</b> shows this help.</nobr></p>
 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
@@ -1165,11 +1165,11 @@ function currenturl() {
   compactc = compactc.slice(0, -1);
   var url =
          (state.sizes[0][0] != 3.0 ? '&s=' + formatscale(sizes[0][0]) : '') +
-         (compactc.length ? '&c=' + compactc : '') +
          (exponent != 2 ? '&exponent=' + exponent : '') +
+         (compactc.length ? '&c=' + compactc : '') +
          (gridcols != 3 ? '&grid=' + gridcols : '') +
          (state.hidden.length ? '&h=' + state.hidden : '') +
-         (pixelRatio != 2 ? '&pixelRatio=' + pixelRatio : '');
+         (pixelRatio != 2 ? '&pixelratio=' + pixelRatio : '');
   return '?' + url.replace('&', '');
 }
 
@@ -1341,7 +1341,7 @@ function stopMovieAnimation() {
 }
 
 function startRecording() {
-  const stream = movieCanvas.captureStream(60); // 60 FPS
+  const stream = movieCanvas.captureStream(30); // 30 FPS
 
   recordingMimeType = null;
   recordedChunks = [];
