@@ -796,6 +796,13 @@ function eventtarget(e) {
   return null;
 }
 
+function pointInTarget(ev, target) {
+  let se = document.scrollingElement || document.body;
+  let x = (ev.clientX + se.scrollLeft - absoluteLeft(target)) * pixelRatio;
+  let y = (ev.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
+  return { x: Math.floor(x), y: Math.floor(y) };
+}
+
 document.onmousedown = function(e) {
   let target = eventtarget(e);
   if (movieMode && (target.id != 'moviescale')) { toggleMovieMode(); }
@@ -807,10 +814,8 @@ document.onmousedown = function(e) {
       return true;
     }
     if (m) {
-      let se = document.scrollingElement || document.body;
-      let x = (e.clientX + se.scrollLeft - absoluteLeft(target)) * pixelRatio;
-      let y = (e.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
-      cellclick(parseInt(m[1]), x + y * dims);
+      let p = pointInTarget(e, target);
+      cellclick(parseInt(m[1]), p.x + p.y * dims);
       return false;
     }
   }
@@ -832,11 +837,9 @@ document.onmousemove = function(e) {
   if (target) {
     let m = target.id.match(/b_(\d+)/);
     if (m) {
-      let se = document.scrollingElement || document.body;
-      let x = (e.clientX + se.scrollLeft - absoluteLeft(target)) * pixelRatio;
-      let y = (e.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
+      let p = pointInTarget(e, target);
       let k = parseInt(m[1]);
-      let j = x + y * dims;
+      let j = p.x + p.y * dims;
       function updateorbit() {
         let orb = [];
         let cyc = [];
@@ -860,7 +863,7 @@ document.onmousemove = function(e) {
               } else {
                 title += '\nafter ' + pp[k][j] + ', period ' + figureperiod(pp[k][j]);
               }
-              let cyc = cycle(j, zz[k], cc[k], pp[k]);
+              cyc = cycle(j, zz[k], cc[k], pp[k]);
             }
           }
           target.setAttribute('title', title);
@@ -1440,7 +1443,9 @@ function drawMovieFrame(kk) {
   const p1 = sourceCenter;
   const p2 = targetCenter
   const p3 = k+2 < sizes.length ? [sizes[k+2][1], sizes[k+2][2]] : targetCenter;
-  const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t)
+  // const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
+  const interpolatedCenter = [qdAdd(qdScale(p1[0], 1-t), qdScale(p2[0], t)),
+                              qdAdd(qdScale(p1[1], 1-t), qdScale(p2[1], t))];
 
   // Clear the movie canvas
   // movieCtx.clearRect(0, 0, dims, dims);
@@ -1449,8 +1454,10 @@ function drawMovieFrame(kk) {
 
   // Draw the current frame
   const scale = sourceSize / interpolatedSize;
-  const offsetX = qdSub(interpolatedCenter[0], sourceCenter[0])[0] / sourceSize * dims;
-  const offsetY = qdSub(sourceCenter[1], interpolatedCenter[1])[0] / sourceSize * dims;
+  const offsetX = qdMul(qdSub(interpolatedCenter[0], sourceCenter[0]),
+                        [dims / sourceSize, 0])[0];
+  const offsetY = qdMul(qdSub(sourceCenter[1], interpolatedCenter[1]),
+                        [dims / sourceSize, 0])[0];
   movieCtx.save();
   movieCtx.imageSmoothingEnabled = true;
   movieCtx.imageSmoothingQuality = 'high';
@@ -1470,8 +1477,10 @@ function drawMovieFrame(kk) {
   // Draw the next frame
   if (k < sizes.length - 1) {
     const targetScale = targetSize / interpolatedSize;
-    const targetOffsetX = qdSub(interpolatedCenter[0], targetCenter[0])[0] / targetSize * dims;
-    const targetOffsetY = qdSub(targetCenter[1], interpolatedCenter[1])[0] / targetSize * dims;
+    const targetOffsetX = qdMul(qdSub(interpolatedCenter[0], targetCenter[0]),
+                                [dims / targetSize, 0])[0];
+    const targetOffsetY = qdMul(qdSub(targetCenter[1], interpolatedCenter[1]),
+                                [dims / targetSize, 0])[0];
     movieCtx.save();
     movieCtx.imageSmoothingEnabled = true;
     movieCtx.imageSmoothingQuality = 'high';
@@ -1588,7 +1597,9 @@ function qdDouble(a) {
 }
 
 function qdScale(q, s) {
-  return [q[0] * s, q[1] * s];
+  let [q1, q0] = q;
+  let [p1, p2] = twoProduct(q1, s);
+  return fast2Sum(p1, p2 + s * q0);
 }
 
 function qdSquare(a) {
