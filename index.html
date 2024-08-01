@@ -815,8 +815,18 @@ document.onmousedown = function(e) {
   return true;
 }
 
+var orbitinterval = null;
+var orbittimeout = null;
 document.onmousemove = function(e) {
   var target = eventtarget(e);
+  if (orbitinterval) {
+    clearInterval(orbitinterval);
+    orbitinterval = null;
+  }
+  if (orbittimeout) {
+    clearTimeout(orbittimeout);
+    orbittimeout= null;
+  }
   if (target) {
     var m = target.id.match(/b_(\d+)/);
     if (m) {
@@ -825,37 +835,51 @@ document.onmousemove = function(e) {
       var y = (e.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
       var k = parseInt(m[1]);
       var j = x + y * dims;
-      var orb = [];
-      var cyc = [];
-      target.setAttribute('title', '');
-      if (cc[k] && j >= 0 && j * 2 < cc[k].length) {
-        // Convert to quad precision if necessary
-        var cr = Array.isArray(cc[k][j * 2]) ? cc[k][j * 2] : [cc[k][j * 2], 0];
-        var cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
-        var title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
-        var len = Math.min(Math.max(pp[k][j], nn[k][j]) || Math.max(it[k], 8), orbitlength);
-        orb = orbit(j, cc[k], len);
-        if (nn[k][j]) {
-          if (nn[k][j] > 0) {
-            title += '\ndiverges in ' + nn[k][j];
-          } else {
-            var period = figureperiod(pp[k][j]);
-            if (period == 1) {
-              title += '\nconverges after ' + pp[k][j];
+      function updateorbit() {
+        var orb = [];
+        var cyc = [];
+        var ongoing = true;
+        target.setAttribute('title', '');
+        if (cc[k] && j >= 0 && j * 2 < cc[k].length) {
+          // Convert to quad precision if necessary
+          var cr = Array.isArray(cc[k][j * 2]) ? cc[k][j * 2] : [cc[k][j * 2], 0];
+          var cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
+          var title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
+          var len = Math.min(Math.max(pp[k][j], nn[k][j]) || Math.max(it[k], 8), orbitlength);
+          orb = orbit(j, cc[k], len);
+          if (nn[k][j]) {
+            ongoing = false;
+            if (nn[k][j] > 0) {
+              title += '\ndiverges in ' + nn[k][j];
             } else {
-              title += '\nafter ' + pp[k][j] + ', period ' + figureperiod(pp[k][j]);
+              var period = figureperiod(pp[k][j]);
+              if (period == 1) {
+                title += '\nconverges after ' + pp[k][j];
+              } else {
+                title += '\nafter ' + pp[k][j] + ', period ' + figureperiod(pp[k][j]);
+              }
+              var cyc = cycle(j, zz[k], cc[k], pp[k]);
             }
-            var cyc = cycle(j, zz[k], cc[k], pp[k]);
+          }
+          target.setAttribute('title', title);
+        }
+        clearseq(k);
+        showseq(k, orb, 'yellow');
+        showseq(k, cyc, 'red');
+        function orbitonallboards() {
+          for (var i = 0; i < sizes.length; i++) {
+            if (!hiddenboard(i) && i != k) {
+              clearseq(i);
+              showseq(i, orb, 'yellow');
+              showseq(i, cyc, 'red');
+            }
           }
         }
-        target.setAttribute('title', title);
+        orbittimeout = setTimeout(orbitonallboards, 1);
+        return ongoing;
       }
-      for (var i = 0; i < sizes.length; i++) {
-        if (!hiddenboard(i)) {
-          clearseq(i);
-          showseq(i, orb, 'yellow');
-          showseq(i, cyc, 'red');
-        }
+      if (updateorbit()) {
+        orbitinterval = setInterval(updateorbit, 251);
       }
     }
   }
