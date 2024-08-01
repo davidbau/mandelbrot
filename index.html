@@ -600,10 +600,8 @@ function showseq(k, seq, color) {
   for (let i = 0; i < seq.length; i += 4) {
     let r = [seq[i], seq[i+1]];
     let j = [seq[i+2], seq[i+3]];
-    let x = qdMul(qdSub(r, cr), [dims/s, 0]);
-    let y = qdMul(qdSub(cj, j), [dims/s, 0]);
-    x = x[0] + dims/2;
-    y = y[0] + dims/2;
+    let x = (qdSub(r, cr)[0] / s + 0.5) * dims;
+    let y = (qdSub(cj, j)[0] / s + 0.5) * dims;
     if (x >= 0 && y >= 0 && x < dims && y < dims) {
       ctx.beginPath();
       ctx.arc(x, y, 1 * pixelRatio, 0, 2 * Math.PI, false);
@@ -891,7 +889,11 @@ document.onmousemove = function(e) {
 }
 
 document.body.onkeydown = function(e) {
-  if (movieMode) { toggleMovieMode(); return; }
+  if (movieMode &&
+      ['Shift', 'Alt', 'Control', 'Meta', 'CapsLock'].indexOf(e.key) == -1) {
+    toggleMovieMode();
+    return;
+  }
   // Pressing backspace will delete the last zoom.
   if (e.key == 'Backspace' && sizes.length > 1 && !currentUpdateProcess) {
     let k = sizes.length - 1;
@@ -1443,9 +1445,9 @@ function drawMovieFrame(kk) {
   const p1 = sourceCenter;
   const p2 = targetCenter
   const p3 = k+2 < sizes.length ? [sizes[k+2][1], sizes[k+2][2]] : targetCenter;
-  // const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
-  const interpolatedCenter = [qdAdd(qdScale(p1[0], 1-t), qdScale(p2[0], t)),
-                              qdAdd(qdScale(p1[1], 1-t), qdScale(p2[1], t))];
+  const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
+  // const interpolatedCenter = [qdAdd(qdScale(p1[0], 1-t), qdScale(p2[0], t)),
+  //                             qdAdd(qdScale(p1[1], 1-t), qdScale(p2[1], t))];
 
   // Clear the movie canvas
   // movieCtx.clearRect(0, 0, dims, dims);
