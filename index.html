@@ -123,24 +123,24 @@ function toQd(x) {
   return Array.isArray(x) ? x : [x, 0];
 }
 
-var vw = window.innerWidth || document.documentElement.clientWidth;
-var gridcols = Math.max(1, Math.min(3, Math.floor((vw - 32) / 200)));
-var exponent = 2;
-var firstr = [-0.5, 0];
-var firstj = [0.0, 0];
-var firstsize = 3.0;
-var orbitlength = 100000; // show very long orbits
-var pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
-var zoomfactor = 5;
+let vw = window.innerWidth || document.documentElement.clientWidth;
+let gridcols = Math.max(1, Math.min(3, Math.floor((vw - 32) / 200)));
+let exponent = 2;
+let firstr = [-0.5, 0];
+let firstj = [0.0, 0];
+let firstsize = 3.0;
+let orbitlength = 100000; // show very long orbits
+let pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
+let zoomfactor = 5;
 
-var startstate = { hidden: [], sizes: [] };
-var opts = document.location.search.split('&');
-for (var j in opts) {
-  var m;
+let startstate = { hidden: [], sizes: [] };
+let opts = document.location.search.split('&');
+for (let j in opts) {
+  let m;
   if (null !== (m = opts[j].match(/exponent=(\d+)/))) {
     exponent = Math.max(2, parseInt(m[1]));
     if (exponent > 2) { firstr = [0.0, 0]; }
-    for (var el of document.getElementsByClassName('exponent')) {
+    for (let el of document.getElementsByClassName('exponent')) {
       el.innerText = exponent;
     }
   }
@@ -154,7 +154,7 @@ for (var j in opts) {
     pixelRatio = Math.max(1, parseInt(m[1]));
   }
   if (null !== (m = opts[j].match(/c=([-+\d\.ei,]+)/))) {
-    for (var coords of m[1].split(',')) {
+    for (let coords of m[1].split(',')) {
       m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/);
       startstate.sizes.push([
         firstsize / Math.pow(zoomfactor, startstate.sizes.length),
@@ -174,28 +174,28 @@ if (startstate.sizes.length == 0) {
   startstate.sizes.push([firstsize, firstr, firstj]);
 }
 
-var cssDims = Math.max(32,
+let cssDims = Math.max(32,
   Math.floor((vw - 48) / gridcols) - 16);
-var dims = Math.floor(cssDims * pixelRatio);
-var dims2 = dims * dims;
+let dims = Math.floor(cssDims * pixelRatio);
+let dims2 = dims * dims;
 
-var it = [];  // the current iteration num
-var cc = [];  // the constant at every pixel
-var zz = [];  // the current iterate value
-var bb = [];  // the recent value at iteration r
-var pp = [];  // the point at which the value was first closer than epsilon2
-var nn = [];  // the number of iterations until divergence (or convergence, neg)
-var un = [];  // number of uncomputed pixels
-var di = [];  // number of known diverged pixels
-var hi = [];  // history of up to 256 of [uncomputed, iter]
-var ss = [];  // list of uncomputed indexes
-var fi = [];  // 1 if finished.
-var sizes = [];
-var gridboards = 0;
-var steps = 0;
-var ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
-var unknowncolor = ukcs[0];
-var focusk = null;
+let it = [];  // the current iteration num
+let cc = [];  // the constant at every pixel
+let zz = [];  // the current iterate value
+let bb = [];  // the recent value at iteration r
+let pp = [];  // the point at which the value was first closer than epsilon2
+let nn = [];  // the number of iterations until divergence (or convergence, neg)
+let un = [];  // number of uncomputed pixels
+let di = [];  // number of known diverged pixels
+let hi = [];  // history of up to 256 of [uncomputed, iter]
+let ss = [];  // list of uncomputed indexes
+let fi = [];  // 1 if finished.
+let sizes = [];
+let gridboards = 0;
+let steps = 0;
+let ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
+let unknowncolor = ukcs[0];
+let focusk = null;
 
 let currentUpdateProcess = null;
 
@@ -217,7 +217,7 @@ function updateGridLayout(state = null) {
   }
 
   // Recreate the grid
-  var gridElement = grid();
+  let gridElement = grid();
   gridElement.innerHTML = '';
   gridboards = 0;
 
@@ -233,7 +233,7 @@ function updateGridLayout(state = null) {
 }
 
 function currentGridState() {
-  var state = { hidden: [], sizes: [] };
+  let state = { hidden: [], sizes: [] };
   for (let k = 0; k < sizes.length; k++) {
     if (hiddenboard(k)) {
       state.hidden.push(k);
@@ -287,7 +287,7 @@ function abortGridLayout() {
 }
 
 function updatePixelRatioUI() {
-  for (var el of document.getElementsByClassName('pixelratio')) {
+  for (let el of document.getElementsByClassName('pixelratio')) {
     el.innerText = pixelRatio;
   }
 }
@@ -295,7 +295,7 @@ function updatePixelRatioUI() {
 function updateExponent(newExponent) {
   if (newExponent < 2) { return; }
   exponent = newExponent;
-  for (var el of document.getElementsByClassName('exponent')) {
+  for (let el of document.getElementsByClassName('exponent')) {
     el.innerText = exponent;
   }
   abortGridLayout();
@@ -331,7 +331,7 @@ function updateZoomRectangles() {
 }
 
 function cycle(m, z, c, p) {
-  var len = figureperiod(p[m]);
+  let len = figureperiod(p[m]);
   return suborbit(m, z, c, len);
 }
 
@@ -340,21 +340,21 @@ function orbit(m, c, len) {
 }
 
 function suborbit(m, z, c, len) {
-  var m2 = m * 2;
-  var m2i = m2 + 1;
+  let m2 = m * 2;
+  let m2i = m2 + 1;
 
   // Always convert to quad precision
-  var r = toQd(z[m2]);
-  var j = toQd(z[m2i]);
-  var cr = toQd(c[m2]);
-  var cj = toQd(c[m2i]);
+  let r = toQd(z[m2]);
+  let j = toQd(z[m2i]);
+  let cr = toQd(c[m2]);
+  let cj = toQd(c[m2i]);
 
-  var result = [r[0], r[1], j[0], j[1]];
+  let result = [r[0], r[1], j[0], j[1]];
   while (result.length < len * 4) {
-    var j2 = qdSquare(j);
-    var ja = qdMul(qdDouble(r), j);
-    var r2 = qdSquare(r);
-    var ra = qdSub(r2, j2);
+    let j2 = qdSquare(j);
+    let ja = qdMul(qdDouble(r), j);
+    let r2 = qdSquare(r);
+    let ra = qdSub(r2, j2);
     for (let ord = 2; ord < exponent; ord++) {
       let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
       ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
@@ -436,22 +436,22 @@ function compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
 }
 
 function iterate(k) {
-  var i = ++it[k];  // total iteration count
-  var z = zz[k];    // current iterate for each pixel
-  var c = cc[k];    // current constant for each pixel
-  var n = nn[k];    // number of iterations before conv/divergence
-  var b = bb[k];    // recent remembered z
-  var p = pp[k];    // iteration at which converged within epsilon2
-  var s = ss[k];    // speedy list of indexes to compute
-  var pix = sizes[k][0] / dims;  // current for quad-precision check
-  var epsilon = Math.min(1e-12, pix);
-  var epsilon2 = Math.min(1e-9, pix * 10000);
+  let i = ++it[k];  // total iteration count
+  let z = zz[k];    // current iterate for each pixel
+  let c = cc[k];    // current constant for each pixel
+  let n = nn[k];    // number of iterations before conv/divergence
+  let b = bb[k];    // recent remembered z
+  let p = pp[k];    // iteration at which converged within epsilon2
+  let s = ss[k];    // speedy list of indexes to compute
+  let pix = sizes[k][0] / dims;  // current for quad-precision check
+  let epsilon = Math.min(1e-12, pix);
+  let epsilon2 = Math.min(1e-9, pix * 10000);
   // head and tail factor i into an odd num and largest power of 2.
-  var head = i, tail = 1;
+  let head = i, tail = 1;
   while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
   if (s === null && un[k] <= z.length / 4) {
-    var news = [];
-    for (var m = 0; m < dims2; ++m) {
+    let news = [];
+    for (let m = 0; m < dims2; ++m) {
       if (n[m]) continue;
       news.push(m);
     }
@@ -459,15 +459,15 @@ function iterate(k) {
   }
   if (s === null) {
     if (head <= tail) {
-      for (var m = 0; m < dims2; ++m) {
+      for (let m = 0; m < dims2; ++m) {
         if (n[m]) continue;
         b[m * 2] = z[m * 2];
         b[m * 2 + 1] = z[m * 2 + 1];
         p[m] = 0;
       }
     }
-    var count = 0, diverged = 0, a;
-    for (var m = 0; m < dims2; ++m) {
+    let count = 0, diverged = 0, a;
+    for (let m = 0; m < dims2; ++m) {
       a = compute(m, i, n, z, c, b, p, epsilon, epsilon2);
       if (a) { count += 1; }
       if (a > 0) { diverged += 1; }
@@ -476,24 +476,24 @@ function iterate(k) {
     di[k] += diverged;
   } else {
     if (s.length > un[k] * 1.25) {
-      var news = [];
-      for (var t = 0; t < s.length; ++t) {
+      let news = [];
+      for (let t = 0; t < s.length; ++t) {
         if (n[s[t]]) continue;
         news.push(s[t]);
       }
       s = ss[k] = news;
     }
     if (head <= tail) {
-      for (var t = 0; t < s.length; ++t) {
-        var m = s[t];
+      for (let t = 0; t < s.length; ++t) {
+        let m = s[t];
         if (n[m]) continue;
         b[m * 2] = z[m * 2];
         b[m * 2 + 1] = z[m * 2 + 1];
         p[m] = 0;
       }
     }
-    var count = 0, diverged = 0, a;
-    for (var t = 0; t < s.length; ++t) {
+    let count = 0, diverged = 0, a;
+    for (let t = 0; t < s.length; ++t) {
       a = compute(s[t], i, n, z, c, b, p, epsilon, epsilon2);
       if (a) { count += 1; }
       if (a > 0) { diverged += 1; }
@@ -510,7 +510,7 @@ function iterate(k) {
 }
 
 function setboard(k, size, re, im) {
-  for (var j = Math.min(it.length, k); j <= k; j++) { 
+  for (let j = Math.min(it.length, k); j <= k; j++) { 
     it[j] = 0;
     fi[j] = 0;
     zz[j] = [];
@@ -526,21 +526,21 @@ function setboard(k, size, re, im) {
   }
   sizes[k] = [size, toQd(re), toQd(im)];
   it[k] = 1;
-  var c = cc[k];
-  var n = nn[k];
-  var p = pp[k];
-  var useQuad = (size / dims) < 1e-15;
-  for (var y = 0; y < dims; y++) {
-    var jFrac = (0.5 - (y / dims));
-    var j = (useQuad
+  let c = cc[k];
+  let n = nn[k];
+  let p = pp[k];
+  let useQuad = (size / dims) < 1e-15;
+  for (let y = 0; y < dims; y++) {
+    let jFrac = (0.5 - (y / dims));
+    let j = (useQuad
         ? qdAdd(toQd(im), qdMul(toQd(jFrac), toQd(size)))
         : jFrac * size + im[0]);
-    for (var x = 0; x < dims; x++) {
-      var rFrac = ((x / dims) - 0.5);
+    for (let x = 0; x < dims; x++) {
+      let rFrac = ((x / dims) - 0.5);
       if (useQuad) {
-        var r = qdAdd(toQd(re), qdMul(toQd(rFrac), toQd(size)));
+        let r = qdAdd(toQd(re), qdMul(toQd(rFrac), toQd(size)));
         c.push(r, j);
-        var r2j2 = qdAdd(qdMul(r, r), qdMul(j, j));
+        let r2j2 = qdAdd(qdMul(r, r), qdMul(j, j));
         if (qdGt(r2j2, 4)) {
           n.push(1);
           p.push(0);
@@ -550,7 +550,7 @@ function setboard(k, size, re, im) {
           p.push(0);
         }
       } else {
-        var r = rFrac * size + re[0];
+        let r = rFrac * size + re[0];
         c.push(r, j);
         if (r * r + j * j > 4) {
           n.push(1);
@@ -586,22 +586,22 @@ function truncateboards(k) {
 }
 
 function clearseq(k) {
-  var ctx = overlay(k).getContext('2d');
+  let ctx = overlay(k).getContext('2d');
   ctx.clearRect(0, 0, dims, dims);
 }
 
 function showseq(k, seq, color) {
-  var ctx = overlay(k).getContext('2d');
+  let ctx = overlay(k).getContext('2d');
   ctx.fillStyle = color;
-  var sc = sizes[k];
-  var s = sc[0];
-  var cr = sc[1];
-  var cj = sc[2];
-  for (var i = 0; i < seq.length; i += 4) {
-    var r = [seq[i], seq[i+1]];
-    var j = [seq[i+2], seq[i+3]];
-    var x = qdMul(qdSub(r, cr), [dims/s, 0]);
-    var y = qdMul(qdSub(cj, j), [dims/s, 0]);
+  let sc = sizes[k];
+  let s = sc[0];
+  let cr = sc[1];
+  let cj = sc[2];
+  for (let i = 0; i < seq.length; i += 4) {
+    let r = [seq[i], seq[i+1]];
+    let j = [seq[i+2], seq[i+3]];
+    let x = qdMul(qdSub(r, cr), [dims/s, 0]);
+    let y = qdMul(qdSub(cj, j), [dims/s, 0]);
     x = x[0] + dims/2;
     y = y[0] + dims/2;
     if (x >= 0 && y >= 0 && x < dims && y < dims) {
@@ -613,14 +613,14 @@ function showseq(k, seq, color) {
 }
 
 function drawcolor(k, i) {
-  var color = makecolor(k, i);
-  var converged = makecolor(k, -i);
-  var n = nn[k];
-  var ctx = board(k).getContext('2d');
-  for (var m = 0; m < dims2; ++m) {
+  let color = makecolor(k, i);
+  let converged = makecolor(k, -i);
+  let n = nn[k];
+  let ctx = board(k).getContext('2d');
+  for (let m = 0; m < dims2; ++m) {
     if (n[m] == i || n[m] == -i) {
-      var x = m % dims;
-      var y = (m - x) / dims;
+      let x = m % dims;
+      let y = (m - x) / dims;
       ctx.fillStyle = n[m] > 0 ? color : converged;
       ctx.fillRect(x, y, 1, 1);
     }
@@ -628,7 +628,7 @@ function drawcolor(k, i) {
 }
 
 function clearboard(k) {
-  var ctx = board(k).getContext('2d');
+  let ctx = board(k).getContext('2d');
   ctx.fillStyle = makecolor(k, 0);
   ctx.fillRect(0, 0, dims, dims);
 }
@@ -648,23 +648,24 @@ function intcolor(n) {
 function makecolor(k, i) {
   if (i == 0) return unknowncolor;
   if (i < 0) return 'black';
-  for (var j = 0; i < hi[k][j][2]; j += 1) {}
-  var frac = (dims2 - hi[k][j][0]) / dims2; // frac of pixels done.
-  var len = hi[k].length, half = Math.floor((len + j) / 2);
-  var s = sizes[k][0];
-  var ff = Math.pow(frac, 2);
-  var fr = Math.pow(frac, 0.333);
-  var fg = Math.pow(frac, 3);
-  var g = intcolor(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
-  var r = intcolor(Math.min(fr, i * Math.pow(s, 0.22) / 64));
-  var b = intcolor(ff / 3 + 0.667);
+  let j = 0;
+  for (; i < hi[k][j][2]; j += 1) {}
+  let frac = (dims2 - hi[k][j][0]) / dims2; // frac of pixels done.
+  let len = hi[k].length, half = Math.floor((len + j) / 2);
+  let s = sizes[k][0];
+  let ff = Math.pow(frac, 2);
+  let fr = Math.pow(frac, 0.333);
+  let fg = Math.pow(frac, 3);
+  let g = intcolor(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
+  let r = intcolor(Math.min(fr, i * Math.pow(s, 0.22) / 64));
+  let b = intcolor(ff / 3 + 0.667);
   return "rgb(" + r + "," + g + "," + b + ")";
 }
 
 function draw(k) {
-  var colorcache = {};
+  let colorcache = {};
   function fastcolor(num) {
-    var result = colorcache[num];
+    let result = colorcache[num];
     if (!result) {
       result = makecolor(k, num);
       if (colorcache.length < 10000) {
@@ -674,26 +675,26 @@ function draw(k) {
     return result;
   }
   if (nn.length <= k) return;
-  var n = nn[k];
-  var ctx = board(k).getContext('2d');
-  for (var m = 0; m < dims2; ++m) {
-    var x = m % dims;
-    var y = (m - x) / dims;
+  let n = nn[k];
+  let ctx = board(k).getContext('2d');
+  for (let m = 0; m < dims2; ++m) {
+    let x = m % dims;
+    let y = (m - x) / dims;
     ctx.fillStyle = fastcolor(n[m]);
     ctx.fillRect(x, y, 1, 1);
   }
 }
 
 function drawall() {
-  for (var k = 0; k < nn.length; ++k) {
+  for (let k = 0; k < nn.length; ++k) {
     draw(k);
   }
 }
 
 function makeboard(k) {
-  var gd = grid();
+  let gd = grid();
   while (gridboards <= k) {
-    var dd = document.createElement('div');
+    let dd = document.createElement('div');
     dd.id = 'b_' + gridboards;
     dd.innerHTML = boardstring(gridboards);
     dd.className = 'hidemarks';
@@ -713,7 +714,7 @@ function formatScale(scale) {
 }
 
 function boardstring(k) {
-  var factor = 3.0 / (k < sizes.length ? sizes[k][0] :
+  let factor = 3.0 / (k < sizes.length ? sizes[k][0] :
     firstsize / Math.pow(zoomfactor, k));
   factor = formatScale(factor);
   return '<canvas width=' + dims + ' height=' + dims +
@@ -735,7 +736,7 @@ function progress() {
   }
   try {
     // Contribute to every unfinished cell
-    var pri = Array.from(sizes.keys())
+    let pri = Array.from(sizes.keys())
       .filter(k => un[k] > 0 && !hiddenboard(k));
     if (steps % 2) {
       // Prioritize most unfinished half the time.
@@ -749,12 +750,13 @@ function progress() {
       }
     }
     // Exponential scheduling policy
-    var shift = Math.floor(steps++ / 2);
-    for (var p = 0; 1 << p & shift; p += 1) { }
-    var k = pri[Math.min(p, pri.length)];
+    let shift = Math.floor(steps++ / 2);
+    let p = 0;
+    while (1 << p & shift) { p += 1; }
+    let k = pri[Math.min(p, pri.length)];
     // Do at least 1000 pixel-steps.
-    var u = un[k];
-    for (var amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
+    let u = un[k];
+    for (let amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
       iterate(k);
       if (un[k] < u) {
         drawcolor(k, it[k]);
@@ -768,7 +770,7 @@ function progress() {
 }
 
 function absoluteLeft(target) {
-  var left = 0;
+  let left = 0;
   while (target) {
     left += target.offsetLeft;
     target = target.offsetParent;
@@ -777,7 +779,7 @@ function absoluteLeft(target) {
 }
 
 function absoluteTop(target) {
-  var top = 0;
+  let top = 0;
   while (target) {
     top += target.offsetTop;
     target = target.offsetParent;
@@ -786,7 +788,7 @@ function absoluteTop(target) {
 }
 
 function eventtarget(e) {
-  var target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
+  let target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
   while (target) {
     if (target.id) { return target; }
     target = target.parentNode;
@@ -795,19 +797,19 @@ function eventtarget(e) {
 }
 
 document.onmousedown = function(e) {
-  var target = eventtarget(e);
+  let target = eventtarget(e);
   if (movieMode && (target.id != 'moviescale')) { toggleMovieMode(); }
   if (e.button != 0) { return true; }
   if (target) {
-    var m = target.id.match(/b_(\d+)/);
+    let m = target.id.match(/b_(\d+)/);
     if (e.target.tagName == 'A') {
       if (m) { e.target.href = bigurl(m[1]); }
       return true;
     }
     if (m) {
-      var se = document.scrollingElement || document.body;
-      var x = (e.clientX + se.scrollLeft - absoluteLeft(target)) * pixelRatio;
-      var y = (e.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
+      let se = document.scrollingElement || document.body;
+      let x = (e.clientX + se.scrollLeft - absoluteLeft(target)) * pixelRatio;
+      let y = (e.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
       cellclick(parseInt(m[1]), x + y * dims);
       return false;
     }
@@ -815,10 +817,10 @@ document.onmousedown = function(e) {
   return true;
 }
 
-var orbitinterval = null;
-var orbittimeout = null;
+let orbitinterval = null;
+let orbittimeout = null;
 document.onmousemove = function(e) {
-  var target = eventtarget(e);
+  let target = eventtarget(e);
   if (orbitinterval) {
     clearInterval(orbitinterval);
     orbitinterval = null;
@@ -828,37 +830,37 @@ document.onmousemove = function(e) {
     orbittimeout= null;
   }
   if (target) {
-    var m = target.id.match(/b_(\d+)/);
+    let m = target.id.match(/b_(\d+)/);
     if (m) {
-      var se = document.scrollingElement || document.body;
-      var x = (e.clientX + se.scrollLeft - absoluteLeft(target)) * pixelRatio;
-      var y = (e.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
-      var k = parseInt(m[1]);
-      var j = x + y * dims;
+      let se = document.scrollingElement || document.body;
+      let x = (e.clientX + se.scrollLeft - absoluteLeft(target)) * pixelRatio;
+      let y = (e.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
+      let k = parseInt(m[1]);
+      let j = x + y * dims;
       function updateorbit() {
-        var orb = [];
-        var cyc = [];
-        var ongoing = true;
+        let orb = [];
+        let cyc = [];
+        let ongoing = true;
         target.setAttribute('title', '');
         if (cc[k] && j >= 0 && j * 2 < cc[k].length) {
           // Convert to quad precision if necessary
-          var cr = Array.isArray(cc[k][j * 2]) ? cc[k][j * 2] : [cc[k][j * 2], 0];
-          var cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
-          var title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
-          var len = Math.min(Math.max(pp[k][j], nn[k][j]) || Math.max(it[k], 8), orbitlength);
+          let cr = Array.isArray(cc[k][j * 2]) ? cc[k][j * 2] : [cc[k][j * 2], 0];
+          let cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
+          let title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
+          let len = Math.min(Math.max(pp[k][j], nn[k][j]) || Math.max(it[k], 8), orbitlength);
           orb = orbit(j, cc[k], len);
           if (nn[k][j]) {
             ongoing = false;
             if (nn[k][j] > 0) {
               title += '\ndiverges in ' + nn[k][j];
             } else {
-              var period = figureperiod(pp[k][j]);
+              let period = figureperiod(pp[k][j]);
               if (period == 1) {
                 title += '\nconverges after ' + pp[k][j];
               } else {
                 title += '\nafter ' + pp[k][j] + ', period ' + figureperiod(pp[k][j]);
               }
-              var cyc = cycle(j, zz[k], cc[k], pp[k]);
+              let cyc = cycle(j, zz[k], cc[k], pp[k]);
             }
           }
           target.setAttribute('title', title);
@@ -867,7 +869,7 @@ document.onmousemove = function(e) {
         showseq(k, orb, 'yellow');
         showseq(k, cyc, 'red');
         function orbitonallboards() {
-          for (var i = 0; i < sizes.length; i++) {
+          for (let i = 0; i < sizes.length; i++) {
             if (!hiddenboard(i) && i != k) {
               clearseq(i);
               showseq(i, orb, 'yellow');
@@ -889,7 +891,7 @@ document.body.onkeydown = function(e) {
   if (movieMode) { toggleMovieMode(); return; }
   // Pressing backspace will delete the last zoom.
   if (e.key == 'Backspace' && sizes.length > 1 && !currentUpdateProcess) {
-    var k = sizes.length - 1;
+    let k = sizes.length - 1;
     truncateboards(k);
     removeboardspast(k - 1);
     truncatehiddenboards();
@@ -897,9 +899,9 @@ document.body.onkeydown = function(e) {
   }
   // Pressing C will center all the zoom positions.
   if (e.key == 'c' && sizes.length > 1) {
-    var k = sizes.length - 1;
-    var ore = sizes[k][1];
-    var oim = sizes[k][2];
+    let k = sizes.length - 1;
+    let ore = sizes[k][1];
+    let oim = sizes[k][2];
     showrect(0, 0.5 + (ore - sizes[0][1]) / sizes[0][0],
                 0.5 - (oim - sizes[0][2]) / sizes[0][0],
                 sizes[0][0] / sizes[1][0]);
@@ -917,18 +919,18 @@ document.body.onkeydown = function(e) {
   // Pressing U will cycle through the uncomputed colors.
   if (e.key == 'u') {
     unknowncolor = ukcs[(ukcs.indexOf(unknowncolor) + 1) % ukcs.length];
-    for (var k = 0; k < nn.length; ++k) {
+    for (let k = 0; k < nn.length; ++k) {
       drawcolor(k, 0);
     }
   }
   // Pressing I will zoom in at the same position.
   if (e.key == 'i') {
-    var k = sizes.length - 1;
+    let k = sizes.length - 1;
     if (di[k] == 0) { return; }
-    var osize = sizes[k][0];
-    var ore = sizes[k][1];
-    var oim = sizes[k][2];
-    var rre = 0.5;
+    let osize = sizes[k][0];
+    let ore = sizes[k][1];
+    let oim = sizes[k][2];
+    let rre = 0.5;
     if (k == 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
       // Myreberg / Feigenbaum point, https://oeis.org/A218453
       // qdParse('-1.40115518909205060052382678789386129222630')
@@ -990,18 +992,18 @@ document.body.onkeydown = function(e) {
 document.body.onmouseover = function(e) {
   document.body.className = 'hidemarks';
   focusk = null;
-  var target = eventtarget(e);
+  let target = eventtarget(e);
   if (target) {
-    var m = target.id.match(/b_(\d+)/);
+    let m = target.id.match(/b_(\d+)/);
     if (m) {
       k = parseInt(m[1]);
       focusk = k;
       if (nn.length <= k) return;
-      for (var i = 0; i < gridboards; ++i) {
+      for (let i = 0; i < gridboards; ++i) {
         board(i).parentElement.className = i < k ? '' : 'hidemarks';
       }
       document.body.className = '';
-      var overtarget = e.target;
+      let overtarget = e.target;
       function update_progress() {
         if (overtarget.tagName == 'A') {
           overtarget.href = bigurl(k)
@@ -1015,7 +1017,7 @@ document.body.onmouseover = function(e) {
         }
       }
       update_progress();
-    } else if (target.id.startsWith('movie') && e.target.id != 'movie') {
+    } else if (target.id.startsWith('movie') && (!e.target || e.target.id != 'movie')) {
       document.body.className = '';
     }
   }
@@ -1023,7 +1025,7 @@ document.body.onmouseover = function(e) {
 
 function figureperiod(i) {
   // Reverse the computation that was done for exponential backoff.
-  var head = i, tail = 1;
+  let head = i, tail = 1;
   while (head > tail) { head >>= 1; tail <<= 1; }
   return i - (head * tail) + 1;
 }
@@ -1034,34 +1036,24 @@ function formatscale(s) {
 }
 
 function formatcomplex(k, re, im) {
-  var pix = sizes[k][0] / dims;
-  var digits = 0;
+  let pix = sizes[k][0] / dims;
+  let digits = 0;
   while (pix < 1.0) {
     pix *= 10;
     digits += 1;
   }
-  var useQuad = Array.isArray(re);
-  if (useQuad) {
-    var ra = qdFormat(qdAbs(re)).split('e');
-    var ia = qdFormat(qdAbs(im)).split('e');
-    var rs = re[0] < 0.0 ? '-' : '+';
-    var is = im[0] < 0.0 ? '-' : '+';
-  } else {
-    var ra = ('' + Math.abs(re)).split('e');
-    var ia = ('' + Math.abs(im)).split('e');
-    var rs = re < 0.0 ? '-' : '+';
-    var is = im < 0.0 ? '-' : '+';
-  }
-  if (ra[0].length > digits + 2) ra[0] = ra[0].substring(0, digits + 2);
-  if (ia[0].length > digits + 2) ia[0] = ia[0].substring(0, digits + 2);
-  var rd = ra[0] + (ra[1] ? 'e' + ra[1] : '');
-  var id = ia[0] + (ia[1] ? 'e' + ia[1] : '');
+  re = toQd(re);
+  im = toQd(im);
+  let rd = qdFixed(qdAbs(re), digits)
+  let id = qdFixed(qdAbs(im), digits)
+  let rs = re[0] < 0.0 ? '-' : '+';
+  let is = im[0] < 0.0 ? '-' : '+';
   return rs + rd + is + id + 'i';
 }
 
 function removeboardspast(k) {
   if (gridboards > k) {
-    for (var j = k + 1; j < gridboards; ++j) {
+    for (let j = k + 1; j < gridboards; ++j) {
       board(j).parentElement.remove();
     }
     gridboards = k + 1;
@@ -1077,19 +1069,20 @@ function hideboard(k) {
 }
 
 function showallboards() {
-  for (var j = 0; j < gridboards; ++j) {
+  for (let j = 0; j < gridboards; ++j) {
     showboard(j);
   }
   updateZoomRectangles();
 }
 
 function hiddenboard(k) {
-  var b = board(k);
+  let b = board(k);
   return b && b.parentElement.style.display == 'none';
 }
 
 function truncatehiddenboards(k) {
-  for (var j = gridboards - 1; j > 0; j--) {
+  let j = gridboards - 1;
+  for (; j > 0; j--) {
     if (!hiddenboard(j)) {
       break;
     }
@@ -1106,7 +1099,7 @@ function grid() {
 }
 
 function board(k) {
-  var b = document.getElementById("b_" + k);
+  let b = document.getElementById("b_" + k);
   return b && b.firstElementChild;
 }
 
@@ -1132,9 +1125,9 @@ function cellclick(k, m) {
 
 function cellclickdelay(k, m) {
   if (k >= sizes.length || currentUpdateProcess) return;
-  var osize = sizes[k][0];
-  var ore = sizes[k][1];
-  var oim = sizes[k][2];
+  let osize = sizes[k][0];
+  let ore = sizes[k][1];
+  let oim = sizes[k][2];
   cx = m % dims;
   cy = (m - cx) / dims;
   removeboardspast(k + 1);
@@ -1156,7 +1149,7 @@ function cellclickdelay(k, m) {
 }
 
 function showrect(k, x, y, zf) {
-  var s = rect(k).style;
+  let s = rect(k).style;
   zf = Math.min(125, zf); // Make rectangle visible if it is tiny.
   board(k).parentElement.className = '';
   s.top = (y * cssDims - cssDims / 2 / zf) + 'px';
@@ -1172,12 +1165,12 @@ function updateurl() {
 }
 
 function currenturl() {
-  var state = currentGridState();
-  var compactc = '';
-  var commas = '';
-  var prev = [firstr, firstj];
-  var prevj = -1;
-  for (var j = 0; j <= state.sizes.length; j++) {
+  let state = currentGridState();
+  let compactc = '';
+  let commas = '';
+  let prev = [firstr, firstj];
+  let prevj = -1;
+  for (let j = 0; j <= state.sizes.length; j++) {
     if (j < state.sizes.length &&
         !qdCompare(state.sizes[j][1], prev[0]) &&
         !qdCompare(state.sizes[j][2], prev[1])) {
@@ -1195,7 +1188,7 @@ function currenturl() {
     }
   }
   compactc = compactc.slice(0, -1);
-  var url =
+  let url =
          (state.sizes[0][0] != 3.0 ? '&s=' + formatscale(sizes[0][0]) : '') +
          (exponent != 2 ? '&exponent=' + exponent : '') +
          (compactc.length ? '&c=' + compactc : '') +
@@ -1207,17 +1200,17 @@ function currenturl() {
 
 function bigurl(k) {
   if (k >= sizes.length) return;
-  var osize = sizes[k][0];
+  let osize = sizes[k][0];
   if (exponent != 2) {
     osize += '&exponent=' + exponent;
   }
-  var ore = sizes[k][1];
-  var oim = sizes[k][2];
+  let ore = sizes[k][1];
+  let oim = sizes[k][2];
   return '?s=' + formatscale(osize) + '&c=' + formatcomplex(k, ore, oim) + '&grid=1';
 }
 
 function removerect(k) {
-  var s = rect(k).style;
+  let s = rect(k).style;
   s.top = s.left = s.width = s.height = '';
 }
 
@@ -1720,7 +1713,6 @@ const qdTen = [10, 0];
 
 function qdFormat(q, digits = 'auto', useFixedPoint = false) {
   // With scientific notation, digits specifies the number of significant digits.
-
   let [a, b] = q;
   let s = a < 0 || (a === 0 && b < 0) ? '-' : '';
   let autoFormat = (digits == 'auto');
@@ -1728,14 +1720,12 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
      digits = 32;
   }
   q = qdAbs(q);
-
   if (!isFinite(a) || !isFinite(b)) return a.toString();
   if (a === 0 && b === 0) {
      if (autoFormat) return '0';
-     if (usedFixedPoint) digits += 1;
+     if (useFixedPoint) digits += 1;
      return '0' + (digits > 1 ? '.' + '0'.repeat(digits - 1) : '');
   }
-
   // Scale q to be between 1 and 10, avoiding cumulative rounding
   let e = 0;
   let ex = [1, 0];
@@ -1754,14 +1744,11 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
     q = qdDiv(q, qdTen);
     e += 1;
   }
-
   let result = '';
   let nonzeroDigits = digits;
-
   if (useFixedPoint && !autoFormat) {
      nonzeroDigits = nonzeroDigits + e + 1;
   }
-
   for (let i = 0; i < nonzeroDigits + 1; i++) {
     let floorQ = qdFloor(q);
     let digit = floorQ[0];
@@ -1769,7 +1756,6 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
     q = qdSub(q, floorQ);
     q = qdMul(q, qdTen);
   }
-
   if (autoFormat) {
     if (parseInt(result.slice(result.length - 3)) > 970 ||
       parseInt(result.slice(result.length - 3)) < 30 ||
@@ -1777,7 +1763,6 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
       nonzeroDigits -= 1; // round to one fewer digit
     }
   }
-
   // Rounding
   if (parseInt(result[nonzeroDigits]) >= 5) {
     let carry = 1;
@@ -1798,7 +1783,6 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
     }
   }
   result = result.slice(0, nonzeroDigits);
-
   epart = '';
   if (!useFixedPoint && (!autoFormat || e < -6 || e > 32)) {
     // Scientific notation
