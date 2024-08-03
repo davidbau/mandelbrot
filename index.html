@@ -261,7 +261,7 @@ function createUpdateProcess(state) {
     }
 
     const k = currentIndex;
-    setboard(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
+    initboard(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
     draw(k);
     if (state.hidden[k]) { hideboard(k); }
     currentIndex++;
@@ -308,7 +308,7 @@ function updateExponent(newExponent) {
     firstr = [exponent > 2 ? 0.0 : -0.5, 0];
     firstj = [0.0, 0];
   }
-  setboard(0, firstsize, firstr, firstj);
+  initboard(0, firstsize, firstr, firstj);
   makeboard(0);
   draw(0);
   clearseq(0);
@@ -333,24 +333,19 @@ function updateZoomRectangles() {
   }
 }
 
-function cycle(m, z, c, p) {
+function viscycle(m, z, c, p) {
   let len = figureperiod(p[m]);
-  return suborbit(m, z, c, len);
+  return suborbit([z[m*2], z[m*2+1]], [c[m*2], c[m*2+1]], len);
 }
 
-function orbit(m, c, len) {
-  return suborbit(m, c, c, len);
+function visorbit(m, c, len) {
+  return suborbit([c[m*2], c[m*2+1]], [c[m*2], c[m*2+1]], len);
 }
 
-function suborbit(m, z, c, len) {
-  let m2 = m * 2;
-  let m2i = m2 + 1;
-
+function suborbit(z, c, len) {
   // Always convert to quad precision
-  let r = toQd(z[m2]);
-  let j = toQd(z[m2i]);
-  let cr = toQd(c[m2]);
-  let cj = toQd(c[m2i]);
+  let [r, j] = z.map(toQd);
+  let [cr, cj] = c.map(toQd);
 
   let result = [r[0], r[1], j[0], j[1]];
   while (result.length < len * 4) {
@@ -512,8 +507,9 @@ function iterate(k) {
   }
 }
 
-function setboard(k, size, re, im) {
-  for (let j = Math.min(it.length, k); j <= k; j++) { 
+function initboard(k, size, re, im) {
+  // Initialize arrays if they don't exist
+  for (let j = Math.min(it.length, k); j <= k; j++) {
     it[j] = 0;
     fi[j] = 0;
     zz[j] = [];
@@ -528,6 +524,57 @@ function setboard(k, size, re, im) {
     sizes[j] = [0, [0, 0], [0, 0]];
   }
   sizes[k] = [size, toQd(re), toQd(im)];
+
+  // Use the power series approximation to initialize, if applicable.
+  if (false && k > 0 && size < 0.01 && exponent == 2) {
+    let targetIteration = findMinIterationInPreviousBoard(k);
+    if (targetIteration >= 150) {
+      powerseriesinitboard(k, Math.floor(targetIteration / 2), size, re, im);
+      return;
+    }
+  }
+  setboard(k, size, re, im);
+}
+
+function findMinIterationInPreviousBoard(k) {
+  let prevSize = sizes[k-1][0];
+  let prevRe = sizes[k-1][1];
+  let prevIm = sizes[k-1][2];
+  let currRe = sizes[k][1];
+  let currIm = sizes[k][2];
+  let currSize = sizes[k][0];
+
+  let startX = Math.floor(dims * (qdSub(currRe, [currSize/2, 0])[0] - prevRe[0] + prevSize/2) / prevSize);
+  let endX = Math.ceil(dims * (qdAdd(currRe, [currSize/2, 0])[0] - prevRe[0] + prevSize/2) / prevSize);
+  let startY = Math.floor(dims * (qdSub(currIm, [currSize/2, 0])[0] - prevIm[0] + prevSize/2) / prevSize);
+  let endY = Math.ceil(dims * (qdAdd(currIm, [currSize/2, 0])[0] - prevIm[0] + prevSize/2) / prevSize);
+
+  startX = Math.max(0, Math.min(dims-1, startX));
+  endX = Math.max(0, Math.min(dims-1, endX));
+  startY = Math.max(0, Math.min(dims-1, startY));
+  endY = Math.max(0, Math.min(dims-1, endY));
+
+  let minIteration = Infinity;
+  let allUnknown = true;
+
+  for (let y = startY; y <= endY; y++) {
+    for (let x = startX; x <= endX; x++) {
+      let index = y * dims + x;
+      if (nn[k-1][index] !== 0) {
+        minIteration = Math.min(minIteration, Math.abs(nn[k-1][index]));
+        allUnknown = false;
+      }
+    }
+  }
+
+  if (allUnknown) {
+    return it[k-1];
+  } else {
+    return minIteration;
+  }
+}
+
+function setboard(k, size, re, im) {
   it[k] = 1;
   let c = cc[k];
   let n = nn[k];
@@ -536,8 +583,8 @@ function setboard(k, size, re, im) {
   for (let y = 0; y < dims; y++) {
     let jFrac = (0.5 - (y / dims));
     let j = (useQuad
-        ? qdAdd(toQd(im), qdMul(toQd(jFrac), toQd(size)))
-        : jFrac * size + im[0]);
+      ? qdAdd(toQd(im), qdMul(toQd(jFrac), toQd(size)))
+      : jFrac * size + im[0]);
     for (let x = 0; x < dims; x++) {
       let rFrac = ((x / dims) - 0.5);
       if (useQuad) {
@@ -571,6 +618,115 @@ function setboard(k, size, re, im) {
   fi[k] = (un[k] == dims2 ? 0 : 1);
 }
 
+function powerseriesinitboard(k, targetIteration, size, re, im) {
+  // Compute center point's orbit using suborbit
+  let centerOrbit = suborbit(
+    [[re[0], re[1]], [im[0], im[1]]],
+    [[re[0], re[1]], [im[0], im[1]]],
+    targetIteration
+  );
+
+  // Unshift a zero (representing z_0 = 0) to the beginning of the orbit
+  centerOrbit.unshift(0, 0, 0, 0);
+
+  // Check for escape (starting from index 4, which is now z_1)
+  for (let i = 4; i < centerOrbit.length; i += 4) {
+    let r2 = qdAdd(qdSquare([centerOrbit[i], centerOrbit[i+1]]),
+                   qdSquare([centerOrbit[i+2], centerOrbit[i+3]]));
+    if (qdGt(r2, 4)) {
+      console.log(`Center point escaped at iteration ${i/4 - 1}`);
+      return setboard(k, size, re, im); // Fallback to setboard
+    }
+  }
+
+  // Calculate power series coefficients
+  let A = [[0, 0, 0, 0], [1, 0, 0, 0]];  // A0 = 0, A1 = 1
+  let B = [[0, 0, 0, 0], [0, 0, 0, 0]];
+  let C = [[0, 0, 0, 0], [0, 0, 0, 0]];
+  let D = [[0, 0, 0, 0], [0, 0, 0, 0]];
+
+  for (let n = 2; n <= targetIteration; n++) {
+    let z = centerOrbit.slice((n-1)*4, n*4);
+    A.push(qdcAdd(qdcMul(z, qdcDouble(A[n-1])), [1, 0, 0, 0]));
+    B.push(qdcAdd(qdcMul(z, qdcDouble(B[n-1])), qdcSquare(A[n-1])));
+    C.push(qdcAdd(qdcMul(z, qdcDouble(C[n-1])), qdcDouble(qdcMul(A[n-1], B[n-1]))));
+    D.push(qdcAdd(qdcAdd(
+        qdcMul(z, qdcDouble(D[n-1])),
+        qdcDouble(qdcMul(A[n-1], C[n-1]))), qdcSquare(B[n-1])));
+    /*
+    E.push(qdcAdd(qdcAdd(
+        qdcMul(z, qdcDouble(E[n-1])),
+        qdcDouble(qdcMul(A[n-1], D[n-1]))), qdcDouble(qdcMul(B[n-1], C[n-1]))));
+    F.push(qdcAdd(qdcAdd(qdcAdd(
+        qdcMul(z, qdcDouble(F[n-1])),
+        qdcDouble(qdcMul(A[n-1], E[n-1]))), qdcDouble(qdcMul(B[n-1], D[n-1]))),
+        qdcSquare(C[n-1])));
+    G.push(qdcAdd(qdcAdd(qdcAdd(
+        qdcMul(z, qdcDouble(G[n-1])),
+        qdcDouble(qdcMul(A[n-1], F[n-1]))), qdcDouble(qdcMul(B[n-1], E[n-1]))),
+        qdcDouble(qdcMul(C[n-1], D[n-1]))));
+    H.push(qdcAdd(qdcAdd(qdcAdd(qdcAdd(
+        qdcMul(z, qdcDouble(H[n-1])),
+        qdcDouble(qdcMul(A[n-1], G[n-1]))), qdcDouble(qdcMul(B[n-1], F[n-1]))),
+        qdcDouble(qdcMul(C[n-1], E[n-1]))), qdcSquare(D[n-1])));
+    */
+  }
+
+  // Pre-calculate the final orbit point
+  let finalOrbitPoint = centerOrbit.slice(targetIteration*4, (targetIteration+1)*4);
+
+  // Initialize grid using power series approximation
+  it[k] = targetIteration;
+  let useQuad = (size / dims) < 1e-15;
+  let [AA, BB, CC, DD] = [A, B, C, D].map(x => x[targetIteration]);
+
+  for (let y = 0; y < dims; y++) {
+    let jFrac = (0.5 - (y / dims));
+    let deltaIm = qdMul(toQd(jFrac), toQd(size));
+    let j = qdAdd(toQd(im), deltaIm);
+
+    for (let x = 0; x < dims; x++) {
+      let rFrac = ((x / dims) - 0.5);
+      let deltaRe = qdMul(toQd(rFrac), toQd(size));
+      let r = qdAdd(toQd(re), deltaRe);
+
+      // Form delta directly from deltaRe and deltaIm
+      let delta = [deltaRe[0], deltaRe[1], deltaIm[0], deltaIm[1]];
+      let d2 = qdcSquare(delta);
+      let d3 = qdcMul(delta, d2);
+      let d4 = qdcMul(d2, d2);
+
+      // Apply power series approximation
+      let epsilon = qdcAdd(
+          qdcAdd(
+            qdcMul(AA, delta),
+            qdcMul(BB, d2)
+          ),
+          qdcAdd(
+            qdcMul(CC, d3),
+            qdcMul(DD, d4),
+          )
+        );
+
+      // Calculate z value
+      let z = qdcAdd(finalOrbitPoint, epsilon);
+
+      // Store values
+      if (useQuad) {
+        cc[k].push([r[0], r[1]], [j[0], j[1]]);
+        zz[k].push([z[0], z[1]], [z[2], z[3]]);
+      } else {
+        cc[k].push(r[0] + r[1], j[0] + j[1]);
+        zz[k].push(z[0] + z[1], z[2] + z[3]);
+      }
+      nn[k].push(0);
+      pp[k].push(0);
+    }
+  }
+  bb[k] = zz[k].slice();
+  fi[k] = 0;
+}
+
 function truncateboards(k) {
   if (it.length > k) {
     it.length = k;
@@ -594,12 +750,10 @@ function clearseq(k) {
 }
 
 function showseq(k, seq, color) {
+  if (k >= sizes.length) { return; }
   let ctx = overlay(k).getContext('2d');
   ctx.fillStyle = color;
-  let sc = sizes[k];
-  let s = sc[0];
-  let cr = sc[1];
-  let cj = sc[2];
+  let [s, cr, cj] = sizes[k];
   for (let i = 0; i < seq.length; i += 4) {
     let r = [seq[i], seq[i+1]];
     let j = [seq[i+2], seq[i+3]];
@@ -852,7 +1006,7 @@ document.onmousemove = function(e) {
           let cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
           let title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
           let len = Math.min(Math.max(pp[k][j], nn[k][j]) || Math.max(it[k], 8), orbitlength);
-          orb = orbit(j, cc[k], len);
+          orb = visorbit(j, cc[k], len);
           if (nn[k][j]) {
             ongoing = false;
             if (nn[k][j] > 0) {
@@ -864,7 +1018,7 @@ document.onmousemove = function(e) {
               } else {
                 title += '\nafter ' + pp[k][j] + ', period ' + figureperiod(pp[k][j]);
               }
-              cyc = cycle(j, zz[k], cc[k], pp[k]);
+              cyc = viscycle(j, zz[k], cc[k], pp[k]);
             }
           }
           target.setAttribute('title', title);
@@ -917,7 +1071,7 @@ document.body.onkeydown = function(e) {
       showrect(k, 0.5, 0.5, sizes[k][0] / sizes[k+1][0]);
       if (qdCompare(sizes[k][1], ore) || qdCompare(sizes[k][2], oim)) {
         clearboard(k);
-        setboard(k, sizes[k][0], ore, oim);
+        initboard(k, sizes[k][0], ore, oim);
         drawcolor(k, 1);
         clearseq(k);
       }
@@ -947,7 +1101,7 @@ document.body.onkeydown = function(e) {
     }
     showrect(k, rre, 0.5, zoomfactor);
     nsize = osize / zoomfactor;
-    setboard(k + 1, nsize, ore, oim);
+    initboard(k + 1, nsize, ore, oim);
     makeboard(k + 1);
     removeboardspast(k + 1);
     board(k + 1).parentElement.className = 'hidemarks';
@@ -1146,7 +1300,7 @@ function cellclickdelay(k, m) {
     nsize = osize / zoomfactor;
     nre = qdAdd(ore, [((cx / dims) - 0.5) * osize, 0]);
     nim = qdAdd(oim, [(0.5 - (cy / dims)) * osize, 0]);
-    setboard(k + 1, nsize, nre, nim);
+    initboard(k + 1, nsize, nre, nim);
     makeboard(k + 1);
     board(k + 1).parentElement.className = 'hidemarks';
     board(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
@@ -1340,7 +1494,7 @@ function startMovieAnimation() {
   let endpause = 180;
   let endrecord = 60;
   const totalFrames = (sizes.length - 1) * framesteps;
-  
+
   const scaleElement = document.getElementById('moviescale');
   scaleElement.removeAttribute('href');
 
@@ -1349,17 +1503,17 @@ function startMovieAnimation() {
     isRecording = true;
     startRecording();
   }
-  
+
   function animate() {
     const kk = Math.min(frame, totalFrames) / framesteps;
     drawMovieFrame(kk);
     frame = (frame + 1) % (totalFrames + endpause);
-    
+
     if (isRecording && frame > totalFrames + endrecord) {
       stopRecording();
       isRecording = false;
     }
-    
+
     animationFrame = requestAnimationFrame(animate);
   }
   animate();
@@ -1388,24 +1542,24 @@ function startRecording() {
     console.error('Neither MP4 nor WebM recording is supported');
     return;
   }
-  
+
   mediaRecorder = new MediaRecorder(stream, {
     mimeType: recordingMimeType,
     videoBitsPerSecond: 10000000,
   });
-  
+
   mediaRecorder.ondataavailable = (event) => {
     if (event.data.size > 0) {
       recordedChunks.push(event.data);
     }
   };
-  
+
   mediaRecorder.onstop = () => {
     recordedBlob = new Blob(recordedChunks, { type: recordingMimeType });
     recordedChunks = [];
     updateDownloadLink();
   };
-  
+
   mediaRecorder.start(1000); // one-second blobs
 }
 
@@ -1419,7 +1573,7 @@ function updateDownloadLink() {
   scaleElement.textContent = 'Download ' + extension;
   scaleElement.href = URL.createObjectURL(recordedBlob);
   const k = sizes.length - 1;
-  scaleElement.download = 'mandelbrot' + 
+  scaleElement.download = 'mandelbrot' +
               formatcomplex(k, sizes[k][1], sizes[k][2]) +
               '-' + it[k] +
               '.' + extension;
@@ -1617,6 +1771,20 @@ function qdSquare(a) {
   return fast2Sum(p1, p2 + 2 * a1 * a0);
 }
 
+function qdcPow(q, n) {
+  if (n === 1) return q;
+  if (n === 2) return qdcSquare(q);
+  if (n === 3) return qdcMul(qdSquare(q), q);
+  let result = [1, 0, 0, 0];
+  let base = q;
+  while (n > 0) {
+    if (n % 2 === 1) { result = qdcMul(result, base); }
+    base = qdcSquare(base);
+    n = Math.floor(n / 2);
+  }
+  return result;
+}
+
 function qdNegate(a) {
   let [a1, a0] = a;
   return [-a1, -a0];
@@ -1641,6 +1809,47 @@ function qdReciprocal(b, iters = 2) {
     x = qdMul(x, qdSub([2, 0], qdMul(x, b)));
   }
   return x;
+}
+
+// Complex addition in quad precision
+function qdcAdd(a, b) {
+  let realSum = qdAdd([a[0], a[1]], [b[0], b[1]]);
+  let imagSum = qdAdd([a[2], a[3]], [b[2], b[3]]);
+  return [realSum[0], realSum[1], imagSum[0], imagSum[1]];
+}
+
+// Complex subtraction in quad precision
+function qdcSub(a, b) {
+  let realDiff = qdSub([a[0], a[1]], [b[0], b[1]]);
+  let imagDiff = qdSub([a[2], a[3]], [b[2], b[3]]);
+  return [realDiff[0], realDiff[1], imagDiff[0], imagDiff[1]];
+}
+
+// Complex multiplication in quad precision
+function qdcMul(a, b) {
+  let ac = qdMul([a[0], a[1]], [b[0], b[1]]);
+  let bd = qdMul([a[2], a[3]], [b[2], b[3]]);
+  let adbc = qdMul(qdAdd([a[0], a[1]], [a[2], a[3]]), qdAdd([b[0], b[1]], [b[2], b[3]]));
+  let real = qdSub(ac, bd);
+  let imag = qdSub(adbc, qdAdd(ac, bd));
+  return [real[0], real[1], imag[0], imag[1]];
+}
+
+// Complex doubling in quad precision
+function qdcDouble(a) {
+  let realDouble = qdDouble([a[0], a[1]]);
+  let imagDouble = qdDouble([a[2], a[3]]);
+  return [realDouble[0], realDouble[1], imagDouble[0], imagDouble[1]];
+}
+
+// Complex squaring in quad precision
+function qdcSquare(a) {
+  let a0a0 = qdSquare([a[0], a[1]]);
+  let a1a1 = qdSquare([a[2], a[3]]);
+  let a0a1 = qdMul([a[0], a[1]], [a[2], a[3]]);
+  let real = qdSub(a0a0, a1a1);
+  let imag = qdDouble(a0a1);
+  return [real[0], real[1], imag[0], imag[1]];
 }
 
 function qdParse(s) {
