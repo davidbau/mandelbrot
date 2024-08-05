@@ -434,6 +434,14 @@ class Board {
     if (n >= 1) { return "255"; }
     return (n * 255).toString(10);
   }
+
+  currentc(j) {
+    return [toQd(this.cc[j * 2]), toQd(this.cc[j * 2 + 1])];
+  }
+
+  currentz(j) {
+    return [toQd(this.zz[j * 2]), toQd(this.zz[j * 2 + 1])];
+  }
 }
 
 class Grid {
@@ -921,7 +929,8 @@ class EventHandler {
       }
       if (m) {
         let p = this.pointInTarget(e, target);
-        this.explorer.zoomManager.cellclick(parseInt(m[1]), p.x + p.y * this.explorer.config.dims);
+        let k = parseInt(m[1]);
+        this.explorer.zoomManager.cellclick(k, p.x + p.y * this.explorer.config.dims);
         return false;
       }
     }
@@ -1424,6 +1433,20 @@ class OrbitComputer {
   }
 
   updateOrbit(k, j, target) {
+    this.clearPreviousOrbit();
+
+    const updateorbit = () => {
+      const [orb, cyc, ongoing, title] = this.calculateOrbit(k, j);
+      this.displayOrbit(k, orb, cyc, target, title);
+      return ongoing;
+    };
+
+    if (updateorbit()) {
+      this.orbitinterval = setInterval(updateorbit, 251);
+    }
+  }
+
+  clearPreviousOrbit() {
     if (this.orbitinterval) {
       clearInterval(this.orbitinterval);
       this.orbitinterval = null;
@@ -1432,71 +1455,71 @@ class OrbitComputer {
       clearTimeout(this.orbittimeout);
       this.orbittimeout = null;
     }
-    const updateorbit = () => {
-      let orb = [];
-      let cyc = [];
-      let ongoing = false;
-      let board = this.explorer.grid.boards[k];
-      target.setAttribute('title', '');
-      if (board && board.cc && j >= 0 && j * 2 < board.cc.length) {
-        let cr = toQd(board.cc[j * 2]);
-        let cj = toQd(board.cc[j * 2 + 1]);
-        let title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
-        let len = Math.min(Math.max(board.pp[j], board.nn[j]) || Math.max(board.it, 8),
-                          this.explorer.config.orbitlength);
-        orb = this.visorbit(j, board.cc, len);
-        if (board.nn[j]) {
-          if (board.nn[j] > 0) {
-            title += '\ndiverges in ' + board.nn[j];
-          } else {
-            let period = this.figureperiod(board.pp[j]);
-            if (period == 1) {
-              title += '\nconverges after ' + board.pp[j];
-            } else {
-              title += '\nafter ' + board.pp[j] + ', period ' + this.figureperiod(board.pp[j]);
-            }
-            cyc = this.viscycle(j, board.zz, board.cc, board.pp);
-          }
+  }
+
+  calculateOrbit(k, j) {
+    let orb = [];
+    let cyc = [];
+    let ongoing = false;
+    let title = '';
+    let board = this.explorer.grid.boards[k];
+
+    if (board && j >= 0 && j < this.explorer.config.dims2) {
+      let [cr, cj] = board.currentc(j);
+      title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
+      let len = Math.min(Math.max(board.pp[j], board.nn[j]) || Math.max(board.it, 8),
+                        this.explorer.config.orbitlength);
+      orb = this.visorbit(board, j, len);
+      if (board.nn[j]) {
+        if (board.nn[j] > 0) {
+          title += '\ndiverges in ' + board.nn[j];
         } else {
-          ongoing = true;
-        }
-        target.setAttribute('title', title);
-      }
-      if (board) {
-        this.explorer.grid.clearseq(k);
-        this.showseq(k, orb, 'yellow');
-        this.showseq(k, cyc, 'red');
-        const orbitonallboards = () => {
-          for (let i = 0; i < this.explorer.grid.boards.length; i++) {
-            if (!this.explorer.grid.hiddencanvas(i) && i != k) {
-              this.explorer.grid.clearseq(i);
-              this.showseq(i, orb, 'yellow');
-              this.showseq(i, cyc, 'red');
-            }
+          let period = this.figureperiod(board.pp[j]);
+          if (period == 1) {
+            title += '\nconverges after ' + board.pp[j];
+          } else {
+            title += '\nafter ' + board.pp[j] + ', period ' + period;
           }
-        };
-        this.orbittimeout = setTimeout(orbitonallboards, 1);
+          cyc = this.viscycle(board, j);
+        }
+      } else {
+        ongoing = true;
       }
-      return ongoing;
-    };
-    if (updateorbit()) {
-      this.orbitinterval = setInterval(updateorbit, 251);
     }
+
+    return [orb, cyc, ongoing, title];
   }
 
-  viscycle(m, z, c, p) {
-    let len = this.figureperiod(p[m]);
-    return this.suborbit([z[m*2], z[m*2+1]], [c[m*2], c[m*2+1]], len);
+  displayOrbit(k, orb, cyc, target, title) {
+    target.setAttribute('title', title);
+    this.explorer.grid.clearseq(k);
+    this.showseq(k, orb, 'yellow');
+    this.showseq(k, cyc, 'red');
+
+    const orbitonallboards = () => {
+      for (let i = 0; i < this.explorer.grid.boards.length; i++) {
+        if (!this.explorer.grid.hiddencanvas(i) && i != k) {
+          this.explorer.grid.clearseq(i);
+          this.showseq(i, orb, 'yellow');
+          this.showseq(i, cyc, 'red');
+        }
+      }
+    };
+    this.orbittimeout = setTimeout(orbitonallboards, 1);
   }
 
-  visorbit(m, c, len) {
-    return this.suborbit([c[m*2], c[m*2+1]], [c[m*2], c[m*2+1]], len);
+  viscycle(board, m) {
+    let len = this.figureperiod(board.pp[m]);
+    return this.suborbit(board.currentz(m), board.currentc(m), len);
+  }
+
+  visorbit(board, m, len) {
+    return this.suborbit(board.currentc(m), board.currentc(m), len);
   }
 
   suborbit(z, c, len) {
-    // Always convert to quad precision
-    let [r, j] = z.map(toQd);
-    let [cr, cj] = c.map(toQd);
+    let [r, j] = z;
+    let [cr, cj] = c;
 
     let result = [r[0], r[1], j[0], j[1]];
     while (result.length < len * 4) {
