@@ -858,7 +858,7 @@ class EventHandler {
         e.target.parentElement.style.display = 'none';
         this.explorer.grid.truncatehiddenboards();
         this.explorer.grid.updateZoomRectangles();
-        this.explorer.grid.updateurl();
+        this.explorer.urlHandler.updateurl();
       }
     };
   }
@@ -904,12 +904,13 @@ class EventHandler {
       return;
     }
     // Pressing backspace will delete the last zoom.
-    if (e.key == 'Backspace' && this.explorer.grid.boards.length > 1 && !this.explorer.grid.currentUpdateProcess) {
+    if (e.key == 'Backspace' && this.explorer.grid.boards.length > 1 &&
+        !this.explorer.grid.currentUpdateProcess) {
       let k = this.explorer.grid.boards.length - 1;
       this.explorer.grid.truncateboards(k);
       this.explorer.grid.removeboardspast(k - 1);
       this.explorer.grid.truncatehiddenboards();
-      this.explorer.grid.updateurl();
+      this.explorer.urlHandler.updateurl();
     }
     // Pressing C will center all the zoom positions.
     if (e.key == 'c' && this.explorer.grid.boards.length > 1) {
@@ -927,11 +928,12 @@ class EventHandler {
     if (e.key == '?') {
       document.getElementById('text').style.display = 'block';
     }
-    // G reduces the grid column and H increases
+    // G reduces the grid column count
     if (e.key === 'g' && this.explorer.config.gridcols > 1) {
       this.explorer.config.gridcols -= 1;
       this.explorer.grid.updateLayout();
     }
+    // H increases the grid column count
     if (e.key === 'h') {
       this.explorer.config.gridcols += 1;
       this.explorer.grid.updateLayout();
@@ -939,7 +941,7 @@ class EventHandler {
     // R will restore any hidden boards
     if (e.key === 'r') {
       this.explorer.grid.showAllBoards();
-      this.explorer.grid.updateurl();
+      this.explorer.urlHandler.updateurl();
     }
     // Increase the exponent
     if (e.key === 'x') {
@@ -1548,7 +1550,7 @@ class MandelbrotExplorer {
     this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
     this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
     newBoard.draw(this.grid.canvas(k + 1).getContext('2d'));
-    this.grid.updateurl();
+    this.urlHandler.updateurl();
   }
 }
 
