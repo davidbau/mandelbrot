@@ -443,6 +443,7 @@ class Grid {
     this.gridboards = 0;
     this.focusk = null;
     this.urlListeners = [];
+    this.zoomListeners = [];
   }
 
   currentGridState() {
@@ -488,7 +489,7 @@ class Grid {
       if (aborted || currentIndex >= state.sizes.length) {
         if (!aborted) {
           this.notifyurl();
-          this.updateZoomRectangles();
+          this.notifyzoom();
         }
         this.currentUpdateProcess = null;
         return;
@@ -516,14 +517,14 @@ class Grid {
     while (this.gridboards <= k) {
       let dd = document.createElement('div');
       dd.id = 'b_' + this.gridboards;
-      dd.innerHTML = this.boardstring(this.gridboards);
+      dd.innerHTML = this.canvasstring(this.gridboards);
       dd.className = 'hidemarks';
       gd.appendChild(dd);
       this.gridboards += 1;
     }
   }
 
-  boardstring(k) {
+  canvasstring(k) {
     let factor = 3.0 / (k < this.boards.length ? this.boards[k].sizes[0] :
       this.config.firstsize / Math.pow(this.config.zoomfactor, k));
     factor = formatScale(factor);
@@ -552,7 +553,6 @@ class Grid {
     return b && b.parentElement.style.display == 'none';
   }
 
-
   grid() {
     return document.getElementById('grid');
   }
@@ -577,73 +577,6 @@ class Grid {
       return rect && rect.nextElementSibling;
   }
 
-  showrect(k, x, y, zf) {
-    let s = this.rect(k).style;
-    zf = Math.min(125, zf); // Make rectangle visible if it is tiny.
-    this.canvas(k).parentElement.className = '';
-    s.top = (y * this.config.cssDims - this.config.cssDims / 2 / zf) + 'px';
-    s.left = (x * this.config.cssDims - this.config.cssDims / 2 / zf) + 'px';
-    s.width = (this.config.cssDims / zf) + 'px';
-    s.height = (this.config.cssDims / zf) + 'px';
-  }
-
-  removerect(k) {
-    let s = this.rect(k).style;
-    s.top = s.left = s.width = s.height = '';
-  }
-
-  updateZoomRectangles() {
-    let prevBoard = null;
-    let prevK = 0;
-    for (let k = 0; k < this.boards.length; k++) {
-      if (this.hiddencanvas(k)) { continue; }
-      let currBoard = this.boards[k].sizes;
-      if (prevBoard != null) {
-        let x = (currBoard[1][0] - prevBoard[1][0]) / prevBoard[0] + 0.5;
-        let y = 0.5 - (currBoard[2][0] - prevBoard[2][0]) / prevBoard[0];
-        let zf = prevBoard[0] / currBoard[0];
-        this.showrect(prevK, x, y, zf);
-      }
-      prevBoard = currBoard;
-      prevK = k;
-    }
-  }
-
-  cellclick(k, m) {
-    // Only accept clicks on cells with something computed in them.
-    if (k >= this.boards.length || this.boards[k].di <= 0 || this.currentUpdateProcess) return;
-    this.truncateboards(k + 1);
-    this.removeboardspast(k + 1);
-    setTimeout(() => { this.cellclickdelay(k, m); }, 1);
-  }
-
-  cellclickdelay(k, m) {
-    if (k >= this.boards.length || this.currentUpdateProcess) return;
-    let osize = this.boards[k].sizes[0];
-    let ore = this.boards[k].sizes[1];
-    let oim = this.boards[k].sizes[2];
-    let cx = m % this.config.dims;
-    let cy = (m - cx) / this.config.dims;
-    this.removeboardspast(k + 1);
-    this.showrect(k, cx / this.config.dims, cy / this.config.dims, this.config.zoomfactor);
-    this.truncateboards(k + 1);
-    // Do slow parts after a moment.
-    setTimeout(() => {
-      let nsize = osize / this.config.zoomfactor;
-      let nre = qdAdd(ore, [((cx / this.config.dims) - 0.5) * osize, 0]);
-      let nim = qdAdd(oim, [(0.5 - (cy / this.config.dims)) * osize, 0]);
-      let newBoard = new Board(k + 1, nsize, nre, nim, this.config);
-      newBoard.initcanvas(nsize, nre, nim);
-      this.boards.push(newBoard);
-      this.makecanvas(k + 1);
-      this.canvas(k + 1).parentElement.className = 'hidemarks';
-      this.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
-      newBoard.draw(this.canvas(k + 1).getContext('2d'));
-      this.showcanvas(k + 1);
-      this.notifyurl();
-    }, 10);
-  }
-
   truncateboards(k) {
     if (this.boards.length > k) {
       this.boards.length = k;
@@ -659,32 +592,11 @@ class Grid {
     }
   }
 
-  centerBoards() {
-    let k = this.boards.length - 1;
-    let ore = this.boards[k].sizes[1];
-    let oim = this.boards[k].sizes[2];
-    this.showrect(0, 0.5 + (ore[0] - this.boards[0].sizes[1][0]) / this.boards[0].sizes[0],
-                  0.5 - (oim[0] - this.boards[0].sizes[2][0]) / this.boards[0].sizes[0],
-                  this.boards[0].sizes[0] / this.boards[1].sizes[0]);
-    for (k = 1; k < this.boards.length - 1; k += 1) {
-      this.showrect(k, 0.5, 0.5, this.boards[k].sizes[0] / this.boards[k+1].sizes[0]);
-      if (qdCompare(this.boards[k].sizes[1], ore) || qdCompare(this.boards[k].sizes[2], oim)) {
-        let nsize = this.boards[k].sizes[0];
-        this.boards[k] = new Board(k + 1, nsize, ore, oim, this.config);
-        this.boards[k].clearcanvas(this.canvas(k).getContext('2d'));
-        this.boards[k].initcanvas(nsize, ore, oim);
-        this.boards[k].draw(this.canvas(k).getContext('2d'));
-        this.clearseq(k);
-      }
-    }
-    this.notifyurl();
-  }
-
   showAllBoards() {
     for (let j = 0; j < this.gridboards; ++j) {
       this.showcanvas(j);
     }
-    this.updateZoomRectangles();
+    this.notifyzoom();
   }
 
   truncatehiddenboards() {
@@ -742,6 +654,138 @@ class Grid {
     for (let cb of this.urlListeners) {
       cb();
     }
+  }
+
+  onzoomchange(callback) {
+    this.zoomListeners.push(callback);
+  }
+
+  notifyzoom() {
+    for (let cb of this.zoomListeners) {
+      cb();
+    }
+  }
+}
+
+class ZoomManager {
+  constructor(config, grid) {
+    this.config = config;
+    this.grid = grid;
+    this.grid.onzoomchange(() => this.updateZoomRectangles());
+  }
+
+  showZoomRect(k, x, y, zf) {
+    let s = this.grid.rect(k).style;
+    zf = Math.min(125, zf); // Make rectangle visible if it is tiny.
+    this.grid.canvas(k).parentElement.className = '';
+    s.top = (y * this.config.cssDims - this.config.cssDims / 2 / zf) + 'px';
+    s.left = (x * this.config.cssDims - this.config.cssDims / 2 / zf) + 'px';
+    s.width = (this.config.cssDims / zf) + 'px';
+    s.height = (this.config.cssDims / zf) + 'px';
+  }
+
+  removeZoomRect(k) {
+    let s = this.grid.rect(k).style;
+    s.top = s.left = s.width = s.height = '';
+  }
+
+  updateZoomRectangles() {
+    let prevBoard = null;
+    let prevK = 0;
+    for (let k = 0; k < this.grid.boards.length; k++) {
+      if (this.grid.hiddencanvas(k)) { continue; }
+      let currBoard = this.grid.boards[k].sizes;
+      if (prevBoard != null) {
+        let x = (currBoard[1][0] - prevBoard[1][0]) / prevBoard[0] + 0.5;
+        let y = 0.5 - (currBoard[2][0] - prevBoard[2][0]) / prevBoard[0];
+        let zf = prevBoard[0] / currBoard[0];
+        this.showZoomRect(prevK, x, y, zf);
+      }
+      prevBoard = currBoard;
+      prevK = k;
+    }
+  }
+
+  zoomInAtCurrentPosition() {
+    let k = this.grid.boards.length - 1;
+    if (this.grid.boards[k].di == 0) { return; }
+    let osize = this.grid.boards[k].sizes[0];
+    let ore = this.grid.boards[k].sizes[1];
+    let oim = this.grid.boards[k].sizes[2];
+    let rre = 0.5;
+    if (k == 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
+      // Myreberg / Feigenbaum point
+      ore = [-1.4011551890920506, 1.196330130384937e-17];
+      rre = (ore[0] - this.grid.boards[0].sizes[1][0]) / this.grid.boards[0].sizes[0] + 0.5;
+    }
+    this.showZoomRect(k, rre, 0.5, this.config.zoomfactor);
+    let nsize = osize / this.config.zoomfactor;
+    let newBoard = new Board(k + 1, nsize, ore, oim, this.config);
+    newBoard.initcanvas(nsize, ore, oim);
+    this.grid.boards.push(newBoard);
+    this.grid.makecanvas(k + 1);
+    this.grid.removeboardspast(k + 1);
+    this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
+    this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
+    newBoard.draw(this.grid.canvas(k + 1).getContext('2d'));
+    this.grid.notifyurl();
+  }
+
+  cellclick(k, m) {
+    // Only accept clicks on cells with something computed in them.
+    if (k >= this.grid.boards.length || this.grid.boards[k].di <= 0 ||
+         this.grid.currentUpdateProcess) return;
+    this.grid.truncateboards(k + 1);
+    this.grid.removeboardspast(k + 1);
+    setTimeout(() => { this.cellclickdelay(k, m); }, 1);
+  }
+
+  cellclickdelay(k, m) {
+    if (k >= this.grid.boards.length || this.grid.currentUpdateProcess) return;
+    let osize = this.grid.boards[k].sizes[0];
+    let ore = this.grid.boards[k].sizes[1];
+    let oim = this.grid.boards[k].sizes[2];
+    let cx = m % this.config.dims;
+    let cy = (m - cx) / this.config.dims;
+    this.grid.removeboardspast(k + 1);
+    this.showZoomRect(k, cx / this.config.dims, cy / this.config.dims, this.config.zoomfactor);
+    this.grid.truncateboards(k + 1);
+    // Do slow parts after a moment.
+    setTimeout(() => {
+      let nsize = osize / this.config.zoomfactor;
+      let nre = qdAdd(ore, [((cx / this.config.dims) - 0.5) * osize, 0]);
+      let nim = qdAdd(oim, [(0.5 - (cy / this.config.dims)) * osize, 0]);
+      let newBoard = new Board(k + 1, nsize, nre, nim, this.config);
+      newBoard.initcanvas(nsize, nre, nim);
+      this.grid.boards.push(newBoard);
+      this.grid.makecanvas(k + 1);
+      this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
+      this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
+      newBoard.draw(this.grid.canvas(k + 1).getContext('2d'));
+      this.grid.showcanvas(k + 1);
+      this.grid.notifyurl();
+    }, 10);
+  }
+
+  centerBoards() {
+    let k = this.grid.boards.length - 1;
+    let ore = this.grid.boards[k].sizes[1];
+    let oim = this.grid.boards[k].sizes[2];
+    this.showZoomRect(0, 0.5 + (ore[0] - this.grid.boards[0].sizes[1][0]) / this.grid.boards[0].sizes[0],
+                      0.5 - (oim[0] - this.grid.boards[0].sizes[2][0]) / this.grid.boards[0].sizes[0],
+                      this.grid.boards[0].sizes[0] / this.grid.boards[1].sizes[0]);
+    for (k = 1; k < this.grid.boards.length - 1; k += 1) {
+      this.showZoomRect(k, 0.5, 0.5, this.grid.boards[k].sizes[0] / this.grid.boards[k+1].sizes[0]);
+      if (qdCompare(this.grid.boards[k].sizes[1], ore) || qdCompare(this.grid.boards[k].sizes[2], oim)) {
+        let nsize = this.grid.boards[k].sizes[0];
+        this.grid.boards[k] = new Board(k + 1, nsize, ore, oim, this.config);
+        this.grid.boards[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
+        this.grid.boards[k].initcanvas(nsize, ore, oim);
+        this.grid.boards[k].draw(this.grid.canvas(k).getContext('2d'));
+        this.grid.clearseq(k);
+      }
+    }
+    this.grid.notifyurl();
   }
 }
 
@@ -857,7 +901,7 @@ class EventHandler {
       if (e.target.className == 'closebox' && !explorer.grid.currentUpdateProcess) {
         e.target.parentElement.style.display = 'none';
         this.explorer.grid.truncatehiddenboards();
-        this.explorer.grid.updateZoomRectangles();
+        this.explorer.zoomManager.updateZoomRectangles();
         this.explorer.urlHandler.updateurl();
       }
     };
@@ -877,7 +921,7 @@ class EventHandler {
       }
       if (m) {
         let p = this.pointInTarget(e, target);
-        this.explorer.grid.cellclick(parseInt(m[1]), p.x + p.y * this.explorer.config.dims);
+        this.explorer.zoomManager.cellclick(parseInt(m[1]), p.x + p.y * this.explorer.config.dims);
         return false;
       }
     }
@@ -914,7 +958,7 @@ class EventHandler {
     }
     // Pressing C will center all the zoom positions.
     if (e.key == 'c' && this.explorer.grid.boards.length > 1) {
-      this.explorer.grid.centerBoards();
+      this.explorer.zoomManager.centerBoards();
     }
     // Pressing U will cycle through the uncomputed colors.
     if (e.key == 'u') {
@@ -922,7 +966,7 @@ class EventHandler {
     }
     // Pressing I will zoom in at the same position.
     if (e.key == 'i') {
-      this.explorer.zoomInAtCurrentPosition();
+      this.explorer.zoomManager.zoomInAtCurrentPosition();
     }
     // Pressing ? will show the help window
     if (e.key == '?') {
@@ -1388,14 +1432,13 @@ class OrbitComputer {
       clearTimeout(this.orbittimeout);
       this.orbittimeout = null;
     }
-
     const updateorbit = () => {
       let orb = [];
       let cyc = [];
-      let ongoing = true;
+      let ongoing = false;
       let board = this.explorer.grid.boards[k];
       target.setAttribute('title', '');
-      if (board.cc && j >= 0 && j * 2 < board.cc.length) {
+      if (board && board.cc && j >= 0 && j * 2 < board.cc.length) {
         let cr = toQd(board.cc[j * 2]);
         let cj = toQd(board.cc[j * 2 + 1]);
         let title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
@@ -1403,7 +1446,6 @@ class OrbitComputer {
                           this.explorer.config.orbitlength);
         orb = this.visorbit(j, board.cc, len);
         if (board.nn[j]) {
-          ongoing = false;
           if (board.nn[j] > 0) {
             title += '\ndiverges in ' + board.nn[j];
           } else {
@@ -1415,6 +1457,8 @@ class OrbitComputer {
             }
             cyc = this.viscycle(j, board.zz, board.cc, board.pp);
           }
+        } else {
+          ongoing = true;
         }
         target.setAttribute('title', title);
       }
@@ -1422,20 +1466,19 @@ class OrbitComputer {
         this.explorer.grid.clearseq(k);
         this.showseq(k, orb, 'yellow');
         this.showseq(k, cyc, 'red');
-      }
-      const orbitonallboards = () => {
-        for (let i = 0; i < this.explorer.grid.boards.length; i++) {
-          if (!this.explorer.grid.hiddencanvas(i) && i != k) {
-            this.explorer.grid.clearseq(i);
-            this.showseq(i, orb, 'yellow');
-            this.showseq(i, cyc, 'red');
+        const orbitonallboards = () => {
+          for (let i = 0; i < this.explorer.grid.boards.length; i++) {
+            if (!this.explorer.grid.hiddencanvas(i) && i != k) {
+              this.explorer.grid.clearseq(i);
+              this.showseq(i, orb, 'yellow');
+              this.showseq(i, cyc, 'red');
+            }
           }
-        }
-      };
-      this.orbittimeout = setTimeout(orbitonallboards, 1);
+        };
+        this.orbittimeout = setTimeout(orbitonallboards, 1);
+      }
       return ongoing;
     };
-
     if (updateorbit()) {
       this.orbitinterval = setInterval(updateorbit, 251);
     }
@@ -1503,6 +1546,7 @@ class MandelbrotExplorer {
   constructor() {
     this.config = new Config();
     this.grid = new Grid(this.config);
+    this.zoomManager = new ZoomManager(this.config, this.grid);
     this.urlHandler = new URLHandler(this.config, this.grid);
     this.eventHandler = new EventHandler(this);
     this.movieMode = new MovieMode(this);
