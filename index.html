@@ -15,8 +15,8 @@ to handle high device pixel ratios, show orbits, and report periodicity.
 Keyboard controls added in 2022, and quad-precision added in 2024.
 
 URL options: use ?grid=3 to select 3-column view,
-                   c=-0.14-0.65i to set center,
-               and s=0.5 to set viewed size.
+                    &c=-0.14-0.65i to set center,
+                and &s=0.5 to set viewed size.
 
 Implementation notes.  To minimize computation, the code identifies both
 points that diverge and points that converge.  It uses a method that can
@@ -121,743 +121,1438 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </center>
 
 <script>
-// Helper function to convert a regular number to quad-precision
-function toQd(x) {
-  return Array.isArray(x) ? x : [x, 0];
-}
+class Config {
+  constructor() {
+    this.vw = window.innerWidth || document.documentElement.clientWidth;
+    this.gridcols = 3;
+    this.exponent = 2;
+    this.firstr = [-0.5, 0];
+    this.firstj = [0.0, 0];
+    this.firstsize = 3.0;
+    this.orbitlength = 100000; // show very long orbits
+    this.pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
+    this.zoomfactor = 5;
+    this.cssDims = 0;
+    this.dims = 0;
+    this.dims2 = 0;
+    this.ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
+    this.unknowncolor = "#000";
+  }
 
-let vw = window.innerWidth || document.documentElement.clientWidth;
-let gridcols = Math.max(1, Math.min(3, Math.floor((vw - 32) / 200)));
-let exponent = 2;
-let firstr = [-0.5, 0];
-let firstj = [0.0, 0];
-let firstsize = 3.0;
-let orbitlength = 100000; // show very long orbits
-let pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
-let zoomfactor = 5;
+  initSizes() {
+    this.cssDims = Math.max(32, Math.floor((this.vw - 48) / this.gridcols) - 16);
+    this.dims = Math.floor(this.cssDims * this.pixelRatio);
+    this.dims2 = this.dims * this.dims;
+    for (let el of document.getElementsByClassName('pixelratio')) {
+      el.innerText = this.pixelRatio;
+    }
+  }
 
-let startstate = { hidden: [], sizes: [] };
-let opts = document.location.search.split('&');
-for (let j in opts) {
-  let m;
-  if (null !== (m = opts[j].match(/exponent=(\d+)/))) {
-    exponent = Math.max(2, parseInt(m[1]));
-    if (exponent > 2) { firstr = [0.0, 0]; }
+  updateExponent(newExponent) {
+    if (newExponent < 2) { return; }
+    this.exponent = newExponent;
     for (let el of document.getElementsByClassName('exponent')) {
-      el.innerText = exponent;
+      el.innerText = this.exponent;
+    }
+    if (this.firstsize == 3) {
+      this.firstr = [this.exponent > 2 ? 0.0 : -0.5, 0];
+      this.firstj = [0.0, 0];
     }
   }
-  if (null !== (m = opts[j].match(/grid=(\d+)/))) {
-    gridcols = Math.max(1, parseInt(m[1]));
-  }
-  if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+(?:e[-+]\d+)?)/))) {
-    firstsize = parseFloat(m[1]);
-  }
-  if (null !== (m = opts[j].match(/pixelratio=(\d+)/))) {
-    pixelRatio = Math.max(1, parseInt(m[1]));
-  }
-  if (null !== (m = opts[j].match(/c=([-+\d\.ei,]+)/))) {
-    for (let coords of m[1].split(',')) {
-      m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/);
-      startstate.sizes.push([
-        firstsize / Math.pow(zoomfactor, startstate.sizes.length),
-        m != null && m[1] ? qdParse(m[1]) : (startstate.sizes.length > 0 ?
-            startstate.sizes[startstate.sizes.length - 1][1] : firstr),
-        m != null && m[2] ? qdParse(m[2]) : (startstate.sizes.length > 0 ?
-            startstate.sizes[startstate.sizes.length - 1][2] : firstj)
-      ]);
-    }
-  }
-  if (null !== (m = opts[j].match(/h=([\d,]+)/))) {
-    startstate.hidden = m[1].split(',').map(x=>parseInt(x));
+
+  firststate() {
+    return {sizes:[[this.firstsize, this.firstr, this.firstj]], hidden:[]};
   }
 }
 
-if (startstate.sizes.length == 0) {
-  startstate.sizes.push([firstsize, firstr, firstj]);
-}
-
-let cssDims = Math.max(32,
-  Math.floor((vw - 48) / gridcols) - 16);
-let dims = Math.floor(cssDims * pixelRatio);
-let dims2 = dims * dims;
-
-let it = [];  // the current iteration num
-let cc = [];  // the constant at every pixel
-let zz = [];  // the current iterate value
-let bb = [];  // the recent value at iteration r
-let pp = [];  // the point at which the value was first closer than epsilon2
-let nn = [];  // the number of iterations until divergence (or convergence, neg)
-let un = [];  // number of uncomputed pixels
-let di = [];  // number of known diverged pixels
-let hi = [];  // history of up to 256 of [uncomputed, iter]
-let ss = [];  // list of uncomputed indexes
-let fi = [];  // 1 if finished.
-let sizes = [];
-let gridboards = 0;
-let steps = 0;
-let ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
-let unknowncolor = ukcs[0];
-let focusk = null;
-
-let currentUpdateProcess = null;
-
-function start() {
-  updatePixelRatioUI();
-  updateGridLayout(startstate);
-  progress();
-}
-
-function updateGridLayout(state = null) {
-  if (currentUpdateProcess) {
-    currentUpdateProcess.abort();
-  }
-  cssDims = Math.max(32, Math.floor((vw - 48) / gridcols) - 16);
-  dims = Math.floor(cssDims * pixelRatio);
-  dims2 = dims * dims;
-  if (state == null) {
-    state = currentGridState();
+class Board {
+  constructor(k, size, re, im, config) {
+    this.k = k;
+    this.config = config;
+    this.it = 0;
+    this.fi = 0;
+    this.zz = [];
+    this.cc = [];
+    this.nn = [];
+    this.bb = [];
+    this.pp = [];
+    this.ss = null;
+    this.un = config.dims2;
+    this.di = 0;
+    this.hi = [[config.dims2, 0, 0]];
+    this.sizes = [size, toQd(re), toQd(im)];
   }
 
-  // Recreate the grid
-  let gridElement = grid();
-  gridElement.innerHTML = '';
-  gridboards = 0;
-
-  // Recreate all canvases
-  for (let k = 0; k < state.sizes.length; k++) {
-    makeboard(k);
-    if (state.hidden.indexOf(k) >= 0) { hideboard(k); }
-  }
-  updatePixelRatioUI();
-
-  currentUpdateProcess = createUpdateProcess(state);
-  currentUpdateProcess.start();
-}
-
-function currentGridState() {
-  let state = { hidden: [], sizes: [] };
-  for (let k = 0; k < sizes.length; k++) {
-    if (hiddenboard(k)) {
-      state.hidden.push(k);
-    }
-    state.sizes.push(sizes[k]);
-  }
-  return state;
-}
-
-function createUpdateProcess(state) {
-  let aborted = false;
-  let currentIndex = 0;
-
-  function processNext() {
-    if (aborted || currentIndex >= state.sizes.length) {
-      if (!aborted) {
-        updateurl();
-        updateZoomRectangles();
-      }
-      currentUpdateProcess = null;
-      return;
-    }
-
-    const k = currentIndex;
-    initboard(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
-    draw(k);
-    if (state.hidden[k]) { hideboard(k); }
-    currentIndex++;
-    setTimeout(processNext, 0);
-  }
-
-  return {
-    start: function() {
-      processNext();
-    },
-    abort: function() {
-      aborted = true;
-    },
-    restart: function() {
-      aborted = false;
-      currentIndex = 0;
-      this.start();
-    }
-  };
-}
-
-function abortGridLayout() {
-  if (currentUpdateProcess) {
-    currentUpdateProcess.abort();
-  }
-}
-
-function updatePixelRatioUI() {
-  for (let el of document.getElementsByClassName('pixelratio')) {
-    el.innerText = pixelRatio;
-  }
-}
-
-function updateExponent(newExponent) {
-  if (newExponent < 2) { return; }
-  exponent = newExponent;
-  for (let el of document.getElementsByClassName('exponent')) {
-    el.innerText = exponent;
-  }
-  abortGridLayout();
-  truncateboards(1);
-  removeboardspast(0);
-  if (firstsize == 3) {
-    firstr = [exponent > 2 ? 0.0 : -0.5, 0];
-    firstj = [0.0, 0];
-  }
-  initboard(0, firstsize, firstr, firstj);
-  makeboard(0);
-  draw(0);
-  clearseq(0);
-  updateZoomRectangles();
-  updateurl();
-}
-
-function updateZoomRectangles() {
-  let prevBoard = null;
-  let prevK = 0;
-  for (let k = 0; k < sizes.length; k++) {
-    if (hiddenboard(k)) { continue; }
-    let currBoard = sizes[k];
-    if (prevBoard != null) {
-      let x = (currBoard[1][0] - prevBoard[1][0]) / prevBoard[0] + 0.5;
-      let y = 0.5 - (currBoard[2][0] - prevBoard[2][0]) / prevBoard[0];
-      let zf = prevBoard[0] / currBoard[0];
-      showrect(prevK, x, y, zf);
-    }
-    prevBoard = currBoard;
-    prevK = k;
-  }
-}
-
-function viscycle(m, z, c, p) {
-  let len = figureperiod(p[m]);
-  return suborbit([z[m*2], z[m*2+1]], [c[m*2], c[m*2+1]], len);
-}
-
-function visorbit(m, c, len) {
-  return suborbit([c[m*2], c[m*2+1]], [c[m*2], c[m*2+1]], len);
-}
-
-function suborbit(z, c, len) {
-  // Always convert to quad precision
-  let [r, j] = z.map(toQd);
-  let [cr, cj] = c.map(toQd);
-
-  let result = [r[0], r[1], j[0], j[1]];
-  while (result.length < len * 4) {
-    let j2 = qdSquare(j);
-    let ja = qdMul(qdDouble(r), j);
-    let r2 = qdSquare(r);
-    let ra = qdSub(r2, j2);
-    for (let ord = 2; ord < exponent; ord++) {
-      let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
-      ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
-      ra = rt;
-    }
-    r = qdAdd(ra, cr);
-    j = qdAdd(ja, cj);
-    result.push(r[0], r[1], j[0], j[1]);
-  }
-  return result;
-}
-
-function compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
-  if (n[m]) return 0;
-  let m2 = m * 2;
-  let m2i = m2 + 1;
-  let useQuad = Array.isArray(z[0]);
-
-  let r, j, r2, j2, ra, ja, rb, jb, db;
-
-  if (useQuad) {
-    r = z[m2]
-    j = z[m2i]
-
-    let r2 = qdSquare(r);
-    let j2 = qdSquare(j);
-    if (qdGt(qdAdd(r2, j2), 4)) {
-      n[m] = i;
-      return 1;
-    }
-    ra = qdSub(r2, j2);
-    ja = qdMul(qdDouble(r), j);
-    for (let ord = 2; ord < exponent; ord++) {
-      let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
-      ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
-      ra = rt;
-    }
-    ra = qdAdd(ra, c[m2]);
-    ja = qdAdd(ja, c[m2i]);
-    z[m2] = ra;
-    z[m2i] = ja;
-    rb = b[m2];
-    jb = b[m2i];
-    db = qdAdd(qdAbs(qdSub(rb, ra)), qdAbs(qdSub(jb, ja)));
-    db = db[0] + db[1];
-  } else {
-    r = z[m2];
-    j = z[m2i];
-    r2 = r * r;
-    j2 = j * j;
-    if (r2 + j2 > 4.0) {
-      n[m] = i;
-      return 1;
-    }
-    ra = r2 - j2;
-    ja = 2 * r * j;
-    for (let ord = 2; ord < exponent; ord++) {
-      let rt = r * ra - j * ja;
-      ja = r * ja + j * ra;
-      ra = rt;
-    }
-    ra += c[m2];
-    ja += c[m2i];
-    z[m2] = ra;
-    z[m2i] = ja;
-    rb = b[m2];
-    jb = b[m2i];
-    db = Math.abs(rb - ra) + Math.abs(jb - ja);
-  }
-
-  if (db <= epsilon2) {
-    if (!p[m]) { p[m] = i; }
-    if (db <= epsilon) {
-      n[m] = -i;
-      return -1;
-    }
-  }
-  return 0;
-}
-
-function iterate(k) {
-  let i = ++it[k];  // total iteration count
-  let z = zz[k];    // current iterate for each pixel
-  let c = cc[k];    // current constant for each pixel
-  let n = nn[k];    // number of iterations before conv/divergence
-  let b = bb[k];    // recent remembered z
-  let p = pp[k];    // iteration at which converged within epsilon2
-  let s = ss[k];    // speedy list of indexes to compute
-  let pix = sizes[k][0] / dims;  // current for quad-precision check
-  let epsilon = Math.min(1e-12, pix);
-  let epsilon2 = Math.min(1e-9, pix * 10000);
-  // head and tail factor i into an odd num and largest power of 2.
-  let head = i, tail = 1;
-  while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
-  if (s === null && un[k] <= z.length / 4) {
-    let news = [];
-    for (let m = 0; m < dims2; ++m) {
-      if (n[m]) continue;
-      news.push(m);
-    }
-    s = ss[k] = news;
-  }
-  if (s === null) {
-    if (head <= tail) {
-      for (let m = 0; m < dims2; ++m) {
-        if (n[m]) continue;
-        b[m * 2] = z[m * 2];
-        b[m * 2 + 1] = z[m * 2 + 1];
-        p[m] = 0;
+  initcanvas(size, re, im) {
+    this.it = 1;
+    let c = this.cc;
+    let n = this.nn;
+    let p = this.pp;
+    let useQuad = (size / this.config.dims) < 1e-15;
+    for (let y = 0; y < this.config.dims; y++) {
+      let jFrac = (0.5 - (y / this.config.dims));
+      let j = (useQuad
+        ? qdAdd(toQd(im), qdMul(toQd(jFrac), toQd(size)))
+        : jFrac * size + im[0]);
+      for (let x = 0; x < this.config.dims; x++) {
+        let rFrac = ((x / this.config.dims) - 0.5);
+        if (useQuad) {
+          let r = qdAdd(toQd(re), qdMul(toQd(rFrac), toQd(size)));
+          c.push(r, j);
+          let r2j2 = qdAdd(qdMul(r, r), qdMul(j, j));
+          if (qdGt(r2j2, 4)) {
+            n.push(1);
+            p.push(0);
+            this.un -= 1;
+          } else {
+            n.push(0);
+            p.push(0);
+          }
+        } else {
+          let r = rFrac * size + re[0];
+          c.push(r, j);
+          if (r * r + j * j > 4) {
+            n.push(1);
+            p.push(0);
+            this.un -= 1;
+          } else {
+            n.push(0);
+            p.push(0);
+          }
+        }
       }
     }
-    let count = 0, diverged = 0, a;
-    for (let m = 0; m < dims2; ++m) {
-      a = compute(m, i, n, z, c, b, p, epsilon, epsilon2);
-      if (a) { count += 1; }
-      if (a > 0) { diverged += 1; }
-    }
-    un[k] -= count;
-    di[k] += diverged;
-  } else {
-    if (s.length > un[k] * 1.25) {
+    this.zz = c.slice();
+    this.bb = c.slice();
+    this.fi = (this.un == this.config.dims2 ? 0 : 1);
+  }
+
+  iterate() {
+    let i = ++this.it;  // total iteration count
+    let z = this.zz;    // current iterate for each pixel
+    let c = this.cc;    // current constant for each pixel
+    let n = this.nn;    // number of iterations before conv/divergence
+    let b = this.bb;    // recent remembered z
+    let p = this.pp;    // iteration at which converged within epsilon2
+    let s = this.ss;    // speedy list of indexes to compute
+    let pix = this.sizes[0] / this.config.dims;  // current for quad-precision check
+    let count = 0;
+    let epsilon = Math.min(1e-12, pix);
+    let epsilon2 = Math.min(1e-9, pix * 10000);
+    // head and tail factor i into an odd num and largest power of 2.
+    let head = i, tail = 1;
+    while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
+    if (s === null && this.un <= z.length / 4) {
       let news = [];
-      for (let t = 0; t < s.length; ++t) {
-        if (n[s[t]]) continue;
-        news.push(s[t]);
-      }
-      s = ss[k] = news;
-    }
-    if (head <= tail) {
-      for (let t = 0; t < s.length; ++t) {
-        let m = s[t];
+      for (let m = 0; m < this.config.dims2; ++m) {
         if (n[m]) continue;
-        b[m * 2] = z[m * 2];
-        b[m * 2 + 1] = z[m * 2 + 1];
-        p[m] = 0;
+        news.push(m);
       }
+      s = this.ss = news;
     }
-    let count = 0, diverged = 0, a;
-    for (let t = 0; t < s.length; ++t) {
-      a = compute(s[t], i, n, z, c, b, p, epsilon, epsilon2);
-      if (a) { count += 1; }
-      if (a > 0) { diverged += 1; }
-    }
-    un[k] -= count;
-    di[k] += diverged;
-  }
-  if (hi[k][0][0] - un[k] >= dims2 / 256) {
-    hi[k].unshift([un[k], di[k], i]);
-  }
-  if (!fi[k] && un[k] != dims2) {
-    fi[k] = i;
-  }
-}
-
-function initboard(k, size, re, im) {
-  // Initialize arrays if they don't exist
-  for (let j = Math.min(it.length, k); j <= k; j++) {
-    it[j] = 0;
-    fi[j] = 0;
-    zz[j] = [];
-    cc[j] = [];
-    nn[j] = [];
-    bb[j] = [];
-    pp[j] = [];
-    ss[j] = null;
-    un[j] = dims2;
-    di[j] = 0;
-    hi[j] = [[dims2, 0, 0]];
-    sizes[j] = [0, [0, 0], [0, 0]];
-  }
-  sizes[k] = [size, toQd(re), toQd(im)];
-
-  // Use the power series approximation to initialize, if applicable.
-  if (false && k > 0 && size < 0.01 && exponent == 2) {
-    let targetIteration = findMinIterationInPreviousBoard(k);
-    if (targetIteration >= 150) {
-      powerseriesinitboard(k, Math.floor(targetIteration / 2), size, re, im);
-      return;
-    }
-  }
-  setboard(k, size, re, im);
-}
-
-function findMinIterationInPreviousBoard(k) {
-  let prevSize = sizes[k-1][0];
-  let prevRe = sizes[k-1][1];
-  let prevIm = sizes[k-1][2];
-  let currRe = sizes[k][1];
-  let currIm = sizes[k][2];
-  let currSize = sizes[k][0];
-
-  let startX = Math.floor(dims * (qdSub(currRe, [currSize/2, 0])[0] - prevRe[0] + prevSize/2) / prevSize);
-  let endX = Math.ceil(dims * (qdAdd(currRe, [currSize/2, 0])[0] - prevRe[0] + prevSize/2) / prevSize);
-  let startY = Math.floor(dims * (qdSub(currIm, [currSize/2, 0])[0] - prevIm[0] + prevSize/2) / prevSize);
-  let endY = Math.ceil(dims * (qdAdd(currIm, [currSize/2, 0])[0] - prevIm[0] + prevSize/2) / prevSize);
-
-  startX = Math.max(0, Math.min(dims-1, startX));
-  endX = Math.max(0, Math.min(dims-1, endX));
-  startY = Math.max(0, Math.min(dims-1, startY));
-  endY = Math.max(0, Math.min(dims-1, endY));
-
-  let minIteration = Infinity;
-  let allUnknown = true;
-
-  for (let y = startY; y <= endY; y++) {
-    for (let x = startX; x <= endX; x++) {
-      let index = y * dims + x;
-      if (nn[k-1][index] !== 0) {
-        minIteration = Math.min(minIteration, Math.abs(nn[k-1][index]));
-        allUnknown = false;
-      }
-    }
-  }
-
-  if (allUnknown) {
-    return it[k-1];
-  } else {
-    return minIteration;
-  }
-}
-
-function setboard(k, size, re, im) {
-  it[k] = 1;
-  let c = cc[k];
-  let n = nn[k];
-  let p = pp[k];
-  let useQuad = (size / dims) < 1e-15;
-  for (let y = 0; y < dims; y++) {
-    let jFrac = (0.5 - (y / dims));
-    let j = (useQuad
-      ? qdAdd(toQd(im), qdMul(toQd(jFrac), toQd(size)))
-      : jFrac * size + im[0]);
-    for (let x = 0; x < dims; x++) {
-      let rFrac = ((x / dims) - 0.5);
-      if (useQuad) {
-        let r = qdAdd(toQd(re), qdMul(toQd(rFrac), toQd(size)));
-        c.push(r, j);
-        let r2j2 = qdAdd(qdMul(r, r), qdMul(j, j));
-        if (qdGt(r2j2, 4)) {
-          n.push(1);
-          p.push(0);
-          un[k] -= 1;
-        } else {
-          n.push(0);
-          p.push(0);
-        }
-      } else {
-        let r = rFrac * size + re[0];
-        c.push(r, j);
-        if (r * r + j * j > 4) {
-          n.push(1);
-          p.push(0);
-          un[k] -= 1;
-        } else {
-          n.push(0);
-          p.push(0);
+    if (s === null) {
+      if (head <= tail) {
+        for (let m = 0; m < this.config.dims2; ++m) {
+          if (n[m]) continue;
+          b[m * 2] = z[m * 2];
+          b[m * 2 + 1] = z[m * 2 + 1];
+          p[m] = 0;
         }
       }
-    }
-  }
-  zz[k] = c.slice();
-  bb[k] = c.slice();
-  fi[k] = (un[k] == dims2 ? 0 : 1);
-}
-
-function powerseriesinitboard(k, targetIteration, size, re, im) {
-  // Compute center point's orbit using suborbit
-  let centerOrbit = suborbit(
-    [[re[0], re[1]], [im[0], im[1]]],
-    [[re[0], re[1]], [im[0], im[1]]],
-    targetIteration
-  );
-
-  // Unshift a zero (representing z_0 = 0) to the beginning of the orbit
-  centerOrbit.unshift(0, 0, 0, 0);
-
-  // Check for escape (starting from index 4, which is now z_1)
-  for (let i = 4; i < centerOrbit.length; i += 4) {
-    let r2 = qdAdd(qdSquare([centerOrbit[i], centerOrbit[i+1]]),
-                   qdSquare([centerOrbit[i+2], centerOrbit[i+3]]));
-    if (qdGt(r2, 4)) {
-      console.log(`Center point escaped at iteration ${i/4 - 1}`);
-      return setboard(k, size, re, im); // Fallback to setboard
-    }
-  }
-
-  // Calculate power series coefficients
-  let A = [[0, 0, 0, 0], [1, 0, 0, 0]];  // A0 = 0, A1 = 1
-  let B = [[0, 0, 0, 0], [0, 0, 0, 0]];
-  let C = [[0, 0, 0, 0], [0, 0, 0, 0]];
-  let D = [[0, 0, 0, 0], [0, 0, 0, 0]];
-
-  for (let n = 2; n <= targetIteration; n++) {
-    let z = centerOrbit.slice((n-1)*4, n*4);
-    A.push(qdcAdd(qdcMul(z, qdcDouble(A[n-1])), [1, 0, 0, 0]));
-    B.push(qdcAdd(qdcMul(z, qdcDouble(B[n-1])), qdcSquare(A[n-1])));
-    C.push(qdcAdd(qdcMul(z, qdcDouble(C[n-1])), qdcDouble(qdcMul(A[n-1], B[n-1]))));
-    D.push(qdcAdd(qdcAdd(
-        qdcMul(z, qdcDouble(D[n-1])),
-        qdcDouble(qdcMul(A[n-1], C[n-1]))), qdcSquare(B[n-1])));
-    /*
-    E.push(qdcAdd(qdcAdd(
-        qdcMul(z, qdcDouble(E[n-1])),
-        qdcDouble(qdcMul(A[n-1], D[n-1]))), qdcDouble(qdcMul(B[n-1], C[n-1]))));
-    F.push(qdcAdd(qdcAdd(qdcAdd(
-        qdcMul(z, qdcDouble(F[n-1])),
-        qdcDouble(qdcMul(A[n-1], E[n-1]))), qdcDouble(qdcMul(B[n-1], D[n-1]))),
-        qdcSquare(C[n-1])));
-    G.push(qdcAdd(qdcAdd(qdcAdd(
-        qdcMul(z, qdcDouble(G[n-1])),
-        qdcDouble(qdcMul(A[n-1], F[n-1]))), qdcDouble(qdcMul(B[n-1], E[n-1]))),
-        qdcDouble(qdcMul(C[n-1], D[n-1]))));
-    H.push(qdcAdd(qdcAdd(qdcAdd(qdcAdd(
-        qdcMul(z, qdcDouble(H[n-1])),
-        qdcDouble(qdcMul(A[n-1], G[n-1]))), qdcDouble(qdcMul(B[n-1], F[n-1]))),
-        qdcDouble(qdcMul(C[n-1], E[n-1]))), qdcSquare(D[n-1])));
-    */
-  }
-
-  // Pre-calculate the final orbit point
-  let finalOrbitPoint = centerOrbit.slice(targetIteration*4, (targetIteration+1)*4);
-
-  // Initialize grid using power series approximation
-  it[k] = targetIteration;
-  let useQuad = (size / dims) < 1e-15;
-  let [AA, BB, CC, DD] = [A, B, C, D].map(x => x[targetIteration]);
-
-  for (let y = 0; y < dims; y++) {
-    let jFrac = (0.5 - (y / dims));
-    let deltaIm = qdMul(toQd(jFrac), toQd(size));
-    let j = qdAdd(toQd(im), deltaIm);
-
-    for (let x = 0; x < dims; x++) {
-      let rFrac = ((x / dims) - 0.5);
-      let deltaRe = qdMul(toQd(rFrac), toQd(size));
-      let r = qdAdd(toQd(re), deltaRe);
-
-      // Form delta directly from deltaRe and deltaIm
-      let delta = [deltaRe[0], deltaRe[1], deltaIm[0], deltaIm[1]];
-      let d2 = qdcSquare(delta);
-      let d3 = qdcMul(delta, d2);
-      let d4 = qdcMul(d2, d2);
-
-      // Apply power series approximation
-      let epsilon = qdcAdd(
-          qdcAdd(
-            qdcMul(AA, delta),
-            qdcMul(BB, d2)
-          ),
-          qdcAdd(
-            qdcMul(CC, d3),
-            qdcMul(DD, d4),
-          )
-        );
-
-      // Calculate z value
-      let z = qdcAdd(finalOrbitPoint, epsilon);
-
-      // Store values
-      if (useQuad) {
-        cc[k].push([r[0], r[1]], [j[0], j[1]]);
-        zz[k].push([z[0], z[1]], [z[2], z[3]]);
-      } else {
-        cc[k].push(r[0] + r[1], j[0] + j[1]);
-        zz[k].push(z[0] + z[1], z[2] + z[3]);
+      let diverged = 0, a;
+      for (let m = 0; m < this.config.dims2; ++m) {
+        a = this.compute(m, i, n, z, c, b, p, epsilon, epsilon2);
+        if (a) { count += 1; }
+        if (a > 0) { diverged += 1; }
       }
-      nn[k].push(0);
-      pp[k].push(0);
+      this.un -= count;
+      this.di += diverged;
+    } else {
+      if (s.length > this.un * 1.25) {
+        let news = [];
+        for (let t = 0; t < s.length; ++t) {
+          if (n[s[t]]) continue;
+          news.push(s[t]);
+        }
+        s = this.ss = news;
+      }
+      if (head <= tail) {
+        for (let t = 0; t < s.length; ++t) {
+          let m = s[t];
+          if (n[m]) continue;
+          b[m * 2] = z[m * 2];
+          b[m * 2 + 1] = z[m * 2 + 1];
+          p[m] = 0;
+        }
+      }
+      let diverged = 0, a;
+      for (let t = 0; t < s.length; ++t) {
+        a = this.compute(s[t], i, n, z, c, b, p, epsilon, epsilon2);
+        if (a) { count += 1; }
+        if (a > 0) { diverged += 1; }
+      }
+      this.un -= count;
+      this.di += diverged;
     }
-  }
-  bb[k] = zz[k].slice();
-  fi[k] = 0;
-}
-
-function truncateboards(k) {
-  if (it.length > k) {
-    it.length = k;
-    cc.length = k;
-    zz.length = k;
-    bb.length = k;
-    pp.length = k;
-    nn.length = k;
-    un.length = k;
-    di.length = k;
-    hi.length = k;
-    ss.length = k;
-    fi.length = k;
-    sizes.length = k;
-  }
-}
-
-function clearseq(k) {
-  let ctx = overlay(k).getContext('2d');
-  ctx.clearRect(0, 0, dims, dims);
-}
-
-function showseq(k, seq, color) {
-  if (k >= sizes.length) { return; }
-  let ctx = overlay(k).getContext('2d');
-  ctx.fillStyle = color;
-  let [s, cr, cj] = sizes[k];
-  for (let i = 0; i < seq.length; i += 4) {
-    let r = [seq[i], seq[i+1]];
-    let j = [seq[i+2], seq[i+3]];
-    let x = (qdSub(r, cr)[0] / s + 0.5) * dims;
-    let y = (qdSub(cj, j)[0] / s + 0.5) * dims;
-    if (x >= 0 && y >= 0 && x < dims && y < dims) {
-      ctx.beginPath();
-      ctx.arc(x, y, 1 * pixelRatio, 0, 2 * Math.PI, false);
-      ctx.fill();
+    if (this.hi[0][0] - this.un >= this.config.dims2 / 256) {
+      this.hi.unshift([this.un, this.di, i]);
     }
+    if (!this.fi && this.un != this.config.dims2) {
+      this.fi = i;
+    }
+    return count;
   }
-}
 
-function drawcolor(k, i) {
-  let color = makecolor(k, i);
-  let converged = makecolor(k, -i);
-  let n = nn[k];
-  let ctx = board(k).getContext('2d');
-  for (let m = 0; m < dims2; ++m) {
-    if (n[m] == i || n[m] == -i) {
-      let x = m % dims;
-      let y = (m - x) / dims;
-      ctx.fillStyle = n[m] > 0 ? color : converged;
+  compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
+    if (n[m]) return 0;
+    let m2 = m * 2;
+    let m2i = m2 + 1;
+    let useQuad = Array.isArray(z[0]);
+
+    let r, j, r2, j2, ra, ja, rb, jb, db;
+
+    if (useQuad) {
+      r = z[m2]
+      j = z[m2i]
+
+      let r2 = qdSquare(r);
+      let j2 = qdSquare(j);
+      if (qdGt(qdAdd(r2, j2), 4)) {
+        n[m] = i;
+        return 1;
+      }
+      ra = qdSub(r2, j2);
+      ja = qdMul(qdDouble(r), j);
+      for (let ord = 2; ord < this.config.exponent; ord++) {
+        let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
+        ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
+        ra = rt;
+      }
+      ra = qdAdd(ra, c[m2]);
+      ja = qdAdd(ja, c[m2i]);
+      z[m2] = ra;
+      z[m2i] = ja;
+      rb = b[m2];
+      jb = b[m2i];
+      db = qdAdd(qdAbs(qdSub(rb, ra)), qdAbs(qdSub(jb, ja)));
+      db = db[0] + db[1];
+    } else {
+      r = z[m2];
+      j = z[m2i];
+      r2 = r * r;
+      j2 = j * j;
+      if (r2 + j2 > 4.0) {
+        n[m] = i;
+        return 1;
+      }
+      ra = r2 - j2;
+      ja = 2 * r * j;
+      for (let ord = 2; ord < this.config.exponent; ord++) {
+        let rt = r * ra - j * ja;
+        ja = r * ja + j * ra;
+        ra = rt;
+      }
+      ra += c[m2];
+      ja += c[m2i];
+      z[m2] = ra;
+      z[m2i] = ja;
+      rb = b[m2];
+      jb = b[m2i];
+      db = Math.abs(rb - ra) + Math.abs(jb - ja);
+    }
+
+    if (db <= epsilon2) {
+      if (!p[m]) { p[m] = i; }
+      if (db <= epsilon) {
+        n[m] = -i;
+        return -1;
+      }
+    }
+    return 0;
+  }
+
+  draw(ctx) {
+    let colorcache = {};
+    const fastcolor = (num) => {
+      let result = colorcache[num];
+      if (!result) {
+        result = this.makecolor(num);
+        if (colorcache.length < 10000) {
+          colorcache[num] = result;
+        }
+      }
+      return result;
+    };
+
+    let n = this.nn;
+    for (let m = 0; m < this.config.dims2; ++m) {
+      let x = m % this.config.dims;
+      let y = (m - x) / this.config.dims;
+      ctx.fillStyle = fastcolor(n[m]);
       ctx.fillRect(x, y, 1, 1);
     }
   }
-}
 
-function clearboard(k) {
-  let ctx = board(k).getContext('2d');
-  ctx.fillStyle = makecolor(k, 0);
-  ctx.fillRect(0, 0, dims, dims);
-}
+  clearcanvas(ctx) {
+    ctx.fillStyle = this.makecolor(0);
+    ctx.fillRect(0, 0, this.config.dims, this.config.dims);
+  }
 
-function colornum(n) {
-  if (n <= 0) { return "0"; }
-  if (n < 16) { return (n * 17).toString(10); }
-  return "255";
-}
-
-function intcolor(n) {
-  if (n <= 0) { return "0"; }
-  if (n >= 1) { return "255"; }
-  return (n * 255).toString(10);
-}
-
-function makecolor(k, i) {
-  if (i == 0) return unknowncolor;
-  if (i < 0) return 'black';
-  let j = 0;
-  for (; i < hi[k][j][2]; j += 1) {}
-  let frac = (dims2 - hi[k][j][0]) / dims2; // frac of pixels done.
-  let len = hi[k].length, half = Math.floor((len + j) / 2);
-  let s = sizes[k][0];
-  let ff = Math.pow(frac, 2);
-  let fr = Math.pow(frac, 0.333);
-  let fg = Math.pow(frac, 3);
-  let g = intcolor(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
-  let r = intcolor(Math.min(fr, i * Math.pow(s, 0.22) / 64));
-  let b = intcolor(ff / 3 + 0.667);
-  return "rgb(" + r + "," + g + "," + b + ")";
-}
-
-function draw(k) {
-  let colorcache = {};
-  function fastcolor(num) {
-    let result = colorcache[num];
-    if (!result) {
-      result = makecolor(k, num);
-      if (colorcache.length < 10000) {
-        colorcache[num] = result;
+  drawcolor(ctx, i) {
+    let color = this.makecolor(i);
+    let converged = this.makecolor(-i);
+    let n = this.nn;
+    for (let m = 0; m < this.config.dims2; ++m) {
+      if (n[m] == i || n[m] == -i) {
+        let x = m % this.config.dims;
+        let y = (m - x) / this.config.dims;
+        ctx.fillStyle = n[m] > 0 ? color : converged;
+        ctx.fillRect(x, y, 1, 1);
       }
+    }
+  }
+
+  makecolor(i) {
+    if (i == 0) return this.config.unknowncolor;
+    if (i < 0) return 'black';
+    let j = 0;
+    for (; i < this.hi[j][2]; j += 1) {}
+    let frac = (this.config.dims2 - this.hi[j][0]) / this.config.dims2; // frac of pixels done.
+    let len = this.hi.length, half = Math.floor((len + j) / 2);
+    let s = this.sizes[0];
+    let ff = Math.pow(frac, 2);
+    let fr = Math.pow(frac, 0.333);
+    let fg = Math.pow(frac, 3);
+    let g = this.intcolor(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
+    let r = this.intcolor(Math.min(fr, i * Math.pow(s, 0.22) / 64));
+    let b = this.intcolor(ff / 3 + 0.667);
+    return "rgb(" + r + "," + g + "," + b + ")";
+  }
+
+  intcolor(n) {
+    if (n <= 0) { return "0"; }
+    if (n >= 1) { return "255"; }
+    return (n * 255).toString(10);
+  }
+}
+
+class Grid {
+  constructor(config) {
+    this.config = config;
+    this.boards = [];
+    this.gridboards = 0;
+    this.focusk = null;
+    this.urlListeners = [];
+  }
+
+  currentGridState() {
+    let state = { hidden: [], sizes: [] };
+    for (let k = 0; k < this.boards.length; k++) {
+      if (this.hiddencanvas(k)) {
+        state.hidden.push(k);
+      }
+      state.sizes.push(this.boards[k].sizes);
+    }
+    return state;
+  }
+
+  updateLayout(state = null) {
+    if (this.currentUpdateProcess) {
+      this.currentUpdateProcess.abort();
+    }
+    if (state === null) {
+      state = this.currentGridState();
+    }
+    this.config.initSizes();
+
+    // Recreate the grid
+    let gridElement = document.getElementById('grid');
+    gridElement.innerHTML = '';
+    this.gridboards = 0;
+
+    // Recreate all canvases
+    for (let k = 0; k < state.sizes.length; k++) {
+      this.makecanvas(k);
+      if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
+    }
+    this.truncateboards(0);
+    this.currentUpdateProcess = this.createUpdateProcess(state);
+    this.currentUpdateProcess.start();
+  }
+
+  createUpdateProcess(state) {
+    let aborted = false;
+    let currentIndex = 0;
+
+    const processNext = () => {
+      if (aborted || currentIndex >= state.sizes.length) {
+        if (!aborted) {
+          this.notifyurl();
+          this.updateZoomRectangles();
+        }
+        this.currentUpdateProcess = null;
+        return;
+      }
+
+      const k = currentIndex;
+      if (!this.boards[k]) {
+        this.boards[k] = new Board(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2], this.config);
+      }
+      this.boards[k].initcanvas(state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
+      this.boards[k].draw(this.canvas(k).getContext('2d'));
+      if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
+      currentIndex++;
+      setTimeout(processNext, 0);
+    };
+
+    return {
+      start: processNext,
+      abort: () => { aborted = true; }
+    };
+  }
+
+  makecanvas(k) {
+    let gd = document.getElementById('grid');
+    while (this.gridboards <= k) {
+      let dd = document.createElement('div');
+      dd.id = 'b_' + this.gridboards;
+      dd.innerHTML = this.boardstring(this.gridboards);
+      dd.className = 'hidemarks';
+      gd.appendChild(dd);
+      this.gridboards += 1;
+    }
+  }
+
+  boardstring(k) {
+    let factor = 3.0 / (k < this.boards.length ? this.boards[k].sizes[0] :
+      this.config.firstsize / Math.pow(this.config.zoomfactor, k));
+    factor = formatScale(factor);
+    return '<canvas width=' + this.config.dims + ' height=' + this.config.dims +
+           ' style="height:' + this.config.cssDims + 'px;width:' + this.config.cssDims + 'px;">' +
+           '</canvas>' +
+           '<div class="closebox"></div>' +
+           '<div class="rect"></div>' +
+           '<canvas class=overlay width=' + this.config.dims + ' height=' + this.config.dims +
+           ' style="height:' + this.config.cssDims + 'px;width:' + this.config.cssDims + 'px;">' +
+           '</canvas>' +
+           '<a class="zoomnum" target="_blank" href="?grid=1">' + factor +
+           '</a>';
+  }
+
+  hidecanvas(k) {
+    this.canvas(k).parentElement.style.display = 'none';
+  }
+
+  showcanvas(k) {
+    this.canvas(k).parentElement.style.display = '';
+  }
+
+  hiddencanvas(k) {
+    let b = this.canvas(k);
+    return b && b.parentElement.style.display == 'none';
+  }
+
+
+  grid() {
+    return document.getElementById('grid');
+  }
+
+  canvas(k) {
+    let b = document.getElementById("b_" + k);
+    return b && b.firstElementChild;
+  }
+
+  closebutton(k) {
+      const board = this.canvas(k);
+      return board && board.nextElementSibling;
+  }
+
+  rect(k) {
+      const closeBtn = this.closebutton(k);
+      return closeBtn && closeBtn.nextElementSibling;
+  }
+
+  overlay(k) {
+      const rect = this.rect(k);
+      return rect && rect.nextElementSibling;
+  }
+
+  showrect(k, x, y, zf) {
+    let s = this.rect(k).style;
+    zf = Math.min(125, zf); // Make rectangle visible if it is tiny.
+    this.canvas(k).parentElement.className = '';
+    s.top = (y * this.config.cssDims - this.config.cssDims / 2 / zf) + 'px';
+    s.left = (x * this.config.cssDims - this.config.cssDims / 2 / zf) + 'px';
+    s.width = (this.config.cssDims / zf) + 'px';
+    s.height = (this.config.cssDims / zf) + 'px';
+  }
+
+  removerect(k) {
+    let s = this.rect(k).style;
+    s.top = s.left = s.width = s.height = '';
+  }
+
+  updateZoomRectangles() {
+    let prevBoard = null;
+    let prevK = 0;
+    for (let k = 0; k < this.boards.length; k++) {
+      if (this.hiddencanvas(k)) { continue; }
+      let currBoard = this.boards[k].sizes;
+      if (prevBoard != null) {
+        let x = (currBoard[1][0] - prevBoard[1][0]) / prevBoard[0] + 0.5;
+        let y = 0.5 - (currBoard[2][0] - prevBoard[2][0]) / prevBoard[0];
+        let zf = prevBoard[0] / currBoard[0];
+        this.showrect(prevK, x, y, zf);
+      }
+      prevBoard = currBoard;
+      prevK = k;
+    }
+  }
+
+  cellclick(k, m) {
+    // Only accept clicks on cells with something computed in them.
+    if (k >= this.boards.length || this.boards[k].di <= 0 || this.currentUpdateProcess) return;
+    this.truncateboards(k + 1);
+    this.removeboardspast(k + 1);
+    setTimeout(() => { this.cellclickdelay(k, m); }, 1);
+  }
+
+  cellclickdelay(k, m) {
+    if (k >= this.boards.length || this.currentUpdateProcess) return;
+    let osize = this.boards[k].sizes[0];
+    let ore = this.boards[k].sizes[1];
+    let oim = this.boards[k].sizes[2];
+    let cx = m % this.config.dims;
+    let cy = (m - cx) / this.config.dims;
+    this.removeboardspast(k + 1);
+    this.showrect(k, cx / this.config.dims, cy / this.config.dims, this.config.zoomfactor);
+    this.truncateboards(k + 1);
+    // Do slow parts after a moment.
+    setTimeout(() => {
+      let nsize = osize / this.config.zoomfactor;
+      let nre = qdAdd(ore, [((cx / this.config.dims) - 0.5) * osize, 0]);
+      let nim = qdAdd(oim, [(0.5 - (cy / this.config.dims)) * osize, 0]);
+      let newBoard = new Board(k + 1, nsize, nre, nim, this.config);
+      newBoard.initcanvas(nsize, nre, nim);
+      this.boards.push(newBoard);
+      this.makecanvas(k + 1);
+      this.canvas(k + 1).parentElement.className = 'hidemarks';
+      this.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
+      newBoard.draw(this.canvas(k + 1).getContext('2d'));
+      this.showcanvas(k + 1);
+      this.notifyurl();
+    }, 10);
+  }
+
+  truncateboards(k) {
+    if (this.boards.length > k) {
+      this.boards.length = k;
+    }
+  }
+
+  removeboardspast(k) {
+    if (this.gridboards > k) {
+      for (let j = k + 1; j < this.gridboards; ++j) {
+        this.canvas(j).parentElement.remove();
+      }
+      this.gridboards = k + 1;
+    }
+  }
+
+  centerBoards() {
+    let k = this.boards.length - 1;
+    let ore = this.boards[k].sizes[1];
+    let oim = this.boards[k].sizes[2];
+    this.showrect(0, 0.5 + (ore[0] - this.boards[0].sizes[1][0]) / this.boards[0].sizes[0],
+                  0.5 - (oim[0] - this.boards[0].sizes[2][0]) / this.boards[0].sizes[0],
+                  this.boards[0].sizes[0] / this.boards[1].sizes[0]);
+    for (k = 1; k < this.boards.length - 1; k += 1) {
+      this.showrect(k, 0.5, 0.5, this.boards[k].sizes[0] / this.boards[k+1].sizes[0]);
+      if (qdCompare(this.boards[k].sizes[1], ore) || qdCompare(this.boards[k].sizes[2], oim)) {
+        let nsize = this.boards[k].sizes[0];
+        this.boards[k] = new Board(k + 1, nsize, ore, oim, this.config);
+        this.boards[k].clearcanvas(this.canvas(k).getContext('2d'));
+        this.boards[k].initcanvas(nsize, ore, oim);
+        this.boards[k].draw(this.canvas(k).getContext('2d'));
+        this.clearseq(k);
+      }
+    }
+    this.notifyurl();
+  }
+
+  showAllBoards() {
+    for (let j = 0; j < this.gridboards; ++j) {
+      this.showcanvas(j);
+    }
+    this.updateZoomRectangles();
+  }
+
+  truncatehiddenboards() {
+    let j = this.gridboards - 1;
+    for (; j > 0; j--) {
+      if (!this.hiddencanvas(j)) {
+        break;
+      }
+    }
+    this.truncateboards(j + 1);
+    this.removeboardspast(j);
+    if (j == 0) {
+      this.showcanvas(j);
+    }
+  }
+
+  updateProgress(overtarget, k) {
+    if (overtarget.tagName == 'A') {
+      overtarget.href = this.bigurl(k);
+      overtarget.setAttribute('status', ('center at ' +
+          formatcomplex(k, this.boards[k].sizes[1], this.boards[k].sizes[2])
+            .replaceAll('-', '\u2212') + '\n' +
+          Math.floor(1000 * (1.0 - this.boards[k].un / this.config.dims2))/10.0  + '% done ' +
+          'after ' + this.boards[k].it + ' iters'));
+    }
+    if (overtarget.matches(':hover')) {
+      setTimeout(() => this.updateProgress(overtarget, k), 100);
+    }
+  }
+
+  bigurl(k) {
+    if (k >= this.boards.length) return;
+    let osize = this.boards[k].sizes[0];
+    if (this.config.exponent != 2) {
+      osize += '&exponent=' + this.config.exponent;
+    }
+    let ore = this.boards[k].sizes[1];
+    let oim = this.boards[k].sizes[2];
+    return '?s=' + formatSize(osize) + '&c=' + formatcomplex(k, ore, oim) + '&grid=1';
+  }
+
+  clearseq(k) {
+    const overlayElement = this.overlay(k);
+    if (overlayElement) {
+      let ctx = overlayElement.getContext('2d');
+      ctx.clearRect(0, 0, this.config.dims, this.config.dims);
+    }
+  }
+
+  onurlchange(callback) {
+    this.urlListeners.push(callback);
+  }
+
+  notifyurl() {
+    for (let cb of this.urlListeners) {
+      cb();
+    }
+  }
+}
+
+class URLHandler {
+  constructor(config, grid) {
+    this.config = config;
+    this.grid = grid;
+    this.grid.onurlchange(x => this.updateurl());
+  }
+
+  updateurl() {
+    if (history.replaceState) {
+      history.replaceState(null, '', this.currenturl());
+    }
+  }
+
+  parseUrl() {
+    let startstate = { hidden: [], sizes: [] };
+    let opts = document.location.search.split('&');
+    for (let j in opts) {
+      let m;
+      if (null !== (m = opts[j].match(/exponent=(\d+)/))) {
+        this.config.exponent = Math.max(2, parseInt(m[1]));
+        if (this.config.exponent > 2) { this.config.firstr = [0.0, 0]; }
+        for (let el of document.getElementsByClassName('exponent')) {
+          el.innerText = this.config.exponent;
+        }
+      }
+      if (null !== (m = opts[j].match(/grid=(\d+)/))) {
+        this.config.gridcols = Math.max(1, parseInt(m[1]));
+      }
+      if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+(?:e[-+]\d+)?)/))) {
+        this.config.firstsize = parseFloat(m[1]);
+      }
+      if (null !== (m = opts[j].match(/pixelratio=(\d+)/))) {
+        this.config.pixelRatio = Math.max(1, parseInt(m[1]));
+      }
+      if (null !== (m = opts[j].match(/c=([-+\d\.ei,]+)/))) {
+        for (let coords of m[1].split(',')) {
+          m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/);
+          startstate.sizes.push([
+            this.config.firstsize / Math.pow(this.config.zoomfactor, startstate.sizes.length),
+            m != null && m[1] ? qdParse(m[1]) : (startstate.sizes.length > 0 ?
+                startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstr),
+            m != null && m[2] ? qdParse(m[2]) : (startstate.sizes.length > 0 ?
+                startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstj)
+          ]);
+        }
+      }
+      if (null !== (m = opts[j].match(/h=([\d,]+)/))) {
+        startstate.hidden = m[1].split(',').map(x=>parseInt(x));
+      }
+    }
+
+    if (startstate.sizes.length == 0) {
+      startstate.sizes = this.config.firststate().sizes;
+    }
+
+    return startstate;
+  }
+
+  currenturl() {
+    let state = this.grid.currentGridState();
+    let compactc = '';
+    let commas = '';
+    let prev = [this.config.firstr, this.config.firstj];
+    let prevj = -1;
+    for (let j = 0; j <= state.sizes.length; j++) {
+      if (j < state.sizes.length &&
+          !qdCompare(state.sizes[j][1], prev[0]) &&
+          !qdCompare(state.sizes[j][2], prev[1])) {
+        commas += ',';
+      } else {
+        if (prevj >= 0) {
+          compactc += formatcomplex(j - 1, state.sizes[prevj][1], state.sizes[prevj][2]) + ',';
+        }
+        compactc += commas;
+        if (j < state.sizes.length) {
+          commas = '';
+          prev = [state.sizes[j][1], state.sizes[j][2]];
+          prevj = j;
+        }
+      }
+    }
+    compactc = compactc.slice(0, -1);
+    let url =
+           (state.sizes[0][0] != 3.0 ? '&s=' + formatSize(this.grid.boards[0].sizes[0]) : '') +
+           (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
+           (compactc.length ? '&c=' + compactc : '') +
+           (this.config.gridcols != 3 ? '&grid=' + this.config.gridcols : '') +
+           (state.hidden.length ? '&h=' + state.hidden : '') +
+           (this.config.pixelRatio != 2 ? '&pixelratio=' + this.config.pixelRatio : '');
+    return '?' + url.replace('&', '');
+  }
+}
+
+class EventHandler {
+  constructor(explorer) {
+    this.explorer = explorer;
+  }
+
+  setup() {
+    document.onmousedown = this.onmousedown.bind(this);
+    document.onmousemove = this.onmousemove.bind(this);
+    document.body.onkeydown = this.onkeydown.bind(this);
+    document.body.onmouseover = this.onmouseover.bind(this);
+    document.body.onmousedown = (e) => {
+      if (e.target.className == 'closebox') {
+        e.stopPropagation();
+      }
+    };
+    document.body.onclick = (e) => {
+      if (e.target.className == 'closebox' && !explorer.grid.currentUpdateProcess) {
+        e.target.parentElement.style.display = 'none';
+        this.explorer.grid.truncatehiddenboards();
+        this.explorer.grid.updateZoomRectangles();
+        this.explorer.grid.updateurl();
+      }
+    };
+  }
+
+  onmousedown(e) {
+    let target = this.eventtarget(e);
+    if (this.explorer.movieMode.active && (target.id != 'moviescale')) {
+      this.explorer.movieMode.toggle();
+    }
+    if (e.button != 0) { return true; }
+    if (target) {
+      let m = target.id.match(/b_(\d+)/);
+      if (e.target.tagName == 'A') {
+        if (m) { e.target.href = this.explorer.grid.bigurl(m[1]); }
+        return true;
+      }
+      if (m) {
+        let p = this.pointInTarget(e, target);
+        this.explorer.grid.cellclick(parseInt(m[1]), p.x + p.y * this.explorer.config.dims);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  onmousemove(e) {
+    let target = this.eventtarget(e);
+    if (target) {
+      let m = target.id.match(/b_(\d+)/);
+      if (m) {
+        let p = this.pointInTarget(e, target);
+        let k = parseInt(m[1]);
+        let j = p.x + p.y * this.explorer.config.dims;
+        this.explorer.orbitComputer.updateOrbit(k, j, target);
+      }
+    }
+  }
+
+  onkeydown(e) {
+    if (this.explorer.movieMode.active &&
+        ['Shift', 'Alt', 'Control', 'Meta', 'CapsLock'].indexOf(e.key) == -1) {
+      this.explorer.movieMode.toggle();
+      return;
+    }
+    // Pressing backspace will delete the last zoom.
+    if (e.key == 'Backspace' && this.explorer.grid.boards.length > 1 && !this.explorer.grid.currentUpdateProcess) {
+      let k = this.explorer.grid.boards.length - 1;
+      this.explorer.grid.truncateboards(k);
+      this.explorer.grid.removeboardspast(k - 1);
+      this.explorer.grid.truncatehiddenboards();
+      this.explorer.grid.updateurl();
+    }
+    // Pressing C will center all the zoom positions.
+    if (e.key == 'c' && this.explorer.grid.boards.length > 1) {
+      this.explorer.grid.centerBoards();
+    }
+    // Pressing U will cycle through the uncomputed colors.
+    if (e.key == 'u') {
+      this.explorer.cycleUnknownColor();
+    }
+    // Pressing I will zoom in at the same position.
+    if (e.key == 'i') {
+      this.explorer.zoomInAtCurrentPosition();
+    }
+    // Pressing ? will show the help window
+    if (e.key == '?') {
+      document.getElementById('text').style.display = 'block';
+    }
+    // G reduces the grid column and H increases
+    if (e.key === 'g' && this.explorer.config.gridcols > 1) {
+      this.explorer.config.gridcols -= 1;
+      this.explorer.grid.updateLayout();
+    }
+    if (e.key === 'h') {
+      this.explorer.config.gridcols += 1;
+      this.explorer.grid.updateLayout();
+    }
+    // R will restore any hidden boards
+    if (e.key === 'r') {
+      this.explorer.grid.showAllBoards();
+      this.explorer.grid.updateurl();
+    }
+    // Increase the exponent
+    if (e.key === 'x') {
+      this.explorer.config.updateExponent(this.explorer.config.exponent + 1);
+      this.explorer.grid.updateLayout(this.explorer.config.firststate());
+    }
+    // Decrease the exponent
+    if (e.key === 'z' && this.explorer.config.exponent > 2) {
+      this.explorer.config.updateExponent(this.explorer.config.exponent - 1);
+      this.explorer.grid.updateLayout(this.explorer.config.firststate());
+    }
+    // Increase the pixel ratio
+    if (e.key === 'f') {
+      this.explorer.config.pixelRatio += 1;
+      this.explorer.grid.updateLayout();
+    }
+    // Decrease the pixel ratio
+    if (e.key === 'd' && this.explorer.config.pixelRatio > 1) {
+      this.explorer.config.pixelRatio -= 1;
+      this.explorer.grid.updateLayout();
+    }
+    // Toggle movie mode
+    if (e.key === 'm' && this.explorer.grid.boards.length > 1) {
+      this.explorer.movieMode.toggle();
+    }
+  }
+
+  onmouseover(e) {
+    document.body.className = 'hidemarks';
+    this.explorer.grid.focusk = null;
+    let target = this.eventtarget(e);
+    if (target) {
+      let m = target.id.match(/b_(\d+)/);
+      if (m) {
+        let k = parseInt(m[1]);
+        this.explorer.grid.focusk = k;
+        if (this.explorer.grid.boards.length <= k) return;
+        for (let i = 0; i < this.explorer.grid.gridboards; ++i) {
+          this.explorer.grid.canvas(i).parentElement.className = i < k ? '' : 'hidemarks';
+        }
+        document.body.className = '';
+        let overtarget = e.target;
+        this.explorer.grid.updateProgress(overtarget, k);
+      } else if (target.id.startsWith('movie') && (!e.target || e.target.id != 'movie')) {
+        document.body.className = '';
+      }
+    }
+  }
+
+  eventtarget(e) {
+    let target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
+    while (target) {
+      if (target.id) { return target; }
+      target = target.parentNode;
+    }
+    return null;
+  }
+
+  pointInTarget(ev, target) {
+    let se = document.scrollingElement || document.body;
+    let x = (ev.clientX + se.scrollLeft - this.absoluteLeft(target)) * this.explorer.config.pixelRatio;
+    let y = (ev.clientY + se.scrollTop - this.absoluteTop(target)) * this.explorer.config.pixelRatio;
+    return { x: Math.round(x), y: Math.round(y) };
+  }
+
+  absoluteLeft(target) {
+    let left = 0;
+    while (target) {
+      left += target.offsetLeft;
+      target = target.offsetParent;
+    }
+    return left;
+  }
+
+  absoluteTop(target) {
+    let top = 0;
+    while (target) {
+      top += target.offsetTop;
+      target = target.offsetParent;
+    }
+    return top;
+  }
+}
+
+class MovieMode {
+  constructor(explorer) {
+    this.explorer = explorer;
+    this.active = false;
+    this.movieCanvas = null;
+    this.movieCtx = null;
+    this.animationFrame = null;
+    this.frameCanvases = [];
+    this.mediaRecorder = null;
+    this.recordedChunks = [];
+    this.isRecording = false;
+    this.recordedBlob = null;
+    this.recordingMimeType = null;
+    this.recordingMimeTypes = [
+      'video/webm; codecs="vp8"',
+      'video/webm; codecs="avc1.640029"',
+      'video/webm',
+      'video/mp4; codecs="avc1.640029"',
+      'video/mp4',
+    ];
+  }
+
+  toggle() {
+    this.active = !this.active;
+    this.explorer.scheduler.computationPaused = this.active;
+    if (this.active) {
+      this.startMovie();
+    } else {
+      this.stopMovie();
+    }
+  }
+
+  startMovie() {
+    this.explorer.grid.grid().style.display = 'none';
+    this.explorer.movieContainer.style.display = 'block';
+    this.createMovieCanvas();
+    this.explorer.movieContainer.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => {
+      document.body.className = '';
+      this.preRenderFrames(() => {
+        this.startMovieAnimation();
+      });
+    }, 20);
+  }
+
+  stopMovie() {
+    this.explorer.grid.grid().style.display = 'block';
+    this.explorer.movieContainer.style.display = 'none';
+    this.stopMovieAnimation();
+    this.removeMovieCanvas();
+  }
+
+  createMovieCanvas() {
+    this.explorer.movieContainer.innerHTML = '<div>' +
+      `<canvas width=${this.explorer.config.dims} height=${this.explorer.config.dims} ` +
+      `style="width:${this.explorer.config.cssDims}px;height:${this.explorer.config.cssDims}px"></canvas>` +
+      `<a id="moviescale" class="zoomnum">Rendering...</a></div>`;
+    this.movieCanvas = this.explorer.movieContainer.firstElementChild.firstElementChild;
+    this.movieCtx = this.movieCanvas.getContext('2d');
+    this.movieCtx.drawImage(this.explorer.grid.canvas(0), 0, 0);
+  }
+
+  removeMovieCanvas() {
+    while (this.explorer.movieContainer.firstChild) {
+      this.explorer.movieContainer.removeChild(this.explorer.movieContainer.firstChild);
+    }
+    this.movieCanvas = null;
+    this.movieCtx = null;
+  }
+
+  preRenderFrames(after) {
+    this.frameCanvases = [];
+    let queueOneFrame = (k, after) => {
+      return () => {
+        document.getElementById('moviescale').textContent =
+          `Rendering ${formatScale(3.0 / this.explorer.grid.boards[k].sizes[0])}`;
+        let canvas1 = null;
+        let canvas2 = null;
+        const n = this.explorer.grid.boards[k].nn;
+        // Render with k-1 palette
+        if (k > 0) {
+          canvas1 = document.createElement('canvas');
+          canvas1.width = canvas1.height = this.explorer.config.dims;
+          const ctx1 = canvas1.getContext('2d');
+          for (let y = 0; y < this.explorer.config.dims; y++) {
+            for (let x = 0; x < this.explorer.config.dims; x++) {
+              const m = y * this.explorer.config.dims + x;
+              const i = n[m];
+              ctx1.fillStyle = this.explorer.grid.boards[k - 1].makecolor(i);
+              ctx1.fillRect(x, y, 1, 1);
+            }
+          }
+          if (this.explorer.config.unknowncolor != '#000') {
+            ctx1.strokeStyle = 'yellow';
+            ctx1.lineWidth = this.explorer.config.pixelRatio * this.explorer.config.zoomfactor;
+            ctx1.strokeRect(0, 0, this.explorer.config.dims, this.explorer.config.dims);
+          }
+        }
+        // Render with k+1 palette
+        if (k < this.explorer.grid.boards.length - 1) {
+          canvas2 = document.createElement('canvas');
+          canvas2.width = canvas2.height = this.explorer.config.dims;
+          const ctx2 = canvas2.getContext('2d');
+          for (let y = 0; y < this.explorer.config.dims; y++) {
+            for (let x = 0; x < this.explorer.config.dims; x++) {
+              const m = y * this.explorer.config.dims + x;
+              const i = n[m];
+              ctx2.fillStyle = this.explorer.grid.boards[k + 1].makecolor(i);
+              ctx2.fillRect(x, y, 1, 1);
+            }
+          }
+        }
+        this.frameCanvases.push({ prev: canvas1, next: canvas2 });
+        setTimeout(after, 1);
+      };
+    }
+    for (let k = this.explorer.grid.boards.length - 1; k >= 0; k--) {
+      after = queueOneFrame(k, after);
+    }
+    setTimeout(after, 0);
+  }
+
+  startMovieAnimation() {
+    let frame = 0;
+    let framesteps = 300;
+    let endpause = 180;
+    let endrecord = 60;
+    const totalFrames = (this.explorer.grid.boards.length - 1) * framesteps;
+
+    const scaleElement = document.getElementById('moviescale');
+    scaleElement.removeAttribute('href');
+
+    if (!this.isRecording) {
+      this.recordedBlob = null;
+      this.isRecording = true;
+      this.startRecording();
+    }
+
+    const animate = () => {
+      const kk = Math.min(frame, totalFrames) / framesteps;
+      this.drawMovieFrame(kk);
+      frame = (frame + 1) % (totalFrames + endpause);
+
+      if (this.isRecording && frame > totalFrames + endrecord) {
+        this.stopRecording();
+        this.isRecording = false;
+      }
+
+      this.animationFrame = requestAnimationFrame(animate);
+    };
+    animate();
+  }
+
+  stopMovieAnimation() {
+    if (this.animationFrame) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+    this.recordedBlob = null;
+  }
+
+  startRecording() {
+    const stream = this.movieCanvas.captureStream(30); // 30 FPS
+
+    this.recordingMimeType = null;
+    this.recordedChunks = [];
+    for (let tryType of this.recordingMimeTypes) {
+       if (MediaRecorder.isTypeSupported(tryType)) {
+          this.recordingMimeType = tryType;
+          break;
+       }
+    }
+    if (this.recordingMimeType == null) {
+      console.error('Neither MP4 nor WebM recording is supported');
+      return;
+    }
+
+    this.mediaRecorder = new MediaRecorder(stream, {
+      mimeType: this.recordingMimeType,
+      videoBitsPerSecond: 10000000,
+    });
+
+    this.mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        this.recordedChunks.push(event.data);
+      }
+    };
+
+    this.mediaRecorder.onstop = () => {
+      this.recordedBlob = new Blob(this.recordedChunks, { type: this.recordingMimeType });
+      this.recordedChunks = [];
+      this.updateDownloadLink();
+    };
+
+    this.mediaRecorder.start(1000); // one-second blobs
+  }
+
+  stopRecording() {
+    this.mediaRecorder.stop();
+  }
+
+  updateDownloadLink() {
+    const scaleElement = document.getElementById('moviescale');
+    const extension = (this.recordingMimeType.includes('mp4') ? 'mp4' : 'webm');
+    scaleElement.textContent = 'Download ' + extension;
+    scaleElement.href = URL.createObjectURL(this.recordedBlob);
+    const k = this.explorer.grid.boards.length - 1;
+    scaleElement.download = 'mandelbrot' +
+              formatcomplex(k, this.explorer.grid.boards[k].sizes[1], this.explorer.grid.boards[k].sizes[2]) +
+              '-' + this.explorer.grid.boards[k].it +
+              '.' + extension;
+  }
+
+  drawMovieFrame(kk) {
+    if (this.movieCtx == null) { return; }
+    const k = Math.floor(kk);
+    const t = kk - k;
+    const sourceSize = this.explorer.grid.boards[k].sizes[0];
+    const targetSize = k+1 < this.explorer.grid.boards.length ? this.explorer.grid.boards[k+1].sizes[0] : sourceSize;
+    const zoomRatio = targetSize / sourceSize;
+
+    // Use zoom ratio for exponential interpolation
+    const mulT = Math.pow(zoomRatio, t);
+    const expT = (zoomRatio == 1.0 ? t : (mulT - 1) / (zoomRatio - 1));
+    const colorT = expT * expT;
+    const interpolatedSize = sourceSize * mulT;
+
+    // Use spline interpolation for center coordinates
+    const sourceCenter = [this.explorer.grid.boards[k].sizes[1], this.explorer.grid.boards[k].sizes[2]];
+    const targetCenter = k+1 < this.explorer.grid.boards.length ?
+               [this.explorer.grid.boards[k+1].sizes[1], this.explorer.grid.boards[k+1].sizes[2]] : sourceCenter;
+
+    const p0 = k > 0 ? [this.explorer.grid.boards[k-1].sizes[1], this.explorer.grid.boards[k-1].sizes[2]] : sourceCenter;
+    const p1 = sourceCenter;
+    const p2 = targetCenter
+    const p3 = k+2 < this.explorer.grid.boards.length ? [this.explorer.grid.boards[k+2].sizes[1], this.explorer.grid.boards[k+2].sizes[2]] : targetCenter;
+    const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
+
+    // Clear the movie canvas
+    this.movieCtx.fillStyle = this.explorer.grid.boards[k].makecolor(1);
+    this.movieCtx.fillRect(0, 0, this.explorer.config.dims, this.explorer.config.dims);
+
+    // Draw the current frame
+    const scale = sourceSize / interpolatedSize;
+    const offsetX = qdMul(qdSub(interpolatedCenter[0], sourceCenter[0]),
+                          [this.explorer.config.dims / sourceSize, 0])[0];
+    const offsetY = qdMul(qdSub(sourceCenter[1], interpolatedCenter[1]),
+                          [this.explorer.config.dims / sourceSize, 0])[0];
+    this.movieCtx.save();
+    this.movieCtx.imageSmoothingEnabled = true;
+    this.movieCtx.imageSmoothingQuality = 'high';
+    this.movieCtx.translate(this.explorer.config.dims / 2, this.explorer.config.dims / 2);
+    this.movieCtx.scale(scale, scale);
+    this.movieCtx.translate(-this.explorer.config.dims / 2 - offsetX, -this.explorer.config.dims / 2 - offsetY);
+    this.movieCtx.globalAlpha = 1;
+    this.movieCtx.drawImage(this.explorer.grid.canvas(k), 0, 0);
+
+    // Blend the color palette of the next frame
+    if (this.frameCanvases[k].next) {
+      this.movieCtx.globalAlpha = colorT;
+      this.movieCtx.drawImage(this.frameCanvases[k].next, 0, 0);
+    }
+    this.movieCtx.restore();
+
+    // Draw the next frame
+    if (k < this.explorer.grid.boards.length - 1) {
+      const targetScale = targetSize / interpolatedSize;
+      const targetOffsetX = qdMul(qdSub(interpolatedCenter[0], targetCenter[0]),
+                                  [this.explorer.config.dims / targetSize, 0])[0];
+      const targetOffsetY = qdMul(qdSub(targetCenter[1], interpolatedCenter[1]),
+                                  [this.explorer.config.dims / targetSize, 0])[0];
+      this.movieCtx.save();
+      this.movieCtx.imageSmoothingEnabled = true;
+      this.movieCtx.imageSmoothingQuality = 'high';
+      this.movieCtx.translate(this.explorer.config.dims / 2, this.explorer.config.dims / 2);
+      this.movieCtx.scale(targetScale, targetScale);
+      this.movieCtx.translate(-this.explorer.config.dims / 2 - targetOffsetX, -this.explorer.config.dims / 2 - targetOffsetY);
+      this.movieCtx.globalAlpha = 1;
+      this.movieCtx.drawImage(this.frameCanvases[k + 1].prev, 0, 0);
+      this.movieCtx.globalAlpha = colorT;
+      this.movieCtx.drawImage(this.explorer.grid.canvas(k + 1), 0, 0);
+      this.movieCtx.restore();
+    }
+
+    // Update scale text
+    if (!this.recordedBlob) {
+      const currentScale = (3.0 / this.explorer.config.firstsize) * (Math.pow(this.explorer.config.zoomfactor, kk));
+      document.getElementById('moviescale').textContent = formatScale(currentScale);
+    }
+  }
+}
+
+class Scheduler {
+  constructor(explorer) {
+    this.explorer = explorer;
+    this.computationPaused = false;
+    this.steps = 0;
+  }
+
+  start() {
+    this.progress();
+  }
+
+  progress() {
+    if (this.computationPaused) {
+      setTimeout(() => this.progress(), 100); // Check less frequently when paused
+      return;
+    }
+    try {
+      // Contribute to every unfinished cell
+      let pri = this.explorer.grid.boards.map((_, index) => index)
+        .filter(k => this.explorer.grid.boards[k].un > 0 && !this.explorer.grid.hiddencanvas(k));
+      if (this.steps % 2) {
+        // Prioritize most unfinished half the time.
+        pri = pri.sort((a, b) => this.explorer.grid.boards[b].un - this.explorer.grid.boards[a].un);
+      } else {
+        // Prioritize the most recent half the time.
+        pri = pri.reverse();
+        // Allow the user to prioritize by pointing the mouse.
+        if (this.explorer.grid.focusk != null) {
+          pri.sort((a, b) => (a === this.explorer.grid.focusk && -1) || (b === this.explorer.grid.focusk && 1) || 0);
+        }
+      }
+      // Exponential scheduling policy
+      let shift = Math.floor(this.steps++ / 2);
+      let p = 0;
+      while (1 << p & shift) { p += 1; }
+      let k = pri[Math.min(p, pri.length - 1)];
+      // Do at least 1000 pixel-steps.
+      let u = this.explorer.grid.boards[k].un;
+      for (let amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
+        let count = this.explorer.grid.boards[k].iterate();
+        if (count > 0) {
+          let ctx = this.explorer.grid.canvas(k)?.getContext('2d');
+          if (ctx) {
+            this.explorer.grid.boards[k].drawcolor(ctx, this.explorer.grid.boards[k].it);
+          }
+        }
+      }
+    } catch (e) {
+      console.log(e);
+    }
+    setTimeout(() => this.progress(), 0);
+  }
+}
+
+class OrbitComputer {
+  constructor(explorer) {
+    this.explorer = explorer;
+    this.orbitinterval = null;
+    this.orbittimeout = null;
+  }
+
+  updateOrbit(k, j, target) {
+    if (this.orbitinterval) {
+      clearInterval(this.orbitinterval);
+      this.orbitinterval = null;
+    }
+    if (this.orbittimeout) {
+      clearTimeout(this.orbittimeout);
+      this.orbittimeout = null;
+    }
+
+    const updateorbit = () => {
+      let orb = [];
+      let cyc = [];
+      let ongoing = true;
+      let board = this.explorer.grid.boards[k];
+      target.setAttribute('title', '');
+      if (board.cc && j >= 0 && j * 2 < board.cc.length) {
+        let cr = toQd(board.cc[j * 2]);
+        let cj = toQd(board.cc[j * 2 + 1]);
+        let title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
+        let len = Math.min(Math.max(board.pp[j], board.nn[j]) || Math.max(board.it, 8),
+                          this.explorer.config.orbitlength);
+        orb = this.visorbit(j, board.cc, len);
+        if (board.nn[j]) {
+          ongoing = false;
+          if (board.nn[j] > 0) {
+            title += '\ndiverges in ' + board.nn[j];
+          } else {
+            let period = this.figureperiod(board.pp[j]);
+            if (period == 1) {
+              title += '\nconverges after ' + board.pp[j];
+            } else {
+              title += '\nafter ' + board.pp[j] + ', period ' + this.figureperiod(board.pp[j]);
+            }
+            cyc = this.viscycle(j, board.zz, board.cc, board.pp);
+          }
+        }
+        target.setAttribute('title', title);
+      }
+      if (board) {
+        this.explorer.grid.clearseq(k);
+        this.showseq(k, orb, 'yellow');
+        this.showseq(k, cyc, 'red');
+      }
+      const orbitonallboards = () => {
+        for (let i = 0; i < this.explorer.grid.boards.length; i++) {
+          if (!this.explorer.grid.hiddencanvas(i) && i != k) {
+            this.explorer.grid.clearseq(i);
+            this.showseq(i, orb, 'yellow');
+            this.showseq(i, cyc, 'red');
+          }
+        }
+      };
+      this.orbittimeout = setTimeout(orbitonallboards, 1);
+      return ongoing;
+    };
+
+    if (updateorbit()) {
+      this.orbitinterval = setInterval(updateorbit, 251);
+    }
+  }
+
+  viscycle(m, z, c, p) {
+    let len = this.figureperiod(p[m]);
+    return this.suborbit([z[m*2], z[m*2+1]], [c[m*2], c[m*2+1]], len);
+  }
+
+  visorbit(m, c, len) {
+    return this.suborbit([c[m*2], c[m*2+1]], [c[m*2], c[m*2+1]], len);
+  }
+
+  suborbit(z, c, len) {
+    // Always convert to quad precision
+    let [r, j] = z.map(toQd);
+    let [cr, cj] = c.map(toQd);
+
+    let result = [r[0], r[1], j[0], j[1]];
+    while (result.length < len * 4) {
+      let j2 = qdSquare(j);
+      let ja = qdMul(qdDouble(r), j);
+      let r2 = qdSquare(r);
+      let ra = qdSub(r2, j2);
+      for (let ord = 2; ord < this.explorer.config.exponent; ord++) {
+        let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
+        ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
+        ra = rt;
+      }
+      r = qdAdd(ra, cr);
+      j = qdAdd(ja, cj);
+      result.push(r[0], r[1], j[0], j[1]);
     }
     return result;
   }
-  if (nn.length <= k) return;
-  let n = nn[k];
-  let ctx = board(k).getContext('2d');
-  for (let m = 0; m < dims2; ++m) {
-    let x = m % dims;
-    let y = (m - x) / dims;
-    ctx.fillStyle = fastcolor(n[m]);
-    ctx.fillRect(x, y, 1, 1);
+
+  figureperiod(i) {
+    // Reverse the computation that was done for exponential backoff.
+    let head = i, tail = 1;
+    while (head > tail) { head >>= 1; tail <<= 1; }
+    return i - (head * tail) + 1;
+  }
+
+  showseq(k, seq, color) {
+    if (k >= this.explorer.grid.boards.length) { return; }
+    let ctx = this.explorer.grid.overlay(k).getContext('2d');
+    ctx.fillStyle = color;
+    let [s, cr, cj] = this.explorer.grid.boards[k].sizes;
+    for (let i = 0; i < seq.length; i += 4) {
+      let r = [seq[i], seq[i+1]];
+      let j = [seq[i+2], seq[i+3]];
+      let x = (qdSub(r, cr)[0] / s + 0.5) * this.explorer.config.dims;
+      let y = (qdSub(cj, j)[0] / s + 0.5) * this.explorer.config.dims;
+      if (x >= 0 && y >= 0 && x < this.explorer.config.dims && y < this.explorer.config.dims) {
+        ctx.beginPath();
+        ctx.arc(x, y, 1 * this.explorer.config.pixelRatio, 0, 2 * Math.PI, false);
+        ctx.fill();
+      }
+    }
   }
 }
 
-function drawall() {
-  for (let k = 0; k < nn.length; ++k) {
-    draw(k);
+class MandelbrotExplorer {
+  constructor() {
+    this.config = new Config();
+    this.grid = new Grid(this.config);
+    this.urlHandler = new URLHandler(this.config, this.grid);
+    this.eventHandler = new EventHandler(this);
+    this.movieMode = new MovieMode(this);
+    this.scheduler = new Scheduler(this);
+    this.orbitComputer = new OrbitComputer(this);
+    this.movieContainer = document.getElementById('movie');
+  }
+
+  start() {
+    this.config.initSizes();
+    let startState = this.urlHandler.parseUrl();
+    this.grid.updateLayout(startState);
+    this.eventHandler.setup();
+    this.scheduler.start();
+  }
+
+  cycleUnknownColor() {
+    let ind = (this.config.ukcs.indexOf(this.config.unknowncolor) + 1) % this.config.ukcs.length;
+    this.config.unknowncolor = this.config.ukcs[ind];
+    for (let k = 0; k < this.grid.boards.length; ++k) {
+      this.grid.boards[k].drawcolor(this.grid.canvas(k).getContext('2d'), 0);
+    }
+  }
+
+  zoomInAtCurrentPosition() {
+    let k = this.grid.boards.length - 1;
+    if (this.grid.boards[k].di == 0) { return; }
+    let osize = this.grid.boards[k].sizes[0];
+    let ore = this.grid.boards[k].sizes[1];
+    let oim = this.grid.boards[k].sizes[2];
+    let rre = 0.5;
+    if (k == 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
+      // Myreberg / Feigenbaum point, https://oeis.org/A218453
+      // qdParse('-1.40115518909205060052382678789386129222630')
+      ore = [-1.4011551890920506, 1.196330130384937e-17];
+      rre = (ore[0] - this.grid.boards[0].sizes[1][0]) / this.grid.boards[0].sizes[0] + 0.5;
+    }
+    this.grid.showrect(k, rre, 0.5, this.config.zoomfactor);
+    let nsize = osize / this.config.zoomfactor;
+    let newBoard = new Board(k + 1, nsize, ore, oim, this.config);
+    newBoard.initcanvas(nsize, ore, oim);
+    this.grid.boards.push(newBoard);
+    this.grid.makecanvas(k + 1);
+    this.grid.removeboardspast(k + 1);
+    this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
+    this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
+    newBoard.draw(this.grid.canvas(k + 1).getContext('2d'));
+    this.grid.updateurl();
   }
 }
 
-function makeboard(k) {
-  let gd = grid();
-  while (gridboards <= k) {
-    let dd = document.createElement('div');
-    dd.id = 'b_' + gridboards;
-    dd.innerHTML = boardstring(gridboards);
-    dd.className = 'hidemarks';
-    gd.appendChild(dd);
-    gridboards += 1;
-  }
-}
-
+// Utility functions
 function formatScale(scale) {
   if (scale < 10) {
     return +scale.toFixed(1) + 'x';
@@ -868,337 +1563,13 @@ function formatScale(scale) {
   }
 }
 
-function boardstring(k) {
-  let factor = 3.0 / (k < sizes.length ? sizes[k][0] :
-    firstsize / Math.pow(zoomfactor, k));
-  factor = formatScale(factor);
-  return '<canvas width=' + dims + ' height=' + dims +
-         ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
-         '</canvas>' +
-         '<div class="closebox"></div>' +
-         '<div class="rect"></div>' +
-         '<canvas class=overlay width=' + dims + ' height=' + dims +
-         ' style="height:' + cssDims + 'px;width:' + cssDims + 'px;">' +
-         '</canvas>' +
-         '<a class="zoomnum" target="_blank" href="?grid=1">' + factor +
-         '</a>';
-}
-
-function progress() {
-  if (computationPaused) {
-    setTimeout(progress, 100); // Check less frequently when paused
-    return;
-  }
-  try {
-    // Contribute to every unfinished cell
-    let pri = Array.from(sizes.keys())
-      .filter(k => un[k] > 0 && !hiddenboard(k));
-    if (steps % 2) {
-      // Prioritize most unfinished half the time.
-      pri = pri.sort((a, b) => un[b] - un[a]);
-    } else {
-      // Prioritize the most recent half the time.
-      pri = pri.reverse();
-      // Allow the user to prioritize by pointing the mouse.
-      if (focusk != null) {
-        pri.sort((a, b) => (a === focusk && -1) || (b === focusk && 1) || 0);
-      }
-    }
-    // Exponential scheduling policy
-    let shift = Math.floor(steps++ / 2);
-    let p = 0;
-    while (1 << p & shift) { p += 1; }
-    let k = pri[Math.min(p, pri.length)];
-    // Do at least 1000 pixel-steps.
-    let u = un[k];
-    for (let amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
-      iterate(k);
-      if (un[k] < u) {
-        drawcolor(k, it[k]);
-        u = un[k];
-      }
-    }
-  } catch (e) {
-    console.log(e);
-  }
-  setTimeout(progress, 0);
-}
-
-function absoluteLeft(target) {
-  let left = 0;
-  while (target) {
-    left += target.offsetLeft;
-    target = target.offsetParent;
-  }
-  return left;
-}
-
-function absoluteTop(target) {
-  let top = 0;
-  while (target) {
-    top += target.offsetTop;
-    target = target.offsetParent;
-  }
-  return top;
-}
-
-function eventtarget(e) {
-  let target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
-  while (target) {
-    if (target.id) { return target; }
-    target = target.parentNode;
-  }
-  return null;
-}
-
-function pointInTarget(ev, target) {
-  let se = document.scrollingElement || document.body;
-  let x = (ev.clientX + se.scrollLeft - absoluteLeft(target)) * pixelRatio;
-  let y = (ev.clientY + se.scrollTop - absoluteTop(target)) * pixelRatio;
-  return { x: Math.round(x), y: Math.round(y) };
-}
-
-document.onmousedown = function(e) {
-  let target = eventtarget(e);
-  if (movieMode && (target.id != 'moviescale')) { toggleMovieMode(); }
-  if (e.button != 0) { return true; }
-  if (target) {
-    let m = target.id.match(/b_(\d+)/);
-    if (e.target.tagName == 'A') {
-      if (m) { e.target.href = bigurl(m[1]); }
-      return true;
-    }
-    if (m) {
-      let p = pointInTarget(e, target);
-      cellclick(parseInt(m[1]), p.x + p.y * dims);
-      return false;
-    }
-  }
-  return true;
-}
-
-let orbitinterval = null;
-let orbittimeout = null;
-document.onmousemove = function(e) {
-  let target = eventtarget(e);
-  if (orbitinterval) {
-    clearInterval(orbitinterval);
-    orbitinterval = null;
-  }
-  if (orbittimeout) {
-    clearTimeout(orbittimeout);
-    orbittimeout= null;
-  }
-  if (target) {
-    let m = target.id.match(/b_(\d+)/);
-    if (m) {
-      let p = pointInTarget(e, target);
-      let k = parseInt(m[1]);
-      let j = p.x + p.y * dims;
-      function updateorbit() {
-        let orb = [];
-        let cyc = [];
-        let ongoing = true;
-        target.setAttribute('title', '');
-        if (cc[k] && j >= 0 && j * 2 < cc[k].length) {
-          // Convert to quad precision if necessary
-          let cr = Array.isArray(cc[k][j * 2]) ? cc[k][j * 2] : [cc[k][j * 2], 0];
-          let cj = Array.isArray(cc[k][j * 2 + 1]) ? cc[k][j * 2 + 1] : [cc[k][j * 2 + 1], 0];
-          let title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
-          let len = Math.min(Math.max(pp[k][j], nn[k][j]) || Math.max(it[k], 8), orbitlength);
-          orb = visorbit(j, cc[k], len);
-          if (nn[k][j]) {
-            ongoing = false;
-            if (nn[k][j] > 0) {
-              title += '\ndiverges in ' + nn[k][j];
-            } else {
-              let period = figureperiod(pp[k][j]);
-              if (period == 1) {
-                title += '\nconverges after ' + pp[k][j];
-              } else {
-                title += '\nafter ' + pp[k][j] + ', period ' + figureperiod(pp[k][j]);
-              }
-              cyc = viscycle(j, zz[k], cc[k], pp[k]);
-            }
-          }
-          target.setAttribute('title', title);
-        }
-        clearseq(k);
-        showseq(k, orb, 'yellow');
-        showseq(k, cyc, 'red');
-        function orbitonallboards() {
-          for (let i = 0; i < sizes.length; i++) {
-            if (!hiddenboard(i) && i != k) {
-              clearseq(i);
-              showseq(i, orb, 'yellow');
-              showseq(i, cyc, 'red');
-            }
-          }
-        }
-        orbittimeout = setTimeout(orbitonallboards, 1);
-        return ongoing;
-      }
-      if (updateorbit()) {
-        orbitinterval = setInterval(updateorbit, 251);
-      }
-    }
-  }
-}
-
-document.body.onkeydown = function(e) {
-  if (movieMode &&
-      ['Shift', 'Alt', 'Control', 'Meta', 'CapsLock'].indexOf(e.key) == -1) {
-    toggleMovieMode();
-    return;
-  }
-  // Pressing backspace will delete the last zoom.
-  if (e.key == 'Backspace' && sizes.length > 1 && !currentUpdateProcess) {
-    let k = sizes.length - 1;
-    truncateboards(k);
-    removeboardspast(k - 1);
-    truncatehiddenboards();
-    updateurl();
-  }
-  // Pressing C will center all the zoom positions.
-  if (e.key == 'c' && sizes.length > 1) {
-    let k = sizes.length - 1;
-    let ore = sizes[k][1];
-    let oim = sizes[k][2];
-    showrect(0, 0.5 + (ore - sizes[0][1]) / sizes[0][0],
-                0.5 - (oim - sizes[0][2]) / sizes[0][0],
-                sizes[0][0] / sizes[1][0]);
-    for (k = 1; k < sizes.length - 1; k += 1) {
-      showrect(k, 0.5, 0.5, sizes[k][0] / sizes[k+1][0]);
-      if (qdCompare(sizes[k][1], ore) || qdCompare(sizes[k][2], oim)) {
-        clearboard(k);
-        initboard(k, sizes[k][0], ore, oim);
-        drawcolor(k, 1);
-        clearseq(k);
-      }
-    }
-    updateurl();
-  }
-  // Pressing U will cycle through the uncomputed colors.
-  if (e.key == 'u') {
-    unknowncolor = ukcs[(ukcs.indexOf(unknowncolor) + 1) % ukcs.length];
-    for (let k = 0; k < nn.length; ++k) {
-      drawcolor(k, 0);
-    }
-  }
-  // Pressing I will zoom in at the same position.
-  if (e.key == 'i') {
-    let k = sizes.length - 1;
-    if (di[k] == 0) { return; }
-    let osize = sizes[k][0];
-    let ore = sizes[k][1];
-    let oim = sizes[k][2];
-    let rre = 0.5;
-    if (k == 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
-      // Myreberg / Feigenbaum point, https://oeis.org/A218453
-      // qdParse('-1.40115518909205060052382678789386129222630')
-      ore = [-1.4011551890920506, 1.196330130384937e-17];
-      rre = (ore[0] - sizes[0][1][0]) / sizes[0][0] + 0.5;
-    }
-    showrect(k, rre, 0.5, zoomfactor);
-    nsize = osize / zoomfactor;
-    initboard(k + 1, nsize, ore, oim);
-    makeboard(k + 1);
-    removeboardspast(k + 1);
-    board(k + 1).parentElement.className = 'hidemarks';
-    board(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
-    draw(k + 1);
-    updateurl();
-  }
-  // Pressing ? will show the help window
-  if (e.key == '?') {
-    document.getElementById('text').style.display = 'block';
-  }
-  // G reduces the grid column and H increases
-  if (e.key === 'g' && gridcols > 1) {
-    gridcols -= 1;
-    updateGridLayout();
-  }
-  if (e.key === 'h') {
-    gridcols += 1;
-    updateGridLayout();
-  }
-  // R will restore any hidden boards
-  if (e.key === 'r') {
-    showallboards();
-    updateurl();
-  }
-  // Increase the exponent
-  if (e.key === 'x') {
-    updateExponent(exponent + 1);
-  }
-  // Decrease the exponent
-  if (e.key === 'z') {
-    updateExponent(exponent - 1);
-  }
-  // Increase the pixel ratio
-  if (e.key === 'f') {
-    pixelRatio += 1;
-    updateGridLayout();
-  }
-  // Increase the pixel ratio
-  if (e.key === 'd' && pixelRatio > 1) {
-    pixelRatio -= 1;
-    updateGridLayout();
-  }
-  // Toggle movie mode
-  if (e.key === 'm' && sizes.length > 1) {
-    toggleMovieMode();
-  }
-}
-
-document.body.onmouseover = function(e) {
-  document.body.className = 'hidemarks';
-  focusk = null;
-  let target = eventtarget(e);
-  if (target) {
-    let m = target.id.match(/b_(\d+)/);
-    if (m) {
-      k = parseInt(m[1]);
-      focusk = k;
-      if (nn.length <= k) return;
-      for (let i = 0; i < gridboards; ++i) {
-        board(i).parentElement.className = i < k ? '' : 'hidemarks';
-      }
-      document.body.className = '';
-      let overtarget = e.target;
-      function update_progress() {
-        if (overtarget.tagName == 'A') {
-          overtarget.href = bigurl(k)
-          overtarget.setAttribute('status', ('center at ' +
-              formatcomplex(k, sizes[k][1], sizes[k][2]).replaceAll('-', '\u2212') +
-              '\n' + Math.floor(1000 * (1.0 - un[k] / dims2))/10.0  + '% done ' +
-              'after ' + it[k] + ' iters'));
-        }
-        if (overtarget.matches(':hover')) {
-          setTimeout(update_progress, 100);
-        }
-      }
-      update_progress();
-    } else if (target.id.startsWith('movie') && (!e.target || e.target.id != 'movie')) {
-      document.body.className = '';
-    }
-  }
-}
-
-function figureperiod(i) {
-  // Reverse the computation that was done for exponential backoff.
-  let head = i, tail = 1;
-  while (head > tail) { head >>= 1; tail <<= 1; }
-  return i - (head * tail) + 1;
-}
-
-function formatscale(s) {
+function formatSize(s) {
   return parseFloat(s.toPrecision(
               Math.max(2, -Math.ceil(Math.log(s)/2.5))));
 }
 
 function formatcomplex(k, re, im) {
-  let pix = sizes[k][0] / dims;
+  let pix = explorer.grid.boards[k].sizes[0] / explorer.config.dims;
   let digits = 0;
   while (pix < 1.0) {
     pix *= 10;
@@ -1211,453 +1582,6 @@ function formatcomplex(k, re, im) {
   let rs = re[0] < 0.0 ? '-' : '+';
   let is = im[0] < 0.0 ? '-' : '+';
   return rs + rd + is + id + 'i';
-}
-
-function removeboardspast(k) {
-  if (gridboards > k) {
-    for (let j = k + 1; j < gridboards; ++j) {
-      board(j).parentElement.remove();
-    }
-    gridboards = k + 1;
-  }
-}
-
-function showboard(k) {
-  board(k).parentElement.style.display = '';
-}
-
-function hideboard(k) {
-  board(k).parentElement.style.display = 'none';
-}
-
-function showallboards() {
-  for (let j = 0; j < gridboards; ++j) {
-    showboard(j);
-  }
-  updateZoomRectangles();
-}
-
-function hiddenboard(k) {
-  let b = board(k);
-  return b && b.parentElement.style.display == 'none';
-}
-
-function truncatehiddenboards(k) {
-  let j = gridboards - 1;
-  for (; j > 0; j--) {
-    if (!hiddenboard(j)) {
-      break;
-    }
-  }
-  truncateboards(j + 1);
-  removeboardspast(j);
-  if (j == 0) {
-    showboard(j);
-  }
-}
-
-function grid() {
-  return document.getElementById('grid');
-}
-
-function board(k) {
-  let b = document.getElementById("b_" + k);
-  return b && b.firstElementChild;
-}
-
-function closebutton(k) {
-  return board(k).nextElementSibling;
-}
-
-function rect(k) {
-  return closebutton(k).nextElementSibling;
-}
-
-function overlay(k) {
-  return rect(k).nextElementSibling;
-}
-
-function cellclick(k, m) {
-  // Only accept clicks on cells with something computed in them.
-  if (k >= sizes.length || di[k] <= 0 || currentUpdateProcess) return;
-  truncateboards(k + 2);
-  removeboardspast(k + 1);
-  setTimeout(function() { cellclickdelay(k, m); }, 1);
-}
-
-function cellclickdelay(k, m) {
-  if (k >= sizes.length || currentUpdateProcess) return;
-  let osize = sizes[k][0];
-  let ore = sizes[k][1];
-  let oim = sizes[k][2];
-  cx = m % dims;
-  cy = (m - cx) / dims;
-  removeboardspast(k + 1);
-  showrect(k, cx / dims, cy / dims, zoomfactor);
-  truncateboards(k + 2);
-  // Do slow parts after a moment.
-  setTimeout(function() {
-    nsize = osize / zoomfactor;
-    nre = qdAdd(ore, [((cx / dims) - 0.5) * osize, 0]);
-    nim = qdAdd(oim, [(0.5 - (cy / dims)) * osize, 0]);
-    initboard(k + 1, nsize, nre, nim);
-    makeboard(k + 1);
-    board(k + 1).parentElement.className = 'hidemarks';
-    board(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
-    draw(k + 1);
-    showboard(k + 1);
-    updateurl();
-  }, 10);
-}
-
-function showrect(k, x, y, zf) {
-  let s = rect(k).style;
-  zf = Math.min(125, zf); // Make rectangle visible if it is tiny.
-  board(k).parentElement.className = '';
-  s.top = (y * cssDims - cssDims / 2 / zf) + 'px';
-  s.left = (x * cssDims - cssDims / 2 / zf) + 'px';
-  s.width = (cssDims / zf) + 'px';
-  s.height = (cssDims / zf) + 'px';
-}
-
-function updateurl() {
-  if (history.replaceState) {
-    history.replaceState(null, '', currenturl());
-  }
-}
-
-function currenturl() {
-  let state = currentGridState();
-  let compactc = '';
-  let commas = '';
-  let prev = [firstr, firstj];
-  let prevj = -1;
-  for (let j = 0; j <= state.sizes.length; j++) {
-    if (j < state.sizes.length &&
-        !qdCompare(state.sizes[j][1], prev[0]) &&
-        !qdCompare(state.sizes[j][2], prev[1])) {
-      commas += ',';
-    } else {
-      if (prevj >= 0) {
-        compactc += formatcomplex(j - 1, state.sizes[prevj][1], state.sizes[prevj][2]) + ',';
-      }
-      compactc += commas;
-      if (j < state.sizes.length) {
-        commas = '';
-        prev = [state.sizes[j][1], state.sizes[j][2]];
-        prevj = j;
-      }
-    }
-  }
-  compactc = compactc.slice(0, -1);
-  let url =
-         (state.sizes[0][0] != 3.0 ? '&s=' + formatscale(sizes[0][0]) : '') +
-         (exponent != 2 ? '&exponent=' + exponent : '') +
-         (compactc.length ? '&c=' + compactc : '') +
-         (gridcols != 3 ? '&grid=' + gridcols : '') +
-         (state.hidden.length ? '&h=' + state.hidden : '') +
-         (pixelRatio != 2 ? '&pixelratio=' + pixelRatio : '');
-  return '?' + url.replace('&', '');
-}
-
-function bigurl(k) {
-  if (k >= sizes.length) return;
-  let osize = sizes[k][0];
-  if (exponent != 2) {
-    osize += '&exponent=' + exponent;
-  }
-  let ore = sizes[k][1];
-  let oim = sizes[k][2];
-  return '?s=' + formatscale(osize) + '&c=' + formatcomplex(k, ore, oim) + '&grid=1';
-}
-
-function removerect(k) {
-  let s = rect(k).style;
-  s.top = s.left = s.width = s.height = '';
-}
-
-let movieCanvas, movieCtx;
-let movieContainer = document.getElementById('movie');
-let movieMode = false;
-let animationFrame = null;
-let computationPaused = false;
-let frameCanvases = [];
-let mediaRecorder;
-let recordedChunks = [];
-let isRecording = false;
-let recordedBlob = null;
-let recordingMimeType = null;
-let recordingMimeTypes = [
-  'video/webm; codecs="vp8"',
-  'video/webm; codecs="avc1.640029"',
-  'video/webm',
-  'video/mp4; codecs="avc1.640029"',
-  'video/mp4',
-];
-
-
-function createMovieCanvas() {
-  movieContainer.innerHTML = '<div>' +
-    `<canvas width=${dims} height=${dims} ` +
-    `style="width:${cssDims}px;height:${cssDims}px"></canvas>` +
-    `<a id="moviescale" class="zoomnum">Rendering...</a></div>`;
-  movieCanvas = movieContainer.firstElementChild.firstElementChild;
-  movieCtx = movieCanvas.getContext('2d');
-  movieCtx.drawImage(board(0), 0, 0);
-}
-
-function removeMovieCanvas() {
-  while (movieContainer.firstChild) {
-    movieContainer.removeChild(movieContainer.firstChild);
-  }
-  movieCanvas = null;
-  movieCtx = null;
-}
-
-function toggleMovieMode() {
-  movieMode = !movieMode;
-  computationPaused = movieMode;
-  if (movieMode) {
-    grid().style.display = 'none';
-    movieContainer.style.display = 'block';
-    createMovieCanvas();
-    movieContainer.scrollIntoView({ behavior: 'smooth' });
-    setTimeout(function() {
-      document.body.className = '';
-      preRenderFrames(function() {
-        startMovieAnimation();
-      });
-    }, 20);
-  } else {
-    grid().style.display = 'block';
-    movieContainer.style.display = 'none';
-    stopMovieAnimation();
-    removeMovieCanvas();
-  }
-}
-
-function preRenderFrames(after) {
-  frameCanvases = [];
-  function queueOneFrame(k, after) {
-    return (function () {
-      document.getElementById('moviescale').textContent =
-        `Rendering ${formatScale(3.0 / sizes[k][0])}`;
-      let canvas1 = null;
-      let canvas2 = null;
-      const n = nn[k];
-      // Render with k-1 palette
-      if (k > 0) {
-        canvas1 = document.createElement('canvas');
-        canvas1.width = canvas1.height = dims;
-        const ctx1 = canvas1.getContext('2d');
-        for (let y = 0; y < dims; y++) {
-          for (let x = 0; x < dims; x++) {
-            const m = y * dims + x;
-            const i = n[m];
-            ctx1.fillStyle = makecolor(k - 1, i);
-            ctx1.fillRect(x, y, 1, 1);
-          }
-        }
-        if (unknowncolor != '#000') {
-          ctx1.strokeStyle = 'yellow';
-          ctx1.lineWidth = pixelRatio * zoomfactor;
-          ctx1.strokeRect(0, 0, dims, dims);
-        }
-      }
-      // Render with k+1 palette
-      if (k < sizes.length - 1) {
-        canvas2 = document.createElement('canvas');
-        canvas2.width = canvas2.height = dims;
-        const ctx2 = canvas2.getContext('2d');
-        for (let y = 0; y < dims; y++) {
-          for (let x = 0; x < dims; x++) {
-            const m = y * dims + x;
-            const i = n[m];
-            ctx2.fillStyle = makecolor(k + 1, i);
-            ctx2.fillRect(x, y, 1, 1);
-          }
-        }
-      }
-      frameCanvases.push({ prev: canvas1, next: canvas2 });
-      setTimeout(after, 1);
-    });
-  }
-  for (let k = sizes.length - 1; k >= 0; k--) {
-    after = queueOneFrame(k, after);
-  }
-  setTimeout(after, 0);
-}
-
-function startMovieAnimation() {
-  let frame = 0;
-  let framesteps = 300;
-  let endpause = 180;
-  let endrecord = 60;
-  const totalFrames = (sizes.length - 1) * framesteps;
-
-  const scaleElement = document.getElementById('moviescale');
-  scaleElement.removeAttribute('href');
-
-  if (!isRecording) {
-    recordedBlob = null;
-    isRecording = true;
-    startRecording();
-  }
-
-  function animate() {
-    const kk = Math.min(frame, totalFrames) / framesteps;
-    drawMovieFrame(kk);
-    frame = (frame + 1) % (totalFrames + endpause);
-
-    if (isRecording && frame > totalFrames + endrecord) {
-      stopRecording();
-      isRecording = false;
-    }
-
-    animationFrame = requestAnimationFrame(animate);
-  }
-  animate();
-}
-
-function stopMovieAnimation() {
-  if (animationFrame) {
-    cancelAnimationFrame(animationFrame);
-    animationFrame = null;
-  }
-  mp4Blob = null;
-}
-
-function startRecording() {
-  const stream = movieCanvas.captureStream(30); // 30 FPS
-
-  recordingMimeType = null;
-  recordedChunks = [];
-  for (let tryType of recordingMimeTypes) {
-     if (MediaRecorder.isTypeSupported(tryType)) {
-        recordingMimeType = tryType;
-        break;
-     }
-  }
-  if (recordingMimeType == null) {
-    console.error('Neither MP4 nor WebM recording is supported');
-    return;
-  }
-
-  mediaRecorder = new MediaRecorder(stream, {
-    mimeType: recordingMimeType,
-    videoBitsPerSecond: 10000000,
-  });
-
-  mediaRecorder.ondataavailable = (event) => {
-    if (event.data.size > 0) {
-      recordedChunks.push(event.data);
-    }
-  };
-
-  mediaRecorder.onstop = () => {
-    recordedBlob = new Blob(recordedChunks, { type: recordingMimeType });
-    recordedChunks = [];
-    updateDownloadLink();
-  };
-
-  mediaRecorder.start(1000); // one-second blobs
-}
-
-function stopRecording() {
-  mediaRecorder.stop();
-}
-
-function updateDownloadLink() {
-  const scaleElement = document.getElementById('moviescale');
-  const extension = (recordingMimeType.includes('mp4') ? 'mp4' : 'webm');
-  scaleElement.textContent = 'Download ' + extension;
-  scaleElement.href = URL.createObjectURL(recordedBlob);
-  const k = sizes.length - 1;
-  scaleElement.download = 'mandelbrot' +
-              formatcomplex(k, sizes[k][1], sizes[k][2]) +
-              '-' + it[k] +
-              '.' + extension;
-}
-
-function drawMovieFrame(kk) {
-  if (movieCtx == null) { return; }
-  const k = Math.floor(kk);
-  const t = kk - k;
-  const sourceSize = sizes[k][0];
-  const targetSize = k+1 < sizes.length ? sizes[k+1][0] : sourceSize;
-  const zoomRatio = targetSize / sourceSize;
-
-  // Use zoom ratio for exponential interpolation
-  const mulT = Math.pow(zoomRatio, t);
-  const expT = (zoomRatio == 1.0 ? t : (mulT - 1) / (zoomRatio - 1));
-  const colorT = expT * expT;
-  const interpolatedSize = sourceSize * mulT;
-
-  // Use spline interpolation for center coordinates
-  const sourceCenter = [sizes[k][1], sizes[k][2]];
-  const targetCenter = k+1 < sizes.length ?
-             [sizes[k+1][1], sizes[k+1][2]] : sourceCenter;
-
-  const p0 = k > 0 ? [sizes[k-1][1], sizes[k-1][2]] : sourceCenter;
-  const p1 = sourceCenter;
-  const p2 = targetCenter
-  const p3 = k+2 < sizes.length ? [sizes[k+2][1], sizes[k+2][2]] : targetCenter;
-  const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
-  // const interpolatedCenter = [qdAdd(qdScale(p1[0], 1-t), qdScale(p2[0], t)),
-  //                             qdAdd(qdScale(p1[1], 1-t), qdScale(p2[1], t))];
-
-  // Clear the movie canvas
-  // movieCtx.clearRect(0, 0, dims, dims);
-  movieCtx.fillStyle = makecolor(k, 1);
-  movieCtx.fillRect(0, 0, dims, dims);
-
-  // Draw the current frame
-  const scale = sourceSize / interpolatedSize;
-  const offsetX = qdMul(qdSub(interpolatedCenter[0], sourceCenter[0]),
-                        [dims / sourceSize, 0])[0];
-  const offsetY = qdMul(qdSub(sourceCenter[1], interpolatedCenter[1]),
-                        [dims / sourceSize, 0])[0];
-  movieCtx.save();
-  movieCtx.imageSmoothingEnabled = true;
-  movieCtx.imageSmoothingQuality = 'high';
-  movieCtx.translate(dims / 2, dims / 2);
-  movieCtx.scale(scale, scale);
-  movieCtx.translate(-dims / 2 - offsetX, -dims / 2 - offsetY);
-  movieCtx.globalAlpha = 1;
-  movieCtx.drawImage(board(k), 0, 0);
-
-  // Blend the color palette of the next frame
-  if (frameCanvases[k].next) {
-    movieCtx.globalAlpha = colorT;
-    movieCtx.drawImage(frameCanvases[k].next, 0, 0);
-  }
-  movieCtx.restore();
-
-  // Draw the next frame
-  if (k < sizes.length - 1) {
-    const targetScale = targetSize / interpolatedSize;
-    const targetOffsetX = qdMul(qdSub(interpolatedCenter[0], targetCenter[0]),
-                                [dims / targetSize, 0])[0];
-    const targetOffsetY = qdMul(qdSub(targetCenter[1], interpolatedCenter[1]),
-                                [dims / targetSize, 0])[0];
-    movieCtx.save();
-    movieCtx.imageSmoothingEnabled = true;
-    movieCtx.imageSmoothingQuality = 'high';
-    movieCtx.translate(dims / 2, dims / 2);
-    movieCtx.scale(targetScale, targetScale);
-    movieCtx.translate(-dims / 2 - targetOffsetX, -dims / 2 - targetOffsetY);
-    movieCtx.globalAlpha = 1;
-    movieCtx.drawImage(frameCanvases[k + 1].prev, 0, 0);
-    movieCtx.globalAlpha = colorT;
-    movieCtx.drawImage(board(k + 1), 0, 0);
-    movieCtx.restore();
-  }
-
-  // Update scale text
-  if (!recordedBlob) {
-    const currentScale = (3.0 / firstsize) * (Math.pow(zoomfactor, kk));
-    document.getElementById('moviescale').textContent = formatScale(currentScale);
-  }
 }
 
 function catmullRom1D(p0, p1, p2, p3, t) {
@@ -1682,28 +1606,15 @@ function catmullRomSpline(p0, p1, p2, p3, t) {
   ];
 }
 
-document.body.onmousedown = function(e) {
-  if (e.target.className == 'closebox') {
-    e.stopPropagation();
-  }
-}
-document.body.onclick = function(e) {
-  if (e.target.className == 'closebox' && !currentUpdateProcess) {
-    e.target.parentElement.style.display = 'none';
-    truncatehiddenboards();
-    updateZoomRectangles();
-    updateurl();
-  }
-}
+// Start the application
+const explorer = new MandelbrotExplorer();
+explorer.start();
 
-if (dims > 800) {
-  makeboard(0);
-  setTimeout(start, 100);
-} else{
-  setTimeout(start, 1);
-}
+//////////// quad-precision (qd, double double) utilities ///////////
 
-//////////// quad-precision (qd, double double), aided by claude.ai ///////////
+function toQd(x) {
+  return Array.isArray(x) ? x : [x, 0];
+}
 
 function fast2Sum(a, b) {
   let s = a + b;
@@ -1811,7 +1722,7 @@ function qdReciprocal(b, iters = 2) {
   return x;
 }
 
-// Complex addition in quad precision
+// Complex operations in quad precision
 function qdcAdd(a, b) {
   let realSum = qdAdd([a[0], a[1]], [b[0], b[1]]);
   let imagSum = qdAdd([a[2], a[3]], [b[2], b[3]]);
