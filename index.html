@@ -129,7 +129,6 @@ class Config {
     this.firstr = [-0.5, 0];
     this.firstj = [0.0, 0];
     this.firstsize = 3.0;
-    this.orbitlength = 100000; // show very long orbits
     this.pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
     this.zoomfactor = 5;
     this.cssDims = 0;
@@ -1693,11 +1692,14 @@ class OrbitComputer {
   }
 
   updateOrbit(k, j, target) {
-    this.clearPreviousOrbit();
+    this.stopOrbitProcess();
+    const orb = [];
 
     const updateorbit = () => {
-      const [orb, cyc, ongoing, title] = this.calculateOrbit(k, j);
-      this.displayOrbit(k, orb, cyc, target, title);
+      const [neworb, cyc, ongoing, title] = this.calculateOrbit(k, j, orb);
+      this.displayOrbit(k, neworb, cyc, target, title, orb.length > 0);
+      orb.push(...neworb);
+      if (!ongoing) { this.stopOrbitInterval(); }
       return ongoing;
     };
 
@@ -1706,30 +1708,44 @@ class OrbitComputer {
     }
   }
 
-  clearPreviousOrbit() {
+  stopOrbitInterval() {
     if (this.orbitinterval) {
       clearInterval(this.orbitinterval);
       this.orbitinterval = null;
     }
+  }
+
+  stopOrbitProcess() {
+    this.stopOrbitInterval();
     if (this.orbittimeout) {
       clearTimeout(this.orbittimeout);
       this.orbittimeout = null;
     }
   }
 
-  calculateOrbit(k, j) {
-    let orb = [];
+  calculateOrbit(k, j, oldOrb) {
     let cyc = [];
+    let orb = [];
     let ongoing = false;
     let title = '';
     let board = this.explorer.grid.boards[k];
 
     if (board && j >= 0 && j < this.explorer.config.dims2) {
-      let [cr, cj] = board.currentc(j);
-      title = 'c=' + formatcomplex(k, cr, cj).replaceAll('-', '\u2212');
-      let len = Math.min(Math.max(board.pp[j], board.nn[j]) || Math.max(board.it, 8),
-                        this.explorer.config.orbitlength);
-      orb = this.visorbit(board, j, len);
+      let c = board.currentc(j);
+      let z = board.currentz(j);
+
+      // Calculate a further orbit beyond the old orbit.
+      let whole = Math.min(Math.max(board.pp[j], board.nn[j]) || Math.max(board.it, 8));
+      let more = Math.min(whole - oldOrb.length / 4, 1000);
+      if (oldOrb.length) {
+        let s = oldOrb.slice(oldOrb.length - 4);
+        orb = this.suborbit([[s[0], s[1]], [s[2], s[3]]], c, more + 1);
+        orb.splice(0, 4);
+      } else {
+        orb = this.suborbit(c, c, more + 1);
+      }
+      // Calculate a cycle and any messages
+      title = 'c=' + formatcomplex(k, ...c).replaceAll('-', '\u2212');
       if (board.nn[j]) {
         if (board.nn[j] > 0) {
           title += '\ndiverges in ' + board.nn[j];
@@ -1740,41 +1756,36 @@ class OrbitComputer {
           } else {
             title += '\nafter ' + board.pp[j] + ', period ' + period;
           }
-          cyc = this.viscycle(board, j);
+          let clen = this.figureperiod(board.pp[j]);
+          cyc = this.suborbit(z, c, clen);
         }
       } else {
         ongoing = true;
       }
     }
-
     return [orb, cyc, ongoing, title];
   }
 
-  displayOrbit(k, orb, cyc, target, title) {
+  displayOrbit(k, orb, cyc, target, title, preserve) {
     target.setAttribute('title', title);
-    this.explorer.grid.clearseq(k);
+    if (!preserve) {
+      this.explorer.grid.clearseq(k);
+    }
     this.showseq(k, orb, 'yellow');
     this.showseq(k, cyc, 'red');
 
     const orbitonallboards = () => {
       for (let i = 0; i < this.explorer.grid.boards.length; i++) {
         if (!this.explorer.grid.hiddencanvas(i) && i != k) {
-          this.explorer.grid.clearseq(i);
+          if (!preserve) {
+            this.explorer.grid.clearseq(i);
+          }
           this.showseq(i, orb, 'yellow');
           this.showseq(i, cyc, 'red');
         }
       }
     };
     this.orbittimeout = setTimeout(orbitonallboards, 1);
-  }
-
-  viscycle(board, m) {
-    let len = this.figureperiod(board.pp[m]);
-    return this.suborbit(board.currentz(m), board.currentc(m), len);
-  }
-
-  visorbit(board, m, len) {
-    return this.suborbit(board.currentc(m), board.currentc(m), len);
   }
 
   suborbit(z, c, len) {
