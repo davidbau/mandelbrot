@@ -183,7 +183,7 @@ class Board {
     this.sizes = [size, toQd(re), toQd(im)];
   }
 
-  initcanvas(size, re, im) {
+  initboard(size, re, im) {
     this.it = 1;
     let c = this.cc;
     let n = this.nn;
@@ -191,35 +191,18 @@ class Board {
     let useQuad = (size / this.config.dims) < 1e-15;
     for (let y = 0; y < this.config.dims; y++) {
       let jFrac = (0.5 - (y / this.config.dims));
-      let j = (useQuad
-        ? qdAdd(toQd(im), qdMul(toQd(jFrac), toQd(size)))
-        : jFrac * size + im[0]);
+      let j = jFrac * size + im[0];
       for (let x = 0; x < this.config.dims; x++) {
         let rFrac = ((x / this.config.dims) - 0.5);
-        if (useQuad) {
-          let r = qdAdd(toQd(re), qdMul(toQd(rFrac), toQd(size)));
-          c.push(r, j);
-          let r2j2 = qdAdd(qdMul(r, r), qdMul(j, j));
-          if (qdGt(r2j2, 4)) {
-            n.push(1);
-            p.push(0);
-            this.un -= 1;
-          } else {
-            n.push(0);
-            p.push(0);
-          }
+        let r = rFrac * size + re[0];
+        c.push(r, j);
+        if (r * r + j * j > 4) {
+          n.push(1);
+          this.un -= 1;
         } else {
-          let r = rFrac * size + re[0];
-          c.push(r, j);
-          if (r * r + j * j > 4) {
-            n.push(1);
-            p.push(0);
-            this.un -= 1;
-          } else {
-            n.push(0);
-            p.push(0);
-          }
+          n.push(0);
         }
+        p.push(0);
       }
     }
     this.zz = c.slice();
@@ -307,60 +290,29 @@ class Board {
     if (n[m]) return 0;
     let m2 = m * 2;
     let m2i = m2 + 1;
-    let useQuad = Array.isArray(z[0]);
-
     let r, j, r2, j2, ra, ja, rb, jb, db;
-
-    if (useQuad) {
-      r = z[m2]
-      j = z[m2i]
-
-      let r2 = qdSquare(r);
-      let j2 = qdSquare(j);
-      if (qdGt(qdAdd(r2, j2), 4)) {
-        n[m] = i;
-        return 1;
-      }
-      ra = qdSub(r2, j2);
-      ja = qdMul(qdDouble(r), j);
-      for (let ord = 2; ord < this.config.exponent; ord++) {
-        let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
-        ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
-        ra = rt;
-      }
-      ra = qdAdd(ra, c[m2]);
-      ja = qdAdd(ja, c[m2i]);
-      z[m2] = ra;
-      z[m2i] = ja;
-      rb = b[m2];
-      jb = b[m2i];
-      db = qdAdd(qdAbs(qdSub(rb, ra)), qdAbs(qdSub(jb, ja)));
-      db = db[0] + db[1];
-    } else {
-      r = z[m2];
-      j = z[m2i];
-      r2 = r * r;
-      j2 = j * j;
-      if (r2 + j2 > 4.0) {
-        n[m] = i;
-        return 1;
-      }
-      ra = r2 - j2;
-      ja = 2 * r * j;
-      for (let ord = 2; ord < this.config.exponent; ord++) {
-        let rt = r * ra - j * ja;
-        ja = r * ja + j * ra;
-        ra = rt;
-      }
-      ra += c[m2];
-      ja += c[m2i];
-      z[m2] = ra;
-      z[m2i] = ja;
-      rb = b[m2];
-      jb = b[m2i];
-      db = Math.abs(rb - ra) + Math.abs(jb - ja);
+    r = z[m2];
+    j = z[m2i];
+    r2 = r * r;
+    j2 = j * j;
+    if (r2 + j2 > 4.0) {
+      n[m] = i;
+      return 1;
     }
-
+    ra = r2 - j2;
+    ja = 2 * r * j;
+    for (let ord = 2; ord < this.config.exponent; ord++) {
+      let rt = r * ra - j * ja;
+      ja = r * ja + j * ra;
+      ra = rt;
+    }
+    ra += c[m2];
+    ja += c[m2i];
+    z[m2] = ra;
+    z[m2i] = ja;
+    rb = b[m2];
+    jb = b[m2i];
+    db = Math.abs(rb - ra) + Math.abs(jb - ja);
     if (db <= epsilon2) {
       if (!p[m]) { p[m] = i; }
       if (db <= epsilon) {
@@ -444,6 +396,298 @@ class Board {
   }
 }
 
+class PerturbationBoard extends Board {
+  constructor(k, size, re, im, config) {
+    super(k, size, re, im, config);
+    this.quadIndexes = [];
+    this.pertIndexes = [];
+    // With about 15 digits of precision, bail when we're using 14.
+    this.perturbationThreshold = 1e14 * (size / config.dims);
+  }
+
+  initboard(size, re, im) {
+    this.cc = new Array(this.config.dims2).fill(null);
+    this.nn = new Array(this.config.dims2).fill(0);
+    this.pp = new Array(this.config.dims2).fill(0);
+    const gridSize = Math.ceil(this.config.dims / 16);
+    const step = this.config.dims / gridSize;
+    const offset = step / 2;
+    const pix = size / this.config.dims;
+    re = toQd(re);
+    im = toQd(im);
+
+    for (let gy = 0; gy < gridSize; gy++) {
+      let ry = Math.floor(gy * step + offset);
+      let jFrac = (0.5 - (ry / this.config.dims));
+      let ci = qdAdd(im, qdScale(toQd(jFrac), size))
+      for (let gx = 0; gx < gridSize; gx++) {
+        let rx = Math.floor(gx * step + offset);
+        let rFrac = ((rx / this.config.dims) - 0.5);
+        let refIndex = ry * this.config.dims + rx;
+        let cr = qdAdd(re, qdScale(toQd(rFrac), size));
+        let escaped = (qdGt(qdAdd(qdSquare(cr), qdSquare(ci)), 4));
+        if (escaped) {
+          this.nn[refIndex] = 1;
+          this.un -= 1;
+        }
+
+        // Initialize reference point
+        let c = [cr[0], cr[1], ci[0], ci[1]];  // Quad-precision
+        this.cc[refIndex] = c;
+        this.quadIndexes.push(refIndex);
+
+        // Initialize perturbations around this reference point
+        const minY = Math.max(0, Math.floor(ry - offset));
+        const maxY = Math.min(this.config.dims - 1, Math.ceil(ry + offset));
+        const minX = Math.max(0, Math.floor(rx - offset));
+        const maxX = Math.min(this.config.dims - 1, Math.ceil(rx + offset));
+        for (let py = minY; py <= maxY; py++) {
+          const dci = (ry - py) * pix;
+          for (let px = minX; px <= maxX; px++) {
+            const dcr = (px - rx) * pix;
+            const pertIndex = py * this.config.dims + px;
+            if (this.cc[pertIndex] === null) {  // Avoid double-initialization
+              if (escaped) {
+                let ec = this.cc[pertIndex] = qdcAdd(c, [dcr, 0, dci, 0]);
+                this.quadIndexes.push(pertIndex);
+                if (qdGt(qdcAbs(ec), 4)) {
+                  this.nn[pertIndex] = 1;
+                  this.un -= 1;
+                }
+              } else {
+                this.cc[pertIndex] = [dcr, dci, refIndex];
+                this.pertIndexes.push(pertIndex);
+              }
+            }
+          }
+        }
+      }
+    }
+    this.zz = this.cc.slice();
+    this.bb = this.cc.slice();
+  }
+
+  iterate() {
+    let i = ++this.it;
+    let head = i, tail = 1;
+    while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
+    let results = [0, 0, 0];
+
+    // Iterate perturbation points
+    const newQuadIndexes = [];
+    let cache = { refIndex: null, binZpow: null };
+    for (const index of this.pertIndexes) {
+      if (!this.computePerturbation(index, cache)) {
+        this.convertToQuadPrecision(index);
+        newQuadIndexes.push(index);
+      }
+    }
+
+    // Update index arrays
+    if (newQuadIndexes.length > 0) {
+      const newPertIndexes = [];
+      let qi = 0;
+      for (const index of this.pertIndexes) {
+        if (newQuadIndexes[qi] == index) {
+          qi += 1;
+        } else {
+          newPertIndexes.push(index);
+        }
+      }
+      this.quadIndexes = this.quadIndexes.concat(newQuadIndexes);
+      this.pertIndexes = newPertIndexes;
+    }
+
+    // Iterate quad-precision points
+    for (const index of this.quadIndexes) {
+      if (head <= tail && !this.nn[index]) {
+        this.bb[index] = this.zz[index];
+        this.pp[index] = 0;
+      }
+      results[this.compute(index) + 1] += 1;
+    }
+
+    // Tally progress
+    let diverged = results[2];
+    let count = results[0] + diverged;
+    this.un -= count;
+    this.di += diverged;
+    if (this.hi[0][0] - this.un >= this.config.dims2 / 256) {
+      this.hi.unshift([this.un, this.di, i]);
+    }
+    if (!this.fi && this.un != this.config.dims2) {
+      this.fi = i;
+    }
+    return count;
+  }
+
+  compute(m) {
+    // Quad-precision compute
+    if (this.nn[m]) return 0;
+    let r = this.zz[m].slice(0, 2);
+    let j = this.zz[m].slice(2, 4);
+    let cr = this.cc[m].slice(0, 2);
+    let cj = this.cc[m].slice(2, 4);
+
+    let r2 = qdSquare(r);
+    let j2 = qdSquare(j);
+    if (qdGt(qdAdd(r2, j2), 4)) {
+      this.nn[m] = this.it;
+      return 1;
+    }
+    let ra = qdSub(r2, j2);
+    let ja = qdMul(qdDouble(r), j);
+    for (let ord = 2; ord < this.config.exponent; ord++) {
+      let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
+      ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
+      ra = rt;
+    }
+    ra = qdAdd(ra, cr);
+    ja = qdAdd(ja, cj);
+    this.zz[m] = [...ra, ...ja];
+    let rb = this.bb[m].slice(0, 2);
+    let jb = this.bb[m].slice(2, 4);
+    let db = qdAdd(qdAbs(qdSub(rb, ra)), qdAbs(qdSub(jb, ja)));
+    db = db[0] + db[1];
+    if (db <= this.epsilon2) {
+      if (!this.pp[m]) { this.pp[m] = this.it; }
+      if (db <= this.epsilon) {
+        this.nn[m] = -this.it;
+        return -1;
+      }
+    }
+    return 0;
+  }
+
+  computePerturbation(index, cache) {
+    const [cr, ci, refIndex] = this.cc[index];
+    const [dr, di] = this.zz[index];
+
+    // Switch to quad on convergence.
+    if (this.nn[refIndex]) return false;
+
+    // Compute binomial powers of z
+    if (cache.refIndex !== refIndex) {
+      const [zr, zr0, zi, zi0] = this.zz[refIndex];
+      cache.refIndex = refIndex;
+      cache.binZpow = this.computeBinZpow(zr, zi);
+    }
+    const binZpow = cache.binZpow;
+
+    // Compute in (z+d)^n - z^n = nz^(n-1) d + (n(n-1)/2)z^(n-2) d^2...
+    let r = dr;
+    let i = di;
+    for (const [bzr, bzi] of binZpow) {
+      r += bzr;
+      i += bzi;
+      const rNew = r * dr - i * di;
+      i = r * di + i * dr;
+      r = rNew;
+    }
+
+    // Add perturbation in c
+    r += cr;
+    i += ci;
+
+    if (this.isThresholdExceeded(r, i)) {
+      return false;
+    }
+
+    this.zz[index] = [r, i];
+    return true;
+  }
+
+  computeBinZpow(zr, zi) {
+    const binZpow = [];
+    let zrCurrent = zr, ziCurrent = zi;
+    let coeff = this.config.exponent;
+
+    for (let k = 1; k < this.config.exponent - 1; k++) {
+      binZpow.push([coeff * zrCurrent, coeff * ziCurrent]);
+
+      // Update z power
+      const zrNew = zrCurrent * zr - ziCurrent * zi;
+      ziCurrent = zrCurrent * zi + ziCurrent * zr;
+      zrCurrent = zrNew;
+
+      // Update coefficient for next iteration
+      coeff *= (this.config.exponent - k) / (k + 1);
+    }
+
+    // Add the last element without computing the next z power or coefficient
+    if (this.config.exponent > 1) {
+      binZpow.push([coeff * zrCurrent, coeff * ziCurrent]);
+    }
+
+    return binZpow;
+  }
+
+  isThresholdExceeded(dr, di) {
+    return Math.max(Math.abs(dr), Math.abs(di)) > this.perturbationThreshold;
+  }
+
+  isEscaped(r, i) {
+    return r * r + i * i > 4;
+  }
+
+  convertToQuadPrecision(index) {
+    const [dr, di] = this.zz[index];
+    const [cr, ci, refIndex] = this.cc[index];
+    this.zz[index] = qdcAdd(this.zz[refIndex], [dr, 0, di, 0]);
+    this.cc[index] = qdcAdd(this.cc[refIndex], [cr, 0, ci, 0]);
+  }
+
+  isQuadPrecision(index) {
+    return this.cc[index].length === 4;
+  }
+
+  currentc(j) {
+    if (this.isQuadPrecision(j)) {
+      const [re1, re2, im1, im2] = this.cc[j];
+      return [[re1, re2], [im1, im2]];
+    } else {
+      const [dr, di, refIndex] = this.cc[j];
+      const ref = this.cc[refIndex];
+      const r = qdcAdd([ref[0], ref[1], ref[2], ref[3]], [dr, 0, di, 0]);
+      return [[r[0], r[1]], [r[2], r[3]]];
+    }
+  }
+
+  currentz(j) {
+    if (this.isQuadPrecision(j)) {
+      const [re1, re2, im1, im2] = this.zz[j];
+      return [[re1, re2], [im1, im2]];
+    } else {
+      const refIndex = this.cc[j][2];
+      const [dr, di] = this.zz[j];
+      const ref = this.zz[refIndex];
+      const r = qdcAdd([ref[0], ref[1], ref[2], ref[3]], [dr, 0, di, 0]);
+      return [[r[0], r[1]], [r[2], r[3]]];
+    }
+  }
+
+  draw(ctx) {
+    let colorcache = {};
+    const fastcolor = (num) => {
+      let result = colorcache[num];
+      if (!result) {
+        result = this.makecolor(num);
+        if (colorcache.length < 10000) {
+          colorcache[num] = result;
+        }
+      }
+      return result;
+    };
+
+    for (let m = 0; m < this.config.dims2; ++m) {
+      let x = m % this.config.dims;
+      let y = (m - x) / this.config.dims;
+      ctx.fillStyle = fastcolor(this.nn[m]);
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+}
+
 class Grid {
   constructor(config) {
     this.config = config;
@@ -452,6 +696,17 @@ class Grid {
     this.focusk = null;
     this.urlListeners = [];
     this.zoomListeners = [];
+  }
+
+  makeBoard(k, size, re, im) {
+    // Threshold for switching to PerturbationBoard
+    const perturbationThreshold = 1e-15;
+
+    if (size / this.config.dims < perturbationThreshold) {
+      return new PerturbationBoard(k, size, re, im, this.config);
+    } else {
+      return new Board(k, size, re, im, this.config);
+    }
   }
 
   currentGridState() {
@@ -505,9 +760,9 @@ class Grid {
 
       const k = currentIndex;
       if (!this.boards[k]) {
-        this.boards[k] = new Board(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2], this.config);
+        this.boards[k] = this.makeBoard(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
       }
-      this.boards[k].initcanvas(state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
+      this.boards[k].initboard(state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
       this.boards[k].draw(this.canvas(k).getContext('2d'));
       if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
       currentIndex++;
@@ -638,12 +893,13 @@ class Grid {
   bigurl(k) {
     if (k >= this.boards.length) return;
     let osize = this.boards[k].sizes[0];
+    let oexp = '';
     if (this.config.exponent != 2) {
-      osize += '&exponent=' + this.config.exponent;
+      oexp = '&exponent=' + this.config.exponent;
     }
     let ore = this.boards[k].sizes[1];
     let oim = this.boards[k].sizes[2];
-    return '?s=' + formatSize(osize) + '&c=' + formatcomplex(k, ore, oim) + '&grid=1';
+    return '?s=' + formatSize(osize) + oexp + '&c=' + formatcomplex(k, ore, oim) + '&grid=1';
   }
 
   clearseq(k) {
@@ -728,8 +984,8 @@ class ZoomManager {
     }
     this.showZoomRect(k, rre, 0.5, this.config.zoomfactor);
     let nsize = osize / this.config.zoomfactor;
-    let newBoard = new Board(k + 1, nsize, ore, oim, this.config);
-    newBoard.initcanvas(nsize, ore, oim);
+    let newBoard = this.grid.makeBoard(k + 1, nsize, ore, oim);
+    newBoard.initboard(nsize, ore, oim);
     this.grid.boards.push(newBoard);
     this.grid.makecanvas(k + 1);
     this.grid.removeboardspast(k + 1);
@@ -763,8 +1019,8 @@ class ZoomManager {
       let nsize = osize / this.config.zoomfactor;
       let nre = qdAdd(ore, [((cx / this.config.dims) - 0.5) * osize, 0]);
       let nim = qdAdd(oim, [(0.5 - (cy / this.config.dims)) * osize, 0]);
-      let newBoard = new Board(k + 1, nsize, nre, nim, this.config);
-      newBoard.initcanvas(nsize, nre, nim);
+      let newBoard = this.grid.makeBoard(k + 1, nsize, nre, nim);
+      newBoard.initboard(nsize, nre, nim);
       this.grid.boards.push(newBoard);
       this.grid.makecanvas(k + 1);
       this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
@@ -786,9 +1042,9 @@ class ZoomManager {
       this.showZoomRect(k, 0.5, 0.5, this.grid.boards[k].sizes[0] / this.grid.boards[k+1].sizes[0]);
       if (qdCompare(this.grid.boards[k].sizes[1], ore) || qdCompare(this.grid.boards[k].sizes[2], oim)) {
         let nsize = this.grid.boards[k].sizes[0];
-        this.grid.boards[k] = new Board(k + 1, nsize, ore, oim, this.config);
+        this.grid.boards[k] = this.grid.makeBoard(k + 1, nsize, ore, oim);
         this.grid.boards[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
-        this.grid.boards[k].initcanvas(nsize, ore, oim);
+        this.grid.boards[k].initboard(nsize, ore, oim);
         this.grid.boards[k].draw(this.grid.canvas(k).getContext('2d'));
         this.grid.clearseq(k);
       }
@@ -1390,7 +1646,9 @@ class Scheduler {
     try {
       // Contribute to every unfinished cell
       let pri = this.explorer.grid.boards.map((_, index) => index)
-        .filter(k => this.explorer.grid.boards[k].un > 0 && !this.explorer.grid.hiddencanvas(k));
+        .filter(k => this.explorer.grid.boards[k])
+        .filter(k => this.explorer.grid.boards[k].un > 0)
+        .filter(k => !this.explorer.grid.hiddencanvas(k));
       if (this.steps % 2) {
         // Prioritize most unfinished half the time.
         pri = pri.sort((a, b) => this.explorer.grid.boards[b].un - this.explorer.grid.boards[a].un);
@@ -1402,19 +1660,21 @@ class Scheduler {
           pri.sort((a, b) => (a === this.explorer.grid.focusk && -1) || (b === this.explorer.grid.focusk && 1) || 0);
         }
       }
-      // Exponential scheduling policy
-      let shift = Math.floor(this.steps++ / 2);
-      let p = 0;
-      while (1 << p & shift) { p += 1; }
-      let k = pri[Math.min(p, pri.length - 1)];
-      // Do at least 1000 pixel-steps.
-      let u = this.explorer.grid.boards[k].un;
-      for (let amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
-        let count = this.explorer.grid.boards[k].iterate();
-        if (count > 0) {
-          let ctx = this.explorer.grid.canvas(k)?.getContext('2d');
-          if (ctx) {
-            this.explorer.grid.boards[k].drawcolor(ctx, this.explorer.grid.boards[k].it);
+      if (pri.length) {
+        // Exponential scheduling policy
+        let shift = Math.floor(this.steps++ / 2);
+        let p = 0;
+        while (1 << p & shift) { p += 1; }
+        let k = pri[Math.min(p, pri.length - 1)];
+        // Do at least 1000 pixel-steps.
+        let u = this.explorer.grid.boards[k].un;
+        for (let amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
+          let count = this.explorer.grid.boards[k].iterate();
+          if (count > 0) {
+            let ctx = this.explorer.grid.canvas(k)?.getContext('2d');
+            if (ctx) {
+              this.explorer.grid.boards[k].drawcolor(ctx, this.explorer.grid.boards[k].it);
+            }
           }
         }
       }
@@ -1609,8 +1869,8 @@ class MandelbrotExplorer {
     }
     this.grid.showrect(k, rre, 0.5, this.config.zoomfactor);
     let nsize = osize / this.config.zoomfactor;
-    let newBoard = new Board(k + 1, nsize, ore, oim, this.config);
-    newBoard.initcanvas(nsize, ore, oim);
+    let newBoard = this.grid.makeBoard(k + 1, nsize, ore, oim);
+    newBoard.initboard(nsize, ore, oim);
     this.grid.boards.push(newBoard);
     this.grid.makecanvas(k + 1);
     this.grid.removeboardspast(k + 1);
@@ -1830,6 +2090,13 @@ function qdcSquare(a) {
   let real = qdSub(a0a0, a1a1);
   let imag = qdDouble(a0a1);
   return [real[0], real[1], imag[0], imag[1]];
+}
+
+// Complex absolute value in quad precision
+function qdcAbs(a) {
+  let a0a0 = qdSquare([a[0], a[1]]);
+  let a1a1 = qdSquare([a[2], a[3]]);
+  return qdAdd(a0a0, a1a1);
 }
 
 function qdParse(s) {
