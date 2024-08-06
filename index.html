@@ -1705,7 +1705,7 @@ class OrbitComputer {
     };
 
     if (updateorbit()) {
-      this.orbitinterval = setInterval(updateorbit, 251);
+      this.orbitinterval = setInterval(updateorbit, 53);
     }
   }
 
@@ -1736,14 +1736,18 @@ class OrbitComputer {
       let z = board.currentz(j);
 
       // Calculate a further orbit beyond the old orbit.
-      let whole = Math.min(Math.max(board.pp[j], board.nn[j]) || Math.max(board.it, 8));
-      let more = Math.min(whole - oldOrb.length / 4, 1000);
+      let finished = Math.max(board.pp[j], board.nn[j]);
+      let whole = Math.min(finished || Math.max(board.it, 8));
+      let more = Math.min(whole - oldOrb.length / 4, 53);
       if (oldOrb.length) {
         let s = oldOrb.slice(oldOrb.length - 4);
         orb = this.suborbit([[s[0], s[1]], [s[2], s[3]]], c, more + 1);
         orb.splice(0, 4);
       } else {
-        orb = this.suborbit(c, c, more + 1);
+        orb = this.suborbit(c, c, more);
+      }
+      if (!finished || (orb.length + oldOrb.length) / 4 < finished) {
+        ongoing = true;
       }
       // Calculate a cycle and any messages
       title = 'c=' + formatcomplex(k, ...c).replaceAll('-', '\u2212');
