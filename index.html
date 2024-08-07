@@ -1033,16 +1033,16 @@ class ZoomManager {
     this.grid.notifyurl();
   }
 
-  cellclick(k, m) {
+  cellclick(k, m, hideCurrent) {
     // Only accept clicks on cells with something computed in them.
     if (k >= this.grid.boards.length || this.grid.boards[k].di <= 0 ||
          this.grid.currentUpdateProcess) return;
     this.grid.truncateboards(k + 1);
     this.grid.removeboardspast(k + 1);
-    setTimeout(() => { this.cellclickdelay(k, m); }, 1);
+    setTimeout(() => { this.cellclickdelay(k, m, hideCurrent); }, 1);
   }
 
-  cellclickdelay(k, m) {
+  cellclickdelay(k, m, hideCurrent) {
     if (k >= this.grid.boards.length || this.grid.currentUpdateProcess) return;
     let osize = this.grid.boards[k].sizes[0];
     let ore = this.grid.boards[k].sizes[1];
@@ -1061,6 +1061,10 @@ class ZoomManager {
       newBoard.initboard(nsize, nre, nim);
       this.grid.boards.push(newBoard);
       this.grid.makecanvas(k + 1);
+      if (hideCurrent) {
+        this.grid.canvas(k).parentElement.style.display = 'none';
+        this.updateZoomRectangles();
+      }
       this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
       this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
       newBoard.draw(this.grid.canvas(k + 1).getContext('2d'));
@@ -1227,7 +1231,7 @@ class EventHandler {
       if (m) {
         let p = this.pointInTarget(e, target);
         let k = parseInt(m[1]);
-        this.explorer.zoomManager.cellclick(k, p.x + p.y * this.explorer.config.dims);
+        this.explorer.zoomManager.cellclick(k, p.x + p.y * this.explorer.config.dims, e.metaKey);
         return false;
       }
     }
