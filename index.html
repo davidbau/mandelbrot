@@ -40,8 +40,11 @@ canvas { vertical-align:bottom;cursor:crosshair }
   transition: opacity 0.3s }
 .closebox::after { content: '\00d7'; font-size: 20px; }
 .closebox:hover { font-weight: bold; }
-.rect { position: absolute; outline: 1px solid yellow; height: 0; width: 0;
+.rect { position: absolute; height: 0; width: 0;
   pointer-events: none; opacity: 0.7; transition: opacity 0.3s; }
+.rect:after { content: ''; display: block; position: absolute;
+  top: 0; bottom: 0; left: 0; right: 0; border: 1px solid yellow; }
+.circle .rect:after { border-radius: 100px; border-thickness: 2px; }
 .hidemarks .rect { opacity: 0; }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
   top:0; left:0; z-index:1; transition: opacity 0.3s }
@@ -964,12 +967,18 @@ class ZoomManager {
 
   showZoomRect(k, x, y, zf) {
     let s = this.grid.rect(k).style;
-    zf = Math.min(125, zf); // Make rectangle visible if it is tiny.
-    this.grid.canvas(k).parentElement.className = '';
-    s.top = (y * this.config.cssDims - this.config.cssDims / 2 / zf) + 'px';
-    s.left = (x * this.config.cssDims - this.config.cssDims / 2 / zf) + 'px';
-    s.width = (this.config.cssDims / zf) + 'px';
-    s.height = (this.config.cssDims / zf) + 'px';
+    let border = 1;
+    let cssClass = '';
+    if (zf > 50) {
+      // Make rectangle visible if it is tiny.
+      zf = 25;
+      cssClass = 'circle';
+    }
+    this.grid.canvas(k).parentElement.className = cssClass;
+    s.top = (y * this.config.cssDims - this.config.cssDims / 2 / zf - border) + 'px';
+    s.left = (x * this.config.cssDims - this.config.cssDims / 2 / zf - border) + 'px';
+    s.width = (this.config.cssDims / zf + 2 * border) + 'px';
+    s.height = (this.config.cssDims / zf + 2 * border) + 'px';
   }
 
   removeZoomRect(k) {
@@ -1315,9 +1324,6 @@ class EventHandler {
         let k = parseInt(m[1]);
         this.explorer.grid.focusk = k;
         if (this.explorer.grid.boards.length <= k) return;
-        for (let i = 0; i < this.explorer.grid.gridboards; ++i) {
-          this.explorer.grid.canvas(i).parentElement.className = i < k ? '' : 'hidemarks';
-        }
         document.body.className = '';
         let overtarget = e.target;
         this.explorer.grid.updateProgress(overtarget, k);
