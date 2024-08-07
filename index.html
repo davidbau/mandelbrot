@@ -44,8 +44,9 @@ canvas { vertical-align:bottom;cursor:crosshair }
 .rect { position: absolute; height: 0; width: 0;
   pointer-events: none; opacity: 0.7; transition: opacity 0.3s; }
 .rect:after { content: ''; display: block; position: absolute;
-  top: 0; bottom: 0; left: 0; right: 0; border: 1px solid yellow; }
-.circle .rect:after { border-radius: 100px; border-thickness: 2px; }
+  top: 0; bottom: 0; left: 0; right: 0; border: 1px solid yellow;
+  box-shadow: 0px 0px 3px 1px #aa0; }
+.circle .rect:after { border-radius: 100px; }
 .hidemarks .rect { opacity: 0; }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
   top:0; left:0; z-index:1; transition: opacity 0.3s }
@@ -109,7 +110,7 @@ The display computes subpixels with a <span class="pixelratio">2</span>:1 ratio.
 Keys:
 <b>I</b> zooms in;
 <b class="cmd">Ctrl</b>-click to zoom in-place;
-<b>H</b> shrinks and <b>G</b> grows the size of each field;
+<b>H</b> shrinks and <b>G</b> grows the size of each window;
 <b>R</b> reopens midway windows;
 <b>C</b> recenters all;
 <b>U</b> highlights unfinished pixels;
@@ -1934,12 +1935,12 @@ class MandelbrotExplorer {
     let startState = this.urlHandler.parseUrl();
     this.grid.updateLayout(startState);
     this.eventHandler.setup();
-    this.scheduler.start();
     if (navigator.platform.indexOf('Mac') == 0) {
       for (let el of document.getElementsByClassName('cmd')) {
         el.innerHTML = '&#8984;'
       }
     }
+    setTimeout(() => { this.scheduler.start(); }, 100);
   }
 
   cycleUnknownColor() {
