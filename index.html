@@ -31,7 +31,7 @@ body { font-family: Arial; background: #888; margin: 16px 0;}
 td { position: relative; vertical-align: top;}
 canvas { vertical-align:bottom;cursor:crosshair }
 #grid > div, #text, #movie > div { display: inline-block; margin: 8px;
-  position: relative; vertical-align: top }
+  position: relative; vertical-align: top; background: rgba(90, 90, 90, 0.5); }
 #grid { color: yellow }
 #grid > div:only-child .closebox { display: none; }
 #text { text-align: left; width: 439px; max-width: 82%; background:#aaa;
@@ -220,17 +220,17 @@ class Board {
   }
 
   iterate() {
-    let i = ++this.it;  // total iteration count
-    let z = this.zz;    // current iterate for each pixel
-    let c = this.cc;    // current constant for each pixel
-    let n = this.nn;    // number of iterations before conv/divergence
-    let b = this.bb;    // recent remembered z
-    let p = this.pp;    // iteration at which converged within epsilon2
+    const i = this.it;
+    const z = this.zz;    // current iterate for each pixel
+    const c = this.cc;    // current constant for each pixel
+    const n = this.nn;    // number of iterations before conv/divergence
+    const b = this.bb;    // recent remembered z
+    const p = this.pp;    // iteration at which converged within epsilon2
+    const pix = this.pix;
+    const epsilon = this.epsilon;
+    const epsilon2 = this.epsilon2;
     let s = this.ss;    // speedy list of indexes to compute
-    let pix = this.pix;
     let count = 0;
-    let epsilon = this.epsilon;
-    let epsilon2 = this.epsilon2;
     // head and tail factor i into an odd num and largest power of 2.
     let head = i, tail = 1;
     while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
@@ -292,6 +292,7 @@ class Board {
     if (!this.fi && this.un != this.config.dims2) {
       this.fi = i;
     }
+    this.it++;
     return count;
   }
 
@@ -422,6 +423,7 @@ class PerturbationBoard extends Board {
   }
 
   initboard(size, re, im) {
+    this.it = 1;
     this.cc = new Array(this.config.dims2).fill(null);
     this.nn = new Array(this.config.dims2).fill(0);
     this.pp = new Array(this.config.dims2).fill(0);
@@ -484,7 +486,7 @@ class PerturbationBoard extends Board {
   }
 
   iterate() {
-    let i = ++this.it;
+    let i = this.it;
     let head = i, tail = 1;
     while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
     let results = [0, 0, 0];
@@ -553,6 +555,7 @@ class PerturbationBoard extends Board {
       this.quadIndexes = trimmedQuadIndexes;
     }
 
+    this.it++;
     return count;
   }
 
@@ -805,7 +808,13 @@ class Grid {
     };
 
     return {
-      start: processNext,
+      start: () => {
+        if (this.config.gridcols == 1) {
+          setTimeout(processNext, 100);
+        } else {
+          processNext();
+        }
+      },
       abort: () => { aborted = true; }
     };
   }
@@ -1744,7 +1753,7 @@ class Scheduler {
         for (let amt = 0; board.un > 0 && amt < 1000; amt += (board.un * board.effort + 1)) {
           let count = board.iterate();
           if (count > 0 && ctx) {
-            board.drawcolor(ctx, board.it);
+            board.drawcolor(ctx, board.it - 1);
           }
         }
       } else {
@@ -1931,16 +1940,12 @@ class MandelbrotExplorer {
   }
 
   start() {
+    this.initPlatform();
     this.config.initSizes();
     let startState = this.urlHandler.parseUrl();
     this.grid.updateLayout(startState);
     this.eventHandler.setup();
-    if (navigator.platform.indexOf('Mac') == 0) {
-      for (let el of document.getElementsByClassName('cmd')) {
-        el.innerHTML = '&#8984;'
-      }
-    }
-    setTimeout(() => { this.scheduler.start(); }, 100);
+    this.scheduler.start();
   }
 
   cycleUnknownColor() {
@@ -1948,6 +1953,14 @@ class MandelbrotExplorer {
     this.config.unknowncolor = this.config.ukcs[ind];
     for (let k = 0; k < this.grid.boards.length; ++k) {
       this.grid.boards[k].drawcolor(this.grid.canvas(k).getContext('2d'), 0);
+    }
+  }
+
+  initPlatform() {
+    if (navigator.platform.indexOf('Mac') == 0) {
+      for (let el of document.getElementsByClassName('cmd')) {
+        el.innerHTML = '&#8984;'
+      }
     }
   }
 }
