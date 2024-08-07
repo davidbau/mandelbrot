@@ -2203,10 +2203,8 @@ function qdParse(s) {
 function qdPow10(e) {
   if (e === 0) return [1, 0];
   let result = [1, 0];
-  for (let i = 0; i < Math.abs(e); i++) {
-    result = qdMul(result, [10, 0]);
-  }
-  return (e < 0) ? qdReciprocal(result) : result;
+  if (e < 0) return qdReciprocal(qdPow10(-e));
+  return [10 ** e, 0];
 }
 
 function qdFloor(q) {
@@ -2269,13 +2267,16 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
   let e = 0;
   let ex = [1, 0];
   while (qdCompare(q, qdMul(ex, qdTen)) >= 0) {
-    ex = qdMul(ex, qdTen);
     e += 1;
+    ex = qdPow10(e);
   }
-  while (qdLt(qdMul(ex, q), 1)) {
-    ex = qdMul(ex, qdTen);
-    e -= 1;
+  if (e == 0) {
+    while (qdLt(qdMul(ex, q), 1)) {
+      e -= 1;
+      ex = qdPow10(-e);
+    }
   }
+  console.log('after scaling down', e, ex, q);
   if (e) {
     q = (e > 0 ? qdDiv(q, ex) : qdMul(q, ex));
   }
@@ -2303,7 +2304,13 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
     }
   }
   // Rounding
-  if (parseInt(result[nonzeroDigits]) >= 5) {
+  if (nonzeroDigits < 0) {
+    // No nonzero signficant digits? Treat as zero.
+    result = '?';
+    nonzeroDigits = 0;
+    e = 0;
+  } else if (parseInt(result[nonzeroDigits]) >= 5) {
+    result = result.slice(0, nonzeroDigits) + '?';
     let carry = 1;
     for (let i = nonzeroDigits - 1; i >= 0; i--) {
       let digit = parseInt(result[i]) + carry;
@@ -2318,6 +2325,7 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
     }
     if (carry) {
       result = '1' + result;
+      nonzeroDigits += 1;
       e++;
     }
   }
