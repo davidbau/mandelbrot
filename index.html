@@ -171,19 +171,19 @@ class Board {
     this.config = config;
     this.it = 0;
     this.fi = 0;
-    this.zz = [];
-    this.cc = [];
-    this.nn = [];
-    this.bb = [];
-    this.pp = [];
-    this.ss = null;
+    this.zz = []; // current iterate for each pixel
+    this.cc = []; // current constant for each pixel
+    this.nn = []; // iterations when diverged / (neg) converged
+    this.bb = []; // recent remembered z
+    this.pp = []; // iteration at which converged within epsilon2
+    this.ss = null; // sparse list of indexes to compute
     this.un = config.dims2;
     this.di = 0;
     this.hi = [[config.dims2, 0, 0]];
     this.sizes = [size, toQd(re), toQd(im)];
     this.effort = 1;
     this.pix = this.sizes[0] / this.config.dims;
-    this.epsilon = Math.min(1e-12, this.pix);
+    this.epsilon = Math.min(1e-12, this.pix / 10);
     this.epsilon2 = Math.min(1e-9, this.pix * 10);
   }
 
@@ -192,7 +192,6 @@ class Board {
     let c = this.cc;
     let n = this.nn;
     let p = this.pp;
-    let useQuad = (size / this.config.dims) < 1e-15;
     for (let y = 0; y < this.config.dims; y++) {
       let jFrac = (0.5 - (y / this.config.dims));
       let j = jFrac * size + im[0];
