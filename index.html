@@ -1720,7 +1720,6 @@ class Scheduler {
       } else {
         if (!this.endTime) {
           this.endTime = (new Date).getTime();
-          console.log((this.endTime - this.startTime) / 1000, 'seconds');
         }
         setTimeout(() => this.progress(), 100); // Check less frequently when no work
         return;
@@ -2276,7 +2275,6 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
       ex = qdPow10(-e);
     }
   }
-  console.log('after scaling down', e, ex, q);
   if (e) {
     q = (e > 0 ? qdDiv(q, ex) : qdMul(q, ex));
   }
