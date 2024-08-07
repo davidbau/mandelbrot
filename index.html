@@ -974,7 +974,7 @@ class ZoomManager {
       zf = 25;
       cssClass = 'circle';
     }
-    this.grid.canvas(k).parentElement.className = cssClass;
+    this.grid.rect(k).parentElement.className = cssClass;
     s.top = (y * this.config.cssDims - this.config.cssDims / 2 / zf - border) + 'px';
     s.left = (x * this.config.cssDims - this.config.cssDims / 2 / zf - border) + 'px';
     s.width = (this.config.cssDims / zf + 2 * border) + 'px';
@@ -984,6 +984,7 @@ class ZoomManager {
   removeZoomRect(k) {
     let s = this.grid.rect(k).style;
     s.top = s.left = s.width = s.height = '';
+    this.grid.rect(k).parentElement.className = 'hidemarks';
   }
 
   updateZoomRectangles() {
@@ -1000,6 +1001,9 @@ class ZoomManager {
       }
       prevBoard = currBoard;
       prevK = k;
+    }
+    if (prevBoard !== null) {
+      this.removeZoomRect(prevK);
     }
   }
 
@@ -1445,8 +1449,11 @@ class MovieMode {
     this.frameCanvases = [];
     let queueOneFrame = (k, after) => {
       return () => {
-        document.getElementById('moviescale').textContent =
-          `Rendering ${formatScale(3.0 / this.explorer.grid.boards[k].sizes[0])}`;
+        let status = document.getElementById('moviescale');
+        if (status) {
+          status.textContent =
+            `Rendering ${formatScale(3.0 / this.explorer.grid.boards[k].sizes[0])}`;
+        }
         let canvas1 = null;
         let canvas2 = null;
         const n = this.explorer.grid.boards[k].nn;
