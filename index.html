@@ -181,6 +181,10 @@ class Board {
     this.di = 0;
     this.hi = [[config.dims2, 0, 0]];
     this.sizes = [size, toQd(re), toQd(im)];
+    this.effort = 1;
+    this.pix = this.sizes[0] / this.config.dims;
+    this.epsilon = Math.min(1e-12, this.pix);
+    this.epsilon2 = Math.min(1e-9, this.pix * 10);
   }
 
   initboard(size, re, im) {
@@ -218,10 +222,10 @@ class Board {
     let b = this.bb;    // recent remembered z
     let p = this.pp;    // iteration at which converged within epsilon2
     let s = this.ss;    // speedy list of indexes to compute
-    let pix = this.sizes[0] / this.config.dims;  // current for quad-precision check
+    let pix = this.pix;
     let count = 0;
-    let epsilon = Math.min(1e-12, pix);
-    let epsilon2 = Math.min(1e-9, pix * 10000);
+    let epsilon = this.epsilon;
+    let epsilon2 = this.epsilon2;
     // head and tail factor i into an odd num and largest power of 2.
     let head = i, tail = 1;
     while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
@@ -401,15 +405,17 @@ class PerturbationBoard extends Board {
     super(k, size, re, im, config);
     this.quadIndexes = [];
     this.pertIndexes = [];
-    // With about 15 digits of precision, bail when we're using 14.
-    this.perturbationThreshold = 1e14 * (size / config.dims);
+    // Bail when perturbation exceeds half the digits of precision
+    this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dims)));
+    // For scheduling: each step is about 10x effort of default board.
+    this.effort = 10;
   }
 
   initboard(size, re, im) {
     this.cc = new Array(this.config.dims2).fill(null);
     this.nn = new Array(this.config.dims2).fill(0);
     this.pp = new Array(this.config.dims2).fill(0);
-    const gridSize = Math.ceil(this.config.dims / 16);
+    const gridSize = Math.ceil(this.config.dims / 17);
     const step = this.config.dims / gridSize;
     const offset = step / 2;
     const pix = size / this.config.dims;
@@ -518,6 +524,25 @@ class PerturbationBoard extends Board {
     if (!this.fi && this.un != this.config.dims2) {
       this.fi = i;
     }
+
+    // Trim finished pixels from array.
+    if (this.pertIndexes.length + this.quadIndexes.length > this.un * 1.25) {
+      const trimmedQuadIndexes = []
+      for (const index of this.quadIndexes) {
+        if (this.nn[index]) continue;
+        trimmedQuadIndexes.push(index);
+      }
+      // Switch to full quad when perturbations are a small fraction of the work
+      if (this.pertIndexes.length < trimmedQuadIndexes.length * 0.5) {
+        for (const index of this.pertIndexes) {
+          this.convertToQuadPrecision(index);
+          trimmedQuadIndexes.push(index);
+        }
+        this.pertIndexes = [];
+      }
+      this.quadIndexes = trimmedQuadIndexes;
+    }
+
     return count;
   }
 
@@ -563,8 +588,8 @@ class PerturbationBoard extends Board {
     const [cr, ci, refIndex] = this.cc[index];
     const [dr, di] = this.zz[index];
 
-    // Switch to quad on convergence.
-    if (this.nn[refIndex]) return false;
+    // Switch to quad when approaching convergence.
+    if (this.nn[refIndex] || this.pp[refIndex]) return false;
 
     // Compute binomial powers of z
     if (cache.refIndex !== refIndex) {
@@ -960,8 +985,8 @@ class ZoomManager {
       if (this.grid.hiddencanvas(k)) { continue; }
       let currBoard = this.grid.boards[k].sizes;
       if (prevBoard != null) {
-        let x = (currBoard[1][0] - prevBoard[1][0]) / prevBoard[0] + 0.5;
-        let y = 0.5 - (currBoard[2][0] - prevBoard[2][0]) / prevBoard[0];
+        let x = qdSub(currBoard[1], prevBoard[1])[0] / prevBoard[0] + 0.5;
+        let y = 0.5 - qdSub(currBoard[2], prevBoard[2])[0] / prevBoard[0];
         let zf = prevBoard[0] / currBoard[0];
         this.showZoomRect(prevK, x, y, zf);
       }
@@ -1035,12 +1060,15 @@ class ZoomManager {
     let k = this.grid.boards.length - 1;
     let ore = this.grid.boards[k].sizes[1];
     let oim = this.grid.boards[k].sizes[2];
-    this.showZoomRect(0, 0.5 + (ore[0] - this.grid.boards[0].sizes[1][0]) / this.grid.boards[0].sizes[0],
-                      0.5 - (oim[0] - this.grid.boards[0].sizes[2][0]) / this.grid.boards[0].sizes[0],
-                      this.grid.boards[0].sizes[0] / this.grid.boards[1].sizes[0]);
+    this.showZoomRect(
+      0, 0.5 + (ore[0] - this.grid.boards[0].sizes[1][0]) / this.grid.boards[0].sizes[0],
+         0.5 - (oim[0] - this.grid.boards[0].sizes[2][0]) / this.grid.boards[0].sizes[0],
+         this.grid.boards[0].sizes[0] / this.grid.boards[1].sizes[0]);
     for (k = 1; k < this.grid.boards.length - 1; k += 1) {
-      this.showZoomRect(k, 0.5, 0.5, this.grid.boards[k].sizes[0] / this.grid.boards[k+1].sizes[0]);
-      if (qdCompare(this.grid.boards[k].sizes[1], ore) || qdCompare(this.grid.boards[k].sizes[2], oim)) {
+      this.showZoomRect(
+          k, 0.5, 0.5, this.grid.boards[k].sizes[0] / this.grid.boards[k+1].sizes[0]);
+      if (qdCompare(this.grid.boards[k].sizes[1], ore) ||
+          qdCompare(this.grid.boards[k].sizes[2], oim)) {
         let nsize = this.grid.boards[k].sizes[0];
         this.grid.boards[k] = this.grid.makeBoard(k + 1, nsize, ore, oim);
         this.grid.boards[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
@@ -1311,8 +1339,10 @@ class EventHandler {
 
   pointInTarget(ev, target) {
     let se = document.scrollingElement || document.body;
-    let x = (ev.clientX + se.scrollLeft - this.absoluteLeft(target)) * this.explorer.config.pixelRatio;
-    let y = (ev.clientY + se.scrollTop - this.absoluteTop(target)) * this.explorer.config.pixelRatio;
+    let x = (ev.clientX + se.scrollLeft - this.absoluteLeft(target)) *
+            this.explorer.config.pixelRatio;
+    let y = (ev.clientY + se.scrollTop - this.absoluteTop(target)) *
+            this.explorer.config.pixelRatio;
     return { x: Math.round(x), y: Math.round(y) };
   }
 
@@ -1390,7 +1420,8 @@ class MovieMode {
   createMovieCanvas() {
     this.explorer.movieContainer.innerHTML = '<div>' +
       `<canvas width=${this.explorer.config.dims} height=${this.explorer.config.dims} ` +
-      `style="width:${this.explorer.config.cssDims}px;height:${this.explorer.config.cssDims}px"></canvas>` +
+      `style="width:${this.explorer.config.cssDims}px;` +
+      `height:${this.explorer.config.cssDims}px"></canvas>` +
       `<a id="moviescale" class="zoomnum">Rendering...</a></div>`;
     this.movieCanvas = this.explorer.movieContainer.firstElementChild.firstElementChild;
     this.movieCtx = this.movieCanvas.getContext('2d');
@@ -1542,18 +1573,21 @@ class MovieMode {
     scaleElement.textContent = 'Download ' + extension;
     scaleElement.href = URL.createObjectURL(this.recordedBlob);
     const k = this.explorer.grid.boards.length - 1;
+    const board = this.explorer.grid.boards[k];
     scaleElement.download = 'mandelbrot' +
-              formatcomplex(k, this.explorer.grid.boards[k].sizes[1], this.explorer.grid.boards[k].sizes[2]) +
-              '-' + this.explorer.grid.boards[k].it +
-              '.' + extension;
+              formatcomplex(k, board.sizes[1], board.sizes[2]) +
+              '-' + board.it + '.' + extension;
   }
 
   drawMovieFrame(kk) {
     if (this.movieCtx == null) { return; }
     const k = Math.floor(kk);
     const t = kk - k;
-    const sourceSize = this.explorer.grid.boards[k].sizes[0];
-    const targetSize = k+1 < this.explorer.grid.boards.length ? this.explorer.grid.boards[k+1].sizes[0] : sourceSize;
+    const sourceBoard = this.explorer.grid.boards[k];
+    const targetBoard = k+1 < this.explorer.grid.boards.length ?
+                        this.explorer.grid.boards[k+1] : sourceBoard;
+    const sourceSize = sourceBoard.sizes[0];
+    const targetSize = targetBoard.sizes[0];
     const zoomRatio = targetSize / sourceSize;
 
     // Use zoom ratio for exponential interpolation
@@ -1563,14 +1597,17 @@ class MovieMode {
     const interpolatedSize = sourceSize * mulT;
 
     // Use spline interpolation for center coordinates
-    const sourceCenter = [this.explorer.grid.boards[k].sizes[1], this.explorer.grid.boards[k].sizes[2]];
-    const targetCenter = k+1 < this.explorer.grid.boards.length ?
-               [this.explorer.grid.boards[k+1].sizes[1], this.explorer.grid.boards[k+1].sizes[2]] : sourceCenter;
+    const sourceCenter = [sourceBoard.sizes[1], sourceBoard.sizes[2]];
+    const targetCenter = [targetBoard.sizes[1], targetBoard.sizes[2]];
 
-    const p0 = k > 0 ? [this.explorer.grid.boards[k-1].sizes[1], this.explorer.grid.boards[k-1].sizes[2]] : sourceCenter;
+    const p0 = k > 0 ? [
+        this.explorer.grid.boards[k-1].sizes[1],
+        this.explorer.grid.boards[k-1].sizes[2]] : sourceCenter;
     const p1 = sourceCenter;
     const p2 = targetCenter
-    const p3 = k+2 < this.explorer.grid.boards.length ? [this.explorer.grid.boards[k+2].sizes[1], this.explorer.grid.boards[k+2].sizes[2]] : targetCenter;
+    const p3 = k+2 < this.explorer.grid.boards.length ? [
+        this.explorer.grid.boards[k+2].sizes[1],
+        this.explorer.grid.boards[k+2].sizes[2]] : targetCenter;
     const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
 
     // Clear the movie canvas
@@ -1621,7 +1658,8 @@ class MovieMode {
 
     // Update scale text
     if (!this.recordedBlob) {
-      const currentScale = (3.0 / this.explorer.config.firstsize) * (Math.pow(this.explorer.config.zoomfactor, kk));
+      const currentScale = (3.0 / this.explorer.config.firstsize) *
+          (Math.pow(this.explorer.config.zoomfactor, kk));
       document.getElementById('moviescale').textContent = formatScale(currentScale);
     }
   }
@@ -1632,9 +1670,12 @@ class Scheduler {
     this.explorer = explorer;
     this.computationPaused = false;
     this.steps = 0;
+    this.startTime = 0;
+    this.endTime = 0;
   }
 
   start() {
+    this.startTime = (new Date).getTime();
     this.progress();
   }
 
@@ -1651,13 +1692,15 @@ class Scheduler {
         .filter(k => !this.explorer.grid.hiddencanvas(k));
       if (this.steps % 2) {
         // Prioritize most unfinished half the time.
-        pri = pri.sort((a, b) => this.explorer.grid.boards[b].un - this.explorer.grid.boards[a].un);
+        let boards = this.explorer.grid.boards;
+        pri = pri.sort((a, b) => boards[b].un - boards[a].un);
       } else {
         // Prioritize the most recent half the time.
         pri = pri.reverse();
         // Allow the user to prioritize by pointing the mouse.
         if (this.explorer.grid.focusk != null) {
-          pri.sort((a, b) => (a === this.explorer.grid.focusk && -1) || (b === this.explorer.grid.focusk && 1) || 0);
+          let focused = this.explorer.grid.focusk;
+          pri.sort((a, b) => (a === focused ? -1 : b === focused ? 1 : 0));
         }
       }
       if (pri.length) {
@@ -1667,16 +1710,21 @@ class Scheduler {
         while (1 << p & shift) { p += 1; }
         let k = pri[Math.min(p, pri.length - 1)];
         // Do at least 1000 pixel-steps.
-        let u = this.explorer.grid.boards[k].un;
-        for (let amt = 0; u > 0 && amt < 1000; amt += (u + 1)) {
-          let count = this.explorer.grid.boards[k].iterate();
-          if (count > 0) {
-            let ctx = this.explorer.grid.canvas(k)?.getContext('2d');
-            if (ctx) {
-              this.explorer.grid.boards[k].drawcolor(ctx, this.explorer.grid.boards[k].it);
-            }
+        const board = this.explorer.grid.boards[k];
+        const ctx = this.explorer.grid.canvas(k)?.getContext('2d');
+        for (let amt = 0; board.un > 0 && amt < 1000; amt += (board.un * board.effort + 1)) {
+          let count = board.iterate();
+          if (count > 0 && ctx) {
+            board.drawcolor(ctx, board.it);
           }
         }
+      } else {
+        if (!this.endTime) {
+          this.endTime = (new Date).getTime();
+          console.log((this.endTime - this.startTime) / 1000, 'seconds');
+        }
+        setTimeout(() => this.progress(), 100); // Check less frequently when no work
+        return;
       }
     } catch (e) {
       console.log(e);
@@ -1914,7 +1962,7 @@ function formatSize(s) {
 }
 
 function formatcomplex(k, re, im) {
-  let pix = explorer.grid.boards[k].sizes[0] / explorer.config.dims;
+  let pix = explorer.grid.boards[k].pix;
   let digits = 0;
   while (pix < 1.0) {
     pix *= 10;
