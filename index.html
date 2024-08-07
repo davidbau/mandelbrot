@@ -107,8 +107,9 @@ The display computes subpixels with a <span class="pixelratio">2</span>:1 ratio.
 
 <p style="margin-top:6px;margin-bottom:6px">
 Keys:
-<b>H</b> shrinks and <b>G</b> grows the size of each field;
 <b>I</b> zooms in;
+<b class="cmd">Ctrl</b>-click to zoom in-place;
+<b>H</b> shrinks and <b>G</b> grows the size of each field;
 <b>R</b> reopens midway windows;
 <b>C</b> recenters all;
 <b>U</b> highlights unfinished pixels;
@@ -400,6 +401,11 @@ class Board {
 
   currentz(j) {
     return [toQd(this.zz[j * 2]), toQd(this.zz[j * 2 + 1])];
+  }
+
+  uninteresting() {
+    // Boring: nothing computed, or done with less than 5 colors
+    return this.di <= 0 || (this.un == 0 && this.hi.length <= 5);
   }
 }
 
@@ -1008,9 +1014,9 @@ class ZoomManager {
     }
   }
 
-  zoomInAtCurrentPosition() {
+  zoomInAtCurrentPosition(hideCurrent) {
     let k = this.grid.boards.length - 1;
-    if (this.grid.boards[k].di == 0) { return; }
+    if (this.grid.boards[k].uninteresting()) { return; }
     let osize = this.grid.boards[k].sizes[0];
     let ore = this.grid.boards[k].sizes[1];
     let oim = this.grid.boards[k].sizes[2];
@@ -1026,6 +1032,10 @@ class ZoomManager {
     newBoard.initboard(nsize, ore, oim);
     this.grid.boards.push(newBoard);
     this.grid.makecanvas(k + 1);
+    if (hideCurrent) {
+      this.grid.canvas(k).parentElement.style.display = 'none';
+      this.updateZoomRectangles();
+    }
     this.grid.removeboardspast(k + 1);
     this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
     this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
@@ -1035,7 +1045,7 @@ class ZoomManager {
 
   cellclick(k, m, hideCurrent) {
     // Only accept clicks on cells with something computed in them.
-    if (k >= this.grid.boards.length || this.grid.boards[k].di <= 0 ||
+    if (k >= this.grid.boards.length || this.grid.boards[k].uninteresting() ||
          this.grid.currentUpdateProcess) return;
     this.grid.truncateboards(k + 1);
     this.grid.removeboardspast(k + 1);
@@ -1231,7 +1241,8 @@ class EventHandler {
       if (m) {
         let p = this.pointInTarget(e, target);
         let k = parseInt(m[1]);
-        this.explorer.zoomManager.cellclick(k, p.x + p.y * this.explorer.config.dims, e.metaKey);
+        this.explorer.zoomManager.cellclick(k, p.x + p.y * this.explorer.config.dims,
+          e.metaKey || e.ctrlKey);
         return false;
       }
     }
@@ -1276,7 +1287,7 @@ class EventHandler {
     }
     // Pressing I will zoom in at the same position.
     if (e.key == 'i') {
-      this.explorer.zoomManager.zoomInAtCurrentPosition();
+      this.explorer.zoomManager.zoomInAtCurrentPosition(e.metaKey || e.ctrlKey);
     }
     // Pressing ? will show the help window
     if (e.key == '?') {
@@ -1924,6 +1935,11 @@ class MandelbrotExplorer {
     this.grid.updateLayout(startState);
     this.eventHandler.setup();
     this.scheduler.start();
+    if (navigator.platform.indexOf('Mac') == 0) {
+      for (let el of document.getElementsByClassName('cmd')) {
+        el.innerHTML = '&#8984;'
+      }
+    }
   }
 
   cycleUnknownColor() {
@@ -1932,32 +1948,6 @@ class MandelbrotExplorer {
     for (let k = 0; k < this.grid.boards.length; ++k) {
       this.grid.boards[k].drawcolor(this.grid.canvas(k).getContext('2d'), 0);
     }
-  }
-
-  zoomInAtCurrentPosition() {
-    let k = this.grid.boards.length - 1;
-    if (this.grid.boards[k].di == 0) { return; }
-    let osize = this.grid.boards[k].sizes[0];
-    let ore = this.grid.boards[k].sizes[1];
-    let oim = this.grid.boards[k].sizes[2];
-    let rre = 0.5;
-    if (k == 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
-      // Myreberg / Feigenbaum point, https://oeis.org/A218453
-      // qdParse('-1.40115518909205060052382678789386129222630')
-      ore = [-1.4011551890920506, 1.196330130384937e-17];
-      rre = (ore[0] - this.grid.boards[0].sizes[1][0]) / this.grid.boards[0].sizes[0] + 0.5;
-    }
-    this.grid.showrect(k, rre, 0.5, this.config.zoomfactor);
-    let nsize = osize / this.config.zoomfactor;
-    let newBoard = this.grid.makeBoard(k + 1, nsize, ore, oim);
-    newBoard.initboard(nsize, ore, oim);
-    this.grid.boards.push(newBoard);
-    this.grid.makecanvas(k + 1);
-    this.grid.removeboardspast(k + 1);
-    this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
-    this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
-    newBoard.draw(this.grid.canvas(k + 1).getContext('2d'));
-    this.urlHandler.updateurl();
   }
 }
 
