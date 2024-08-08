@@ -1957,9 +1957,9 @@ class MandelbrotExplorer {
   }
 
   start() {
+    let startState = this.urlHandler.parseUrl();
     this.config.initSizes();
     this.initPlatform();
-    let startState = this.urlHandler.parseUrl();
     this.grid.updateLayout(startState);
     this.eventHandler.setup();
     this.scheduler.start();
