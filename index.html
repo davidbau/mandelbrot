@@ -27,15 +27,15 @@ it computes the remaining points sparsely, avoiding iterating over the
 already-known points.
 -->
 <style>
-body { font-family: Arial; background: #888; margin: 14px 0;}
+body { font-family: Arial; background: #888; margin: 14px;}
 td { position: relative; vertical-align: top;}
 canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
 #grid > div, #text, #movie > div { display: inline-block; margin: 10px;
   position: relative; vertical-align: top; background: rgba(90, 90, 90, 0.5); }
 #grid { color: yellow }
 #grid > div:only-child .closebox { display: none; }
-#text { text-align: left; width: 440px; max-width: 82%; background:#aaa;
-  position:relative;padding:2px 5px;font-size: 11pt }
+#text { text-align: left; width: auto; background:#aaa; margin: 10px;
+  position:relative;padding:3px 8px;font-size: 11pt }
 .closebox { position: absolute; right: 3px; top: 0; cursor: pointer;
   transition: opacity 0.3s; user-select: none; }
 .closebox:after { content: '\00d7'; font-size: 20px; }
@@ -103,8 +103,8 @@ Mandelbrot Set Fractal Viewer
 <p style="margin-top:6px;margin-bottom:6px">
 <b>About iterations.</b> This viewer shows more fractal detail over time by refining iterations to infinity as you explore. The longer you wait, the more detail is shown.
 After thousands or millions of iterations, you can resolve the finest details in the most complex parts of the fractal.
-See information on iterations, progress, and coordinate by hovering over the yellow zoom number under the corner of each window.
-<span mobile="Holding your fingertip">Moving your mouse</span> over fractal content will animate the orbit of <em>z</em> values for each location <em>c</em>, revealing complex boundary dynamics that are fascinating to mathematicians.
+See information on iterations, progress, and coordinates by <span mobile="tapping">hovering over</a> the yellow zoom number under each window.
+<span mobile="Holding your fingertip">Moving your mouse</span> over fractal content will animate the orbit of <em>z</em> values for each location <em>c</em>, revealing the complex boundary dynamics that have fascinated mathematicians.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Making a path.</b>
@@ -1957,8 +1957,8 @@ class MandelbrotExplorer {
   }
 
   start() {
-    this.initPlatform();
     this.config.initSizes();
+    this.initPlatform();
     let startState = this.urlHandler.parseUrl();
     this.grid.updateLayout(startState);
     this.eventHandler.setup();
@@ -1974,6 +1974,15 @@ class MandelbrotExplorer {
   }
 
   initPlatform() {
+    for (let el of document.querySelectorAll('#text')) {
+      if (this.config.cssDims < 360) {
+        // Two columns plus margin minus padding
+        el.style.maxWidth = (this.config.cssDims * 2 + 20 - 16) + 'px';
+      } else {
+        // One column minus padding
+        el.style.maxWidth = (this.config.cssDims - 16) + 'px';
+      }
+    }
     if (this.config.mac) {
       for (let el of document.querySelectorAll('[mac]')) {
         el.innerHTML = el.getAttribute('mac');
@@ -1985,7 +1994,7 @@ class MandelbrotExplorer {
       }
     }
     for (let el of document.querySelectorAll('.moviemode')) {
-      el.href = '#';
+      el.href = '#movie';
       el.onclick = (() => {
         if (this.grid.boards.length > 1) {
           this.movieMode.toggle();
