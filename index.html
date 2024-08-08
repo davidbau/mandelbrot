@@ -2,7 +2,7 @@
 <html>
 <head>
 <title>Mandelbrot Explorer</title>
-<meta name="description" content="Beautiful, fast, and accurate exploration of the Mandelbrot Set in your browser. Click to zoom. Hover to see orbits. M makes a smooth animation of your zoom path.">
+<meta name="description" content="Beautiful, fast, and accurate exploration of the Mandelbrot Set online. Click to zoom. Hover to see orbits. M makes a smooth animation of your zoom path.">
 <meta name="viewport" content="width=device-width">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="shortcut icon" type="image/png" href="favicon-128x128.png">
@@ -29,7 +29,7 @@ already-known points.
 <style>
 body { font-family: Arial; background: #888; margin: 16px 0;}
 td { position: relative; vertical-align: top;}
-canvas { vertical-align:bottom;cursor:crosshair }
+canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
 #grid > div, #text, #movie > div { display: inline-block; margin: 8px;
   position: relative; vertical-align: top; background: rgba(90, 90, 90, 0.5); }
 #grid { color: yellow }
@@ -84,7 +84,7 @@ body.starting div#b_0::after { display: flex; position: absolute;
 <div class=closebox></div>
 
 <h4 style="margin-top:3px;margin-bottom:6px">
-Javascript Mandelbrot Set Fractal Viewer
+Mandelbrot Set Fractal Viewer
 </h4>
 
 <p style="margin-top:6px;margin-bottom:6px">
