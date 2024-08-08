@@ -93,7 +93,7 @@ Mandelbrot Set Fractal Viewer
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Click to zoom.</b>  Click zoom number to enlarge.  Right-click to save the fractal.
+<b><span mobile="Tap">Click</span> to zoom.</b>  <span mobile="Tap">Click</span> zoom number to enlarge.  <span mobile="">Right-click to save the fractal.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -107,7 +107,7 @@ After you zoom beyond trillion-fold magnification, a quad-precision perturbation
 The display computes subpixels with a <span class="pixelratio">2</span>:1 ratio.
 </p>
 
-<p style="margin-top:6px;margin-bottom:6px">
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
 Keys:
 <b>I</b> zooms in;
 <b class="cmd">Ctrl</b>-click to zoom in-place;
@@ -1962,6 +1962,11 @@ class MandelbrotExplorer {
     if (navigator.platform.indexOf('Mac') == 0) {
       for (let el of document.getElementsByClassName('cmd')) {
         el.innerHTML = '&#8984;'
+      }
+    }
+    if ('ontouchstart' in document.documentElement) {
+      for (let el of document.querySelectorAll('[mobile]')) {
+        el.innerHTML = el.getAttribute('mobile');
       }
     }
   }
