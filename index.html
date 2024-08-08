@@ -131,7 +131,8 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 class Config {
   constructor() {
     this.vw = window.innerWidth || document.documentElement.clientWidth;
-    this.gridcols = 3;
+    this.dgc = Math.min(3, Math.ceil(this.vw / 501));
+    this.gridcols = this.dgc;
     this.exponent = 2;
     this.firstr = [-0.5, 0];
     this.firstj = [0.0, 0];
@@ -1204,7 +1205,7 @@ class URLHandler {
            (state.sizes[0][0] != 3.0 ? '&s=' + formatSize(this.grid.boards[0].sizes[0]) : '') +
            (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
            (compactc.length ? '&c=' + compactc : '') +
-           (this.config.gridcols != 3 ? '&grid=' + this.config.gridcols : '') +
+           (this.config.gridcols != this.config.dgc ? '&grid=' + this.config.gridcols : '') +
            (state.hidden.length ? '&h=' + state.hidden : '') +
            (this.config.pixelRatio != 2 ? '&pixelratio=' + this.config.pixelRatio : '');
     return '?' + url.replace('&', '');
