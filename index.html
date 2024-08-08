@@ -35,7 +35,7 @@ canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
 #grid { color: yellow }
 #grid > div:only-child .closebox { display: none; }
 #text { text-align: left; width: 439px; max-width: 82%; background:#aaa;
-  position:relative;padding:1px 4px;font-size:9pt }
+  position:relative;padding:1px 4px;font-size: 11pt }
 .closebox { position: absolute; right: 3px; top: 0; cursor: pointer;
   transition: opacity 0.3s; user-select: none; }
 .closebox::after { content: '\00d7'; font-size: 20px; }
@@ -45,13 +45,13 @@ canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
   pointer-events: none; opacity: 0.7; transition: opacity 0.3s; }
 .rect:after { content: ''; display: block; position: absolute;
   top: 0; bottom: 0; left: 0; right: 0; border: 1px solid yellow;
-  box-shadow: 0px 0px 3px 1px #aa0; }
+  box-shadow: 0px 0px 4px 1px #880; }
 .circle .rect:after { border-radius: 100px; }
 .hidemarks .rect { opacity: 0; }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
   top:0; left:0; z-index:1; transition: opacity 0.3s }
-.zoomnum { position:absolute; display:inline-block; right:0; bottom:-12px;
-  text-decoration: none; font-size:12px; color: yellow; min-width: 25%;
+.zoomnum { position:absolute; display:inline-block; right:0; bottom:-11pt;
+  text-decoration: none; font-size: 11pt; color: yellow; min-width: 25%;
   text-align:right; transition: opacity 0.3s; z-index: 1; cursor: pointer;
   user-select: none; }
 .zoomnum[href]:hover { text-decoration: underline; }
@@ -61,8 +61,8 @@ body.hidemarks .overlay { opacity: 0; }
 body.hidemarks .zoomnum { opacity: 0; }
 body.hidemarks #grid .closebox { opacity: 0; }
 a[status]::after { /* tooltips */
- position: absolute; bottom: -2.2rem; right: 0; width: auto;
- background-color: #ddd; color: #444; font: 9pt Arial;
+ position: absolute; bottom: -30pt; right: 0; width: auto;
+ background-color: #ddd; color: #444; font: 11pt Arial;
  padding: 3px 7px; box-shadow: 2px 2px 5px #777;
  content: attr(status); text-align: right; white-space: pre;
  pointer-events: none; z-index: 2;
@@ -89,26 +89,33 @@ Mandelbrot Set Fractal Viewer
 </h4>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Points are colored by <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">counting iterations</a> to divergence; black points converge or cycle.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Colors show <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterations</a> to divergence; black points converge or cycle.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Tap">Click</span> to zoom.</b>  <span mobile="">Click zoom number to enlarge.  Right-click to save the fractal.</span>
+<b><span mobile="Tap">Click</span> to zoom.</b>  <span mobile="">Click zoom number to enlarge.  Right-click to save images, <b>M</b> to save a movie.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Yellow dots show <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbits</a></b>.  Red dots show limit cycles.
-<span mobile="">Details in popup.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-This page shows more fractal detail over time by refining iterations to infinity as you explore: the longer you wait, the more detail is shown.
-After you zoom beyond trillion-fold magnification, a quad-precision perturbation algorithm resolves fine details to more than 30 digits of accuracy.
-The display computes subpixels with a <span class="pixelratio">2</span>:1 ratio.
+<b>About iterations.</b> This viewer shows more fractal detail over time by refining iterations to infinity as you explore: the longer you wait, the more detail is shown.
+After thousands or millions of iterations, you can resolve the finest details in the most complex parts of the fractal.
+See iterations, progress, and coordinate information by hovering over the yellow zoom number below the corner of each window.
+Moving your mouse over fractal content will animate the orbit of the <em>z</em> values for the <em>c</em> at each location, revealing complex boundary dynamics that are fascinating to mathematicians.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Making a path.</b>
+Each click on the fractal starts a new parallel compuataion at a higher zoom level at the selected location; point at a window to prioritize its iterations.
+After you zoom beyond trillion-fold magnification, things slow down a bit as a quad-precision perturbation algorithm resolves fine details to more than 30 digits of accuracy.
+Once you have crafted an interesting path that shows the detail you want, you can create and download your own Mandelbrot zoom video, or bookmark your URL to store and share your path.
+To create high-quality images and videos, the display computes subpixels with a <span class="pixelratio">2</span>:1 ratio; this can be increased to create more precise displays.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
-Keys:
+<b>More commands:</b>
 <b>I</b> zooms in;
 <b class="cmd">Ctrl</b>-click to zoom in-place;
 <b>H</b> shrinks and <b>G</b> grows the size of each window;
