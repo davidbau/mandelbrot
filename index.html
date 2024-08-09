@@ -28,7 +28,6 @@ already-known points.
 -->
 <style>
 body { font-family: Arial; background: #888; margin: 14px;}
-td { position: relative; vertical-align: top;}
 canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
 #grid > div, #text, #movie > div { display: inline-block; margin: 10px;
   position: relative; vertical-align: top; background: rgba(90, 90, 90, 0.5); }
@@ -55,20 +54,21 @@ canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
   text-align:right; transition: opacity 0.3s; z-index: 1; cursor: pointer;
   user-select: none; }
 .zoomnum[href]:hover { text-decoration: underline; }
-td#b_0 { background-color: navy; vertical-align: middle; }
-td#b_0 p { color:white; text-align: center; font-size: 16px; }
 body.hidemarks .overlay { opacity: 0; }
 body.hidemarks .zoomnum { opacity: 0; }
 body.hidemarks #grid .closebox { opacity: 0; }
-a[status]:after { /* tooltips */
- position: absolute; bottom: -30pt; right: 0; width: auto;
- background-color: #ddd; color: #444; font: 11pt Arial;
- padding: 3px 7px; box-shadow: 2px 2px 5px #777;
- content: attr(status); text-align: right; white-space: pre;
- pointer-events: none; z-index: 2;
- opacity: 0; transition: opacity 0.25s ease;
+div.status { display: none; }
+div:hover a div.status { /* tooltips */
+  display: block; position: absolute; top: 12.5pt; right: 0;
+  width: auto; background-color: #ddd; color: #444;
+  font: 11pt Arial; text-align: right; white-space: pre;
+  padding: 3px 7px; box-shadow: 2px 2px 5px #777;
+  pointer-events: none; z-index: 2;
+  opacity: 0; transition: opacity 0.25s ease;
 }
-a[status]:focus:after, a[status]:hover:after { opacity: 0.95; }
+div:hover a:focus div.status, div:hover a:hover div.status {
+  opacity: 0.95;
+}
 body.starting div#b_0:after { display: flex; position: absolute;
   top: 0; left: 0; width: 100%; height: 100%; align-items: center;
   justify-content: center; content:"Starting..."; color: white;
@@ -121,6 +121,7 @@ To create high-quality images and videos, this viewer computes subpixels with a 
 <b>H</b> shrinks and <b>G</b> grows each window;
 <b>R</b> reopens midway windows;
 <b>C</b> recenters all;
+<b>Y</b> changes color scheme;
 <b>U</b> highlights unfinished pixels;
 <b>X</b> increases and <b>Z</b> decreases the <em>z</em> exponent;
 <b>F</b> increases and <b>D</b> decreases the pixel ratio;
@@ -151,9 +152,47 @@ class Config {
     this.dims = 0;
     this.dims2 = 0;
     this.ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
+    this.scheme = 'iceblue';
     this.unknowncolor = "#000";
     this.mobile = ('ontouchstart' in document.documentElement);
     this.mac = (navigator.platform.indexOf('Mac') == 0);
+    this.defineColorSchemes();
+  }
+
+  defineColorSchemes() {
+    this.colorSchemes = {
+      iceblue: (i, frac, fracIter, hl, s) => {
+        // Current implementation
+        let ff = Math.pow(frac, 2);
+        let fr = Math.pow(frac, 0.333);
+        let fg = Math.pow(frac, 3);
+        let g = intcolor(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
+        let r = intcolor(Math.min(fr, i * Math.pow(s, 0.22) / 64));
+        let b = intcolor(ff / 3 + 0.667);
+        return `rgb(${r},${g},${b})`;
+      },
+      warm: (i, frac, fracIter, hl, s) => {
+        frac = Math.max(frac, hl > 10 ? fracIter : 0);
+        let hue = (Math.log(i + 20) * 200) % 360;
+        let chroma = 100 - frac ** 2 * 40;
+        let light = 100 * Math.max(frac ** 3, Math.min(frac, i * s ** 0.33 / 64));
+        return hclColor(hue, chroma, light);
+      },
+      /*
+      gray: (i, frac) => {
+        frac = Math.max(frac, frac > 0.1 ? fracIter : 0);
+        let value = Math.floor(frac * 255);
+        return `rgb(${value},${value},${value})`;
+      },
+      */
+      // Add more color schemes here
+    };
+    this.colorSchemes.all = Object.keys(this.colorSchemes);
+    function intcolor(n) {
+      if (n <= 0) { return "0"; }
+      if (n >= 1) { return "255"; }
+      return (n * 255).toString(10);
+    }
   }
 
   initSizes() {
@@ -196,7 +235,7 @@ class Board {
     this.ss = null; // sparse list of indexes to compute
     this.un = config.dims2;
     this.di = 0;
-    this.hi = [[config.dims2, 0, 0]];
+    this.hi = [[config.dims2, 0, 0, 1]];
     this.sizes = [size, toQd(re), toQd(im)];
     this.effort = 1;
     this.pix = this.sizes[0] / this.config.dims;
@@ -298,7 +337,8 @@ class Board {
       this.di += diverged;
     }
     if (this.hi[0][0] - this.un >= this.config.dims2 / 256) {
-      this.hi.unshift([this.un, this.di, i]);
+      const iterFrac = (i - this.hi[0][2]) / i;
+      this.hi.unshift([this.un, this.di, i, iterFrac]);
     }
     if (!this.fi && this.un != this.config.dims2) {
       this.fi = i;
@@ -345,6 +385,11 @@ class Board {
   }
 
   draw(ctx) {
+    if (this.un == this.config.dims2) {
+      this.clearcanvas(ctx);
+      return;
+    }
+
     let colorcache = {};
     const fastcolor = (num) => {
       let result = colorcache[num];
@@ -390,22 +435,12 @@ class Board {
     if (i < 0) return 'black';
     let j = 0;
     for (; i < this.hi[j][2]; j += 1) {}
-    let frac = (this.config.dims2 - this.hi[j][0]) / this.config.dims2; // frac of pixels done.
-    let len = this.hi.length, half = Math.floor((len + j) / 2);
-    let s = this.sizes[0];
-    let ff = Math.pow(frac, 2);
-    let fr = Math.pow(frac, 0.333);
-    let fg = Math.pow(frac, 3);
-    let g = this.intcolor(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
-    let r = this.intcolor(Math.min(fr, i * Math.pow(s, 0.22) / 64));
-    let b = this.intcolor(ff / 3 + 0.667);
-    return "rgb(" + r + "," + g + "," + b + ")";
-  }
-
-  intcolor(n) {
-    if (n <= 0) { return "0"; }
-    if (n >= 1) { return "255"; }
-    return (n * 255).toString(10);
+    // frac of iterations in last equal-bucket of pixels
+    let fracIter = this.hi[j][3];
+    // frac of pixels done.
+    let frac = (this.config.dims2 - this.hi[j][0]) / this.config.dims2;
+    return this.config.colorSchemes[this.config.scheme](
+       i, frac, fracIter, this.hi.length, this.sizes[0]);
   }
 
   currentc(j) {
@@ -420,6 +455,60 @@ class Board {
     // Boring: nothing computed, or done with less than 5 colors
     return this.di <= 0 || (this.un == 0 && this.hi.length <= 5);
   }
+
+  debugStatus() {
+    const debugGraph = this.renderHiGraph(600, 300);
+    return `<img src="${debugGraph}" style="width:300px;height:150px">`;
+  }
+
+  renderHiGraph(width, height) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    const hi = this.hi;
+    const scale = [
+      (y) => { return y / this.config.dims2; },
+      (y) => { return y / this.config.dims2; },
+      (y) => { return y / hi[Math.floor(hi.length / 8)][2] / 2; },
+      (y) => { return y },
+    ];
+    const barWidth = width / (hi.length * 4);
+
+    // Background
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, width, height);
+
+    // Draw bars
+    const colors = ['red', 'green', 'blue', 'purple'];
+    hi.forEach((row, i) => {
+      row.forEach((value, j) => {
+        const x = i * 4 * barWidth + j * barWidth;
+        const barHeight = scale[j](value) * (height - 20);
+        ctx.fillStyle = colors[j];
+        ctx.fillRect(x, height - barHeight - 10, barWidth, barHeight);
+      });
+    });
+
+    // Draw x-axis
+    ctx.strokeStyle = 'black';
+    ctx.beginPath();
+    ctx.moveTo(0, height - 10);
+    ctx.lineTo(width, height - 10);
+    ctx.stroke();
+
+    // Add labels
+    ctx.font = '20px Arial';
+    ctx.fillStyle = 'red';
+    ctx.fillText(`Unknown: ${this.un}`, 5, 30);
+    ctx.fillStyle = 'green';
+    ctx.fillText(`Diverged: ${this.di}`, 5, 60);
+    ctx.fillStyle = 'purple';
+    ctx.fillText(`iterFrac: ${this.hi[0][3]}`, 5, 90);
+
+    return canvas.toDataURL();
+  }
 }
 
 class PerturbationBoard extends Board {
@@ -428,7 +517,7 @@ class PerturbationBoard extends Board {
     this.quadIndexes = [];
     this.pertIndexes = [];
     // Bail when perturbation exceeds half the digits of precision
-    this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dims)));
+    this.perturbationThreshold = Math.min(0.01, Math.sqrt(1e15 * (size / config.dims)));
     // For scheduling: each step is about 10x effort of default board.
     this.effort = 10;
   }
@@ -542,7 +631,8 @@ class PerturbationBoard extends Board {
     this.un -= count;
     this.di += diverged;
     if (this.hi[0][0] - this.un >= this.config.dims2 / 256) {
-      this.hi.unshift([this.un, this.di, i]);
+      const iterFrac = (i - this.hi[0][2]) / i;
+      this.hi.unshift([this.un, this.di, i, iterFrac]);
     }
     if (!this.fi && this.un != this.config.dims2) {
       this.fi = i;
@@ -735,6 +825,12 @@ class PerturbationBoard extends Board {
       ctx.fillRect(x, y, 1, 1);
     }
   }
+
+  debugStatus() {
+    return `pert: ${this.pertIndexes.length}, ` +
+           `quad: ${this.quadIndexes.length}\n` +
+           super.debugStatus();
+  }
 }
 
 class Grid {
@@ -846,16 +942,16 @@ class Grid {
     let factor = 3.0 / (k < this.boards.length ? this.boards[k].sizes[0] :
       this.config.firstsize / Math.pow(this.config.zoomfactor, k));
     factor = formatScale(factor);
-    return '<canvas width=' + this.config.dims + ' height=' + this.config.dims +
-           ' style="height:' + this.config.cssDims + 'px;width:' + this.config.cssDims + 'px;">' +
+    return `<canvas width="${this.config.dims}" height="${this.config.dims}"` +
+           ` style="height:${this.config.cssDims}px;width:${this.config.cssDims}px;">` +
            '</canvas>' +
            '<div class="closebox"></div>' +
            '<div class="rect"></div>' +
-           '<canvas class=overlay width=' + this.config.dims + ' height=' + this.config.dims +
-           ' style="height:' + this.config.cssDims + 'px;width:' + this.config.cssDims + 'px;">' +
+           `<canvas class=overlay width=${this.config.dims} height="${this.config.dims}"` +
+           ` style="height:${this.config.cssDims}px;width:${this.config.cssDims}px;">` +
            '</canvas>' +
-           '<a class="zoomnum" target="_blank" href="?grid=1">' + factor +
-           '</a>';
+           `<a class="zoomnum" target="_blank" href="?grid=1">${factor}` +
+           '<div class="status"></div></a>';
   }
 
   hidecanvas(k) {
@@ -932,17 +1028,28 @@ class Grid {
   }
 
   updateProgress(overtarget, k) {
-    if (overtarget.tagName == 'A') {
+    if (overtarget.tagName == 'A' && overtarget.classList.contains('zoomnum')) {
       if (this.config.mobile) {
         overtarget.removeAttribute('href');
       } else {
         overtarget.href = this.bigurl(k);
       }
-      overtarget.setAttribute('status', ('center at ' +
-          formatcomplex(k, this.boards[k].sizes[1], this.boards[k].sizes[2])
-            .replaceAll('-', '\u2212') + '\n' +
-          Math.floor(1000 * (1.0 - this.boards[k].un / this.config.dims2))/10.0  + '% done ' +
-          'after ' + this.boards[k].it + ' iters'));
+
+      let statusDiv = overtarget.querySelector('.status');
+      if (!statusDiv) return;
+
+      // Regular status
+      let regularStatus = 'center at ' +
+        formatcomplex(k, this.boards[k].sizes[1], this.boards[k].sizes[2])
+          .replaceAll('-', '\u2212') + '\n' +
+        Math.floor(1000 * (1.0 - this.boards[k].un / this.config.dims2))/10.0  + '% done ' +
+        'after ' + this.boards[k].it + ' iters';
+      statusDiv.textContent = regularStatus;
+
+      // Debug status
+      if (overtarget.showDebug) {
+        statusDiv.innerHTML += '\n' + this.boards[k].debugStatus();
+      }
     }
     if (overtarget.matches(':hover')) {
       setTimeout(() => this.updateProgress(overtarget, k), 100);
@@ -1182,8 +1289,12 @@ class URLHandler {
       if (null !== (m = opts[j].match(/h=([\d,]+)/))) {
         startstate.hidden = m[1].split(',').map(x=>parseInt(x));
       }
+      if (null !== (m = opts[j].match(/scheme=(\w+)/))) {
+        if (this.config.colorSchemes.all.includes(m[1])) {
+          this.config.scheme = m[1];
+        }
+      }
     }
-
     if (startstate.sizes.length == 0) {
       startstate.sizes = this.config.firststate().sizes;
     }
@@ -1221,6 +1332,7 @@ class URLHandler {
            (compactc.length ? '&c=' + compactc : '') +
            (this.config.gridcols != this.config.dgc ? '&grid=' + this.config.gridcols : '') +
            (state.hidden.length ? '&h=' + state.hidden : '') +
+           (this.config.scheme != 'iceblue' ? '&scheme=' + this.config.scheme : '') +
            (this.config.pixelRatio != 2 ? '&pixelratio=' + this.config.pixelRatio : '');
     return '?' + url.replace('&', '');
   }
@@ -1308,6 +1420,10 @@ class EventHandler {
     if (e.key == 'c' && this.explorer.grid.boards.length > 1) {
       this.explorer.zoomManager.centerBoards();
     }
+    // Pressing Y will cycle through the color schemes.
+    if (e.key == 'y') {
+      this.explorer.cycleColorScheme();
+    }
     // Pressing U will cycle through the uncomputed colors.
     if (e.key == 'u') {
       this.explorer.cycleUnknownColor();
@@ -1373,7 +1489,10 @@ class EventHandler {
         if (this.explorer.grid.boards.length <= k) return;
         document.body.className = '';
         let overtarget = e.target;
-        this.explorer.grid.updateProgress(overtarget, k);
+        if (overtarget.tagName == 'A') {
+          overtarget.showDebug = e.ctrlKey || e.metaKey;
+          this.explorer.grid.updateProgress(overtarget, k);
+        }
       } else if (target.id.startsWith('movie') && (!e.target || e.target.id != 'movie')) {
         document.body.className = '';
       }
@@ -1943,6 +2062,40 @@ class OrbitComputer {
   }
 }
 
+class RedrawProcess {
+  constructor(explorer) {
+    this.boards = explorer.grid.boards;
+    this.canvasGetter = (index) => explorer.grid.canvas(index);
+    this.currentIndex = 0;
+    this.timer = null;
+  }
+  start() {
+    this.stop();  // Ensure any existing cycle is stopped
+    this.currentIndex = 0;
+    this.drawNext();
+  }
+  stop() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+  drawNext() {
+    if (this.currentIndex < this.boards.length) {
+      const board = this.boards[this.currentIndex];
+      const canvas = this.canvasGetter(this.currentIndex);
+      if (canvas && board) {
+        const ctx = canvas.getContext('2d');
+        board.draw(ctx);
+      }
+      this.currentIndex++;
+      this.timer = setTimeout(() => this.drawNext(), 0);
+    } else {
+      this.stop();
+    }
+  }
+}
+
 class MandelbrotExplorer {
   constructor() {
     this.config = new Config();
@@ -1954,6 +2107,7 @@ class MandelbrotExplorer {
     this.scheduler = new Scheduler(this);
     this.orbitComputer = new OrbitComputer(this);
     this.movieContainer = document.getElementById('movie');
+    this.redrawProcess = new RedrawProcess(this);
   }
 
   start() {
@@ -1971,6 +2125,15 @@ class MandelbrotExplorer {
     for (let k = 0; k < this.grid.boards.length; ++k) {
       this.grid.boards[k].drawcolor(this.grid.canvas(k).getContext('2d'), 0);
     }
+  }
+
+  cycleColorScheme() {
+    const schemes = this.config.colorSchemes.all;
+    const currentIndex = schemes.indexOf(this.config.scheme);
+    const nextIndex = (currentIndex + 1) % schemes.length;
+    this.config.scheme = schemes[nextIndex];
+    this.redrawProcess.start();
+    this.urlHandler.updateurl();
   }
 
   initPlatform() {
@@ -2057,6 +2220,41 @@ function catmullRomSpline(p0, p1, p2, p3, t) {
     catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),
     catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)
   ];
+}
+
+function hclColor(h, c, l) {
+  // Normalize hue to be between 0 and 360 degrees
+  // Chroma and Luminance should be between 0 and 100.
+  h = h % 360;
+  if (h < 0) h += 360;
+  c = Math.min(Math.max(c, 0), 100);
+  l = Math.min(Math.max(l, 0), 100);
+
+  // Convert to radians
+  const hRad = h * Math.PI / 180;
+
+  // Constants for conversion
+  const u = Math.cos(hRad) * c;
+  const v = Math.sin(hRad) * c;
+
+  // Direct conversion from HCL to RGB
+  let r = l + 0.09551990792716 * u + 0.05406649830715 * v;
+  let g = l - 0.03947567534454 * u - 0.01829165033556 * v;
+  let b = l - 0.19638676772419 * u - 0.45388640918783 * v;
+
+  // Apply gamma correction and convert to eight-bit value
+  [r, g, b] = [r, g, b].map((x) => {
+    return Math.round(gammaCorrect(x / 100) * 255);
+  });
+  return `rgb(${r},${g},${b})`
+}
+
+function gammaCorrect(channel) {
+  if (channel <= 0.0031308) {
+    return 12.92 * channel;
+  } else {
+    return 1.055 * Math.pow(channel, 1/2.4) - 0.055;
+  }
 }
 
 // Start the application
