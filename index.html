@@ -561,12 +561,27 @@ class PerturbationBoard extends Board {
     while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
     let results = [0, 0, 0];
 
-    // Iterate perturbation points
+    // Precompute quad-precision point escape without updating z
+    const newZ = [];
+    for (const index of this.quadIndexes) {
+      if (head <= tail && !this.nn[index]) {
+        this.bb[index] = this.zz[index];
+        this.pp[index] = 0;
+      }
+      let [r, z] = this.precomputeQuad(index);
+      results[r + 1] += 1;
+      newZ.push(z);
+    }
+
+    // Iterate perturbation points that use the old z
     const newQuadIndexes = [];
     let cache = { refIndex: null, binZpow: null };
     for (const index of this.pertIndexes) {
       if (!this.computePerturbation(index, cache)) {
         this.convertToQuadPrecision(index);
+        let [r, z] = this.precomputeQuad(index);
+        results[r + 1] += 1;
+        newZ.push(z);
         newQuadIndexes.push(index);
       }
     }
@@ -586,14 +601,12 @@ class PerturbationBoard extends Board {
       this.pertIndexes = newPertIndexes;
     }
 
-    // Iterate quad-precision points
-    for (const index of this.quadIndexes) {
-      if (head <= tail && !this.nn[index]) {
-        this.bb[index] = this.zz[index];
-        this.pp[index] = 0;
+    // Finally update quad-precision z with precomputed values
+    newZ.forEach((z, ii) => {
+      if (z !== null) {
+        this.zz[this.quadIndexes[ii]] = z;
       }
-      results[this.compute(index) + 1] += 1;
-    }
+    });
 
     // Tally progress
     let diverged = results[2];
@@ -629,9 +642,9 @@ class PerturbationBoard extends Board {
     return count;
   }
 
-  compute(m) {
+  precomputeQuad(m) {
     // Quad-precision compute
-    if (this.nn[m]) return 0;
+    if (this.nn[m]) return [0, null];
     let r = this.zz[m].slice(0, 2);
     let j = this.zz[m].slice(2, 4);
     let cr = this.cc[m].slice(0, 2);
@@ -641,7 +654,7 @@ class PerturbationBoard extends Board {
     let j2 = qdSquare(j);
     if (qdGt(qdAdd(r2, j2), 4)) {
       this.nn[m] = this.it;
-      return 1;
+      return [1, null];
     }
     let ra = qdSub(r2, j2);
     let ja = qdMul(qdDouble(r), j);
@@ -652,7 +665,7 @@ class PerturbationBoard extends Board {
     }
     ra = qdAdd(ra, cr);
     ja = qdAdd(ja, cj);
-    this.zz[m] = [...ra, ...ja];
+    let z = [...ra, ...ja];
     let rb = this.bb[m].slice(0, 2);
     let jb = this.bb[m].slice(2, 4);
     let db = qdAdd(qdAbs(qdSub(rb, ra)), qdAbs(qdSub(jb, ja)));
@@ -661,10 +674,10 @@ class PerturbationBoard extends Board {
       if (!this.pp[m]) { this.pp[m] = this.it; }
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
-        return -1;
+        return [-1, z];
       }
     }
-    return 0;
+    return [0, z];
   }
 
   computePerturbation(index, cache) {
