@@ -160,7 +160,7 @@ class Config {
 
   defineColorSchemes() {
     this.colorSchemes = {
-      iceblue: (i, frac, fracIter, hl, s) => {
+      iceblue: (i, frac, s) => {
         // Current implementation
         let ff = Math.pow(frac, 2);
         let fr = Math.pow(frac, 0.333);
@@ -170,8 +170,7 @@ class Config {
         let b = intcolor(ff / 3 + 0.667);
         return `rgb(${r},${g},${b})`;
       },
-      warm: (i, frac, fracIter, hl, s) => {
-        frac = Math.max(frac, hl > 10 ? fracIter : 0);
+      warm: (i, frac, s) => {
         let hue = (Math.log(i + 20) * 200) % 360;
         let chroma = 100 - frac ** 2 * 40;
         let light = 100 * Math.max(frac ** 3, Math.min(frac, i * s ** 0.33 / 64));
@@ -249,12 +248,7 @@ class Board {
         let rFrac = ((x / this.config.dims) - 0.5);
         let r = rFrac * size + re[0];
         c.push(r, j);
-        if (r * r + j * j > 4) {
-          n.push(1);
-          this.un -= 1;
-        } else {
-          n.push(0);
-        }
+        n.push(0);
         p.push(0);
       }
     }
@@ -331,8 +325,7 @@ class Board {
       this.di += diverged;
     }
     if (this.hi[0][0] - this.un >= this.config.dims2 / 256) {
-      const iterFrac = (i - this.hi[0][2]) / i;
-      this.hi.unshift([this.un, this.di, i, iterFrac]);
+      this.hi.unshift([this.un, this.di, i]);
     }
     if (!this.fi && this.un != this.config.dims2) {
       this.fi = i;
@@ -429,12 +422,10 @@ class Board {
     if (i < 0) return 'black';
     let j = 0;
     for (; i < this.hi[j][2]; j += 1) {}
-    // frac of iterations in last equal-bucket of pixels
-    let fracIter = this.hi[j][3];
     // frac of pixels done.
     let frac = (this.config.dims2 - this.hi[j][0]) / this.config.dims2;
     return this.config.colorSchemes[this.config.scheme](
-       i, frac, fracIter, this.hi.length - j, this.sizes[0]);
+       i, frac, this.sizes[0]);
   }
 
   currentc(j) {
@@ -537,11 +528,6 @@ class PerturbationBoard extends Board {
         let rFrac = ((rx / this.config.dims) - 0.5);
         let refIndex = ry * this.config.dims + rx;
         let cr = qdAdd(re, qdScale(toQd(rFrac), size));
-        let escaped = (qdGt(qdAdd(qdSquare(cr), qdSquare(ci)), 4));
-        if (escaped) {
-          this.nn[refIndex] = 1;
-          this.un -= 1;
-        }
 
         // Initialize reference point
         let c = [cr[0], cr[1], ci[0], ci[1]];  // Quad-precision
@@ -559,17 +545,8 @@ class PerturbationBoard extends Board {
             const dcr = (px - rx) * pix;
             const pertIndex = py * this.config.dims + px;
             if (this.cc[pertIndex] === null) {  // Avoid double-initialization
-              if (escaped) {
-                let ec = this.cc[pertIndex] = qdcAdd(c, [dcr, 0, dci, 0]);
-                this.quadIndexes.push(pertIndex);
-                if (qdGt(qdcAbs(ec), 4)) {
-                  this.nn[pertIndex] = 1;
-                  this.un -= 1;
-                }
-              } else {
-                this.cc[pertIndex] = [dcr, dci, refIndex];
-                this.pertIndexes.push(pertIndex);
-              }
+              this.cc[pertIndex] = [dcr, dci, refIndex];
+              this.pertIndexes.push(pertIndex);
             }
           }
         }
