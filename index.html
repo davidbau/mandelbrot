@@ -228,7 +228,7 @@ class Board {
     this.ss = null; // sparse list of indexes to compute
     this.un = config.dims2;
     this.di = 0;
-    this.hi = [[config.dims2, 0, 0, 1]];
+    this.hi = [[config.dims2, 0, 0]];
     this.sizes = [size, toQd(re), toQd(im)];
     this.effort = 1;
     this.pix = this.sizes[0] / this.config.dims;
@@ -454,12 +454,11 @@ class Board {
 
     const hi = this.hi;
     const scale = [
-      (y) => { return y / this.config.dims2; },
-      (y) => { return y / this.config.dims2; },
-      (y) => { return y / hi[Math.floor(hi.length / 8)][2] / 2; },
-      (y) => { return y },
+      (y) => y / this.config.dims2,
+      (y) => y / this.config.dims2,
+      (y) => y / hi[Math.floor(hi.length / 8)][2] / 2,
     ];
-    const barWidth = width / (hi.length * 4);
+    const barWidth = width / (hi.length * scale.length);
 
     // Background
     ctx.fillStyle = 'white';
@@ -469,7 +468,7 @@ class Board {
     const colors = ['red', 'green', 'blue', 'purple'];
     hi.forEach((row, i) => {
       row.forEach((value, j) => {
-        const x = i * 4 * barWidth + j * barWidth;
+        const x = i * scale.length * barWidth + j * barWidth;
         const barHeight = scale[j](value) * (height - 20);
         ctx.fillStyle = colors[j];
         ctx.fillRect(x, height - barHeight - 10, barWidth, barHeight);
@@ -485,12 +484,12 @@ class Board {
 
     // Add labels
     ctx.font = '20px Arial';
+    ctx.shadowColor = 'white';
+    ctx.shadowBlur = 8;
     ctx.fillStyle = 'red';
     ctx.fillText(`Unknown: ${this.un}`, 5, 30);
     ctx.fillStyle = 'green';
     ctx.fillText(`Diverged: ${this.di}`, 5, 60);
-    ctx.fillStyle = 'purple';
-    ctx.fillText(`iterFrac: ${this.hi[0][3]}`, 5, 90);
 
     return canvas.toDataURL();
   }
@@ -602,8 +601,7 @@ class PerturbationBoard extends Board {
     this.un -= count;
     this.di += diverged;
     if (this.hi[0][0] - this.un >= this.config.dims2 / 256) {
-      const iterFrac = (i - this.hi[0][2]) / i;
-      this.hi.unshift([this.un, this.di, i, iterFrac]);
+      this.hi.unshift([this.un, this.di, i]);
     }
     if (!this.fi && this.un != this.config.dims2) {
       this.fi = i;
@@ -1003,7 +1001,7 @@ class Grid {
       if (this.config.mobile) {
         overtarget.removeAttribute('href');
       } else {
-        overtarget.href = this.bigurl(k);
+        overtarget.href = this.bigurl(k, overtarget.showDebug);
       }
 
       let statusDiv = overtarget.querySelector('.status');
@@ -1027,7 +1025,7 @@ class Grid {
     }
   }
 
-  bigurl(k) {
+  bigurl(k, debug) {
     if (k >= this.boards.length) return;
     let osize = this.boards[k].sizes[0];
     let oexp = '';
@@ -1036,7 +1034,11 @@ class Grid {
     }
     let ore = this.boards[k].sizes[1];
     let oim = this.boards[k].sizes[2];
-    return '?s=' + formatSize(osize) + oexp + '&c=' + formatcomplex(k, ore, oim) + '&grid=1';
+    return '?s=' + formatSize(osize) +
+           (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
+           '&c=' + formatcomplex(k, ore, oim) +
+           (this.config.scheme != 'iceblue' ? '&scheme=' + this.config.scheme : '') +
+           (debug ? '' : '&grid=1');
   }
 
   clearseq(k) {
@@ -1344,7 +1346,7 @@ class EventHandler {
       let m = target.id.match(/b_(\d+)/);
       if (e.target.tagName == 'A') {
         if (m && !this.explorer.config.mobile) {
-          e.target.href = this.explorer.grid.bigurl(m[1]);
+          e.target.href = this.explorer.grid.bigurl(m[1], e.metaKey || e.ctrlKey);
         }
         return true;
       }
