@@ -424,7 +424,7 @@ class Board {
       if (this.hi.length > 10) {
         // Estimate the limit of di as i goes to infinity.
         const sample = this.hi.slice(0, this.hi.length - 2).map(
-           (e, i) => ({ x: e[0], y: e[2], weight: (e[0] - this.hi[i+1][0]) ** 3 })
+           (e, i) => ({ x: e[0], y: e[2], weight: (e[0] - this.hi[i+1][0]) ** 4 })
         ).reverse();
         const estimate = Math.min(1, Math.max(0, estimateLimit(sample)));
         // Smooth the estimate.
@@ -2272,7 +2272,7 @@ function intcolor(n) {
 function estimateLimit(data) {
   // Transform data: x becomes 1/x
   const transformedData = data.map(point => ({
-    x: 1 / point.x,
+    x: 1 / (point.x ** 0.75),
     y: point.y,
     weight: point.weight || 1  // Default weight to 1 if not provided
   }));
