@@ -140,7 +140,10 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <script>
 class Config {
   constructor() {
-    this.vw = window.innerWidth || document.documentElement.clientWidth;
+    document.body.style.overflowY = 'scroll';
+    this.vw = document.documentElement.clientWidth || (
+       window.innerWidth - 20);
+    document.body.style.overflowY = '';
     this.dgc = Math.min(3, Math.ceil(this.vw / 501));
     this.gridcols = this.dgc;
     this.exponent = 2;
