@@ -123,6 +123,7 @@ To create high-quality images and videos, this viewer computes subpixels with a 
 <b>C</b> recenters all;
 <b>T</b> changes color theme;
 <b>U</b> highlights unfinished pixels;
+<b mac="Return">Enter</b> toggles full-screen;
 <b>X</b> increases and <b>Z</b> decreases the <em>z</em> exponent;
 <b>F</b> increases and <b>D</b> decreases the pixel ratio;
 <b>M</b> makes a movie that follows your path;
@@ -1481,6 +1482,11 @@ class EventHandler {
     if (e.key === 'm' && this.explorer.grid.boards.length > 1) {
       this.explorer.movieMode.toggle();
     }
+    // Toggle fullscreen mode
+    if (e.key === 'Enter' || document.fullscreenElement && e.key === 'Escape') {
+      e.preventDefault(); // Prevent default action of the Enter key
+      this.explorer.toggleFullscreen();
+    }
   }
 
   onmouseover(e) {
@@ -2140,6 +2146,18 @@ class MandelbrotExplorer {
     this.config.theme = themes[nextIndex];
     this.redrawProcess.start();
     this.urlHandler.updateurl();
+  }
+
+  toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.log(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
   }
 
   initPlatform() {
