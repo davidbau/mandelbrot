@@ -165,6 +165,13 @@ class Config {
 
   defineColorThemes() {
     this.colorThemes = {
+      warm: (i, frac, fracD, fracL, s) => {
+        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
+        let hue = (Math.log(i + 20) * 200) % 360;
+        let chroma = 100;
+        let light = 15 * frac + 85 * frac ** 5;
+        return hclColor(hue, chroma, light);
+      },
       iceblue: (i, frac, fracD, fracL, s) => {
         // Current implementation
         let ff = Math.pow(frac, 2);
@@ -175,20 +182,18 @@ class Config {
         let b = intcolor(ff / 3 + 0.667);
         return `rgb(${r},${g},${b})`;
       },
-      warm: (i, frac, fracD, fracL, s) => {
+      rainbow: (i, frac, fracD, fracL, s) => {
         frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
-        let hue = (Math.log(i + 20) * 200) % 360;
-        let chroma = 100 - frac ** 3 * 50;
-        let light = 1 + 99 * frac ** 4;
+        let hue = (Math.log(i + 20) * 1000) % 360;
+        let chroma = 100;
+        let light = 25 * frac + 75 * frac ** 5;
         return hclColor(hue, chroma, light);
       },
-      /*
-      gray: (i, frac) => {
-        frac = Math.max(frac, frac > 0.1 ? fracIter : 0);
-        let value = Math.floor(frac * 255);
+      gray: (i, frac, fracD, fracL, s) => {
+        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
+        let value = intcolor(0.15 + 0.85 * frac ** 5);
         return `rgb(${value},${value},${value})`;
       },
-      */
       // Add more color themes here
     };
     this.colorThemes.all = Object.keys(this.colorThemes);
@@ -394,10 +399,15 @@ class Board {
     };
 
     let n = this.nn;
+    let prev = -1;
     for (let m = 0; m < this.config.dims2; ++m) {
       let x = m % this.config.dims;
       let y = (m - x) / this.config.dims;
-      ctx.fillStyle = fastcolor(n[m]);
+      let cur = n[m];
+      if (prev !== cur) {
+        ctx.fillStyle = fastcolor(cur);
+        prev = cur;
+      }
       ctx.fillRect(x, y, 1, 1);
     }
   }
@@ -808,27 +818,6 @@ class PerturbationBoard extends Board {
       const ref = this.zz[refIndex];
       const r = qdcAdd([ref[0], ref[1], ref[2], ref[3]], [dr, 0, di, 0]);
       return [[r[0], r[1]], [r[2], r[3]]];
-    }
-  }
-
-  draw(ctx) {
-    let colorcache = {};
-    const fastcolor = (num) => {
-      let result = colorcache[num];
-      if (!result) {
-        result = this.makecolor(num);
-        if (colorcache.length < 10000) {
-          colorcache[num] = result;
-        }
-      }
-      return result;
-    };
-
-    for (let m = 0; m < this.config.dims2; ++m) {
-      let x = m % this.config.dims;
-      let y = (m - x) / this.config.dims;
-      ctx.fillStyle = fastcolor(this.nn[m]);
-      ctx.fillRect(x, y, 1, 1);
     }
   }
 
@@ -2081,12 +2070,14 @@ class RedrawProcess {
   constructor(explorer) {
     this.boards = explorer.grid.boards;
     this.canvasGetter = (index) => explorer.grid.canvas(index);
-    this.currentIndex = 0;
+    this.orderFactory = () => explorer.grid.boards.map((b, i) => i).sort(
+       (a, b) => (explorer.grid.hiddencanvas(a) * 1 - explorer.grid.hiddencanvas(b) * 1)
+                 * explorer.grid.boards.length + (b - a));
     this.timer = null;
   }
   start() {
     this.stop();  // Ensure any existing cycle is stopped
-    this.currentIndex = 0;
+    this.canvasOrder = this.orderFactory(); 
     this.drawNext();
   }
   stop() {
@@ -2096,9 +2087,10 @@ class RedrawProcess {
     }
   }
   drawNext() {
-    if (this.currentIndex < this.boards.length) {
-      const board = this.boards[this.currentIndex];
-      const canvas = this.canvasGetter(this.currentIndex);
+    if (this.canvasOrder.length) {
+      const index = this.canvasOrder.shift();
+      const board = this.boards[index];
+      const canvas = this.canvasGetter(index);
       if (canvas && board) {
         const ctx = canvas.getContext('2d');
         board.draw(ctx);
