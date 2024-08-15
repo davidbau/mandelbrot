@@ -300,7 +300,7 @@ class Board {
       results[this.compute(s[t]) + 1] += 1;
     }
     this.un -= results[2] + results[0]; // newly finished
-    this.di += results[0]; // diverged
+    this.di += results[2]; // diverged
     this.updateHistogram(this.un, this.di, this.it);
     if (!this.fi && this.un != this.config.dims2) {
       this.fi = this.it;
