@@ -249,27 +249,23 @@ class Board {
 
   initboard(size, re, im) {
     this.it = 1;
-    let c = this.cc;
-    let n = this.nn;
-    let p = this.pp;
+    this.nn = new Array(this.config.dims2).fill(0);
+    this.pp = new Array(this.config.dims2).fill(0);
     for (let y = 0; y < this.config.dims; y++) {
-      let jFrac = (0.5 - (y / this.config.dims));
-      let j = jFrac * size + im[0];
+      const jFrac = (0.5 - (y / this.config.dims));
+      const j = jFrac * size + im[0];
       for (let x = 0; x < this.config.dims; x++) {
-        let rFrac = ((x / this.config.dims) - 0.5);
-        let r = rFrac * size + re[0];
-        c.push(r, j);
-        n.push(0);
-        p.push(0);
+        const rFrac = ((x / this.config.dims) - 0.5);
+        const r = rFrac * size + re[0];
+        this.cc.push(r, j);
       }
     }
-    let s = [];
+    this.ss = [];
     for (let m = 0; m < this.config.dims2; ++m) {
-      s.push(m);
+      this.ss.push(m);
     }
-    this.ss = s;
-    this.zz = c.slice();
-    this.bb = c.slice();
+    this.zz = this.cc.slice();
+    this.bb = this.cc.slice();
     this.fi = (this.un == this.config.dims2 ? 0 : 1);
   }
 
