@@ -263,117 +263,82 @@ class Board {
         p.push(0);
       }
     }
+    let s = [];
+    for (let m = 0; m < this.config.dims2; ++m) {
+      s.push(m);
+    }
+    this.ss = s;
     this.zz = c.slice();
     this.bb = c.slice();
     this.fi = (this.un == this.config.dims2 ? 0 : 1);
   }
 
   iterate() {
-    const i = this.it;
-    const z = this.zz;    // current iterate for each pixel
-    const c = this.cc;    // current constant for each pixel
-    const n = this.nn;    // number of iterations before conv/divergence
-    const b = this.bb;    // recent remembered z
-    const p = this.pp;    // iteration at which converged within epsilon2
-    const pix = this.pix;
-    const epsilon = this.epsilon;
-    const epsilon2 = this.epsilon2;
+    const results = [0, 0, 0];
     let s = this.ss;    // speedy list of indexes to compute
-    let count = 0;
     // head and tail factor i into an odd num and largest power of 2.
-    let head = i, tail = 1;
+    let head = this.it, tail = 1;
     while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
-    if (s === null && this.un <= z.length / 4) {
+    if (s.length > this.un * 1.25) {
       let news = [];
-      for (let m = 0; m < this.config.dims2; ++m) {
-        if (n[m]) continue;
-        news.push(m);
+      for (let t = 0; t < s.length; ++t) {
+        if (this.nn[s[t]]) continue;
+        news.push(s[t]);
       }
       s = this.ss = news;
     }
-    if (s === null) {
-      if (head <= tail) {
-        for (let m = 0; m < this.config.dims2; ++m) {
-          if (n[m]) continue;
-          b[m * 2] = z[m * 2];
-          b[m * 2 + 1] = z[m * 2 + 1];
-          p[m] = 0;
-        }
-      }
-      let diverged = 0, a;
-      for (let m = 0; m < this.config.dims2; ++m) {
-        a = this.compute(m, i, n, z, c, b, p, epsilon, epsilon2);
-        if (a) { count += 1; }
-        if (a > 0) { diverged += 1; }
-      }
-      this.un -= count;
-      this.di += diverged;
-    } else {
-      if (s.length > this.un * 1.25) {
-        let news = [];
-        for (let t = 0; t < s.length; ++t) {
-          if (n[s[t]]) continue;
-          news.push(s[t]);
-        }
-        s = this.ss = news;
-      }
-      if (head <= tail) {
-        for (let t = 0; t < s.length; ++t) {
-          let m = s[t];
-          if (n[m]) continue;
-          b[m * 2] = z[m * 2];
-          b[m * 2 + 1] = z[m * 2 + 1];
-          p[m] = 0;
-        }
-      }
-      let diverged = 0, a;
+    if (head <= tail) {
       for (let t = 0; t < s.length; ++t) {
-        a = this.compute(s[t], i, n, z, c, b, p, epsilon, epsilon2);
-        if (a) { count += 1; }
-        if (a > 0) { diverged += 1; }
+        let m = s[t];
+        if (this.nn[m]) continue;
+        this.bb[m * 2] = this.zz[m * 2];
+        this.bb[m * 2 + 1] = this.zz[m * 2 + 1];
+        this.pp[m] = 0;
       }
-      this.un -= count;
-      this.di += diverged;
     }
-    this.updateHistogram(this.un, this.di, i);
+    for (let t = 0; t < s.length; ++t) {
+      results[this.compute(s[t]) + 1] += 1;
+    }
+    this.un -= results[2] + results[0]; // newly finished
+    this.di += results[0]; // diverged
+    this.updateHistogram(this.un, this.di, this.it);
     if (!this.fi && this.un != this.config.dims2) {
-      this.fi = i;
+      this.fi = this.it;
     }
     this.it++;
-    return count;
+    return results[2] + results[0];
   }
 
-  compute(m, i, n, z, c, b, p, epsilon, epsilon2) {
-    if (n[m]) return 0;
-    let m2 = m * 2;
-    let m2i = m2 + 1;
-    let r, j, r2, j2, ra, ja, rb, jb, db;
-    r = z[m2];
-    j = z[m2i];
-    r2 = r * r;
-    j2 = j * j;
+  compute(m) {
+    if (this.nn[m]) return 0;
+    const m2 = m * 2;
+    const m2i = m2 + 1;
+    const r = this.zz[m2];
+    const j = this.zz[m2i];
+    const r2 = r * r;
+    const j2 = j * j;
     if (r2 + j2 > 4.0) {
-      n[m] = i;
+      this.nn[m] = this.it;
       return 1;
     }
-    ra = r2 - j2;
-    ja = 2 * r * j;
+    let ra = r2 - j2;
+    let ja = 2 * r * j;
     for (let ord = 2; ord < this.config.exponent; ord++) {
       let rt = r * ra - j * ja;
       ja = r * ja + j * ra;
       ra = rt;
     }
-    ra += c[m2];
-    ja += c[m2i];
-    z[m2] = ra;
-    z[m2i] = ja;
-    rb = b[m2];
-    jb = b[m2i];
-    db = Math.abs(rb - ra) + Math.abs(jb - ja);
-    if (db <= epsilon2) {
-      if (!p[m]) { p[m] = i; }
-      if (db <= epsilon) {
-        n[m] = -i;
+    ra += this.cc[m2];
+    ja += this.cc[m2i];
+    this.zz[m2] = ra;
+    this.zz[m2i] = ja;
+    const rb = this.bb[m2];
+    const jb = this.bb[m2i];
+    const db = Math.abs(rb - ra) + Math.abs(jb - ja);
+    if (db <= this.epsilon2) {
+      if (!this.pp[m]) { this.pp[m] = this.it; }
+      if (db <= this.epsilon) {
+        this.nn[m] = -this.it;
         return -1;
       }
     }
@@ -1899,6 +1864,7 @@ class Scheduler {
       } else {
         if (!this.endTime) {
           this.endTime = (new Date).getTime();
+          console.log(`Finished in ${((this.endTime - this.startTime) / 1000).toFixed(3)}s`);
         }
         setTimeout(() => this.progress(), 100); // Check less frequently when no work
         return;
