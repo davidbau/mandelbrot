@@ -501,8 +501,9 @@ class PerturbationBoard extends Board {
     super(k, size, re, im, config);
     this.quadIndexes = [];
     this.pertIndexes = [];
+    // The 0.1 threshold is 2x faster than 0.01 but reveals some edge artfiacts
     // Bail when perturbation exceeds half the digits of precision
-    this.perturbationThreshold = Math.min(0.01, Math.sqrt(1e15 * (size / config.dims)));
+    this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dims)));
     // For scheduling: each step is about 10x effort of default board.
     this.effort = 10;
   }
@@ -1814,11 +1815,10 @@ class Scheduler {
     this.computationPaused = false;
     this.steps = 0;
     this.startTime = 0;
-    this.endTime = 0;
+    this.endTime = -1;
   }
 
   start() {
-    this.startTime = (new Date).getTime();
     this.progress();
   }
 
@@ -1847,6 +1847,11 @@ class Scheduler {
         }
       }
       if (pri.length) {
+        // Start timer if it is not already running.
+        if (this.endTime) {
+          this.startTime = (new Date).getTime();
+          this.endTime = 0;
+        }
         // Exponential scheduling policy
         let shift = Math.floor(this.steps++ / 2);
         let p = 0;
@@ -1862,6 +1867,7 @@ class Scheduler {
           }
         }
       } else {
+        // End timer when there is no remaining work
         if (!this.endTime) {
           this.endTime = (new Date).getTime();
           console.log(`Finished in ${((this.endTime - this.startTime) / 1000).toFixed(3)}s`);
