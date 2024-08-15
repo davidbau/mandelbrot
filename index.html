@@ -706,7 +706,7 @@ class PerturbationBoard extends Board {
     r += cr;
     i += ci;
 
-    if (this.isThresholdExceeded(r, i)) {
+    if (this.isThresholdExceeded(r, i, refIndex)) {
       return false;
     }
 
@@ -739,8 +739,13 @@ class PerturbationBoard extends Board {
     return binZpow;
   }
 
-  isThresholdExceeded(dr, di) {
-    return Math.max(Math.abs(dr), Math.abs(di)) > this.perturbationThreshold;
+  isThresholdExceeded(dr, di, refIndex) {
+    const mag = Math.max(Math.abs(dr), Math.abs(di));
+    if (mag > this.perturbationThreshold) return true;
+    // If orbit is getting large, then be more careful.
+    if (mag * 10 < this.perturbationThreshold) return false;
+    const [zr, zr0, zi, zi0] = this.zz[refIndex];
+    return ((dr + zr) ** 2 + (di + zi) ** 2 > 3);
   }
 
   isEscaped(r, i) {
