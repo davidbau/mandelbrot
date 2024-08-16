@@ -258,6 +258,9 @@ class Board {
         const rFrac = ((x / this.config.dims) - 0.5);
         const r = rFrac * size + re[0];
         this.cc.push(r, j);
+        if (this.inspike(r, j)) {
+          this.un -= 1;
+        }
       }
     }
     this.ss = [];
@@ -267,6 +270,12 @@ class Board {
     this.zz = this.cc.slice();
     this.bb = this.cc.slice();
     this.fi = (this.un == this.config.dims2 ? 0 : 1);
+  }
+
+  inspike(re, im) {
+    // We do not iterate infinitely for chaotic points in the spike.
+    return (im == 0.0 && re > -2.0 && re < -1.401155 &&
+            this.config.exponent == 2);
   }
 
   iterate() {
@@ -335,6 +344,9 @@ class Board {
       if (!this.pp[m]) { this.pp[m] = this.it; }
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
+        if (this.inspike(this.cc[m2], this.cc[m2i])) {
+          return 0;  // Points in spike are already counted
+        }
         return -1;
       }
     }
@@ -509,7 +521,8 @@ class PerturbationBoard extends Board {
     this.cc = new Array(this.config.dims2).fill(null);
     this.nn = new Array(this.config.dims2).fill(0);
     this.pp = new Array(this.config.dims2).fill(0);
-    const gridSize = Math.ceil(this.config.dims / 17);
+    // Odd grid ensures that center point corresponds to a quad precision pixel
+    const gridSize = Math.floor(this.config.dims / 17 / 2) * 2 + 1;
     const step = this.config.dims / gridSize;
     const offset = step / 2;
     const pix = size / this.config.dims;
@@ -517,11 +530,11 @@ class PerturbationBoard extends Board {
     im = toQd(im);
 
     for (let gy = 0; gy < gridSize; gy++) {
-      let ry = Math.floor(gy * step + offset);
+      let ry = Math.round(gy * step + offset);
       let jFrac = (0.5 - (ry / this.config.dims));
       let ci = qdAdd(im, qdScale(toQd(jFrac), size))
       for (let gx = 0; gx < gridSize; gx++) {
-        let rx = Math.floor(gx * step + offset);
+        let rx = Math.round(gx * step + offset);
         let rFrac = ((rx / this.config.dims) - 0.5);
         let refIndex = ry * this.config.dims + rx;
         let cr = qdAdd(re, qdScale(toQd(rFrac), size));
@@ -530,6 +543,10 @@ class PerturbationBoard extends Board {
         let c = [cr[0], cr[1], ci[0], ci[1]];  // Quad-precision
         this.cc[refIndex] = c;
         this.quadIndexes.push(refIndex);
+        let refspike = this.inspikeQd(cr, ci);
+        if (refspike) {
+          this.un -= 1;
+        }
 
         // Initialize perturbations around this reference point
         const minY = Math.max(0, Math.floor(ry - offset));
@@ -544,6 +561,9 @@ class PerturbationBoard extends Board {
             if (this.cc[pertIndex] === null) {  // Avoid double-initialization
               this.cc[pertIndex] = [dcr, dci, refIndex];
               this.pertIndexes.push(pertIndex);
+              if (refspike && py == ry) {
+                this.un -= 1;
+              }
             }
           }
         }
@@ -551,6 +571,12 @@ class PerturbationBoard extends Board {
     }
     this.zz = this.cc.slice();
     this.bb = this.cc.slice();
+  }
+
+  inspikeQd(re, im) {
+    // We do not iterate infinitely for chaotic points in the spike.
+    return (qdEq(im, 0.0) && qdGt(re, -2.0) && qdLt(re, -1.401155) &&
+            this.config.exponent == 2);
   }
 
   iterate() {
@@ -670,7 +696,11 @@ class PerturbationBoard extends Board {
       if (!this.pp[m]) { this.pp[m] = this.it; }
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
-        return [-1, z];
+        if (this.inspikeQd(cr, ci)) {
+          return [0, z];  // Already counted
+        } else {
+          return [-1, z];
+        }
       }
     }
     return [0, z];
