@@ -93,7 +93,7 @@ Mandelbrot Set Fractal Viewer
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Tap">Click</span> to zoom.</b>  <span mobile="">Click zoom number to enlarge.  Right-click to save images, <b>M</b> to make and save a movie.</span>
+<b><span mobile="Tap">Click</span> to zoom.</b>  <span mobile="">Right-click to save images, <b>M</b> to make and save a movie of your zoom path.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -107,10 +107,10 @@ See information on iterations, progress, and coordinates by <span mobile="tappin
 <span mobile="Holding your fingertip">Moving your mouse</span> over fractal content will animate the orbit of <em>z</em> values for each location <em>c</em>, revealing the complex boundary dynamics that have fascinated mathematicians.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Making a path.</b>
-Each <span mobile="tap">click</span> on the fractal starts a new parallel computataion at a higher zoom level at the selected location; point at a window to prioritize its iterations.
-After you zoom beyond trillion-fold magnification, things slow down a bit as a quad-precision perturbation algorithm resolves fine details to more than 30 digits of accuracy.
-Once you have crafted an interesting path that shows the detail you want, you can <a class="moviemode">create and download your own Mandelbrot zoom video</a> or bookmark your URL to save and share your path.
+<b>Exploring a zoom path.</b>
+Each <span mobile="tap">click</span> on the fractal starts a new parallel computataion at a higher zoom level at the selected location.
+After you zoom beyond trillion-fold magnification, we slow things down a bit to use a quad-precision perturbation algorithm that resolves fine details to more than 30 digits of accuracy.
+Once you have crafted an interesting path that shows the detail you want, you can <a class="moviemode">create and download your own Mandelbrot zoom video</a> or bookmark your URL to save and share your exploration.
 To create high-quality images and videos, this viewer computes subpixels with a <span class="pixelratio">2</span>:1 ratio<span mobile="">, and that can be increased to create more precise displays</span>.
 </p>
 
@@ -230,15 +230,15 @@ class Board {
     this.k = k;
     this.config = config;
     this.it = 0;
-    this.fi = 0;
     this.zz = []; // current iterate for each pixel
     this.cc = []; // current constant for each pixel
     this.nn = []; // iterations when diverged / (neg) converged
     this.bb = []; // recent remembered z
     this.pp = []; // iteration at which converged within epsilon2
     this.ss = null; // sparse list of indexes to compute
-    this.un = config.dims2;
-    this.di = 0;
+    this.un = config.dims2; // count of unfinished points
+    this.di = 0; // diverged points
+    this.ch = 0; // potentially chaotic points in the spike
     this.hi = [[0, 1, 1, 0]];
     this.sizes = [size, toQd(re), toQd(im)];
     this.effort = 1;
@@ -260,6 +260,7 @@ class Board {
         this.cc.push(r, j);
         if (this.inspike(r, j)) {
           this.un -= 1;
+          this.ch += 1;
         }
       }
     }
@@ -269,13 +270,6 @@ class Board {
     }
     this.zz = this.cc.slice();
     this.bb = this.cc.slice();
-    this.fi = (this.un == this.config.dims2 ? 0 : 1);
-  }
-
-  inspike(re, im) {
-    // We do not iterate infinitely for chaotic points in the spike.
-    return (im == 0.0 && re > -2.0 && re < -1.401155 &&
-            this.config.exponent == 2);
   }
 
   iterate() {
@@ -307,9 +301,6 @@ class Board {
     this.un -= results[2] + results[0]; // newly finished
     this.di += results[2]; // diverged
     this.updateHistogram(this.un, this.di, this.it);
-    if (!this.fi && this.un != this.config.dims2) {
-      this.fi = this.it;
-    }
     this.it++;
     return results[2] + results[0];
   }
@@ -344,7 +335,8 @@ class Board {
       if (!this.pp[m]) { this.pp[m] = this.it; }
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
-        if (this.inspike(this.cc[m2], this.cc[m2i])) {
+        if (this.inspike(this.cc[m2], this.cc[m2i]) && this.ch > 0) {
+          this.ch -= 1;
           return 0;  // Points in spike are already counted
         }
         return -1;
@@ -353,8 +345,19 @@ class Board {
     return 0;
   }
 
+  inspike(re, im) {
+    // We do not iterate infinitely for chaotic points in the spike.
+    return (im == 0.0 && re > -2.0 && re < -1.401155 &&
+            this.config.exponent == 2);
+  }
+
+  unfinished() {
+    // Chaotic points in the spike counted as finished after 100000 iterations.
+    return this.un + (this.it < 100000 ? this.ch : 0);
+  }
+
   draw(ctx) {
-    if (this.un == this.config.dims2) {
+    if (this.unfinished() == this.config.dims2) {
       this.clearcanvas(ctx);
       return;
     }
@@ -449,7 +452,8 @@ class Board {
 
   debugStatus() {
     const debugGraph = this.renderHiGraph(600, 300);
-    return `<img src="${debugGraph}" style="width:300px;height:150px">`;
+    return `${this.di} diverged, ${this.un} unfinished, ${this.ch} chaotic\n` +
+           `<img src="${debugGraph}" style="width:300px;height:150px">`;
   }
 
   renderHiGraph(width, height) {
@@ -512,8 +516,8 @@ class PerturbationBoard extends Board {
     // The 0.1 threshold is 2x faster than 0.01 but reveals some edge artfiacts
     // Bail when perturbation exceeds half the digits of precision
     this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dims)));
-    // For scheduling: each step is about 10x effort of default board.
-    this.effort = 10;
+    // For scheduling: each step is about 17x effort of default board.
+    this.effort = 17;
   }
 
   initboard(size, re, im) {
@@ -546,6 +550,7 @@ class PerturbationBoard extends Board {
         let refspike = this.inspikeQd(cr, ci);
         if (refspike) {
           this.un -= 1;
+          this.ch += 1;
         }
 
         // Initialize perturbations around this reference point
@@ -563,6 +568,7 @@ class PerturbationBoard extends Board {
               this.pertIndexes.push(pertIndex);
               if (refspike && py == ry) {
                 this.un -= 1;
+                this.ch += 1;
               }
             }
           }
@@ -638,9 +644,6 @@ class PerturbationBoard extends Board {
     this.un -= count;
     this.di += diverged;
     this.updateHistogram(this.un, this.di, i);
-    if (!this.fi && this.un != this.config.dims2) {
-      this.fi = i;
-    }
 
     // Trim finished pixels from array.
     if (this.pertIndexes.length + this.quadIndexes.length > this.un * 1.25) {
@@ -696,7 +699,8 @@ class PerturbationBoard extends Board {
       if (!this.pp[m]) { this.pp[m] = this.it; }
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
-        if (this.inspikeQd(cr, ci)) {
+        if (this.inspikeQd(cr, ci) && this.ch > 0) {
+          this.ch -= 1;
           return [0, z];  // Already counted
         } else {
           return [-1, z];
@@ -1034,8 +1038,8 @@ class Grid {
       let regularStatus = 'center at ' +
         formatcomplex(k, this.boards[k].sizes[1], this.boards[k].sizes[2])
           .replaceAll('-', '\u2212') + '\n' +
-        Math.floor(1000 * (1.0 - this.boards[k].un / this.config.dims2))/10.0  + '% done ' +
-        'after ' + this.boards[k].it + ' iters';
+        Math.floor(1000 * (1.0 - this.boards[k].unfinished() / this.config.dims2))/10.0  +
+          '% done after ' + this.boards[k].it + ' iters';
       statusDiv.textContent = regularStatus;
 
       // Debug status
@@ -1105,7 +1109,7 @@ class ZoomManager {
     let border = 1;
     let cssClass = '';
     if (zf > 50) {
-      // Make rectangle visible if it is tiny.
+      // Switch from rectangle to circle if the zoom area is tiny.
       zf = 25;
       cssClass = 'circle';
     }
@@ -1800,7 +1804,8 @@ class MovieMode {
     this.movieCtx.imageSmoothingQuality = 'high';
     this.movieCtx.translate(this.explorer.config.dims / 2, this.explorer.config.dims / 2);
     this.movieCtx.scale(scale, scale);
-    this.movieCtx.translate(-this.explorer.config.dims / 2 - offsetX, -this.explorer.config.dims / 2 - offsetY);
+    this.movieCtx.translate(-this.explorer.config.dims / 2 - offsetX,
+                            -this.explorer.config.dims / 2 - offsetY);
     this.movieCtx.globalAlpha = 1;
     this.movieCtx.drawImage(this.explorer.grid.canvas(k), 0, 0);
 
@@ -1823,7 +1828,8 @@ class MovieMode {
       this.movieCtx.imageSmoothingQuality = 'high';
       this.movieCtx.translate(this.explorer.config.dims / 2, this.explorer.config.dims / 2);
       this.movieCtx.scale(targetScale, targetScale);
-      this.movieCtx.translate(-this.explorer.config.dims / 2 - targetOffsetX, -this.explorer.config.dims / 2 - targetOffsetY);
+      this.movieCtx.translate(-this.explorer.config.dims / 2 - targetOffsetX,
+                              -this.explorer.config.dims / 2 - targetOffsetY);
       this.movieCtx.globalAlpha = 1;
       this.movieCtx.drawImage(this.frameCanvases[k + 1].prev, 0, 0);
       this.movieCtx.globalAlpha = colorT;
@@ -1862,7 +1868,7 @@ class Scheduler {
       // Contribute to every unfinished cell
       let pri = this.explorer.grid.boards.map((_, index) => index)
         .filter(k => this.explorer.grid.boards[k])
-        .filter(k => this.explorer.grid.boards[k].un > 0)
+        .filter(k => this.explorer.grid.boards[k].unfinished())
         .filter(k => !this.explorer.grid.hiddencanvas(k));
       if (this.steps % 2) {
         // Prioritize most unfinished half the time.
@@ -1888,10 +1894,11 @@ class Scheduler {
         let p = 0;
         while (1 << p & shift) { p += 1; }
         let k = pri[Math.min(p, pri.length - 1)];
-        // Do at least 1000 pixel-steps.
+        // Do at least 50000 pixel-steps.
         const board = this.explorer.grid.boards[k];
         const ctx = this.explorer.grid.canvas(k)?.getContext('2d');
-        for (let amt = 0; board.un > 0 && amt < 1000; amt += (board.un * board.effort + 1)) {
+        for (let amt = 0; board.unfinished() && amt < 50009;
+                 amt += (board.un + board.ch) * board.effort + 1) {
           let count = board.iterate();
           if (count > 0 && ctx) {
             board.drawcolor(ctx, board.it - 1);
