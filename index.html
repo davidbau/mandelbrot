@@ -1212,7 +1212,11 @@ class ZoomManager {
       newBoard.draw(this.grid.canvas(k + 1).getContext('2d'));
       this.grid.showcanvas(k + 1);
       this.grid.notifyurl();
-    }, 10);
+      setTimeout(() => {
+        // Make sure the rectangles are visible
+        document.body.className = '';
+      }, 1);
+    }, 1);
   }
 
   centerBoards() {
@@ -1380,6 +1384,8 @@ class EventHandler {
       if (m) {
         let p = this.pointInTarget(e, target);
         let k = parseInt(m[1]);
+        // Clear orbit before creating new board
+        this.explorer.orbitComputer.updateOrbit(k, -1, target);
         this.explorer.zoomManager.cellclick(k, p.x + p.y * this.explorer.config.dims,
           e.metaKey || e.ctrlKey);
         return false;
