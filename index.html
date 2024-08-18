@@ -182,7 +182,7 @@ class Config {
         let b = intcolor(ff / 3 + 0.667);
         return `rgb(${r},${g},${b})`;
       },
-      rainbow: (i, frac, fracD, fracL, s) => {
+      tiedye: (i, frac, fracD, fracL, s) => {
         frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
         let hue = (Math.log(i + 20) * 1000) % 360;
         let chroma = 100;
@@ -1427,12 +1427,12 @@ class EventHandler {
       this.explorer.zoomManager.centerBoards(e.metaKey || e.ctrlKey);
     }
     // Pressing T will cycle through the color themes.
-    if (e.key == 't') {
-      this.explorer.cycleColorTheme();
+    if (e.key.toLowerCase() == 't') {
+      this.explorer.cycleColorTheme(e.shiftKey);
     }
     // Pressing U will cycle through the uncomputed colors.
-    if (e.key == 'u') {
-      this.explorer.cycleUnknownColor();
+    if (e.key.toLowerCase() == 'u') {
+      this.explorer.cycleUnknownColor(e.shiftKey);
     }
     // Pressing I will zoom in at the same position.
     if (e.key == 'i') {
@@ -2142,18 +2142,20 @@ class MandelbrotExplorer {
     this.scheduler.start();
   }
 
-  cycleUnknownColor() {
-    let ind = (this.config.ukcs.indexOf(this.config.unknowncolor) + 1) % this.config.ukcs.length;
+  cycleUnknownColor(backward) {
+    const inc = backward ? this.config.ukcs.length - 1 : 1;
+    const ind = (this.config.ukcs.indexOf(this.config.unknowncolor) + inc) % this.config.ukcs.length;
     this.config.unknowncolor = this.config.ukcs[ind];
     for (let k = 0; k < this.grid.boards.length; ++k) {
       this.grid.boards[k].drawcolor(this.grid.canvas(k).getContext('2d'), 0);
     }
   }
 
-  cycleColorTheme() {
+  cycleColorTheme(backward) {
+    const inc = backward ? this.config.colorThemes.all.length - 1 : 1;
     const themes = this.config.colorThemes.all;
     const currentIndex = themes.indexOf(this.config.theme);
-    const nextIndex = (currentIndex + 1) % themes.length;
+    const nextIndex = (currentIndex + inc) % themes.length;
     this.config.theme = themes[nextIndex];
     this.redrawProcess.start();
     this.urlHandler.updateurl();
