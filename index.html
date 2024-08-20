@@ -225,139 +225,89 @@ class Config {
   }
 }
 
-class Board {
+class View {
   constructor(k, size, re, im, config) {
     this.k = k;
     this.config = config;
+    this.nn = new Array(config.dims2).fill(0);
+    this.un = config.dims2;
+    this.di = 0;
+    this.ch = 0;
     this.it = 0;
-    this.zz = []; // current iterate for each pixel
-    this.cc = []; // current constant for each pixel
-    this.nn = []; // iterations when diverged / (neg) converged
-    this.bb = []; // recent remembered z
-    this.pp = []; // iteration at which converged within epsilon2
-    this.ss = null; // sparse list of indexes to compute
-    this.un = config.dims2; // count of unfinished points
-    this.di = 0; // diverged points
-    this.ch = 0; // potentially chaotic points in the spike
-    this.hi = [[0, 1, 1, 0]];
     this.sizes = [size, toQd(re), toQd(im)];
-    this.effort = 1;
-    this.pix = this.sizes[0] / this.config.dims;
-    this.epsilon = Math.min(1e-12, this.pix / 10);
-    this.epsilon2 = Math.min(1e-9, this.pix * 10);
+    this.hi = [[0, 1, 1, 0]];
+    this.convergedData = new Map();
   }
 
-  initboard(size, re, im) {
-    this.it = 1;
+  initview(size, re, im) {
+    this.sizes = [size, toQd(re), toQd(im)];
     this.nn = new Array(this.config.dims2).fill(0);
-    this.pp = new Array(this.config.dims2).fill(0);
-    for (let y = 0; y < this.config.dims; y++) {
-      const jFrac = (0.5 - (y / this.config.dims));
-      const j = jFrac * size + im[0];
-      for (let x = 0; x < this.config.dims; x++) {
-        const rFrac = ((x / this.config.dims) - 0.5);
-        const r = rFrac * size + re[0];
-        this.cc.push(r, j);
-        if (this.inspike(r, j)) {
-          this.un -= 1;
-          this.ch += 1;
-        }
-      }
-    }
-    this.ss = [];
-    for (let m = 0; m < this.config.dims2; ++m) {
-      this.ss.push(m);
-    }
-    this.zz = this.cc.slice();
-    this.bb = this.cc.slice();
+    this.un = this.config.dims2;
+    this.di = 0;
+    this.ch = 0;
+    this.it = 0;
+    this.hi = [[0, 1, 1, 0]];
+    this.convergedData.clear();
   }
 
-  iterate() {
-    const results = [0, 0, 0];
-    let s = this.ss;    // speedy list of indexes to compute
-    // head and tail factor i into an odd num and largest power of 2.
-    let head = this.it, tail = 1;
-    while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
-    if (s.length > this.un * 1.25) {
-      let news = [];
-      for (let t = 0; t < s.length; ++t) {
-        if (this.nn[s[t]]) continue;
-        news.push(s[t]);
-      }
-      s = this.ss = news;
+  updateFromWorkerResult(data) {
+    if (data.changes) {
+      data.changes.nn.forEach(index => {
+        this.nn[index] = data.changes.iter;
+      });
+      data.changes.vv.forEach((index, vind) => {
+        this.nn[index] = -data.changes.iter;
+        this.convergedData.set(index, { z: toQdc(data.changes.zz[vind]), p: data.changes.pp[vind] });
+      });
     }
-    if (head <= tail) {
-      for (let t = 0; t < s.length; ++t) {
-        let m = s[t];
-        if (this.nn[m]) continue;
-        this.bb[m * 2] = this.zz[m * 2];
-        this.bb[m * 2 + 1] = this.zz[m * 2 + 1];
-        this.pp[m] = 0;
-      }
-    }
-    for (let t = 0; t < s.length; ++t) {
-      results[this.compute(s[t]) + 1] += 1;
-    }
-    this.un -= results[2] + results[0]; // newly finished
-    this.di += results[2]; // diverged
+    this.un = data.un;
+    this.di = data.di;
+    this.ch = data.ch;
+    this.it = data.it;
+    // console.log(`View ${this.k}: Updated to iteration ${this.it}`);
     this.updateHistogram(this.un, this.di, this.it);
-    this.it++;
-    return results[2] + results[0];
   }
 
-  compute(m) {
-    if (this.nn[m]) return 0;
-    const m2 = m * 2;
-    const m2i = m2 + 1;
-    const r = this.zz[m2];
-    const j = this.zz[m2i];
-    const r2 = r * r;
-    const j2 = j * j;
-    if (r2 + j2 > 4.0) {
-      this.nn[m] = this.it;
-      return 1;
-    }
-    let ra = r2 - j2;
-    let ja = 2 * r * j;
-    for (let ord = 2; ord < this.config.exponent; ord++) {
-      let rt = r * ra - j * ja;
-      ja = r * ja + j * ra;
-      ra = rt;
-    }
-    ra += this.cc[m2];
-    ja += this.cc[m2i];
-    this.zz[m2] = ra;
-    this.zz[m2i] = ja;
-    const rb = this.bb[m2];
-    const jb = this.bb[m2i];
-    const db = Math.abs(rb - ra) + Math.abs(jb - ja);
-    if (db <= this.epsilon2) {
-      if (!this.pp[m]) { this.pp[m] = this.it; }
-      if (db <= this.epsilon) {
-        this.nn[m] = -this.it;
-        if (this.inspike(this.cc[m2], this.cc[m2i]) && this.ch > 0) {
-          this.ch -= 1;
-          return 0;  // Points in spike are already counted
-        }
-        return -1;
+  currentc(j) {
+    const x = j % this.config.dims;
+    const y = Math.floor(j / this.config.dims);
+    const rFrac = (x / this.config.dims) - 0.5;
+    const jFrac = 0.5 - (y / this.config.dims);
+    const r = qdAdd(this.sizes[1], qdScale(toQd(rFrac), this.sizes[0]));
+    const i = qdAdd(this.sizes[2], qdScale(toQd(jFrac), this.sizes[0]));
+    return [r[0], r[1], i[0], i[1]];
+  }
+
+  currentz(j) {
+    const data = this.convergedData.get(j);
+    return data ? data.z : null;
+  }
+
+  currentp(j) {
+    const data = this.convergedData.get(j);
+    return data ? data.p : null;
+  }
+
+  updateHistogram(un, di, i) {
+    if (this.hi[0][1] - un / this.config.dims2 >= 1 / 256) {
+      const uFrac = un / this.config.dims2;
+      const dFrac = 1 - di / this.config.dims2;
+      this.hi.unshift([i, uFrac, dFrac, 0]);
+      if (this.hi.length > 10) {
+        // Estimate the limit of di as i goes to infinity.
+        const sample = this.hi.slice(0, this.hi.length - 2).map(
+           (e, i) => ({ x: e[0], y: e[2], weight: (e[0] - this.hi[i+1][0]) ** 4 })
+        ).reverse();
+        const estimate = Math.min(1, Math.max(0, estimateLimit(sample)));
+        // Smooth the estimate.
+        const avg = (estimate + this.hi[1][3] * 4) / 5;
+        this.hi[0][3] = avg;
       }
     }
-    return 0;
-  }
-
-  inspike(re, im) {
-    // We do not iterate infinitely for chaotic points in the spike.
-    return (im == 0.0 && re > -2.0 && re < -1.401155 &&
-            this.config.exponent == 2);
-  }
-
-  unfinished() {
-    // Chaotic points in the spike counted as finished after 100000 iterations.
-    return this.un + (this.it < 100000 ? this.ch : 0);
   }
 
   draw(ctx) {
-    if (this.unfinished() == this.config.dims2) {
+    if (this.un == this.config.dims2) {
       this.clearcanvas(ctx);
       return;
     }
@@ -407,24 +357,6 @@ class Board {
     }
   }
 
-  updateHistogram(un, di, i) {
-    if (this.hi[0][1] - un / this.config.dims2 >= 1 / 256) {
-      const uFrac = un / this.config.dims2;
-      const dFrac = 1 - di / this.config.dims2;
-      this.hi.unshift([i, uFrac, dFrac, 0]);
-      if (this.hi.length > 10) {
-        // Estimate the limit of di as i goes to infinity.
-        const sample = this.hi.slice(0, this.hi.length - 2).map(
-           (e, i) => ({ x: e[0], y: e[2], weight: (e[0] - this.hi[i+1][0]) ** 4 })
-        ).reverse();
-        const estimate = Math.min(1, Math.max(0, estimateLimit(sample)));
-        // Smooth the estimate.
-        const avg = (estimate + this.hi[1][3] * 4) / 5;
-        this.hi[0][3] = avg;
-      }
-    }
-  }
-
   makecolor(i) {
     if (i == 0) return this.config.unknowncolor;
     if (i < 0) return 'black';
@@ -437,18 +369,17 @@ class Board {
        i, fracK, fracD, fracL, this.sizes[0]);
   }
 
-  currentc(j) {
-    return [toQd(this.cc[j * 2]), toQd(this.cc[j * 2 + 1])];
-  }
-
-  currentz(j) {
-    return [toQd(this.zz[j * 2]), toQd(this.zz[j * 2 + 1])];
-  }
-
   uninteresting() {
     // Boring: nothing computed, or done with less than 5 colors
     return this.di <= 0 || (this.un == 0 && this.hi.length <= 5);
   }
+
+  unfinished() {
+    // Chaotic points in the spike counted as finished after 100000 iterations.
+    const result = this.un + (this.it < 100000 ? this.ch : 0);
+    return result;
+  }
+
 
   debugStatus() {
     const debugGraph = this.renderHiGraph(600, 300);
@@ -506,6 +437,1797 @@ class Board {
 
     return canvas.toDataURL();
   }
+}
+
+class Grid {
+  constructor(config) {
+    this.config = config;
+    this.views = [];
+    this.canvascount = 0;
+    this.focusk = null;
+    this.urlListeners = [];
+    this.zoomListeners = [];
+    this.scheduler = new Scheduler(this);
+  }
+
+  makeView(k, size, re, im) {
+    const view = new View(k, size, re, im, this.config);
+    this.views.push(view);
+    this.scheduler.assignBoardToWorker(k, size, re, im, this.config);
+    return view;
+  }
+
+  removeView(k) {
+    this.views.splice(k, 1);
+    this.scheduler.removeBoardFromWorker(k);
+  }
+
+  setFocusedView(k) {
+    this.focusk = k;
+    this.scheduler.setFocusedBoard(k);
+  }
+
+  updateHiddenViews() {
+    const hiddenViews = this.views.map((v, i) =>
+            this.hiddencanvas(i) ? i : -1).filter(i => i !== -1);
+    this.scheduler.setHiddenBoards(hiddenViews);
+  }
+
+  updateViewFromWorkerResult(k, data) {
+    if (this.views[k]) {
+      this.views[k].updateFromWorkerResult(data);
+      this.updateCanvas(k, data);
+    }
+  }
+
+  updateCanvas(k, data) {
+    const canvas = this.canvas(k);
+    if (canvas && data.changes) {
+      const ctx = canvas.getContext('2d');
+      this.views[k].drawcolor(ctx, data.changes.iter);
+    }
+  }
+
+  currentGridState() {
+    let state = { hidden: [], sizes: [] };
+    for (let k = 0; k < this.views.length; k++) {
+      if (this.hiddencanvas(k)) {
+        state.hidden.push(k);
+      }
+      state.sizes.push(this.views[k].sizes);
+    }
+    return state;
+  }
+
+  updateLayout(state = null) {
+    if (this.currentUpdateProcess) {
+      this.currentUpdateProcess.abort();
+    }
+    if (state === null) {
+      state = this.currentGridState();
+    }
+    this.config.initSizes();
+
+    // Recreate the grid
+    let gridElement = document.getElementById('grid');
+    gridElement.innerHTML = '';
+    this.canvascount = 0;
+    this.truncateviews(0);
+
+    // Recreate all canvases
+    for (let k = 0; k < state.sizes.length; k++) {
+      this.makecanvas(k);
+      if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
+    }
+    this.currentUpdateProcess = this.createUpdateProcess(state);
+    this.currentUpdateProcess.start();
+  }
+
+  createUpdateProcess(state) {
+    let aborted = false;
+    let currentIndex = 0;
+
+    const processNext = () => {
+      if (aborted || currentIndex >= state.sizes.length) {
+        if (!aborted) {
+          this.notifyurl();
+          this.notifyzoom();
+        }
+        this.currentUpdateProcess = null;
+        return;
+      }
+
+      const k = currentIndex;
+      if (!this.views[k]) {
+        this.views[k] = this.makeView(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
+      }
+      this.views[k].initview(state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
+      this.views[k].draw(this.canvas(k).getContext('2d'));
+      if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
+      currentIndex++;
+      setTimeout(processNext, 0);
+    };
+
+    return {
+      start: () => {
+        if (this.config.gridcols == 1) {
+          setTimeout(processNext, 100);
+        } else {
+          processNext();
+        }
+      },
+      abort: () => { aborted = true; }
+    };
+  }
+
+  makecanvas(k) {
+    let gd = document.getElementById('grid');
+    while (this.canvascount <= k) {
+      let dd = document.createElement('div');
+      dd.id = 'b_' + this.canvascount;
+      dd.innerHTML = this.canvasstring(this.canvascount);
+      dd.className = 'hidemarks';
+      gd.appendChild(dd);
+      this.canvascount += 1;
+    }
+  }
+
+  canvasstring(k) {
+    let factor = 3.0 / (k < this.views.length ? this.views[k].sizes[0] :
+      this.config.firstsize / Math.pow(this.config.zoomfactor, k));
+    factor = formatScale(factor);
+    return `<canvas width="${this.config.dims}" height="${this.config.dims}"` +
+           ` style="height:${this.config.cssDims}px;width:${this.config.cssDims}px;">` +
+           '</canvas>' +
+           '<div class="closebox"></div>' +
+           '<div class="rect"></div>' +
+           `<canvas class=overlay width=${this.config.dims} height="${this.config.dims}"` +
+           ` style="height:${this.config.cssDims}px;width:${this.config.cssDims}px;">` +
+           '</canvas>' +
+           `<a class="zoomnum" target="_blank" href="?grid=1">${factor}` +
+           '<div class="status"></div></a>';
+  }
+
+  hidecanvas(k) {
+    this.canvas(k).parentElement.style.display = 'none';
+  }
+
+  showcanvas(k) {
+    this.canvas(k).parentElement.style.display = '';
+  }
+
+  hiddencanvas(k) {
+    let b = this.canvas(k);
+    return b && b.parentElement.style.display == 'none';
+  }
+
+  grid() {
+    return document.getElementById('grid');
+  }
+
+  canvas(k) {
+    let b = document.getElementById("b_" + k);
+    return b && b.firstElementChild;
+  }
+
+  closebutton(k) {
+      const view = this.canvas(k);
+      return view && view.nextElementSibling;
+  }
+
+  rect(k) {
+      const closeBtn = this.closebutton(k);
+      return closeBtn && closeBtn.nextElementSibling;
+  }
+
+  overlay(k) {
+      const rect = this.rect(k);
+      return rect && rect.nextElementSibling;
+  }
+
+  truncateviews(k) {
+    while (this.views.length > k) {
+      let removeIndex = this.views.length - 1;
+      this.removeView(removeIndex);
+    }
+    while (this.canvascount > k) {
+      let removeIndex = this.canvascount - 1;
+      this.canvas(removeIndex)?.parentElement?.remove();
+      this.canvascount -= 1;
+    }
+  }
+
+  showAllViews() {
+    for (let j = 0; j < this.canvascount; ++j) {
+      this.showcanvas(j);
+    }
+    this.notifyzoom();
+  }
+
+  truncatehiddenviews() {
+    let j = this.canvascount - 1;
+    for (; j > 0; j--) {
+      if (!this.hiddencanvas(j)) {
+        break;
+      }
+    }
+    this.truncateviews(j + 1);
+    if (j == 0) {
+      this.showcanvas(j);
+    }
+  }
+
+  updateProgress(overtarget, k) {
+    if (overtarget.tagName == 'A' && overtarget.classList.contains('zoomnum')) {
+      if (this.config.mobile) {
+        overtarget.removeAttribute('href');
+      } else {
+        overtarget.href = this.bigurl(k, overtarget.showDebug);
+      }
+
+      let statusDiv = overtarget.querySelector('.status');
+      if (!statusDiv) return;
+
+      // Regular status
+      let regularStatus = 'center at ' +
+        formatcomplex(k, this.views[k].sizes[1], this.views[k].sizes[2])
+          .replaceAll('-', '\u2212') + '\n' +
+        Math.floor(1000 * (1.0 - this.views[k].unfinished() / this.config.dims2))/10.0  +
+          '% done after ' + this.views[k].it + ' iters';
+      statusDiv.textContent = regularStatus;
+
+      // Debug status
+      if (overtarget.showDebug) {
+        statusDiv.innerHTML += '\n' + this.views[k].debugStatus();
+      }
+    }
+    if (overtarget.matches(':hover')) {
+      setTimeout(() => this.updateProgress(overtarget, k), 100);
+    }
+  }
+
+  bigurl(k, debug) {
+    if (k >= this.views.length) return;
+    let osize = this.views[k].sizes[0];
+    let oexp = '';
+    if (this.config.exponent != 2) {
+      oexp = '&exponent=' + this.config.exponent;
+    }
+    let ore = this.views[k].sizes[1];
+    let oim = this.views[k].sizes[2];
+    return '?s=' + formatSize(osize) +
+           (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
+           '&c=' + formatcomplex(k, ore, oim) +
+           (this.config.theme != 'warm' ? '&theme=' + this.config.theme : '') +
+           (debug ? '' : '&grid=1');
+  }
+
+  clearseq(k) {
+    const overlayElement = this.overlay(k);
+    if (overlayElement) {
+      let ctx = overlayElement.getContext('2d');
+      ctx.clearRect(0, 0, this.config.dims, this.config.dims);
+    }
+  }
+
+  onurlchange(callback) {
+    this.urlListeners.push(callback);
+  }
+
+  notifyurl() {
+    for (let cb of this.urlListeners) {
+      cb();
+    }
+  }
+
+  onzoomchange(callback) {
+    this.zoomListeners.push(callback);
+  }
+
+  notifyzoom() {
+    for (let cb of this.zoomListeners) {
+      cb();
+    }
+  }
+}
+
+class ZoomManager {
+  constructor(config, grid) {
+    this.config = config;
+    this.grid = grid;
+    this.grid.onzoomchange(() => this.updateZoomRectangles());
+  }
+
+  showZoomRect(k, x, y, zf) {
+    let s = this.grid.rect(k).style;
+    let border = 1;
+    let cssClass = '';
+    if (zf > 50) {
+      // Switch from rectangle to circle if the zoom area is tiny.
+      zf = 25;
+      cssClass = 'circle';
+    }
+    this.grid.rect(k).parentElement.className = cssClass;
+    s.top = (y * this.config.cssDims - this.config.cssDims / 2 / zf - border) + 'px';
+    s.left = (x * this.config.cssDims - this.config.cssDims / 2 / zf - border) + 'px';
+    s.width = (this.config.cssDims / zf + 2 * border) + 'px';
+    s.height = (this.config.cssDims / zf + 2 * border) + 'px';
+  }
+
+  removeZoomRect(k) {
+    let s = this.grid.rect(k).style;
+    s.top = s.left = s.width = s.height = '';
+    this.grid.rect(k).parentElement.className = 'hidemarks';
+  }
+
+  updateZoomRectangles() {
+    let prevView = null;
+    let prevK = 0;
+    for (let k = 0; k < this.grid.views.length; k++) {
+      if (this.grid.hiddencanvas(k)) { continue; }
+      let currView = this.grid.views[k].sizes;
+      if (prevView != null) {
+        let x = qdSub(currView[1], prevView[1])[0] / prevView[0] + 0.5;
+        let y = 0.5 - qdSub(currView[2], prevView[2])[0] / prevView[0];
+        let zf = prevView[0] / currView[0];
+        this.showZoomRect(prevK, x, y, zf);
+      }
+      prevView = currView;
+      prevK = k;
+    }
+    if (prevView !== null) {
+      this.removeZoomRect(prevK);
+    }
+  }
+
+  zoomInAtCurrentPosition(hideCurrent) {
+    let k = this.grid.views.length - 1;
+    if (this.grid.views[k].uninteresting()) { return; }
+    let osize = this.grid.views[k].sizes[0];
+    let ore = this.grid.views[k].sizes[1];
+    let oim = this.grid.views[k].sizes[2];
+    let rre = 0.5;
+    if (k == 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
+      // Myreberg / Feigenbaum point
+      ore = [-1.4011551890920506, 1.196330130384937e-17];
+      rre = (ore[0] - this.grid.views[0].sizes[1][0]) / this.grid.views[0].sizes[0] + 0.5;
+    }
+    this.showZoomRect(k, rre, 0.5, this.config.zoomfactor);
+    let nsize = osize / this.config.zoomfactor;
+    let newView = this.grid.makeView(k + 1, nsize, ore, oim);
+    newView.initview(nsize, ore, oim);
+    this.grid.views.push(newView);
+    this.grid.makecanvas(k + 1);
+    if (hideCurrent) {
+      this.grid.canvas(k).parentElement.style.display = 'none';
+      this.updateZoomRectangles();
+    }
+    this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
+    this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
+    newView.draw(this.grid.canvas(k + 1).getContext('2d'));
+    this.grid.notifyurl();
+  }
+
+  cellclick(k, m, hideCurrent) {
+    // Only accept clicks on cells with something computed in them.
+    if (k >= this.grid.views.length || this.grid.views[k].uninteresting() ||
+         this.grid.currentUpdateProcess) return;
+    this.grid.truncateviews(k + 1);
+    setTimeout(() => { this.cellclickdelay(k, m, hideCurrent); }, 1);
+  }
+
+  cellclickdelay(k, m, hideCurrent) {
+    if (k >= this.grid.views.length || this.grid.currentUpdateProcess) return;
+    let osize = this.grid.views[k].sizes[0];
+    let ore = this.grid.views[k].sizes[1];
+    let oim = this.grid.views[k].sizes[2];
+    let cx = m % this.config.dims;
+    let cy = (m - cx) / this.config.dims;
+    this.showZoomRect(k, cx / this.config.dims, cy / this.config.dims, this.config.zoomfactor);
+    this.grid.truncateviews(k + 1);
+    // Do slow parts after a moment.
+    setTimeout(() => {
+      let nsize = osize / this.config.zoomfactor;
+      let nre = qdAdd(ore, [((cx / this.config.dims) - 0.5) * osize, 0]);
+      let nim = qdAdd(oim, [(0.5 - (cy / this.config.dims)) * osize, 0]);
+      let newView = this.grid.makeView(k + 1, nsize, nre, nim);
+      newView.initview(nsize, nre, nim);
+      this.grid.views.push(newView);
+      this.grid.makecanvas(k + 1);
+      if (hideCurrent) {
+        this.grid.canvas(k).parentElement.style.display = 'none';
+        this.updateZoomRectangles();
+      }
+      this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
+      this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
+      newView.draw(this.grid.canvas(k + 1).getContext('2d'));
+      this.grid.showcanvas(k + 1);
+      this.grid.notifyurl();
+      setTimeout(() => {
+        // Make sure the rectangles are visible
+        document.body.className = '';
+      }, 1);
+    }, 1);
+  }
+
+  centerViews(includeFirst) {
+    let k = this.grid.views.length - 1;
+    let ore = this.grid.views[k].sizes[1];
+    let oim = this.grid.views[k].sizes[2];
+    this.showZoomRect(
+      0, 0.5 + (ore[0] - this.grid.views[0].sizes[1][0]) / this.grid.views[0].sizes[0],
+         0.5 - (oim[0] - this.grid.views[0].sizes[2][0]) / this.grid.views[0].sizes[0],
+         this.grid.views[0].sizes[0] / this.grid.views[1].sizes[0]);
+    for (k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
+      this.showZoomRect(
+          k, 0.5, 0.5, this.grid.views[k].sizes[0] / this.grid.views[k+1].sizes[0]);
+      if (qdCompare(this.grid.views[k].sizes[1], ore) ||
+          qdCompare(this.grid.views[k].sizes[2], oim)) {
+        let nsize = this.grid.views[k].sizes[0];
+        this.grid.views[k] = this.grid.makeView(k + 1, nsize, ore, oim);
+        this.grid.views[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
+        this.grid.views[k].initview(nsize, ore, oim);
+        this.grid.views[k].draw(this.grid.canvas(k).getContext('2d'));
+        this.grid.clearseq(k);
+      }
+    }
+    this.grid.notifyurl();
+  }
+}
+
+class URLHandler {
+  constructor(config, grid) {
+    this.config = config;
+    this.grid = grid;
+    this.grid.onurlchange(x => this.updateurl());
+  }
+
+  updateurl() {
+    if (history.replaceState) {
+      history.replaceState(null, '', this.currenturl());
+    }
+  }
+
+  parseUrl() {
+    let startstate = { hidden: [], sizes: [] };
+    let opts = document.location.search.split('&');
+    for (let j in opts) {
+      let m;
+      if (null !== (m = opts[j].match(/exponent=(\d+)/))) {
+        this.config.exponent = Math.max(2, parseInt(m[1]));
+        if (this.config.exponent > 2) { this.config.firstr = [0.0, 0]; }
+        for (let el of document.getElementsByClassName('exponent')) {
+          el.innerText = this.config.exponent;
+        }
+      }
+      if (null !== (m = opts[j].match(/grid=(\d+)/))) {
+        this.config.gridcols = Math.max(1, parseInt(m[1]));
+      }
+      if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+(?:e[-+]\d+)?)/))) {
+        this.config.firstsize = parseFloat(m[1]);
+      }
+      if (null !== (m = opts[j].match(/pixelratio=(\d+)/))) {
+        this.config.pixelRatio = Math.max(1, parseInt(m[1]));
+      }
+      if (null !== (m = opts[j].match(/c=([-+\d\.ei,]+)/))) {
+        for (let coords of m[1].split(',')) {
+          m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/);
+          startstate.sizes.push([
+            this.config.firstsize / Math.pow(this.config.zoomfactor, startstate.sizes.length),
+            m != null && m[1] ? qdParse(m[1]) : (startstate.sizes.length > 0 ?
+                startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstr),
+            m != null && m[2] ? qdParse(m[2]) : (startstate.sizes.length > 0 ?
+                startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstj)
+          ]);
+        }
+      }
+      if (null !== (m = opts[j].match(/h=([\d,]+)/))) {
+        startstate.hidden = m[1].split(',').map(x=>parseInt(x));
+      }
+      if (null !== (m = opts[j].match(/theme=(\w+)/))) {
+        if (this.config.colorThemes.all.includes(m[1])) {
+          this.config.theme = m[1];
+        }
+      }
+    }
+    if (startstate.sizes.length == 0) {
+      startstate.sizes = this.config.firststate().sizes;
+    }
+
+    return startstate;
+  }
+
+  currenturl() {
+    let state = this.grid.currentGridState();
+    let compactc = '';
+    let commas = '';
+    let prev = [this.config.firstr, this.config.firstj];
+    let prevj = -1;
+    for (let j = 0; j <= state.sizes.length; j++) {
+      if (j < state.sizes.length &&
+          !qdCompare(state.sizes[j][1], prev[0]) &&
+          !qdCompare(state.sizes[j][2], prev[1])) {
+        commas += ',';
+      } else {
+        if (prevj >= 0) {
+          compactc += formatcomplex(j - 1, state.sizes[prevj][1], state.sizes[prevj][2]) + ',';
+        }
+        compactc += commas;
+        if (j < state.sizes.length) {
+          commas = '';
+          prev = [state.sizes[j][1], state.sizes[j][2]];
+          prevj = j;
+        }
+      }
+    }
+    compactc = compactc.slice(0, -1);
+    let url =
+           (state.sizes[0][0] != 3.0 ? '&s=' + formatSize(this.grid.views[0].sizes[0]) : '') +
+           (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
+           (compactc.length ? '&c=' + compactc : '') +
+           (this.config.gridcols != this.config.dgc ? '&grid=' + this.config.gridcols : '') +
+           (state.hidden.length ? '&h=' + state.hidden : '') +
+           (this.config.theme != 'warm' ? '&theme=' + this.config.theme : '') +
+           (this.config.pixelRatio != 2 ? '&pixelratio=' + this.config.pixelRatio : '');
+    return '?' + url.replace('&', '');
+  }
+}
+
+class EventHandler {
+  constructor(explorer) {
+    this.explorer = explorer;
+  }
+
+  setup() {
+    document.onmousedown = this.onmousedown.bind(this);
+    document.onmousemove = this.onmousemove.bind(this);
+    document.body.onkeydown = this.onkeydown.bind(this);
+    document.body.onmouseover = this.onmouseover.bind(this);
+    document.body.onmousedown = (e) => {
+      if (e.target.className == 'closebox') {
+        e.stopPropagation();
+      }
+    };
+    document.body.onclick = (e) => {
+      if (e.target.className == 'closebox' && !explorer.grid.currentUpdateProcess) {
+        e.target.parentElement.style.display = 'none';
+        this.explorer.grid.truncatehiddenviews();
+        this.explorer.zoomManager.updateZoomRectangles();
+        this.explorer.urlHandler.updateurl();
+      }
+    };
+  }
+
+  onmousedown(e) {
+    let target = this.eventtarget(e);
+    if (this.explorer.movieMode.active && (target.id != 'moviescale')) {
+      this.explorer.movieMode.toggle();
+    }
+    if (e.button != 0) { return true; }
+    if (target) {
+      let m = target.id.match(/b_(\d+)/);
+      if (e.target.tagName == 'A') {
+        if (m && !this.explorer.config.mobile) {
+          e.target.href = this.explorer.grid.bigurl(m[1], e.metaKey || e.ctrlKey);
+        }
+        return true;
+      }
+      if (m) {
+        let p = this.pointInTarget(e, target);
+        let k = parseInt(m[1]);
+        // Clear orbit before creating new view
+        this.explorer.orbitComputer.updateOrbit(k, -1, target);
+        this.explorer.zoomManager.cellclick(k, p.x + p.y * this.explorer.config.dims,
+          e.metaKey || e.ctrlKey);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  onmousemove(e) {
+    let target = this.eventtarget(e);
+    if (target) {
+      let m = target.id.match(/b_(\d+)/);
+      if (m) {
+        let p = this.pointInTarget(e, target);
+        let k = parseInt(m[1]);
+        let j = p.x + p.y * this.explorer.config.dims;
+        this.explorer.orbitComputer.updateOrbit(k, j, target);
+      }
+    }
+  }
+
+  onkeydown(e) {
+    if (this.explorer.movieMode.active &&
+        ['Shift', 'Alt', 'Control', 'Meta', 'CapsLock'].indexOf(e.key) == -1) {
+      this.explorer.movieMode.toggle();
+      return;
+    }
+    // Pressing backspace will delete the last zoom.
+    if (e.key == 'Backspace' && this.explorer.grid.views.length > 1 &&
+        !this.explorer.grid.currentUpdateProcess) {
+      let k = this.explorer.grid.views.length - 1;
+      this.explorer.grid.truncateviews(k);
+      this.explorer.grid.truncatehiddenviews();
+      this.explorer.urlHandler.updateurl();
+    }
+    // Pressing C will center all the zoom positions.
+    if (e.key == 'c' && this.explorer.grid.views.length > 1) {
+      this.explorer.zoomManager.centerViews(e.metaKey || e.ctrlKey);
+    }
+    // Pressing T will cycle through the color themes.
+    if (e.key.toLowerCase() == 't') {
+      this.explorer.cycleColorTheme(e.shiftKey);
+    }
+    // Pressing U will cycle through the uncomputed colors.
+    if (e.key.toLowerCase() == 'u') {
+      this.explorer.cycleUnknownColor(e.shiftKey);
+    }
+    // Pressing I will zoom in at the same position.
+    if (e.key == 'i') {
+      this.explorer.zoomManager.zoomInAtCurrentPosition(e.metaKey || e.ctrlKey);
+    }
+    // Pressing ? will show the help window
+    if (e.key == '?') {
+      document.getElementById('text').style.display = 'block';
+    }
+    // G reduces the grid column count
+    if (e.key === 'g' && this.explorer.config.gridcols > 1) {
+      this.explorer.config.gridcols -= 1;
+      this.explorer.grid.updateLayout();
+    }
+    // H increases the grid column count
+    if (e.key === 'h') {
+      this.explorer.config.gridcols += 1;
+      this.explorer.grid.updateLayout();
+    }
+    // R will restore any hidden views
+    if (e.key === 'r') {
+      this.explorer.grid.showAllViews();
+      this.explorer.urlHandler.updateurl();
+    }
+    // Increase the exponent
+    if (e.key === 'x') {
+      this.explorer.config.updateExponent(this.explorer.config.exponent + 1);
+      this.explorer.grid.updateLayout(this.explorer.config.firststate());
+    }
+    // Decrease the exponent
+    if (e.key === 'z' && this.explorer.config.exponent > 2) {
+      this.explorer.config.updateExponent(this.explorer.config.exponent - 1);
+      this.explorer.grid.updateLayout(this.explorer.config.firststate());
+    }
+    // Increase the pixel ratio
+    if (e.key === 'f') {
+      this.explorer.config.pixelRatio += 1;
+      this.explorer.grid.updateLayout();
+    }
+    // Decrease the pixel ratio
+    if (e.key === 'd' && this.explorer.config.pixelRatio > 1) {
+      this.explorer.config.pixelRatio -= 1;
+      this.explorer.grid.updateLayout();
+    }
+    // Toggle movie mode
+    if (e.key === 'm' && this.explorer.grid.views.length > 1) {
+      this.explorer.movieMode.toggle();
+    }
+    // Toggle fullscreen mode
+    if (e.key === 'Enter' || document.fullscreenElement && e.key === 'Escape') {
+      e.preventDefault(); // Prevent default action of the Enter key
+      this.explorer.toggleFullscreen();
+    }
+  }
+
+  onmouseover(e) {
+    document.body.className = 'hidemarks';
+    this.explorer.grid.setFocusedView(null);
+    let target = this.eventtarget(e);
+    if (target) {
+      let m = target.id.match(/b_(\d+)/);
+      if (m) {
+        let k = parseInt(m[1]);
+        this.explorer.grid.setFocusedView(k);
+        if (this.explorer.grid.views.length <= k) return;
+        document.body.className = '';
+        let overtarget = e.target;
+        if (overtarget.tagName == 'A') {
+          overtarget.showDebug = e.ctrlKey || e.metaKey;
+          this.explorer.grid.updateProgress(overtarget, k);
+        }
+      } else if (target.id.startsWith('movie') && (!e.target || e.target.id != 'movie')) {
+        document.body.className = '';
+      }
+    }
+    this.explorer.grid.updateHiddenViews();
+  }
+
+  eventtarget(e) {
+    let target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
+    while (target) {
+      if (target.id) { return target; }
+      target = target.parentNode;
+    }
+    return null;
+  }
+
+  pointInTarget(ev, target) {
+    let se = document.scrollingElement || document.body;
+    let x = (ev.clientX + se.scrollLeft - this.absoluteLeft(target)) *
+            this.explorer.config.pixelRatio;
+    let y = (ev.clientY + se.scrollTop - this.absoluteTop(target)) *
+            this.explorer.config.pixelRatio;
+    return { x: Math.round(x), y: Math.round(y) };
+  }
+
+  absoluteLeft(target) {
+    let left = 0;
+    while (target) {
+      left += target.offsetLeft;
+      target = target.offsetParent;
+    }
+    return left;
+  }
+
+  absoluteTop(target) {
+    let top = 0;
+    while (target) {
+      top += target.offsetTop;
+      target = target.offsetParent;
+    }
+    return top;
+  }
+}
+
+class MovieMode {
+  constructor(explorer) {
+    this.explorer = explorer;
+    this.active = false;
+    this.movieCanvas = null;
+    this.movieCtx = null;
+    this.animationFrame = null;
+    this.frameCanvases = [];
+    this.mediaRecorder = null;
+    this.recordedChunks = [];
+    this.isRecording = false;
+    this.recordedBlob = null;
+    this.recordingMimeType = null;
+    this.recordingMimeTypes = [
+      'video/webm; codecs="vp8"',
+      'video/webm; codecs="avc1.640029"',
+      'video/webm',
+      'video/mp4; codecs="avc1.640029"',
+      'video/mp4',
+    ];
+  }
+
+  toggle() {
+    this.active = !this.active;
+    this.explorer.scheduler.computationPaused = this.active;
+    if (this.active) {
+      this.startMovie();
+    } else {
+      this.stopMovie();
+    }
+  }
+
+  startMovie() {
+    this.explorer.grid.grid().style.display = 'none';
+    this.explorer.movieContainer.style.display = 'block';
+    this.createMovieCanvas();
+    this.explorer.movieContainer.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => {
+      document.body.className = '';
+      this.preRenderFrames(() => {
+        this.startMovieAnimation();
+      });
+    }, 20);
+  }
+
+  stopMovie() {
+    this.explorer.grid.grid().style.display = 'block';
+    this.explorer.movieContainer.style.display = 'none';
+    this.stopMovieAnimation();
+    this.removeMovieCanvas();
+  }
+
+  createMovieCanvas() {
+    this.explorer.movieContainer.innerHTML = '<div>' +
+      `<canvas width=${this.explorer.config.dims} height=${this.explorer.config.dims} ` +
+      `style="width:${this.explorer.config.cssDims}px;` +
+      `height:${this.explorer.config.cssDims}px"></canvas>` +
+      `<a id="moviescale" class="zoomnum">Rendering movie...</a></div>`;
+    this.movieCanvas = this.explorer.movieContainer.firstElementChild.firstElementChild;
+    this.movieCtx = this.movieCanvas.getContext('2d');
+    this.movieCtx.drawImage(this.explorer.grid.canvas(0), 0, 0);
+  }
+
+  removeMovieCanvas() {
+    while (this.explorer.movieContainer.firstChild) {
+      this.explorer.movieContainer.removeChild(this.explorer.movieContainer.firstChild);
+    }
+    this.movieCanvas = null;
+    this.movieCtx = null;
+  }
+
+  preRenderFrames(after) {
+    this.frameCanvases = [];
+    let queueOneFrame = (k, after) => {
+      return () => {
+        let status = document.getElementById('moviescale');
+        if (status) {
+          status.textContent =
+            `Rendering ${formatScale(3.0 / this.explorer.grid.views[k].sizes[0])}`;
+        }
+        let canvas1 = null;
+        let canvas2 = null;
+        const n = this.explorer.grid.views[k].nn;
+        // Render with k-1 palette
+        if (k > 0) {
+          canvas1 = document.createElement('canvas');
+          canvas1.width = canvas1.height = this.explorer.config.dims;
+          const ctx1 = canvas1.getContext('2d');
+          for (let y = 0; y < this.explorer.config.dims; y++) {
+            for (let x = 0; x < this.explorer.config.dims; x++) {
+              const m = y * this.explorer.config.dims + x;
+              const i = n[m];
+              ctx1.fillStyle = this.explorer.grid.views[k - 1].makecolor(i);
+              ctx1.fillRect(x, y, 1, 1);
+            }
+          }
+          if (this.explorer.config.unknowncolor != '#000') {
+            ctx1.strokeStyle = 'yellow';
+            ctx1.lineWidth = this.explorer.config.pixelRatio * this.explorer.config.zoomfactor;
+            ctx1.strokeRect(0, 0, this.explorer.config.dims, this.explorer.config.dims);
+          }
+        }
+        // Render with k+1 palette
+        if (k < this.explorer.grid.views.length - 1) {
+          canvas2 = document.createElement('canvas');
+          canvas2.width = canvas2.height = this.explorer.config.dims;
+          const ctx2 = canvas2.getContext('2d');
+          for (let y = 0; y < this.explorer.config.dims; y++) {
+            for (let x = 0; x < this.explorer.config.dims; x++) {
+              const m = y * this.explorer.config.dims + x;
+              const i = n[m];
+              ctx2.fillStyle = this.explorer.grid.views[k + 1].makecolor(i);
+              ctx2.fillRect(x, y, 1, 1);
+            }
+          }
+        }
+        this.frameCanvases.push({ prev: canvas1, next: canvas2 });
+        setTimeout(after, 1);
+      };
+    }
+    for (let k = this.explorer.grid.views.length - 1; k >= 0; k--) {
+      after = queueOneFrame(k, after);
+    }
+    setTimeout(after, 0);
+  }
+
+  startMovieAnimation() {
+    let frame = 0;
+    let framesteps = 300;
+    let endpause = 180;
+    let endrecord = 60;
+    const totalFrames = (this.explorer.grid.views.length - 1) * framesteps;
+
+    const scaleElement = document.getElementById('moviescale');
+    scaleElement.removeAttribute('href');
+
+    if (!this.isRecording) {
+      this.recordedBlob = null;
+      this.isRecording = true;
+      this.startRecording();
+    }
+
+    const animate = () => {
+      const kk = Math.min(frame, totalFrames) / framesteps;
+      this.drawMovieFrame(kk);
+      frame = (frame + 1) % (totalFrames + endpause);
+
+      if (this.isRecording && frame > totalFrames + endrecord) {
+        this.stopRecording();
+        this.isRecording = false;
+      }
+
+      this.animationFrame = requestAnimationFrame(animate);
+    };
+    animate();
+  }
+
+  stopMovieAnimation() {
+    if (this.animationFrame) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+    this.recordedBlob = null;
+  }
+
+  startRecording() {
+    const stream = this.movieCanvas.captureStream(30); // 30 FPS
+
+    this.recordingMimeType = null;
+    this.recordedChunks = [];
+    for (let tryType of this.recordingMimeTypes) {
+       if (MediaRecorder.isTypeSupported(tryType)) {
+          this.recordingMimeType = tryType;
+          break;
+       }
+    }
+    if (this.recordingMimeType == null) {
+      console.error('Neither MP4 nor WebM recording is supported');
+      return;
+    }
+
+    this.mediaRecorder = new MediaRecorder(stream, {
+      mimeType: this.recordingMimeType,
+      videoBitsPerSecond: 10000000,
+    });
+
+    this.mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        this.recordedChunks.push(event.data);
+      }
+    };
+
+    this.mediaRecorder.onstop = () => {
+      this.recordedBlob = new Blob(this.recordedChunks, { type: this.recordingMimeType });
+      this.recordedChunks = [];
+      this.updateDownloadLink();
+    };
+
+    this.mediaRecorder.start(1000); // one-second blobs
+  }
+
+  stopRecording() {
+    this.mediaRecorder.stop();
+  }
+
+  updateDownloadLink() {
+    const scaleElement = document.getElementById('moviescale');
+    const extension = (this.recordingMimeType.includes('mp4') ? 'mp4' : 'webm');
+    scaleElement.textContent = 'Download ' + extension;
+    scaleElement.href = URL.createObjectURL(this.recordedBlob);
+    const k = this.explorer.grid.views.length - 1;
+    const view = this.explorer.grid.views[k];
+    scaleElement.download = 'mandelbrot' +
+              formatcomplex(k, view.sizes[1], view.sizes[2]) +
+              '-' + view.it + '.' + extension;
+  }
+
+  drawMovieFrame(kk) {
+    if (this.movieCtx == null) { return; }
+    const k = Math.floor(kk);
+    const t = kk - k;
+    const sourceView = this.explorer.grid.views[k];
+    const targetView = k+1 < this.explorer.grid.views.length ?
+                        this.explorer.grid.views[k+1] : sourceView;
+    const sourceSize = sourceView.sizes[0];
+    const targetSize = targetView.sizes[0];
+    const zoomRatio = targetSize / sourceSize;
+
+    // Use zoom ratio for exponential interpolation
+    const mulT = Math.pow(zoomRatio, t);
+    const expT = (zoomRatio == 1.0 ? t : (mulT - 1) / (zoomRatio - 1));
+    const colorT = expT * expT;
+    const interpolatedSize = sourceSize * mulT;
+
+    // Use spline interpolation for center coordinates
+    const sourceCenter = [sourceView.sizes[1], sourceView.sizes[2]];
+    const targetCenter = [targetView.sizes[1], targetView.sizes[2]];
+
+    const p0 = k > 0 ? [
+        this.explorer.grid.views[k-1].sizes[1],
+        this.explorer.grid.views[k-1].sizes[2]] : sourceCenter;
+    const p1 = sourceCenter;
+    const p2 = targetCenter
+    const p3 = k+2 < this.explorer.grid.views.length ? [
+        this.explorer.grid.views[k+2].sizes[1],
+        this.explorer.grid.views[k+2].sizes[2]] : targetCenter;
+    const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
+
+    // Clear the movie canvas
+    this.movieCtx.fillStyle = this.explorer.grid.views[k].makecolor(1);
+    this.movieCtx.fillRect(0, 0, this.explorer.config.dims, this.explorer.config.dims);
+
+    // Draw the current frame
+    const scale = sourceSize / interpolatedSize;
+    const offsetX = qdMul(qdSub(interpolatedCenter[0], sourceCenter[0]),
+                          [this.explorer.config.dims / sourceSize, 0])[0];
+    const offsetY = qdMul(qdSub(sourceCenter[1], interpolatedCenter[1]),
+                          [this.explorer.config.dims / sourceSize, 0])[0];
+    this.movieCtx.save();
+    this.movieCtx.imageSmoothingEnabled = true;
+    this.movieCtx.imageSmoothingQuality = 'high';
+    this.movieCtx.translate(this.explorer.config.dims / 2, this.explorer.config.dims / 2);
+    this.movieCtx.scale(scale, scale);
+    this.movieCtx.translate(-this.explorer.config.dims / 2 - offsetX,
+                            -this.explorer.config.dims / 2 - offsetY);
+    this.movieCtx.globalAlpha = 1;
+    this.movieCtx.drawImage(this.explorer.grid.canvas(k), 0, 0);
+
+    // Blend the color palette of the next frame
+    if (this.frameCanvases[k].next) {
+      this.movieCtx.globalAlpha = colorT;
+      this.movieCtx.drawImage(this.frameCanvases[k].next, 0, 0);
+    }
+    this.movieCtx.restore();
+
+    // Draw the next frame
+    if (k < this.explorer.grid.views.length - 1) {
+      const targetScale = targetSize / interpolatedSize;
+      const targetOffsetX = qdMul(qdSub(interpolatedCenter[0], targetCenter[0]),
+                                  [this.explorer.config.dims / targetSize, 0])[0];
+      const targetOffsetY = qdMul(qdSub(targetCenter[1], interpolatedCenter[1]),
+                                  [this.explorer.config.dims / targetSize, 0])[0];
+      this.movieCtx.save();
+      this.movieCtx.imageSmoothingEnabled = true;
+      this.movieCtx.imageSmoothingQuality = 'high';
+      this.movieCtx.translate(this.explorer.config.dims / 2, this.explorer.config.dims / 2);
+      this.movieCtx.scale(targetScale, targetScale);
+      this.movieCtx.translate(-this.explorer.config.dims / 2 - targetOffsetX,
+                              -this.explorer.config.dims / 2 - targetOffsetY);
+      this.movieCtx.globalAlpha = 1;
+      this.movieCtx.drawImage(this.frameCanvases[k + 1].prev, 0, 0);
+      this.movieCtx.globalAlpha = colorT;
+      this.movieCtx.drawImage(this.explorer.grid.canvas(k + 1), 0, 0);
+      this.movieCtx.restore();
+    }
+
+    // Update scale text
+    if (!this.recordedBlob) {
+      const currentScale = (3.0 / this.explorer.config.firstsize) *
+          (Math.pow(this.explorer.config.zoomfactor, kk));
+      document.getElementById('moviescale').textContent = formatScale(currentScale);
+    }
+  }
+}
+
+/*
+class Scheduler {
+  constructor(explorer) {
+    this.explorer = explorer;
+    this.computationPaused = false;
+    this.steps = 0;
+    this.startTime = 0;
+    this.endTime = -1;
+  }
+
+  start() {
+    this.progress();
+  }
+
+  progress() {
+    if (this.computationPaused) {
+      setTimeout(() => this.progress(), 100); // Check less frequently when paused
+      return;
+    }
+    try {
+      // Contribute to every unfinished cell
+      let pri = this.explorer.grid.views.map((_, index) => index)
+        .filter(k => this.explorer.grid.views[k])
+        .filter(k => this.explorer.grid.views[k].unfinished())
+        .filter(k => !this.explorer.grid.hiddencanvas(k));
+      if (this.steps % 2) {
+        // Prioritize most unfinished half the time.
+        let boards = this.explorer.grid.views;
+        pri = pri.sort((a, b) => boards[b].un - boards[a].un);
+      } else {
+        // Prioritize the most recent half the time.
+        pri = pri.reverse();
+        // Allow the user to prioritize by pointing the mouse.
+        if (this.explorer.grid.focusk != null) {
+          let focused = this.explorer.grid.focusk;
+          pri.sort((a, b) => (a === focused ? -1 : b === focused ? 1 : 0));
+        }
+      }
+      if (pri.length) {
+        // Start timer if it is not already running.
+        if (this.endTime) {
+          this.startTime = (new Date).getTime();
+          this.endTime = 0;
+        }
+        // Exponential scheduling policy
+        let shift = Math.floor(this.steps++ / 2);
+        let p = 0;
+        while (1 << p & shift) { p += 1; }
+        let k = pri[Math.min(p, pri.length - 1)];
+        // Do at least 50000 pixel-steps.
+        const board = this.explorer.grid.views[k];
+        const ctx = this.explorer.grid.canvas(k)?.getContext('2d');
+        for (let amt = 0; board.unfinished() && amt < 50009;
+                 amt += (board.un + board.ch) * board.effort + 1) {
+          let count = board.iterate();
+          if (count > 0 && ctx) {
+            board.drawcolor(ctx, board.it - 1);
+          }
+        }
+      } else {
+        // End timer when there is no remaining work
+        if (!this.endTime) {
+          this.endTime = (new Date).getTime();
+          console.log(`Finished in ${((this.endTime - this.startTime) / 1000).toFixed(3)}s`);
+        }
+        setTimeout(() => this.progress(), 100); // Check less frequently when no work
+        return;
+      }
+    } catch (e) {
+      console.log(e);
+    }
+    setTimeout(() => this.progress(), 0);
+  }
+}
+*/
+
+class Scheduler {
+  constructor(grid) {
+    this.grid = grid;
+    this.workers = [];
+    this.workerLoads = [];
+    this.initWorkers();
+  }
+
+  initWorkers() {
+    const workerCount = Math.max(1, Math.min(navigator.hardwareConcurrency - 1, 4));
+    const workerCode = this.assembleWorkerCode();
+    const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+    const workerUrl = URL.createObjectURL(workerBlob);
+
+    for (let i = 0; i < workerCount; i++) {
+      const worker = new Worker(workerUrl);
+      worker.onmessage = this.handleWorkerMessage.bind(this);
+      this.workers.push(worker);
+      this.workerLoads.push(0);
+    }
+
+    URL.revokeObjectURL(workerUrl);
+  }
+
+  assembleWorkerCode() {
+    const quadPrecisionScript = document.getElementById('quadCode');
+    const workerBoardScript = document.getElementById('workerCode');
+    return quadPrecisionScript.textContent + '\n' + workerBoardScript.textContent;
+  }
+
+  assignBoardToWorker(k, size, re, im, config) {
+    const leastLoadedWorkerIndex = this.workerLoads.indexOf(Math.min(...this.workerLoads));
+    const worker = this.workers[leastLoadedWorkerIndex];
+    
+    worker.postMessage({
+      type: 'addBoard',
+      data: {
+        k,
+        size,
+        re,
+        im,
+        config: {
+          dims: config.dims,
+          dims2: config.dims2,
+          exponent: config.exponent
+        }
+      }
+    });
+  
+    this.workerLoads[leastLoadedWorkerIndex] += config.dims2;
+  }
+
+  removeBoardFromWorker(k) {
+    this.workers.forEach(worker => {
+      worker.postMessage({
+        type: 'removeBoard',
+        data: { k }
+      });
+    });
+  }
+
+  setFocusedBoard(k) {
+    this.workers.forEach(worker => {
+      worker.postMessage({
+        type: 'setFocusedBoard',
+        data: { k }
+      });
+    });
+  }
+
+  setHiddenBoards(hiddenBoards) {
+    this.workers.forEach(worker => {
+      worker.postMessage({
+        type: 'setHiddenBoards',
+        data: { hiddenBoards }
+      });
+    });
+  }
+
+  handleWorkerMessage(e) {
+    const { type, data } = e.data;
+    const workerIndex = this.workers.indexOf(e.target);
+
+    switch (type) {
+      case 'log':
+        console.log(`Worker ${workerIndex}: ${data}`);
+        break;
+      case 'iterationComplete':
+        // console.log(`Main thread: Received update for board ${data.k}, iteration ${data.it}`);
+        this.grid.updateViewFromWorkerResult(data.k, data);
+        this.workerLoads[workerIndex] = data.remainingWork;
+        break;
+    }
+  }
+
+  start() {
+    this.workers.forEach(worker => worker.postMessage({ type: 'iterate' }));
+  }
+}
+
+class OrbitComputer {
+  constructor(explorer) {
+    this.explorer = explorer;
+    this.orbitinterval = null;
+    this.orbittimeout = null;
+  }
+
+  updateOrbit(k, j, target) {
+    console.log('updateOrbit', k, j);
+    this.stopOrbitProcess();
+    const orb = [];
+
+    const updateorbit = () => {
+      const [neworb, cyc, ongoing, title] = this.calculateOrbit(k, j, orb);
+      this.displayOrbit(k, neworb, cyc, target, title, orb.length > 0);
+      orb.push(...neworb);
+      if (!ongoing) { this.stopOrbitInterval(); }
+      return ongoing;
+    };
+
+    if (updateorbit()) {
+      this.orbitinterval = setInterval(updateorbit, 53);
+    }
+  }
+
+  stopOrbitInterval() {
+    if (this.orbitinterval) {
+      clearInterval(this.orbitinterval);
+      this.orbitinterval = null;
+    }
+  }
+
+  stopOrbitProcess() {
+    this.stopOrbitInterval();
+    if (this.orbittimeout) {
+      clearTimeout(this.orbittimeout);
+      this.orbittimeout = null;
+    }
+  }
+
+  calculateOrbit(k, j, oldOrb) {
+    let cyc = [];
+    let orb = [];
+    let ongoing = false;
+    let title = '';
+    let view = this.explorer.grid.views[k];
+
+    if (view && j >= 0 && j < this.explorer.config.dims2) {
+      let c = view.currentc(j);
+      let z = view.currentz(j);
+
+      // Calculate a further orbit beyond the old orbit.
+      let finished = Math.max(view.currentp(j) || 0, Math.abs(view.nn[j] || 0));
+      let whole = Math.min(finished || Math.max(view.it, 8));
+      let more = Math.min(whole - oldOrb.length / 4, 53);
+      if (oldOrb.length) {
+        let s = oldOrb.slice(oldOrb.length - 4);
+        orb = this.suborbit([[s[0], s[1]], [s[2], s[3]]], c, more + 1);
+        orb.splice(0, 4);
+      } else {
+        console.log('calling suborbit', c, c, more);
+        orb = this.suborbit(c, c, more);
+      }
+      if (!finished || (orb.length + oldOrb.length) / 4 < finished) {
+        ongoing = true;
+      }
+      // Calculate a cycle and any messages
+      title = 'c=' + formatcomplex(k, ...c).replaceAll('-', '\u2212');
+      if (view.nn[j]) {
+        if (view.nn[j] > 0) {
+          title += '\ndiverges in ' + view.nn[j];
+        } else {
+          let period = this.figureperiod(view.currentp(j));
+          if (period == 1) {
+            title += '\nconverges after ' + view.currentp(j);
+          } else {
+            title += '\nafter ' + view.currentp(j) + ', period ' + period;
+          }
+          let clen = this.figureperiod(view.currentp(j));
+          console.log('calling suborbit', z, c, clen);
+          cyc = this.suborbit(z, c, clen);
+        }
+      } else {
+        ongoing = true;
+      }
+    }
+    return [orb, cyc, ongoing, title];
+  }
+
+  displayOrbit(k, orb, cyc, target, title, preserve) {
+    target.setAttribute('title', title);
+    if (!preserve) {
+      this.explorer.grid.clearseq(k);
+    }
+    this.showseq(k, orb, 'yellow');
+    this.showseq(k, cyc, 'red');
+
+    const orbitonallboards = () => {
+      for (let i = 0; i < this.explorer.grid.views.length; i++) {
+        if (!this.explorer.grid.hiddencanvas(i) && i != k) {
+          if (!preserve) {
+            this.explorer.grid.clearseq(i);
+          }
+          this.showseq(i, orb, 'yellow');
+          this.showseq(i, cyc, 'red');
+        }
+      }
+    };
+    this.orbittimeout = setTimeout(orbitonallboards, 1);
+  }
+
+  suborbit(z, c, len) {
+    let r = [z[0], z[1]];
+    let j = [z[2], z[3]];
+    const cr = [c[0], c[1]];
+    const cj = [c[2], c[3]];
+
+    let result = [r[0], r[1], j[0], j[1]];
+    while (result.length < len * 4) {
+      let j2 = qdSquare(j);
+      let ja = qdMul(qdDouble(r), j);
+      let r2 = qdSquare(r);
+      let ra = qdSub(r2, j2);
+      for (let ord = 2; ord < this.explorer.config.exponent; ord++) {
+        let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
+        ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
+        ra = rt;
+      }
+      r = qdAdd(ra, cr);
+      j = qdAdd(ja, cj);
+      result.push(r[0], r[1], j[0], j[1]);
+    }
+    return result;
+  }
+
+  figureperiod(i) {
+    // Reverse the computation that was done for exponential backoff.
+    let head = i, tail = 1;
+    while (head > tail) { head >>= 1; tail <<= 1; }
+    return i - (head * tail) + 1;
+  }
+
+  showseq(k, seq, color) {
+    console.log('showseq', k);
+    if (k >= this.explorer.grid.views.length) { return; }
+    let ctx = this.explorer.grid.overlay(k).getContext('2d');
+    ctx.fillStyle = color;
+    let [s, cr, cj] = this.explorer.grid.views[k].sizes;
+    for (let i = 0; i < seq.length; i += 4) {
+      let r = [seq[i], seq[i+1]];
+      let j = [seq[i+2], seq[i+3]];
+      let x = (qdSub(r, cr)[0] / s + 0.5) * this.explorer.config.dims;
+      let y = (qdSub(cj, j)[0] / s + 0.5) * this.explorer.config.dims;
+      if (x >= 0 && y >= 0 && x < this.explorer.config.dims && y < this.explorer.config.dims) {
+        ctx.beginPath();
+        ctx.arc(x, y, 1 * this.explorer.config.pixelRatio, 0, 2 * Math.PI, false);
+        ctx.fill();
+      }
+    }
+  }
+}
+
+class RedrawProcess {
+  constructor(explorer) {
+    this.views = explorer.grid.views;
+    this.canvasGetter = (index) => explorer.grid.canvas(index);
+    this.orderFactory = () => explorer.grid.views.map((b, i) => i).sort(
+       (a, b) => (explorer.grid.hiddencanvas(a) * 1 - explorer.grid.hiddencanvas(b) * 1)
+                 * explorer.grid.views.length + (b - a));
+    this.timer = null;
+  }
+  start() {
+    this.stop();  // Ensure any existing cycle is stopped
+    this.canvasOrder = this.orderFactory();
+    this.drawNext();
+  }
+  stop() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+  drawNext() {
+    if (this.canvasOrder.length) {
+      const index = this.canvasOrder.shift();
+      const view = this.views[index];
+      const canvas = this.canvasGetter(index);
+      if (canvas && view) {
+        const ctx = canvas.getContext('2d');
+        view.draw(ctx);
+      }
+      this.currentIndex++;
+      this.timer = setTimeout(() => this.drawNext(), 0);
+    } else {
+      this.stop();
+    }
+  }
+}
+
+class MandelbrotExplorer {
+  constructor() {
+    this.config = new Config();
+    this.grid = new Grid(this.config);
+    this.zoomManager = new ZoomManager(this.config, this.grid);
+    this.urlHandler = new URLHandler(this.config, this.grid);
+    this.eventHandler = new EventHandler(this);
+    this.movieMode = new MovieMode(this);
+    this.orbitComputer = new OrbitComputer(this);
+    this.redrawProcess = new RedrawProcess(this);
+    this.movieContainer = document.getElementById('movie');
+  }
+
+  start() {
+    let startState = this.urlHandler.parseUrl();
+    this.config.initSizes();
+    this.initPlatform();
+    this.grid.updateLayout(startState);
+    this.eventHandler.setup();
+    this.grid.scheduler.start();
+    this.grid.updateHiddenViews(); // Initial update of hidden boards
+  }
+
+  cycleUnknownColor(backward) {
+    const inc = backward ? this.config.ukcs.length - 1 : 1;
+    const ind = (this.config.ukcs.indexOf(this.config.unknowncolor) + inc) % this.config.ukcs.length;
+    this.config.unknowncolor = this.config.ukcs[ind];
+    for (let k = 0; k < this.grid.views.length; ++k) {
+      this.grid.views[k].drawcolor(this.grid.canvas(k).getContext('2d'), 0);
+    }
+  }
+
+  cycleColorTheme(backward) {
+    const inc = backward ? this.config.colorThemes.all.length - 1 : 1;
+    const themes = this.config.colorThemes.all;
+    const currentIndex = themes.indexOf(this.config.theme);
+    const nextIndex = (currentIndex + inc) % themes.length;
+    this.config.theme = themes[nextIndex];
+    this.redrawProcess.start();
+    this.urlHandler.updateurl();
+  }
+
+  toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.log(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  }
+
+  initPlatform() {
+    for (let el of document.querySelectorAll('#text')) {
+      if (this.config.cssDims < 360) {
+        // Two columns plus margin minus padding
+        el.style.maxWidth = (this.config.cssDims * 2 + 20 - 16) + 'px';
+      } else {
+        // One column minus padding
+        el.style.maxWidth = (this.config.cssDims - 16) + 'px';
+      }
+    }
+    if (this.config.mac) {
+      for (let el of document.querySelectorAll('[mac]')) {
+        el.innerHTML = el.getAttribute('mac');
+      }
+    }
+    if (this.config.mobile) {
+      for (let el of document.querySelectorAll('[mobile]')) {
+        el.innerHTML = el.getAttribute('mobile');
+      }
+    }
+    for (let el of document.querySelectorAll('.moviemode')) {
+      el.href = '#movie';
+      el.onclick = (() => {
+        if (this.grid.views.length > 1) {
+          this.movieMode.toggle();
+        }
+        return true;
+      });
+    }
+  }
+}
+
+// Utility functions
+function formatScale(scale) {
+  if (scale < 10) {
+    return +scale.toFixed(1) + 'x';
+  } else if (scale < 100000) {
+    return +scale.toFixed(0) + 'x';
+  } else {
+    return scale.toExponential(2);
+  }
+}
+
+function formatSize(s) {
+  return parseFloat(s.toPrecision(
+              Math.max(2, -Math.ceil(Math.log(s)/2.5))));
+}
+
+function formatcomplex(k, re, im) {
+  let pix = explorer.grid.views[k].sizes[0] / explorer.config.dims;
+  let digits = Math.max(0, -Math.floor(Math.log10(pix)));
+  re = toQd(re);
+  im = toQd(im);
+  let rd = qdFixed(qdAbs(re), digits)
+  let id = qdFixed(qdAbs(im), digits)
+  let rs = re[0] < 0.0 ? '-' : '+';
+  let is = im[0] < 0.0 ? '-' : '+';
+  return rs + rd + is + id + 'i';
+}
+
+function catmullRom1D(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const c0 = (-t3 + 2*t2 - t) / 2;
+  // c1 = (3*t3 - 5*t2 + 2) / 2; // unneeded since p1 = 0
+  const c2 = (-3*t3 + 4*t2 + t) / 2;
+  const c3 = (t3 - t2) / 2;
+  // Compute offsets from p1 for numerical stability.
+  const s0 = qdSub(p0, p1);
+  const s2 = qdSub(p2, p1);
+  const s3 = qdSub(p3, p1);
+  return qdAdd(qdAdd(qdAdd(qdScale(s0, c0),
+           qdScale(s3, c3)), qdScale(s2, c2)), p1);
+}
+
+function catmullRomSpline(p0, p1, p2, p3, t) {
+  return [
+    catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),
+    catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)
+  ];
+}
+
+function hclColor(h, c, l) {
+  // Normalize hue to be between 0 and 360 degrees
+  // Chroma and Luminance should be between 0 and 100.
+  h = h % 360;
+  if (h < 0) h += 360;
+  c = Math.min(Math.max(c, 0), 100);
+  l = Math.min(Math.max(l, 0), 100);
+
+  // Convert to radians
+  const hRad = h * Math.PI / 180;
+
+  // Constants for conversion
+  const u = Math.cos(hRad) * c;
+  const v = Math.sin(hRad) * c;
+
+  // Direct conversion from HCL to RGB
+  let r = l + 0.09551990792716 * u + 0.05406649830715 * v;
+  let g = l - 0.03947567534454 * u - 0.01829165033556 * v;
+  let b = l - 0.19638676772419 * u - 0.45388640918783 * v;
+
+  // Apply gamma correction and convert to eight-bit value
+  [r, g, b] = [r, g, b].map((x) => {
+    return intcolor(gammaCorrect(x / 100));
+  });
+  return `rgb(${r},${g},${b})`
+}
+
+function gammaCorrect(channel) {
+  if (channel <= 0.0031308) {
+    return 12.92 * channel;
+  } else {
+    return 1.055 * Math.pow(channel, 1/2.4) - 0.055;
+  }
+}
+
+function intcolor(n) {
+  if (n <= 0) { return "0"; }
+  if (n >= 1) { return "255"; }
+  return (n * 255).toString(10);
+}
+
+// Lineweaver-Burk estimate for how many pixels will be black
+function estimateLimit(data) {
+  // Transform data: x becomes 1/x
+  const transformedData = data.map(point => ({
+    x: 1 / (point.x ** 0.75),
+    y: point.y,
+    weight: point.weight || 1  // Default weight to 1 if not provided
+  }));
+
+  // Calculate weighted means
+  let sumWeights = 0;
+  let sumWeightedX = 0;
+  let sumWeightedY = 0;
+
+  for (let point of transformedData) {
+    sumWeights += point.weight;
+    sumWeightedX += point.weight * point.x;
+    sumWeightedY += point.weight * point.y;
+  }
+
+  const meanX = sumWeightedX / sumWeights;
+  const meanY = sumWeightedY / sumWeights;
+
+  // Calculate slope and intercept
+  let numerator = 0;
+  let denominator = 0;
+  for (let point of transformedData) {
+    numerator += point.weight * (point.x - meanX) * (point.y - meanY);
+    denominator += point.weight * Math.pow(point.x - meanX, 2);
+  }
+  const slope = numerator / denominator;
+  const intercept = meanY - slope * meanX;
+
+  // The intercept is our estimate of the limit as 1/x approaches 0 (i.e., as x approaches infinity)
+  return intercept;
+}
+</script>
+<script id="workerCode" type="text/worker">
+class Board {
+  constructor(k, size, re, im, config) {
+    this.k = k;
+    this.config = config;
+    this.it = 0;
+    this.zz = []; // current iterate for each pixel
+    this.cc = []; // current constant for each pixel
+    this.nn = []; // iterations when diverged / (neg) converged
+    this.bb = []; // recent remembered z
+    this.pp = []; // iteration at which converged within epsilon2
+    this.ss = null; // sparse list of indexes to compute
+    this.un = config.dims2; // count of unfinished points
+    this.di = 0; // diverged points
+    this.ch = 0; // potentially chaotic points in the spike
+    this.hi = [[0, 1, 1, 0]];
+    this.sizes = [size, toQd(re), toQd(im)];
+    this.effort = 1;
+    this.pix = this.sizes[0] / this.config.dims;
+    this.epsilon = Math.min(1e-12, this.pix / 10);
+    this.epsilon2 = Math.min(1e-9, this.pix * 10);
+  }
+
+  initboard(size, re, im) {
+    this.it = 1;
+    this.nn = new Array(this.config.dims2).fill(0);
+    this.pp = new Array(this.config.dims2).fill(0);
+    for (let y = 0; y < this.config.dims; y++) {
+      const jFrac = (0.5 - (y / this.config.dims));
+      const j = jFrac * size + im[0];
+      for (let x = 0; x < this.config.dims; x++) {
+        const rFrac = ((x / this.config.dims) - 0.5);
+        const r = rFrac * size + re[0];
+        this.cc.push(r, j);
+        if (this.inspike(r, j)) {
+          this.un -= 1;
+          this.ch += 1;
+        }
+      }
+    }
+    this.ss = [];
+    for (let m = 0; m < this.config.dims2; ++m) {
+      this.ss.push(m);
+    }
+    this.zz = this.cc.slice();
+    this.bb = this.cc.slice();
+  }
+
+  iterate() {
+    // workerLog(`Board ${this.k}: Starting iteration ${this.it}`);
+    let changes = null;
+
+    const results = [0, 0, 0];
+    let s = this.ss;    // speedy list of indexes to compute
+    // head and tail factor i into an odd num and largest power of 2.
+    let head = this.it, tail = 1;
+    while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
+    if (s.length > this.un * 1.25) {
+      let news = [];
+      for (let t = 0; t < s.length; ++t) {
+        if (this.nn[s[t]]) continue;
+        news.push(s[t]);
+      }
+      s = this.ss = news;
+    }
+    if (head <= tail) {
+      for (let t = 0; t < s.length; ++t) {
+        let m = s[t];
+        if (this.nn[m]) continue;
+        this.bb[m * 2] = this.zz[m * 2];
+        this.bb[m * 2 + 1] = this.zz[m * 2 + 1];
+        this.pp[m] = 0;
+      }
+    }
+    for (let t = 0; t < s.length; ++t) {
+      const index = s[t];
+      const computeResult = this.compute(index);
+      results[computeResult + 1] += 1;
+
+      if (computeResult !== 0) {
+        if (!changes) {
+          changes = { iter: this.it, nn: [], vv: [], zz: [], pp: [] };
+        }
+        if (computeResult < 0) {
+          changes.vv.push(index);
+          changes.zz.push([this.zz[index * 2], this.zz[index * 2 + 1]]);
+          changes.pp.push(this.pp[index])
+        } else {
+          changes.nn.push(index);
+        }
+      }
+    }
+
+    this.un -= results[2] + results[0]; // newly finished
+    this.di += results[2]; // diverged
+
+    // workerLog(`Board ${this.k}: Finished iteration ${this.it}. Changes: ${changes.length}, Unfinished: ${this.un}, Diverged: ${this.di}`);
+
+    this.it++;
+
+    return changes;
+  }
+
+  compute(m) {
+    if (this.nn[m]) return 0;
+    const m2 = m * 2;
+    const m2i = m2 + 1;
+    const r = this.zz[m2];
+    const j = this.zz[m2i];
+    const r2 = r * r;
+    const j2 = j * j;
+    if (r2 + j2 > 4.0) {
+      this.nn[m] = this.it;
+      return 1;
+    }
+    let ra = r2 - j2;
+    let ja = 2 * r * j;
+    for (let ord = 2; ord < this.config.exponent; ord++) {
+      let rt = r * ra - j * ja;
+      ja = r * ja + j * ra;
+      ra = rt;
+    }
+    ra += this.cc[m2];
+    ja += this.cc[m2i];
+    this.zz[m2] = ra;
+    this.zz[m2i] = ja;
+    const rb = this.bb[m2];
+    const jb = this.bb[m2i];
+    const db = Math.abs(rb - ra) + Math.abs(jb - ja);
+    if (db <= this.epsilon2) {
+      if (!this.pp[m]) { this.pp[m] = this.it; }
+      if (db <= this.epsilon) {
+        this.nn[m] = -this.it;
+        if (this.inspike(this.cc[m2], this.cc[m2i]) && this.ch > 0) {
+          this.ch -= 1;
+          return 0;  // Points in spike are already counted
+        }
+        return -1;
+      }
+    }
+    return 0;
+  }
+
+  inspike(re, im) {
+    // We do not iterate infinitely for chaotic points in the spike.
+    return (im == 0.0 && re > -2.0 && re < -1.401155 &&
+            this.config.exponent == 2);
+  }
+
+  unfinished() {
+    // Chaotic points in the spike counted as finished after 100000 iterations.
+    const result = this.un + (this.it < 100000 ? this.ch : 0);
+    // workerLog(`Board ${this.k}: unfinished() called. un: ${this.un}, ch: ${this.ch}, it: ${this.it}, result: ${result}`);
+    return result;
+  }
+
 }
 
 class PerturbationBoard extends Board {
@@ -586,6 +2308,9 @@ class PerturbationBoard extends Board {
   }
 
   iterate() {
+    const changes = [];
+    let currentChange = null;
+
     let i = this.it;
     let head = i, tail = 1;
     while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
@@ -601,6 +2326,15 @@ class PerturbationBoard extends Board {
       let [r, z] = this.precomputeQuad(index);
       results[r + 1] += 1;
       newZ.push(z);
+
+      if (r !== 0) {
+        if (!currentChange || currentChange.iter !== this.nn[index]) {
+          if (currentChange) changes.push(currentChange);
+          currentChange = { iter: this.nn[index], nn: [index] };
+        } else {
+          currentChange.nn.push(index);
+        }
+      }
     }
 
     // Iterate perturbation points that use the old z
@@ -613,6 +2347,15 @@ class PerturbationBoard extends Board {
         results[r + 1] += 1;
         newZ.push(z);
         newQuadIndexes.push(index);
+
+        if (r !== 0) {
+          if (!currentChange || currentChange.iter !== this.nn[index]) {
+            if (currentChange) changes.push(currentChange);
+            currentChange = { iter: this.nn[index], nn: [index] };
+          } else {
+            currentChange.nn.push(index);
+          }
+        }
       }
     }
 
@@ -638,12 +2381,13 @@ class PerturbationBoard extends Board {
       }
     });
 
+    if (currentChange) changes.push(currentChange);
+
     // Tally progress
     let diverged = results[2];
     let count = results[0] + diverged;
     this.un -= count;
     this.di += diverged;
-    this.updateHistogram(this.un, this.di, i);
 
     // Trim finished pixels from array.
     if (this.pertIndexes.length + this.quadIndexes.length > this.un * 1.25) {
@@ -664,7 +2408,7 @@ class PerturbationBoard extends Board {
     }
 
     this.it++;
-    return count;
+    return changes;
   }
 
   precomputeQuad(m) {
@@ -796,1555 +2540,102 @@ class PerturbationBoard extends Board {
   isQuadPrecision(index) {
     return this.cc[index].length === 4;
   }
-
-  currentc(j) {
-    if (this.isQuadPrecision(j)) {
-      const [re1, re2, im1, im2] = this.cc[j];
-      return [[re1, re2], [im1, im2]];
-    } else {
-      const [dr, di, refIndex] = this.cc[j];
-      const ref = this.cc[refIndex];
-      const r = qdcAdd([ref[0], ref[1], ref[2], ref[3]], [dr, 0, di, 0]);
-      return [[r[0], r[1]], [r[2], r[3]]];
-    }
-  }
-
-  currentz(j) {
-    if (this.isQuadPrecision(j)) {
-      const [re1, re2, im1, im2] = this.zz[j];
-      return [[re1, re2], [im1, im2]];
-    } else {
-      const refIndex = this.cc[j][2];
-      const [dr, di] = this.zz[j];
-      const ref = this.zz[refIndex];
-      const r = qdcAdd([ref[0], ref[1], ref[2], ref[3]], [dr, 0, di, 0]);
-      return [[r[0], r[1]], [r[2], r[3]]];
-    }
-  }
-
-  debugStatus() {
-    return `pert: ${this.pertIndexes.length}, ` +
-           `quad: ${this.quadIndexes.length}\n` +
-           super.debugStatus();
-  }
 }
 
-class Grid {
-  constructor(config) {
-    this.config = config;
-    this.boards = [];
-    this.gridboards = 0;
-    this.focusk = null;
-    this.urlListeners = [];
-    this.zoomListeners = [];
-  }
-
-  makeBoard(k, size, re, im) {
-    // Threshold for switching to PerturbationBoard
-    const perturbationThreshold = 1e-15;
-
-    if (size / this.config.dims < perturbationThreshold) {
-      return new PerturbationBoard(k, size, re, im, this.config);
-    } else {
-      return new Board(k, size, re, im, this.config);
-    }
-  }
-
-  currentGridState() {
-    let state = { hidden: [], sizes: [] };
-    for (let k = 0; k < this.boards.length; k++) {
-      if (this.hiddencanvas(k)) {
-        state.hidden.push(k);
-      }
-      state.sizes.push(this.boards[k].sizes);
-    }
-    return state;
-  }
-
-  updateLayout(state = null) {
-    if (this.currentUpdateProcess) {
-      this.currentUpdateProcess.abort();
-    }
-    if (state === null) {
-      state = this.currentGridState();
-    }
-    this.config.initSizes();
-
-    // Recreate the grid
-    let gridElement = document.getElementById('grid');
-    gridElement.innerHTML = '';
-    this.gridboards = 0;
-
-    // Recreate all canvases
-    for (let k = 0; k < state.sizes.length; k++) {
-      this.makecanvas(k);
-      if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
-    }
-    this.truncateboards(0);
-    this.currentUpdateProcess = this.createUpdateProcess(state);
-    this.currentUpdateProcess.start();
-  }
-
-  createUpdateProcess(state) {
-    let aborted = false;
-    let currentIndex = 0;
-
-    const processNext = () => {
-      if (aborted || currentIndex >= state.sizes.length) {
-        if (!aborted) {
-          this.notifyurl();
-          this.notifyzoom();
-        }
-        this.currentUpdateProcess = null;
-        return;
-      }
-
-      const k = currentIndex;
-      if (!this.boards[k]) {
-        this.boards[k] = this.makeBoard(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
-      }
-      this.boards[k].initboard(state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
-      this.boards[k].draw(this.canvas(k).getContext('2d'));
-      if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
-      currentIndex++;
-      setTimeout(processNext, 0);
-    };
-
-    return {
-      start: () => {
-        if (this.config.gridcols == 1) {
-          setTimeout(processNext, 100);
-        } else {
-          processNext();
-        }
-      },
-      abort: () => { aborted = true; }
-    };
-  }
-
-  makecanvas(k) {
-    let gd = document.getElementById('grid');
-    while (this.gridboards <= k) {
-      let dd = document.createElement('div');
-      dd.id = 'b_' + this.gridboards;
-      dd.innerHTML = this.canvasstring(this.gridboards);
-      dd.className = 'hidemarks';
-      gd.appendChild(dd);
-      this.gridboards += 1;
-    }
-  }
-
-  canvasstring(k) {
-    let factor = 3.0 / (k < this.boards.length ? this.boards[k].sizes[0] :
-      this.config.firstsize / Math.pow(this.config.zoomfactor, k));
-    factor = formatScale(factor);
-    return `<canvas width="${this.config.dims}" height="${this.config.dims}"` +
-           ` style="height:${this.config.cssDims}px;width:${this.config.cssDims}px;">` +
-           '</canvas>' +
-           '<div class="closebox"></div>' +
-           '<div class="rect"></div>' +
-           `<canvas class=overlay width=${this.config.dims} height="${this.config.dims}"` +
-           ` style="height:${this.config.cssDims}px;width:${this.config.cssDims}px;">` +
-           '</canvas>' +
-           `<a class="zoomnum" target="_blank" href="?grid=1">${factor}` +
-           '<div class="status"></div></a>';
-  }
-
-  hidecanvas(k) {
-    this.canvas(k).parentElement.style.display = 'none';
-  }
-
-  showcanvas(k) {
-    this.canvas(k).parentElement.style.display = '';
-  }
-
-  hiddencanvas(k) {
-    let b = this.canvas(k);
-    return b && b.parentElement.style.display == 'none';
-  }
-
-  grid() {
-    return document.getElementById('grid');
-  }
-
-  canvas(k) {
-    let b = document.getElementById("b_" + k);
-    return b && b.firstElementChild;
-  }
-
-  closebutton(k) {
-      const board = this.canvas(k);
-      return board && board.nextElementSibling;
-  }
-
-  rect(k) {
-      const closeBtn = this.closebutton(k);
-      return closeBtn && closeBtn.nextElementSibling;
-  }
-
-  overlay(k) {
-      const rect = this.rect(k);
-      return rect && rect.nextElementSibling;
-  }
-
-  truncateboards(k) {
-    if (this.boards.length > k) {
-      this.boards.length = k;
-    }
-  }
-
-  removeboardspast(k) {
-    if (this.gridboards > k) {
-      for (let j = k + 1; j < this.gridboards; ++j) {
-        this.canvas(j).parentElement.remove();
-      }
-      this.gridboards = k + 1;
-    }
-  }
-
-  showAllBoards() {
-    for (let j = 0; j < this.gridboards; ++j) {
-      this.showcanvas(j);
-    }
-    this.notifyzoom();
-  }
-
-  truncatehiddenboards() {
-    let j = this.gridboards - 1;
-    for (; j > 0; j--) {
-      if (!this.hiddencanvas(j)) {
-        break;
-      }
-    }
-    this.truncateboards(j + 1);
-    this.removeboardspast(j);
-    if (j == 0) {
-      this.showcanvas(j);
-    }
-  }
-
-  updateProgress(overtarget, k) {
-    if (overtarget.tagName == 'A' && overtarget.classList.contains('zoomnum')) {
-      if (this.config.mobile) {
-        overtarget.removeAttribute('href');
-      } else {
-        overtarget.href = this.bigurl(k, overtarget.showDebug);
-      }
-
-      let statusDiv = overtarget.querySelector('.status');
-      if (!statusDiv) return;
-
-      // Regular status
-      let regularStatus = 'center at ' +
-        formatcomplex(k, this.boards[k].sizes[1], this.boards[k].sizes[2])
-          .replaceAll('-', '\u2212') + '\n' +
-        Math.floor(1000 * (1.0 - this.boards[k].unfinished() / this.config.dims2))/10.0  +
-          '% done after ' + this.boards[k].it + ' iters';
-      statusDiv.textContent = regularStatus;
-
-      // Debug status
-      if (overtarget.showDebug) {
-        statusDiv.innerHTML += '\n' + this.boards[k].debugStatus();
-      }
-    }
-    if (overtarget.matches(':hover')) {
-      setTimeout(() => this.updateProgress(overtarget, k), 100);
-    }
-  }
-
-  bigurl(k, debug) {
-    if (k >= this.boards.length) return;
-    let osize = this.boards[k].sizes[0];
-    let oexp = '';
-    if (this.config.exponent != 2) {
-      oexp = '&exponent=' + this.config.exponent;
-    }
-    let ore = this.boards[k].sizes[1];
-    let oim = this.boards[k].sizes[2];
-    return '?s=' + formatSize(osize) +
-           (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
-           '&c=' + formatcomplex(k, ore, oim) +
-           (this.config.theme != 'warm' ? '&theme=' + this.config.theme : '') +
-           (debug ? '' : '&grid=1');
-  }
-
-  clearseq(k) {
-    const overlayElement = this.overlay(k);
-    if (overlayElement) {
-      let ctx = overlayElement.getContext('2d');
-      ctx.clearRect(0, 0, this.config.dims, this.config.dims);
-    }
-  }
-
-  onurlchange(callback) {
-    this.urlListeners.push(callback);
-  }
-
-  notifyurl() {
-    for (let cb of this.urlListeners) {
-      cb();
-    }
-  }
-
-  onzoomchange(callback) {
-    this.zoomListeners.push(callback);
-  }
-
-  notifyzoom() {
-    for (let cb of this.zoomListeners) {
-      cb();
-    }
-  }
-}
-
-class ZoomManager {
-  constructor(config, grid) {
-    this.config = config;
-    this.grid = grid;
-    this.grid.onzoomchange(() => this.updateZoomRectangles());
-  }
-
-  showZoomRect(k, x, y, zf) {
-    let s = this.grid.rect(k).style;
-    let border = 1;
-    let cssClass = '';
-    if (zf > 50) {
-      // Switch from rectangle to circle if the zoom area is tiny.
-      zf = 25;
-      cssClass = 'circle';
-    }
-    this.grid.rect(k).parentElement.className = cssClass;
-    s.top = (y * this.config.cssDims - this.config.cssDims / 2 / zf - border) + 'px';
-    s.left = (x * this.config.cssDims - this.config.cssDims / 2 / zf - border) + 'px';
-    s.width = (this.config.cssDims / zf + 2 * border) + 'px';
-    s.height = (this.config.cssDims / zf + 2 * border) + 'px';
-  }
-
-  removeZoomRect(k) {
-    let s = this.grid.rect(k).style;
-    s.top = s.left = s.width = s.height = '';
-    this.grid.rect(k).parentElement.className = 'hidemarks';
-  }
-
-  updateZoomRectangles() {
-    let prevBoard = null;
-    let prevK = 0;
-    for (let k = 0; k < this.grid.boards.length; k++) {
-      if (this.grid.hiddencanvas(k)) { continue; }
-      let currBoard = this.grid.boards[k].sizes;
-      if (prevBoard != null) {
-        let x = qdSub(currBoard[1], prevBoard[1])[0] / prevBoard[0] + 0.5;
-        let y = 0.5 - qdSub(currBoard[2], prevBoard[2])[0] / prevBoard[0];
-        let zf = prevBoard[0] / currBoard[0];
-        this.showZoomRect(prevK, x, y, zf);
-      }
-      prevBoard = currBoard;
-      prevK = k;
-    }
-    if (prevBoard !== null) {
-      this.removeZoomRect(prevK);
-    }
-  }
-
-  zoomInAtCurrentPosition(hideCurrent) {
-    let k = this.grid.boards.length - 1;
-    if (this.grid.boards[k].uninteresting()) { return; }
-    let osize = this.grid.boards[k].sizes[0];
-    let ore = this.grid.boards[k].sizes[1];
-    let oim = this.grid.boards[k].sizes[2];
-    let rre = 0.5;
-    if (k == 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
-      // Myreberg / Feigenbaum point
-      ore = [-1.4011551890920506, 1.196330130384937e-17];
-      rre = (ore[0] - this.grid.boards[0].sizes[1][0]) / this.grid.boards[0].sizes[0] + 0.5;
-    }
-    this.showZoomRect(k, rre, 0.5, this.config.zoomfactor);
-    let nsize = osize / this.config.zoomfactor;
-    let newBoard = this.grid.makeBoard(k + 1, nsize, ore, oim);
-    newBoard.initboard(nsize, ore, oim);
-    this.grid.boards.push(newBoard);
-    this.grid.makecanvas(k + 1);
-    if (hideCurrent) {
-      this.grid.canvas(k).parentElement.style.display = 'none';
-      this.updateZoomRectangles();
-    }
-    this.grid.removeboardspast(k + 1);
-    this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
-    this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
-    newBoard.draw(this.grid.canvas(k + 1).getContext('2d'));
-    this.grid.notifyurl();
-  }
-
-  cellclick(k, m, hideCurrent) {
-    // Only accept clicks on cells with something computed in them.
-    if (k >= this.grid.boards.length || this.grid.boards[k].uninteresting() ||
-         this.grid.currentUpdateProcess) return;
-    this.grid.truncateboards(k + 1);
-    this.grid.removeboardspast(k + 1);
-    setTimeout(() => { this.cellclickdelay(k, m, hideCurrent); }, 1);
-  }
-
-  cellclickdelay(k, m, hideCurrent) {
-    if (k >= this.grid.boards.length || this.grid.currentUpdateProcess) return;
-    let osize = this.grid.boards[k].sizes[0];
-    let ore = this.grid.boards[k].sizes[1];
-    let oim = this.grid.boards[k].sizes[2];
-    let cx = m % this.config.dims;
-    let cy = (m - cx) / this.config.dims;
-    this.grid.removeboardspast(k + 1);
-    this.showZoomRect(k, cx / this.config.dims, cy / this.config.dims, this.config.zoomfactor);
-    this.grid.truncateboards(k + 1);
-    // Do slow parts after a moment.
-    setTimeout(() => {
-      let nsize = osize / this.config.zoomfactor;
-      let nre = qdAdd(ore, [((cx / this.config.dims) - 0.5) * osize, 0]);
-      let nim = qdAdd(oim, [(0.5 - (cy / this.config.dims)) * osize, 0]);
-      let newBoard = this.grid.makeBoard(k + 1, nsize, nre, nim);
-      newBoard.initboard(nsize, nre, nim);
-      this.grid.boards.push(newBoard);
-      this.grid.makecanvas(k + 1);
-      if (hideCurrent) {
-        this.grid.canvas(k).parentElement.style.display = 'none';
-        this.updateZoomRectangles();
-      }
-      this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
-      this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
-      newBoard.draw(this.grid.canvas(k + 1).getContext('2d'));
-      this.grid.showcanvas(k + 1);
-      this.grid.notifyurl();
-      setTimeout(() => {
-        // Make sure the rectangles are visible
-        document.body.className = '';
-      }, 1);
-    }, 1);
-  }
-
-  centerBoards(includeFirst) {
-    let k = this.grid.boards.length - 1;
-    let ore = this.grid.boards[k].sizes[1];
-    let oim = this.grid.boards[k].sizes[2];
-    this.showZoomRect(
-      0, 0.5 + (ore[0] - this.grid.boards[0].sizes[1][0]) / this.grid.boards[0].sizes[0],
-         0.5 - (oim[0] - this.grid.boards[0].sizes[2][0]) / this.grid.boards[0].sizes[0],
-         this.grid.boards[0].sizes[0] / this.grid.boards[1].sizes[0]);
-    for (k = includeFirst ? 0 : 1; k < this.grid.boards.length - 1; k += 1) {
-      this.showZoomRect(
-          k, 0.5, 0.5, this.grid.boards[k].sizes[0] / this.grid.boards[k+1].sizes[0]);
-      if (qdCompare(this.grid.boards[k].sizes[1], ore) ||
-          qdCompare(this.grid.boards[k].sizes[2], oim)) {
-        let nsize = this.grid.boards[k].sizes[0];
-        this.grid.boards[k] = this.grid.makeBoard(k + 1, nsize, ore, oim);
-        this.grid.boards[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
-        this.grid.boards[k].initboard(nsize, ore, oim);
-        this.grid.boards[k].draw(this.grid.canvas(k).getContext('2d'));
-        this.grid.clearseq(k);
-      }
-    }
-    this.grid.notifyurl();
-  }
-}
-
-class URLHandler {
-  constructor(config, grid) {
-    this.config = config;
-    this.grid = grid;
-    this.grid.onurlchange(x => this.updateurl());
-  }
-
-  updateurl() {
-    if (history.replaceState) {
-      history.replaceState(null, '', this.currenturl());
-    }
-  }
-
-  parseUrl() {
-    let startstate = { hidden: [], sizes: [] };
-    let opts = document.location.search.split('&');
-    for (let j in opts) {
-      let m;
-      if (null !== (m = opts[j].match(/exponent=(\d+)/))) {
-        this.config.exponent = Math.max(2, parseInt(m[1]));
-        if (this.config.exponent > 2) { this.config.firstr = [0.0, 0]; }
-        for (let el of document.getElementsByClassName('exponent')) {
-          el.innerText = this.config.exponent;
-        }
-      }
-      if (null !== (m = opts[j].match(/grid=(\d+)/))) {
-        this.config.gridcols = Math.max(1, parseInt(m[1]));
-      }
-      if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+(?:e[-+]\d+)?)/))) {
-        this.config.firstsize = parseFloat(m[1]);
-      }
-      if (null !== (m = opts[j].match(/pixelratio=(\d+)/))) {
-        this.config.pixelRatio = Math.max(1, parseInt(m[1]));
-      }
-      if (null !== (m = opts[j].match(/c=([-+\d\.ei,]+)/))) {
-        for (let coords of m[1].split(',')) {
-          m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/);
-          startstate.sizes.push([
-            this.config.firstsize / Math.pow(this.config.zoomfactor, startstate.sizes.length),
-            m != null && m[1] ? qdParse(m[1]) : (startstate.sizes.length > 0 ?
-                startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstr),
-            m != null && m[2] ? qdParse(m[2]) : (startstate.sizes.length > 0 ?
-                startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstj)
-          ]);
-        }
-      }
-      if (null !== (m = opts[j].match(/h=([\d,]+)/))) {
-        startstate.hidden = m[1].split(',').map(x=>parseInt(x));
-      }
-      if (null !== (m = opts[j].match(/theme=(\w+)/))) {
-        if (this.config.colorThemes.all.includes(m[1])) {
-          this.config.theme = m[1];
-        }
-      }
-    }
-    if (startstate.sizes.length == 0) {
-      startstate.sizes = this.config.firststate().sizes;
-    }
-
-    return startstate;
-  }
-
-  currenturl() {
-    let state = this.grid.currentGridState();
-    let compactc = '';
-    let commas = '';
-    let prev = [this.config.firstr, this.config.firstj];
-    let prevj = -1;
-    for (let j = 0; j <= state.sizes.length; j++) {
-      if (j < state.sizes.length &&
-          !qdCompare(state.sizes[j][1], prev[0]) &&
-          !qdCompare(state.sizes[j][2], prev[1])) {
-        commas += ',';
-      } else {
-        if (prevj >= 0) {
-          compactc += formatcomplex(j - 1, state.sizes[prevj][1], state.sizes[prevj][2]) + ',';
-        }
-        compactc += commas;
-        if (j < state.sizes.length) {
-          commas = '';
-          prev = [state.sizes[j][1], state.sizes[j][2]];
-          prevj = j;
-        }
-      }
-    }
-    compactc = compactc.slice(0, -1);
-    let url =
-           (state.sizes[0][0] != 3.0 ? '&s=' + formatSize(this.grid.boards[0].sizes[0]) : '') +
-           (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
-           (compactc.length ? '&c=' + compactc : '') +
-           (this.config.gridcols != this.config.dgc ? '&grid=' + this.config.gridcols : '') +
-           (state.hidden.length ? '&h=' + state.hidden : '') +
-           (this.config.theme != 'warm' ? '&theme=' + this.config.theme : '') +
-           (this.config.pixelRatio != 2 ? '&pixelratio=' + this.config.pixelRatio : '');
-    return '?' + url.replace('&', '');
-  }
-}
-
-class EventHandler {
-  constructor(explorer) {
-    this.explorer = explorer;
-  }
-
-  setup() {
-    document.onmousedown = this.onmousedown.bind(this);
-    document.onmousemove = this.onmousemove.bind(this);
-    document.body.onkeydown = this.onkeydown.bind(this);
-    document.body.onmouseover = this.onmouseover.bind(this);
-    document.body.onmousedown = (e) => {
-      if (e.target.className == 'closebox') {
-        e.stopPropagation();
-      }
-    };
-    document.body.onclick = (e) => {
-      if (e.target.className == 'closebox' && !explorer.grid.currentUpdateProcess) {
-        e.target.parentElement.style.display = 'none';
-        this.explorer.grid.truncatehiddenboards();
-        this.explorer.zoomManager.updateZoomRectangles();
-        this.explorer.urlHandler.updateurl();
-      }
-    };
-  }
-
-  onmousedown(e) {
-    let target = this.eventtarget(e);
-    if (this.explorer.movieMode.active && (target.id != 'moviescale')) {
-      this.explorer.movieMode.toggle();
-    }
-    if (e.button != 0) { return true; }
-    if (target) {
-      let m = target.id.match(/b_(\d+)/);
-      if (e.target.tagName == 'A') {
-        if (m && !this.explorer.config.mobile) {
-          e.target.href = this.explorer.grid.bigurl(m[1], e.metaKey || e.ctrlKey);
-        }
-        return true;
-      }
-      if (m) {
-        let p = this.pointInTarget(e, target);
-        let k = parseInt(m[1]);
-        // Clear orbit before creating new board
-        this.explorer.orbitComputer.updateOrbit(k, -1, target);
-        this.explorer.zoomManager.cellclick(k, p.x + p.y * this.explorer.config.dims,
-          e.metaKey || e.ctrlKey);
-        return false;
-      }
-    }
-    return true;
-  }
-
-  onmousemove(e) {
-    let target = this.eventtarget(e);
-    if (target) {
-      let m = target.id.match(/b_(\d+)/);
-      if (m) {
-        let p = this.pointInTarget(e, target);
-        let k = parseInt(m[1]);
-        let j = p.x + p.y * this.explorer.config.dims;
-        this.explorer.orbitComputer.updateOrbit(k, j, target);
-      }
-    }
-  }
-
-  onkeydown(e) {
-    if (this.explorer.movieMode.active &&
-        ['Shift', 'Alt', 'Control', 'Meta', 'CapsLock'].indexOf(e.key) == -1) {
-      this.explorer.movieMode.toggle();
-      return;
-    }
-    // Pressing backspace will delete the last zoom.
-    if (e.key == 'Backspace' && this.explorer.grid.boards.length > 1 &&
-        !this.explorer.grid.currentUpdateProcess) {
-      let k = this.explorer.grid.boards.length - 1;
-      this.explorer.grid.truncateboards(k);
-      this.explorer.grid.removeboardspast(k - 1);
-      this.explorer.grid.truncatehiddenboards();
-      this.explorer.urlHandler.updateurl();
-    }
-    // Pressing C will center all the zoom positions.
-    if (e.key == 'c' && this.explorer.grid.boards.length > 1) {
-      this.explorer.zoomManager.centerBoards(e.metaKey || e.ctrlKey);
-    }
-    // Pressing T will cycle through the color themes.
-    if (e.key.toLowerCase() == 't') {
-      this.explorer.cycleColorTheme(e.shiftKey);
-    }
-    // Pressing U will cycle through the uncomputed colors.
-    if (e.key.toLowerCase() == 'u') {
-      this.explorer.cycleUnknownColor(e.shiftKey);
-    }
-    // Pressing I will zoom in at the same position.
-    if (e.key == 'i') {
-      this.explorer.zoomManager.zoomInAtCurrentPosition(e.metaKey || e.ctrlKey);
-    }
-    // Pressing ? will show the help window
-    if (e.key == '?') {
-      document.getElementById('text').style.display = 'block';
-    }
-    // G reduces the grid column count
-    if (e.key === 'g' && this.explorer.config.gridcols > 1) {
-      this.explorer.config.gridcols -= 1;
-      this.explorer.grid.updateLayout();
-    }
-    // H increases the grid column count
-    if (e.key === 'h') {
-      this.explorer.config.gridcols += 1;
-      this.explorer.grid.updateLayout();
-    }
-    // R will restore any hidden boards
-    if (e.key === 'r') {
-      this.explorer.grid.showAllBoards();
-      this.explorer.urlHandler.updateurl();
-    }
-    // Increase the exponent
-    if (e.key === 'x') {
-      this.explorer.config.updateExponent(this.explorer.config.exponent + 1);
-      this.explorer.grid.updateLayout(this.explorer.config.firststate());
-    }
-    // Decrease the exponent
-    if (e.key === 'z' && this.explorer.config.exponent > 2) {
-      this.explorer.config.updateExponent(this.explorer.config.exponent - 1);
-      this.explorer.grid.updateLayout(this.explorer.config.firststate());
-    }
-    // Increase the pixel ratio
-    if (e.key === 'f') {
-      this.explorer.config.pixelRatio += 1;
-      this.explorer.grid.updateLayout();
-    }
-    // Decrease the pixel ratio
-    if (e.key === 'd' && this.explorer.config.pixelRatio > 1) {
-      this.explorer.config.pixelRatio -= 1;
-      this.explorer.grid.updateLayout();
-    }
-    // Toggle movie mode
-    if (e.key === 'm' && this.explorer.grid.boards.length > 1) {
-      this.explorer.movieMode.toggle();
-    }
-    // Toggle fullscreen mode
-    if (e.key === 'Enter' || document.fullscreenElement && e.key === 'Escape') {
-      e.preventDefault(); // Prevent default action of the Enter key
-      this.explorer.toggleFullscreen();
-    }
-  }
-
-  onmouseover(e) {
-    document.body.className = 'hidemarks';
-    this.explorer.grid.focusk = null;
-    let target = this.eventtarget(e);
-    if (target) {
-      let m = target.id.match(/b_(\d+)/);
-      if (m) {
-        let k = parseInt(m[1]);
-        this.explorer.grid.focusk = k;
-        if (this.explorer.grid.boards.length <= k) return;
-        document.body.className = '';
-        let overtarget = e.target;
-        if (overtarget.tagName == 'A') {
-          overtarget.showDebug = e.ctrlKey || e.metaKey;
-          this.explorer.grid.updateProgress(overtarget, k);
-        }
-      } else if (target.id.startsWith('movie') && (!e.target || e.target.id != 'movie')) {
-        document.body.className = '';
-      }
-    }
-  }
-
-  eventtarget(e) {
-    let target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
-    while (target) {
-      if (target.id) { return target; }
-      target = target.parentNode;
-    }
-    return null;
-  }
-
-  pointInTarget(ev, target) {
-    let se = document.scrollingElement || document.body;
-    let x = (ev.clientX + se.scrollLeft - this.absoluteLeft(target)) *
-            this.explorer.config.pixelRatio;
-    let y = (ev.clientY + se.scrollTop - this.absoluteTop(target)) *
-            this.explorer.config.pixelRatio;
-    return { x: Math.round(x), y: Math.round(y) };
-  }
-
-  absoluteLeft(target) {
-    let left = 0;
-    while (target) {
-      left += target.offsetLeft;
-      target = target.offsetParent;
-    }
-    return left;
-  }
-
-  absoluteTop(target) {
-    let top = 0;
-    while (target) {
-      top += target.offsetTop;
-      target = target.offsetParent;
-    }
-    return top;
-  }
-}
-
-class MovieMode {
-  constructor(explorer) {
-    this.explorer = explorer;
-    this.active = false;
-    this.movieCanvas = null;
-    this.movieCtx = null;
-    this.animationFrame = null;
-    this.frameCanvases = [];
-    this.mediaRecorder = null;
-    this.recordedChunks = [];
-    this.isRecording = false;
-    this.recordedBlob = null;
-    this.recordingMimeType = null;
-    this.recordingMimeTypes = [
-      'video/webm; codecs="vp8"',
-      'video/webm; codecs="avc1.640029"',
-      'video/webm',
-      'video/mp4; codecs="avc1.640029"',
-      'video/mp4',
-    ];
-  }
-
-  toggle() {
-    this.active = !this.active;
-    this.explorer.scheduler.computationPaused = this.active;
-    if (this.active) {
-      this.startMovie();
-    } else {
-      this.stopMovie();
-    }
-  }
-
-  startMovie() {
-    this.explorer.grid.grid().style.display = 'none';
-    this.explorer.movieContainer.style.display = 'block';
-    this.createMovieCanvas();
-    this.explorer.movieContainer.scrollIntoView({ behavior: 'smooth' });
-    setTimeout(() => {
-      document.body.className = '';
-      this.preRenderFrames(() => {
-        this.startMovieAnimation();
-      });
-    }, 20);
-  }
-
-  stopMovie() {
-    this.explorer.grid.grid().style.display = 'block';
-    this.explorer.movieContainer.style.display = 'none';
-    this.stopMovieAnimation();
-    this.removeMovieCanvas();
-  }
-
-  createMovieCanvas() {
-    this.explorer.movieContainer.innerHTML = '<div>' +
-      `<canvas width=${this.explorer.config.dims} height=${this.explorer.config.dims} ` +
-      `style="width:${this.explorer.config.cssDims}px;` +
-      `height:${this.explorer.config.cssDims}px"></canvas>` +
-      `<a id="moviescale" class="zoomnum">Rendering movie...</a></div>`;
-    this.movieCanvas = this.explorer.movieContainer.firstElementChild.firstElementChild;
-    this.movieCtx = this.movieCanvas.getContext('2d');
-    this.movieCtx.drawImage(this.explorer.grid.canvas(0), 0, 0);
-  }
-
-  removeMovieCanvas() {
-    while (this.explorer.movieContainer.firstChild) {
-      this.explorer.movieContainer.removeChild(this.explorer.movieContainer.firstChild);
-    }
-    this.movieCanvas = null;
-    this.movieCtx = null;
-  }
-
-  preRenderFrames(after) {
-    this.frameCanvases = [];
-    let queueOneFrame = (k, after) => {
-      return () => {
-        let status = document.getElementById('moviescale');
-        if (status) {
-          status.textContent =
-            `Rendering ${formatScale(3.0 / this.explorer.grid.boards[k].sizes[0])}`;
-        }
-        let canvas1 = null;
-        let canvas2 = null;
-        const n = this.explorer.grid.boards[k].nn;
-        // Render with k-1 palette
-        if (k > 0) {
-          canvas1 = document.createElement('canvas');
-          canvas1.width = canvas1.height = this.explorer.config.dims;
-          const ctx1 = canvas1.getContext('2d');
-          for (let y = 0; y < this.explorer.config.dims; y++) {
-            for (let x = 0; x < this.explorer.config.dims; x++) {
-              const m = y * this.explorer.config.dims + x;
-              const i = n[m];
-              ctx1.fillStyle = this.explorer.grid.boards[k - 1].makecolor(i);
-              ctx1.fillRect(x, y, 1, 1);
-            }
-          }
-          if (this.explorer.config.unknowncolor != '#000') {
-            ctx1.strokeStyle = 'yellow';
-            ctx1.lineWidth = this.explorer.config.pixelRatio * this.explorer.config.zoomfactor;
-            ctx1.strokeRect(0, 0, this.explorer.config.dims, this.explorer.config.dims);
-          }
-        }
-        // Render with k+1 palette
-        if (k < this.explorer.grid.boards.length - 1) {
-          canvas2 = document.createElement('canvas');
-          canvas2.width = canvas2.height = this.explorer.config.dims;
-          const ctx2 = canvas2.getContext('2d');
-          for (let y = 0; y < this.explorer.config.dims; y++) {
-            for (let x = 0; x < this.explorer.config.dims; x++) {
-              const m = y * this.explorer.config.dims + x;
-              const i = n[m];
-              ctx2.fillStyle = this.explorer.grid.boards[k + 1].makecolor(i);
-              ctx2.fillRect(x, y, 1, 1);
-            }
-          }
-        }
-        this.frameCanvases.push({ prev: canvas1, next: canvas2 });
-        setTimeout(after, 1);
-      };
-    }
-    for (let k = this.explorer.grid.boards.length - 1; k >= 0; k--) {
-      after = queueOneFrame(k, after);
-    }
-    setTimeout(after, 0);
-  }
-
-  startMovieAnimation() {
-    let frame = 0;
-    let framesteps = 300;
-    let endpause = 180;
-    let endrecord = 60;
-    const totalFrames = (this.explorer.grid.boards.length - 1) * framesteps;
-
-    const scaleElement = document.getElementById('moviescale');
-    scaleElement.removeAttribute('href');
-
-    if (!this.isRecording) {
-      this.recordedBlob = null;
-      this.isRecording = true;
-      this.startRecording();
-    }
-
-    const animate = () => {
-      const kk = Math.min(frame, totalFrames) / framesteps;
-      this.drawMovieFrame(kk);
-      frame = (frame + 1) % (totalFrames + endpause);
-
-      if (this.isRecording && frame > totalFrames + endrecord) {
-        this.stopRecording();
-        this.isRecording = false;
-      }
-
-      this.animationFrame = requestAnimationFrame(animate);
-    };
-    animate();
-  }
-
-  stopMovieAnimation() {
-    if (this.animationFrame) {
-      cancelAnimationFrame(this.animationFrame);
-      this.animationFrame = null;
-    }
-    this.recordedBlob = null;
-  }
-
-  startRecording() {
-    const stream = this.movieCanvas.captureStream(30); // 30 FPS
-
-    this.recordingMimeType = null;
-    this.recordedChunks = [];
-    for (let tryType of this.recordingMimeTypes) {
-       if (MediaRecorder.isTypeSupported(tryType)) {
-          this.recordingMimeType = tryType;
-          break;
-       }
-    }
-    if (this.recordingMimeType == null) {
-      console.error('Neither MP4 nor WebM recording is supported');
-      return;
-    }
-
-    this.mediaRecorder = new MediaRecorder(stream, {
-      mimeType: this.recordingMimeType,
-      videoBitsPerSecond: 10000000,
-    });
-
-    this.mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        this.recordedChunks.push(event.data);
-      }
-    };
-
-    this.mediaRecorder.onstop = () => {
-      this.recordedBlob = new Blob(this.recordedChunks, { type: this.recordingMimeType });
-      this.recordedChunks = [];
-      this.updateDownloadLink();
-    };
-
-    this.mediaRecorder.start(1000); // one-second blobs
-  }
-
-  stopRecording() {
-    this.mediaRecorder.stop();
-  }
-
-  updateDownloadLink() {
-    const scaleElement = document.getElementById('moviescale');
-    const extension = (this.recordingMimeType.includes('mp4') ? 'mp4' : 'webm');
-    scaleElement.textContent = 'Download ' + extension;
-    scaleElement.href = URL.createObjectURL(this.recordedBlob);
-    const k = this.explorer.grid.boards.length - 1;
-    const board = this.explorer.grid.boards[k];
-    scaleElement.download = 'mandelbrot' +
-              formatcomplex(k, board.sizes[1], board.sizes[2]) +
-              '-' + board.it + '.' + extension;
-  }
-
-  drawMovieFrame(kk) {
-    if (this.movieCtx == null) { return; }
-    const k = Math.floor(kk);
-    const t = kk - k;
-    const sourceBoard = this.explorer.grid.boards[k];
-    const targetBoard = k+1 < this.explorer.grid.boards.length ?
-                        this.explorer.grid.boards[k+1] : sourceBoard;
-    const sourceSize = sourceBoard.sizes[0];
-    const targetSize = targetBoard.sizes[0];
-    const zoomRatio = targetSize / sourceSize;
-
-    // Use zoom ratio for exponential interpolation
-    const mulT = Math.pow(zoomRatio, t);
-    const expT = (zoomRatio == 1.0 ? t : (mulT - 1) / (zoomRatio - 1));
-    const colorT = expT * expT;
-    const interpolatedSize = sourceSize * mulT;
-
-    // Use spline interpolation for center coordinates
-    const sourceCenter = [sourceBoard.sizes[1], sourceBoard.sizes[2]];
-    const targetCenter = [targetBoard.sizes[1], targetBoard.sizes[2]];
-
-    const p0 = k > 0 ? [
-        this.explorer.grid.boards[k-1].sizes[1],
-        this.explorer.grid.boards[k-1].sizes[2]] : sourceCenter;
-    const p1 = sourceCenter;
-    const p2 = targetCenter
-    const p3 = k+2 < this.explorer.grid.boards.length ? [
-        this.explorer.grid.boards[k+2].sizes[1],
-        this.explorer.grid.boards[k+2].sizes[2]] : targetCenter;
-    const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
-
-    // Clear the movie canvas
-    this.movieCtx.fillStyle = this.explorer.grid.boards[k].makecolor(1);
-    this.movieCtx.fillRect(0, 0, this.explorer.config.dims, this.explorer.config.dims);
-
-    // Draw the current frame
-    const scale = sourceSize / interpolatedSize;
-    const offsetX = qdMul(qdSub(interpolatedCenter[0], sourceCenter[0]),
-                          [this.explorer.config.dims / sourceSize, 0])[0];
-    const offsetY = qdMul(qdSub(sourceCenter[1], interpolatedCenter[1]),
-                          [this.explorer.config.dims / sourceSize, 0])[0];
-    this.movieCtx.save();
-    this.movieCtx.imageSmoothingEnabled = true;
-    this.movieCtx.imageSmoothingQuality = 'high';
-    this.movieCtx.translate(this.explorer.config.dims / 2, this.explorer.config.dims / 2);
-    this.movieCtx.scale(scale, scale);
-    this.movieCtx.translate(-this.explorer.config.dims / 2 - offsetX,
-                            -this.explorer.config.dims / 2 - offsetY);
-    this.movieCtx.globalAlpha = 1;
-    this.movieCtx.drawImage(this.explorer.grid.canvas(k), 0, 0);
-
-    // Blend the color palette of the next frame
-    if (this.frameCanvases[k].next) {
-      this.movieCtx.globalAlpha = colorT;
-      this.movieCtx.drawImage(this.frameCanvases[k].next, 0, 0);
-    }
-    this.movieCtx.restore();
-
-    // Draw the next frame
-    if (k < this.explorer.grid.boards.length - 1) {
-      const targetScale = targetSize / interpolatedSize;
-      const targetOffsetX = qdMul(qdSub(interpolatedCenter[0], targetCenter[0]),
-                                  [this.explorer.config.dims / targetSize, 0])[0];
-      const targetOffsetY = qdMul(qdSub(targetCenter[1], interpolatedCenter[1]),
-                                  [this.explorer.config.dims / targetSize, 0])[0];
-      this.movieCtx.save();
-      this.movieCtx.imageSmoothingEnabled = true;
-      this.movieCtx.imageSmoothingQuality = 'high';
-      this.movieCtx.translate(this.explorer.config.dims / 2, this.explorer.config.dims / 2);
-      this.movieCtx.scale(targetScale, targetScale);
-      this.movieCtx.translate(-this.explorer.config.dims / 2 - targetOffsetX,
-                              -this.explorer.config.dims / 2 - targetOffsetY);
-      this.movieCtx.globalAlpha = 1;
-      this.movieCtx.drawImage(this.frameCanvases[k + 1].prev, 0, 0);
-      this.movieCtx.globalAlpha = colorT;
-      this.movieCtx.drawImage(this.explorer.grid.canvas(k + 1), 0, 0);
-      this.movieCtx.restore();
-    }
-
-    // Update scale text
-    if (!this.recordedBlob) {
-      const currentScale = (3.0 / this.explorer.config.firstsize) *
-          (Math.pow(this.explorer.config.zoomfactor, kk));
-      document.getElementById('moviescale').textContent = formatScale(currentScale);
-    }
-  }
-}
-
-class Scheduler {
-  constructor(explorer) {
-    this.explorer = explorer;
-    this.computationPaused = false;
-    this.steps = 0;
-    this.startTime = 0;
-    this.endTime = -1;
-  }
-
-  start() {
-    this.progress();
-  }
-
-  progress() {
-    if (this.computationPaused) {
-      setTimeout(() => this.progress(), 100); // Check less frequently when paused
-      return;
-    }
-    try {
-      // Contribute to every unfinished cell
-      let pri = this.explorer.grid.boards.map((_, index) => index)
-        .filter(k => this.explorer.grid.boards[k])
-        .filter(k => this.explorer.grid.boards[k].unfinished())
-        .filter(k => !this.explorer.grid.hiddencanvas(k));
-      if (this.steps % 2) {
-        // Prioritize most unfinished half the time.
-        let boards = this.explorer.grid.boards;
-        pri = pri.sort((a, b) => boards[b].un - boards[a].un);
-      } else {
-        // Prioritize the most recent half the time.
-        pri = pri.reverse();
-        // Allow the user to prioritize by pointing the mouse.
-        if (this.explorer.grid.focusk != null) {
-          let focused = this.explorer.grid.focusk;
-          pri.sort((a, b) => (a === focused ? -1 : b === focused ? 1 : 0));
-        }
-      }
-      if (pri.length) {
-        // Start timer if it is not already running.
-        if (this.endTime) {
-          this.startTime = (new Date).getTime();
-          this.endTime = 0;
-        }
-        // Exponential scheduling policy
-        let shift = Math.floor(this.steps++ / 2);
-        let p = 0;
-        while (1 << p & shift) { p += 1; }
-        let k = pri[Math.min(p, pri.length - 1)];
-        // Do at least 50000 pixel-steps.
-        const board = this.explorer.grid.boards[k];
-        const ctx = this.explorer.grid.canvas(k)?.getContext('2d');
-        for (let amt = 0; board.unfinished() && amt < 50009;
-                 amt += (board.un + board.ch) * board.effort + 1) {
-          let count = board.iterate();
-          if (count > 0 && ctx) {
-            board.drawcolor(ctx, board.it - 1);
-          }
-        }
-      } else {
-        // End timer when there is no remaining work
-        if (!this.endTime) {
-          this.endTime = (new Date).getTime();
-          console.log(`Finished in ${((this.endTime - this.startTime) / 1000).toFixed(3)}s`);
-        }
-        setTimeout(() => this.progress(), 100); // Check less frequently when no work
-        return;
-      }
-    } catch (e) {
-      console.log(e);
-    }
-    setTimeout(() => this.progress(), 0);
-  }
-}
-
-class OrbitComputer {
-  constructor(explorer) {
-    this.explorer = explorer;
-    this.orbitinterval = null;
-    this.orbittimeout = null;
-  }
-
-  updateOrbit(k, j, target) {
-    this.stopOrbitProcess();
-    const orb = [];
-
-    const updateorbit = () => {
-      const [neworb, cyc, ongoing, title] = this.calculateOrbit(k, j, orb);
-      this.displayOrbit(k, neworb, cyc, target, title, orb.length > 0);
-      orb.push(...neworb);
-      if (!ongoing) { this.stopOrbitInterval(); }
-      return ongoing;
-    };
-
-    if (updateorbit()) {
-      this.orbitinterval = setInterval(updateorbit, 53);
-    }
-  }
-
-  stopOrbitInterval() {
-    if (this.orbitinterval) {
-      clearInterval(this.orbitinterval);
-      this.orbitinterval = null;
-    }
-  }
-
-  stopOrbitProcess() {
-    this.stopOrbitInterval();
-    if (this.orbittimeout) {
-      clearTimeout(this.orbittimeout);
-      this.orbittimeout = null;
-    }
-  }
-
-  calculateOrbit(k, j, oldOrb) {
-    let cyc = [];
-    let orb = [];
-    let ongoing = false;
-    let title = '';
-    let board = this.explorer.grid.boards[k];
-
-    if (board && j >= 0 && j < this.explorer.config.dims2) {
-      let c = board.currentc(j);
-      let z = board.currentz(j);
-
-      // Calculate a further orbit beyond the old orbit.
-      let finished = Math.max(board.pp[j], board.nn[j]);
-      let whole = Math.min(finished || Math.max(board.it, 8));
-      let more = Math.min(whole - oldOrb.length / 4, 53);
-      if (oldOrb.length) {
-        let s = oldOrb.slice(oldOrb.length - 4);
-        orb = this.suborbit([[s[0], s[1]], [s[2], s[3]]], c, more + 1);
-        orb.splice(0, 4);
-      } else {
-        orb = this.suborbit(c, c, more);
-      }
-      if (!finished || (orb.length + oldOrb.length) / 4 < finished) {
-        ongoing = true;
-      }
-      // Calculate a cycle and any messages
-      title = 'c=' + formatcomplex(k, ...c).replaceAll('-', '\u2212');
-      if (board.nn[j]) {
-        if (board.nn[j] > 0) {
-          title += '\ndiverges in ' + board.nn[j];
-        } else {
-          let period = this.figureperiod(board.pp[j]);
-          if (period == 1) {
-            title += '\nconverges after ' + board.pp[j];
-          } else {
-            title += '\nafter ' + board.pp[j] + ', period ' + period;
-          }
-          let clen = this.figureperiod(board.pp[j]);
-          cyc = this.suborbit(z, c, clen);
-        }
-      } else {
-        ongoing = true;
-      }
-    }
-    return [orb, cyc, ongoing, title];
-  }
-
-  displayOrbit(k, orb, cyc, target, title, preserve) {
-    target.setAttribute('title', title);
-    if (!preserve) {
-      this.explorer.grid.clearseq(k);
-    }
-    this.showseq(k, orb, 'yellow');
-    this.showseq(k, cyc, 'red');
-
-    const orbitonallboards = () => {
-      for (let i = 0; i < this.explorer.grid.boards.length; i++) {
-        if (!this.explorer.grid.hiddencanvas(i) && i != k) {
-          if (!preserve) {
-            this.explorer.grid.clearseq(i);
-          }
-          this.showseq(i, orb, 'yellow');
-          this.showseq(i, cyc, 'red');
-        }
-      }
-    };
-    this.orbittimeout = setTimeout(orbitonallboards, 1);
-  }
-
-  suborbit(z, c, len) {
-    let [r, j] = z;
-    let [cr, cj] = c;
-
-    let result = [r[0], r[1], j[0], j[1]];
-    while (result.length < len * 4) {
-      let j2 = qdSquare(j);
-      let ja = qdMul(qdDouble(r), j);
-      let r2 = qdSquare(r);
-      let ra = qdSub(r2, j2);
-      for (let ord = 2; ord < this.explorer.config.exponent; ord++) {
-        let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
-        ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
-        ra = rt;
-      }
-      r = qdAdd(ra, cr);
-      j = qdAdd(ja, cj);
-      result.push(r[0], r[1], j[0], j[1]);
-    }
-    return result;
-  }
-
-  figureperiod(i) {
-    // Reverse the computation that was done for exponential backoff.
-    let head = i, tail = 1;
-    while (head > tail) { head >>= 1; tail <<= 1; }
-    return i - (head * tail) + 1;
-  }
-
-  showseq(k, seq, color) {
-    if (k >= this.explorer.grid.boards.length) { return; }
-    let ctx = this.explorer.grid.overlay(k).getContext('2d');
-    ctx.fillStyle = color;
-    let [s, cr, cj] = this.explorer.grid.boards[k].sizes;
-    for (let i = 0; i < seq.length; i += 4) {
-      let r = [seq[i], seq[i+1]];
-      let j = [seq[i+2], seq[i+3]];
-      let x = (qdSub(r, cr)[0] / s + 0.5) * this.explorer.config.dims;
-      let y = (qdSub(cj, j)[0] / s + 0.5) * this.explorer.config.dims;
-      if (x >= 0 && y >= 0 && x < this.explorer.config.dims && y < this.explorer.config.dims) {
-        ctx.beginPath();
-        ctx.arc(x, y, 1 * this.explorer.config.pixelRatio, 0, 2 * Math.PI, false);
-        ctx.fill();
-      }
-    }
-  }
-}
-
-class RedrawProcess {
-  constructor(explorer) {
-    this.boards = explorer.grid.boards;
-    this.canvasGetter = (index) => explorer.grid.canvas(index);
-    this.orderFactory = () => explorer.grid.boards.map((b, i) => i).sort(
-       (a, b) => (explorer.grid.hiddencanvas(a) * 1 - explorer.grid.hiddencanvas(b) * 1)
-                 * explorer.grid.boards.length + (b - a));
-    this.timer = null;
-  }
-  start() {
-    this.stop();  // Ensure any existing cycle is stopped
-    this.canvasOrder = this.orderFactory();
-    this.drawNext();
-  }
-  stop() {
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-  }
-  drawNext() {
-    if (this.canvasOrder.length) {
-      const index = this.canvasOrder.shift();
-      const board = this.boards[index];
-      const canvas = this.canvasGetter(index);
-      if (canvas && board) {
-        const ctx = canvas.getContext('2d');
-        board.draw(ctx);
-      }
-      this.currentIndex++;
-      this.timer = setTimeout(() => this.drawNext(), 0);
-    } else {
-      this.stop();
-    }
-  }
-}
-
-class MandelbrotExplorer {
-  constructor() {
-    this.config = new Config();
-    this.grid = new Grid(this.config);
-    this.zoomManager = new ZoomManager(this.config, this.grid);
-    this.urlHandler = new URLHandler(this.config, this.grid);
-    this.eventHandler = new EventHandler(this);
-    this.movieMode = new MovieMode(this);
-    this.scheduler = new Scheduler(this);
-    this.orbitComputer = new OrbitComputer(this);
-    this.movieContainer = document.getElementById('movie');
-    this.redrawProcess = new RedrawProcess(this);
-  }
-
-  start() {
-    let startState = this.urlHandler.parseUrl();
-    this.config.initSizes();
-    this.initPlatform();
-    this.grid.updateLayout(startState);
-    this.eventHandler.setup();
-    this.scheduler.start();
-  }
-
-  cycleUnknownColor(backward) {
-    const inc = backward ? this.config.ukcs.length - 1 : 1;
-    const ind = (this.config.ukcs.indexOf(this.config.unknowncolor) + inc) % this.config.ukcs.length;
-    this.config.unknowncolor = this.config.ukcs[ind];
-    for (let k = 0; k < this.grid.boards.length; ++k) {
-      this.grid.boards[k].drawcolor(this.grid.canvas(k).getContext('2d'), 0);
-    }
-  }
-
-  cycleColorTheme(backward) {
-    const inc = backward ? this.config.colorThemes.all.length - 1 : 1;
-    const themes = this.config.colorThemes.all;
-    const currentIndex = themes.indexOf(this.config.theme);
-    const nextIndex = (currentIndex + inc) % themes.length;
-    this.config.theme = themes[nextIndex];
-    this.redrawProcess.start();
-    this.urlHandler.updateurl();
-  }
-
-  toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(err => {
-        console.log(`Error attempting to enable fullscreen: ${err.message}`);
-      });
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
-      }
-    }
-  }
-
-  initPlatform() {
-    for (let el of document.querySelectorAll('#text')) {
-      if (this.config.cssDims < 360) {
-        // Two columns plus margin minus padding
-        el.style.maxWidth = (this.config.cssDims * 2 + 20 - 16) + 'px';
-      } else {
-        // One column minus padding
-        el.style.maxWidth = (this.config.cssDims - 16) + 'px';
-      }
-    }
-    if (this.config.mac) {
-      for (let el of document.querySelectorAll('[mac]')) {
-        el.innerHTML = el.getAttribute('mac');
-      }
-    }
-    if (this.config.mobile) {
-      for (let el of document.querySelectorAll('[mobile]')) {
-        el.innerHTML = el.getAttribute('mobile');
-      }
-    }
-    for (let el of document.querySelectorAll('.moviemode')) {
-      el.href = '#movie';
-      el.onclick = (() => {
-        if (this.grid.boards.length > 1) {
-          this.movieMode.toggle();
-        }
-        return true;
-      });
-    }
-  }
-}
-
-// Utility functions
-function formatScale(scale) {
-  if (scale < 10) {
-    return +scale.toFixed(1) + 'x';
-  } else if (scale < 100000) {
-    return +scale.toFixed(0) + 'x';
-  } else {
-    return scale.toExponential(2);
-  }
-}
-
-function formatSize(s) {
-  return parseFloat(s.toPrecision(
-              Math.max(2, -Math.ceil(Math.log(s)/2.5))));
-}
-
-function formatcomplex(k, re, im) {
-  let pix = explorer.grid.boards[k].pix;
-  let digits = 0;
-  while (pix < 1.0) {
-    pix *= 10;
-    digits += 1;
-  }
-  re = toQd(re);
-  im = toQd(im);
-  let rd = qdFixed(qdAbs(re), digits)
-  let id = qdFixed(qdAbs(im), digits)
-  let rs = re[0] < 0.0 ? '-' : '+';
-  let is = im[0] < 0.0 ? '-' : '+';
-  return rs + rd + is + id + 'i';
-}
-
-function catmullRom1D(p0, p1, p2, p3, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const c0 = (-t3 + 2*t2 - t) / 2;
-  // c1 = (3*t3 - 5*t2 + 2) / 2; // unneeded since p1 = 0
-  const c2 = (-3*t3 + 4*t2 + t) / 2;
-  const c3 = (t3 - t2) / 2;
-  // Compute offsets from p1 for numerical stability.
-  const s0 = qdSub(p0, p1);
-  const s2 = qdSub(p2, p1);
-  const s3 = qdSub(p3, p1);
-  return qdAdd(qdAdd(qdAdd(qdScale(s0, c0),
-           qdScale(s3, c3)), qdScale(s2, c2)), p1);
-}
-
-function catmullRomSpline(p0, p1, p2, p3, t) {
-  return [
-    catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),
-    catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)
-  ];
-}
-
-function hclColor(h, c, l) {
-  // Normalize hue to be between 0 and 360 degrees
-  // Chroma and Luminance should be between 0 and 100.
-  h = h % 360;
-  if (h < 0) h += 360;
-  c = Math.min(Math.max(c, 0), 100);
-  l = Math.min(Math.max(l, 0), 100);
-
-  // Convert to radians
-  const hRad = h * Math.PI / 180;
-
-  // Constants for conversion
-  const u = Math.cos(hRad) * c;
-  const v = Math.sin(hRad) * c;
-
-  // Direct conversion from HCL to RGB
-  let r = l + 0.09551990792716 * u + 0.05406649830715 * v;
-  let g = l - 0.03947567534454 * u - 0.01829165033556 * v;
-  let b = l - 0.19638676772419 * u - 0.45388640918783 * v;
-
-  // Apply gamma correction and convert to eight-bit value
-  [r, g, b] = [r, g, b].map((x) => {
-    return intcolor(gammaCorrect(x / 100));
+function workerLog(message) {
+  self.postMessage({
+    type: 'log',
+    data: message
   });
-  return `rgb(${r},${g},${b})`
 }
 
-function gammaCorrect(channel) {
-  if (channel <= 0.0031308) {
-    return 12.92 * channel;
-  } else {
-    return 1.055 * Math.pow(channel, 1/2.4) - 0.055;
+let boards = new Map();
+let focusedBoardK = null;
+let hiddenBoards = new Set();
+
+self.onmessage = function(e) {
+  const { type, data } = e.data;
+  switch (type) {
+    case 'addBoard':
+      const board = data.size / data.config.dims < 1e-15 
+        ? new PerturbationBoard(data.k, data.size, data.re, data.im, data.config)
+        : new Board(data.k, data.size, data.re, data.im, data.config);
+      board.initboard(data.size, data.re, data.im);
+      boards.set(data.k, board);
+      break;
+    case 'removeBoard':
+      boards.delete(data.k);
+      break;
+    case 'setFocusedBoard':
+      focusedBoardK = data.k;
+      break;
+    case 'setHiddenBoards':
+      hiddenBoards = new Set(data.hiddenBoards);
+      break;
+    case 'iterate':
+      iterateBoards();
+      break;
   }
-}
+};
 
-function intcolor(n) {
-  if (n <= 0) { return "0"; }
-  if (n >= 1) { return "255"; }
-  return (n * 255).toString(10);
-}
+function iterateBoards() {
+  let totalRemainingWork = 0;
+  let boardsArray = Array.from(boards.entries());
 
-// Lineweaver-Burk estimate for how many pixels will be black
-function estimateLimit(data) {
-  // Transform data: x becomes 1/x
-  const transformedData = data.map(point => ({
-    x: 1 / (point.x ** 0.75),
-    y: point.y,
-    weight: point.weight || 1  // Default weight to 1 if not provided
-  }));
+  // workerLog(`Starting iteration cycle. Total boards: ${boardsArray.length}`);
 
-  // Calculate weighted means
-  let sumWeights = 0;
-  let sumWeightedX = 0;
-  let sumWeightedY = 0;
+  for (const [k, board] of boardsArray) {
+    if (hiddenBoards.has(k)) {
+      // workerLog(`Board ${k} is hidden, skipping`);
+      continue;
+    }
 
-  for (let point of transformedData) {
-    sumWeights += point.weight;
-    sumWeightedX += point.weight * point.x;
-    sumWeightedY += point.weight * point.y;
+    // workerLog(`Processing board ${k}. Current iteration: ${board.it}, Unfinished: ${board.unfinished()}`);
+
+    if (board.unfinished()) {
+      const iterationCount = Math.min(board.unfinished(), 50000);
+      // workerLog(`Board ${k}: About to iterate. IterationCount: ${iterationCount}`);
+      const changes = board.iterate(iterationCount);
+      totalRemainingWork += board.unfinished() + board.ch;
+      
+      // workerLog(`Board ${k}: Iteration complete. Changes: ${changes.length}, New it: ${board.it}, Remaining unfinished: ${board.unfinished()}`);
+
+      self.postMessage({
+        type: 'iterationComplete',
+        data: {
+          k: k,
+          changes: changes,
+          un: board.un,
+          di: board.di,
+          ch: board.ch,
+          it: board.it,
+          remainingWork: totalRemainingWork
+        }
+      });
+    } else {
+      // workerLog(`Board ${k} is finished. Final iteration: ${board.it}`);
+    }
   }
 
-  const meanX = sumWeightedX / sumWeights;
-  const meanY = sumWeightedY / sumWeights;
-
-  // Calculate slope and intercept
-  let numerator = 0;
-  let denominator = 0;
-  for (let point of transformedData) {
-    numerator += point.weight * (point.x - meanX) * (point.y - meanY);
-    denominator += point.weight * Math.pow(point.x - meanX, 2);
-  }
-  const slope = numerator / denominator;
-  const intercept = meanY - slope * meanX;
-
-  // The intercept is our estimate of the limit as 1/x approaches 0 (i.e., as x approaches infinity)
-  return intercept;
+  // workerLog(`Completed iteration cycle. Total remaining work: ${totalRemainingWork}`);
+  setTimeout(iterateBoards, 0);
 }
 
-// Start the application
-const explorer = new MandelbrotExplorer();
-explorer.start();
+iterateBoards();
 
+</script>
+<script id="quadCode">
 //////////// quad-precision (qd, double double) utilities ///////////
 
 function toQd(x) {
   return Array.isArray(x) ? x : [x, 0];
+}
+
+function toQdc(c) {
+  if (c.length == 4) { return c; }
+  const r = toQd(c[0]);
+  const j = toQd(c[1]);
+  return [r[0], r[1], j[0], j[1]];
 }
 
 function fast2Sum(a, b) {
@@ -2700,6 +2991,11 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
   }
   return s + result + epart;
 }
+</script>
+<script>
+// Start the application
+const explorer = new MandelbrotExplorer();
+explorer.start();
 </script>
 </body>
 <script src="https://www.google-analytics.com/urchin.js" type="text/javascript">
