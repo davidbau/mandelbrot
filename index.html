@@ -303,32 +303,24 @@ class View {
     }
   }
 
-  draw(ctx) {
+  draw(ctx, colorview = null) {
     if (this.un == this.config.dims2) {
       this.clearcanvas(ctx);
       return;
     }
-
-    let colorcache = {};
-    const fastcolor = (num) => {
-      let result = colorcache[num];
-      if (!result) {
-        result = this.makecolor(num);
-        if (colorcache.length < 10000) {
-          colorcache[num] = result;
-        }
-      }
-      return result;
-    };
-
-    let n = this.nn;
-    let prev = -1;
-    for (let m = 0; m < this.config.dims2; ++m) {
-      let x = m % this.config.dims;
-      let y = (m - x) / this.config.dims;
-      let cur = n[m];
+    if (colorview === null) {
+      colorview = this;
+    }
+    // Sort pixels to minimize color transitions
+    const n = this.nn;
+    const msort = n.map((v, i) => i).sort((a, b) => n[a] - n[b]);
+    let prev = null;
+    for (let m of msort) {
+      const x = m % this.config.dims;
+      const y = (m - x) / this.config.dims;
+      const cur = n[m];
       if (prev !== cur) {
-        ctx.fillStyle = fastcolor(cur);
+        ctx.fillStyle = colorview.makecolor(cur);
         prev = cur;
       }
       ctx.fillRect(x, y, 1, 1);
@@ -1025,7 +1017,7 @@ class EventHandler {
 
   onmousedown(e) {
     let target = this.eventtarget(e);
-    if (this.explorer.movieMode.active && (target.id != 'moviescale')) {
+    if (this.explorer.movieMode.active && (!target || target.id != 'moviescale')) {
       this.explorer.movieMode.toggle();
     }
     if (e.button != 0) { return true; }
@@ -1210,6 +1202,7 @@ class MovieMode {
     this.movieCanvas = null;
     this.movieCtx = null;
     this.animationFrame = null;
+    this.preRenderTimer = null;
     this.frameCanvases = [];
     this.mediaRecorder = null;
     this.recordedChunks = [];
@@ -1240,7 +1233,7 @@ class MovieMode {
     this.explorer.movieContainer.style.display = 'block';
     this.createMovieCanvas();
     this.explorer.movieContainer.scrollIntoView({ behavior: 'smooth' });
-    setTimeout(() => {
+    this.preRenderTimer = setTimeout(() => {
       document.body.className = '';
       this.preRenderFrames(() => {
         this.startMovieAnimation();
@@ -1291,14 +1284,7 @@ class MovieMode {
           canvas1 = document.createElement('canvas');
           canvas1.width = canvas1.height = this.explorer.config.dims;
           const ctx1 = canvas1.getContext('2d');
-          for (let y = 0; y < this.explorer.config.dims; y++) {
-            for (let x = 0; x < this.explorer.config.dims; x++) {
-              const m = y * this.explorer.config.dims + x;
-              const i = n[m];
-              ctx1.fillStyle = this.explorer.grid.views[k - 1].makecolor(i);
-              ctx1.fillRect(x, y, 1, 1);
-            }
-          }
+          this.explorer.grid.views[k].draw(ctx1, this.explorer.grid.views[k - 1]);
           if (this.explorer.config.unknowncolor != '#000') {
             ctx1.strokeStyle = 'yellow';
             ctx1.lineWidth = this.explorer.config.pixelRatio * this.explorer.config.zoomfactor;
@@ -1310,23 +1296,16 @@ class MovieMode {
           canvas2 = document.createElement('canvas');
           canvas2.width = canvas2.height = this.explorer.config.dims;
           const ctx2 = canvas2.getContext('2d');
-          for (let y = 0; y < this.explorer.config.dims; y++) {
-            for (let x = 0; x < this.explorer.config.dims; x++) {
-              const m = y * this.explorer.config.dims + x;
-              const i = n[m];
-              ctx2.fillStyle = this.explorer.grid.views[k + 1].makecolor(i);
-              ctx2.fillRect(x, y, 1, 1);
-            }
-          }
+          this.explorer.grid.views[k].draw(ctx2, this.explorer.grid.views[k + 1]);
         }
         this.frameCanvases.push({ prev: canvas1, next: canvas2 });
-        setTimeout(after, 1);
+        this.preRenderTimer = setTimeout(after, 1);
       };
     }
     for (let k = this.explorer.grid.views.length - 1; k >= 0; k--) {
       after = queueOneFrame(k, after);
     }
-    setTimeout(after, 0);
+    this.preRenderTimer = setTimeout(after, 0);
   }
 
   startMovieAnimation() {
@@ -1361,6 +1340,10 @@ class MovieMode {
   }
 
   stopMovieAnimation() {
+    if (this.preRenderTimer) {
+      clearTimeout(this.preRenderTimer);
+      this.preRenderTimer = null;
+    }
     if (this.animationFrame) {
       cancelAnimationFrame(this.animationFrame);
       this.animationFrame = null;
@@ -2545,6 +2528,9 @@ self.onmessage = function(e) {
       break;
     case 'pause':
       computationPaused = data.pause;
+      if (!data.pause && boards.size) {
+        iterateBoards();
+      }
       break;
   }
 };
