@@ -226,17 +226,12 @@ class Config {
 }
 
 class View {
-  constructor(k, size, re, im, config) {
+  constructor(k, size, re, im, config, id) {
     this.k = k;
+    this.id = id;
     this.config = config;
-    this.nn = new Array(config.dims2).fill(0);
-    this.un = config.dims2;
-    this.di = 0;
-    this.ch = 0;
-    this.it = 0;
-    this.sizes = [size, toQd(re), toQd(im)];
-    this.hi = [[0, 1, 1, 0]];
     this.convergedData = new Map();
+    this.initview(size, re, im);
   }
 
   initview(size, re, im) {
@@ -251,21 +246,23 @@ class View {
   }
 
   updateFromWorkerResult(data) {
-    if (data.changes) {
-      data.changes.nn.forEach(index => {
-        this.nn[index] = data.changes.iter;
-      });
-      data.changes.vv.forEach((index, vind) => {
-        this.nn[index] = -data.changes.iter;
-        this.convergedData.set(index, { z: toQdc(data.changes.zz[vind]), p: data.changes.pp[vind] });
-      });
+    for (let change of data.changeList) {
+      for (let index of change.nn) {
+        this.nn[index] = change.iter;
+      }
+      for (let v of change.vv) {
+        this.nn[v.index] = -change.iter;
+        this.convergedData.set(v.index, { z: toQdc(v.z), p: v.p });
+      }
+      this.di += change.nn.length;
+      this.un -= change.nn.length + change.vv.length;
+      this.updateHistogram(this.un, this.di, change.iter);
     }
     this.un = data.un;
     this.di = data.di;
     this.ch = data.ch;
     this.it = data.it;
     // console.log(`View ${this.k}: Updated to iteration ${this.it}`);
-    this.updateHistogram(this.un, this.di, this.it);
   }
 
   currentc(j) {
@@ -341,6 +338,25 @@ class View {
   clearcanvas(ctx) {
     ctx.fillStyle = this.makecolor(0);
     ctx.fillRect(0, 0, this.config.dims, this.config.dims);
+  }
+
+  drawchange(ctx, change) {
+    if (change.nn.length) {
+      ctx.fillStyle = this.makecolor(change.iter);
+      for (let m of change.nn) {
+        const x = m % this.config.dims;
+        const y = (m - x) / this.config.dims;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    if (change.vv.length) {
+      ctx.fillStyle = this.makecolor(-change.iter);
+      for (let v of change.vv) {
+        const x = v.index % this.config.dims;
+        const y = (v.index - x) / this.config.dims;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
   }
 
   drawcolor(ctx, i) {
@@ -451,14 +467,20 @@ class Grid {
   }
 
   makeView(k, size, re, im) {
-    const view = new View(k, size, re, im, this.config);
-    this.views.push(view);
-    this.scheduler.assignBoardToWorker(k, size, re, im, this.config);
+    const id = Math.random();
+    const view = new View(k, size, re, im, this.config, id);
+    this.views[k] = view;
+    this.scheduler.assignBoardToWorker(k, size, re, im, this.config, id);
     return view;
   }
 
   removeView(k) {
-    this.views.splice(k, 1);
+    this.views[k] = null;
+    let i = this.views.length - 1;
+    for (i = this.views.length - 1; i >= 0; i -= 1) {
+      if (this.views[i] !== null) { break; }
+    }
+    this.views.length = i + 1;
     this.scheduler.removeBoardFromWorker(k);
   }
 
@@ -475,6 +497,10 @@ class Grid {
 
   updateViewFromWorkerResult(k, data) {
     if (this.views[k]) {
+      if (this.views[k].id != data.id) {
+        console.log('Mismatched id from worker; discarding.');
+        return;
+      }
       this.views[k].updateFromWorkerResult(data);
       this.updateCanvas(k, data);
     }
@@ -482,9 +508,11 @@ class Grid {
 
   updateCanvas(k, data) {
     const canvas = this.canvas(k);
-    if (canvas && data.changes) {
+    if (canvas && data.changeList.length) {
       const ctx = canvas.getContext('2d');
-      this.views[k].drawcolor(ctx, data.changes.iter);
+      for (let change of data.changeList) {
+        this.views[k].drawchange(ctx, change);
+      }
     }
   }
 
@@ -545,7 +573,7 @@ class Grid {
       this.views[k].draw(this.canvas(k).getContext('2d'));
       if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
       currentIndex++;
-      setTimeout(processNext, 0);
+      setTimeout(processNext, 200);
     };
 
     return {
@@ -795,8 +823,6 @@ class ZoomManager {
     this.showZoomRect(k, rre, 0.5, this.config.zoomfactor);
     let nsize = osize / this.config.zoomfactor;
     let newView = this.grid.makeView(k + 1, nsize, ore, oim);
-    newView.initview(nsize, ore, oim);
-    this.grid.views.push(newView);
     this.grid.makecanvas(k + 1);
     if (hideCurrent) {
       this.grid.canvas(k).parentElement.style.display = 'none';
@@ -831,8 +857,6 @@ class ZoomManager {
       let nre = qdAdd(ore, [((cx / this.config.dims) - 0.5) * osize, 0]);
       let nim = qdAdd(oim, [(0.5 - (cy / this.config.dims)) * osize, 0]);
       let newView = this.grid.makeView(k + 1, nsize, nre, nim);
-      newView.initview(nsize, nre, nim);
-      this.grid.views.push(newView);
       this.grid.makecanvas(k + 1);
       if (hideCurrent) {
         this.grid.canvas(k).parentElement.style.display = 'none';
@@ -854,20 +878,21 @@ class ZoomManager {
     let k = this.grid.views.length - 1;
     let ore = this.grid.views[k].sizes[1];
     let oim = this.grid.views[k].sizes[2];
-    this.showZoomRect(
-      0, 0.5 + (ore[0] - this.grid.views[0].sizes[1][0]) / this.grid.views[0].sizes[0],
-         0.5 - (oim[0] - this.grid.views[0].sizes[2][0]) / this.grid.views[0].sizes[0],
-         this.grid.views[0].sizes[0] / this.grid.views[1].sizes[0]);
+    if (!includeFirst) {
+      this.showZoomRect(
+        0, 0.5 + (ore[0] - this.grid.views[0].sizes[1][0]) / this.grid.views[0].sizes[0],
+           0.5 - (oim[0] - this.grid.views[0].sizes[2][0]) / this.grid.views[0].sizes[0],
+           this.grid.views[0].sizes[0] / this.grid.views[1].sizes[0]);
+    }
     for (k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
       this.showZoomRect(
           k, 0.5, 0.5, this.grid.views[k].sizes[0] / this.grid.views[k+1].sizes[0]);
       if (qdCompare(this.grid.views[k].sizes[1], ore) ||
           qdCompare(this.grid.views[k].sizes[2], oim)) {
         let nsize = this.grid.views[k].sizes[0];
-        this.grid.views[k] = this.grid.makeView(k + 1, nsize, ore, oim);
+        this.grid.makeView(k, nsize, ore, oim);
         this.grid.views[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
-        this.grid.views[k].initview(nsize, ore, oim);
-        this.grid.views[k].draw(this.grid.canvas(k).getContext('2d'));
+        // this.grid.views[k].draw(this.grid.canvas(k).getContext('2d'));
         this.grid.clearseq(k);
       }
     }
@@ -1202,7 +1227,7 @@ class MovieMode {
 
   toggle() {
     this.active = !this.active;
-    this.explorer.scheduler.computationPaused = this.active;
+    this.explorer.grid.scheduler.pauseComputation(this.active);
     if (this.active) {
       this.startMovie();
     } else {
@@ -1483,103 +1508,23 @@ class MovieMode {
   }
 }
 
-/*
-class Scheduler {
-  constructor(explorer) {
-    this.explorer = explorer;
-    this.computationPaused = false;
-    this.steps = 0;
-    this.startTime = 0;
-    this.endTime = -1;
-  }
-
-  start() {
-    this.progress();
-  }
-
-  progress() {
-    if (this.computationPaused) {
-      setTimeout(() => this.progress(), 100); // Check less frequently when paused
-      return;
-    }
-    try {
-      // Contribute to every unfinished cell
-      let pri = this.explorer.grid.views.map((_, index) => index)
-        .filter(k => this.explorer.grid.views[k])
-        .filter(k => this.explorer.grid.views[k].unfinished())
-        .filter(k => !this.explorer.grid.hiddencanvas(k));
-      if (this.steps % 2) {
-        // Prioritize most unfinished half the time.
-        let boards = this.explorer.grid.views;
-        pri = pri.sort((a, b) => boards[b].un - boards[a].un);
-      } else {
-        // Prioritize the most recent half the time.
-        pri = pri.reverse();
-        // Allow the user to prioritize by pointing the mouse.
-        if (this.explorer.grid.focusk != null) {
-          let focused = this.explorer.grid.focusk;
-          pri.sort((a, b) => (a === focused ? -1 : b === focused ? 1 : 0));
-        }
-      }
-      if (pri.length) {
-        // Start timer if it is not already running.
-        if (this.endTime) {
-          this.startTime = (new Date).getTime();
-          this.endTime = 0;
-        }
-        // Exponential scheduling policy
-        let shift = Math.floor(this.steps++ / 2);
-        let p = 0;
-        while (1 << p & shift) { p += 1; }
-        let k = pri[Math.min(p, pri.length - 1)];
-        // Do at least 50000 pixel-steps.
-        const board = this.explorer.grid.views[k];
-        const ctx = this.explorer.grid.canvas(k)?.getContext('2d');
-        for (let amt = 0; board.unfinished() && amt < 50009;
-                 amt += (board.un + board.ch) * board.effort + 1) {
-          let count = board.iterate();
-          if (count > 0 && ctx) {
-            board.drawcolor(ctx, board.it - 1);
-          }
-        }
-      } else {
-        // End timer when there is no remaining work
-        if (!this.endTime) {
-          this.endTime = (new Date).getTime();
-          console.log(`Finished in ${((this.endTime - this.startTime) / 1000).toFixed(3)}s`);
-        }
-        setTimeout(() => this.progress(), 100); // Check less frequently when no work
-        return;
-      }
-    } catch (e) {
-      console.log(e);
-    }
-    setTimeout(() => this.progress(), 0);
-  }
-}
-*/
-
 class Scheduler {
   constructor(grid) {
     this.grid = grid;
     this.workers = [];
     this.workerLoads = [];
-    this.initWorkers();
+    this.assignments = {};
+    this.workerCount = Math.max(1, navigator.hardwareConcurrency || 1);
   }
 
-  initWorkers() {
-    const workerCount = Math.max(1, Math.min(navigator.hardwareConcurrency - 1, 4));
+  addWorker() {
     const workerCode = this.assembleWorkerCode();
     const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
     const workerUrl = URL.createObjectURL(workerBlob);
-
-    for (let i = 0; i < workerCount; i++) {
-      const worker = new Worker(workerUrl);
-      worker.onmessage = this.handleWorkerMessage.bind(this);
-      this.workers.push(worker);
-      this.workerLoads.push(0);
-    }
-
+    const worker = new Worker(workerUrl, { name: `Worker ${this.workers.length}` });
+    worker.onmessage = this.handleWorkerMessage.bind(this);
+    this.workers.push(worker);
+    this.workerLoads.push(0);
     URL.revokeObjectURL(workerUrl);
   }
 
@@ -1589,9 +1534,16 @@ class Scheduler {
     return quadPrecisionScript.textContent + '\n' + workerBoardScript.textContent;
   }
 
-  assignBoardToWorker(k, size, re, im, config) {
-    const leastLoadedWorkerIndex = this.workerLoads.indexOf(Math.min(...this.workerLoads));
+  assignBoardToWorker(k, size, re, im, config, id) {
+    let minLoad = Math.min(...this.workerLoads);
+    if (this.workers.length == 0 || minLoad && this.workers.length < this.workerCount) {
+      this.addWorker();
+      minLoad = 0;
+    }
+    const leastLoadedWorkerIndex = this.workerLoads.indexOf(minLoad);
     const worker = this.workers[leastLoadedWorkerIndex];
+    const estimatedWork = config.dims2 * ((size / config.dims < 1e-15) ? 7 : 1);
+    this.assignments[k] = leastLoadedWorkerIndex;
     
     worker.postMessage({
       type: 'addBoard',
@@ -1604,11 +1556,12 @@ class Scheduler {
           dims: config.dims,
           dims2: config.dims2,
           exponent: config.exponent
-        }
+        },
+        id
       }
     });
   
-    this.workerLoads[leastLoadedWorkerIndex] += config.dims2;
+    this.workerLoads[leastLoadedWorkerIndex] += estimatedWork;
   }
 
   removeBoardFromWorker(k) {
@@ -1646,16 +1599,16 @@ class Scheduler {
       case 'log':
         console.log(`Worker ${workerIndex}: ${data}`);
         break;
-      case 'iterationComplete':
-        // console.log(`Main thread: Received update for board ${data.k}, iteration ${data.it}`);
+      case 'iterations':
+        // console.log(`Main thread: Received update for board ${data.k}, iteration ${data.it}, len ${data.changeList.length}`);
         this.grid.updateViewFromWorkerResult(data.k, data);
         this.workerLoads[workerIndex] = data.remainingWork;
         break;
     }
   }
 
-  start() {
-    this.workers.forEach(worker => worker.postMessage({ type: 'iterate' }));
+  pauseComputation(pause) {
+    this.workers.forEach(worker => worker.postMessage({ type: 'pause', data: { pause } }));
   }
 }
 
@@ -1667,7 +1620,6 @@ class OrbitComputer {
   }
 
   updateOrbit(k, j, target) {
-    console.log('updateOrbit', k, j);
     this.stopOrbitProcess();
     const orb = [];
 
@@ -1716,17 +1668,16 @@ class OrbitComputer {
       let more = Math.min(whole - oldOrb.length / 4, 53);
       if (oldOrb.length) {
         let s = oldOrb.slice(oldOrb.length - 4);
-        orb = this.suborbit([[s[0], s[1]], [s[2], s[3]]], c, more + 1);
+        orb = this.suborbit(s, c, more + 1);
         orb.splice(0, 4);
       } else {
-        console.log('calling suborbit', c, c, more);
         orb = this.suborbit(c, c, more);
       }
       if (!finished || (orb.length + oldOrb.length) / 4 < finished) {
         ongoing = true;
       }
       // Calculate a cycle and any messages
-      title = 'c=' + formatcomplex(k, ...c).replaceAll('-', '\u2212');
+      title = 'c=' + formatcomplex(k, [c[0], c[1]], [c[2], c[3]]).replaceAll('-', '\u2212');
       if (view.nn[j]) {
         if (view.nn[j] > 0) {
           title += '\ndiverges in ' + view.nn[j];
@@ -1738,7 +1689,6 @@ class OrbitComputer {
             title += '\nafter ' + view.currentp(j) + ', period ' + period;
           }
           let clen = this.figureperiod(view.currentp(j));
-          console.log('calling suborbit', z, c, clen);
           cyc = this.suborbit(z, c, clen);
         }
       } else {
@@ -1802,7 +1752,6 @@ class OrbitComputer {
   }
 
   showseq(k, seq, color) {
-    console.log('showseq', k);
     if (k >= this.explorer.grid.views.length) { return; }
     let ctx = this.explorer.grid.overlay(k).getContext('2d');
     ctx.fillStyle = color;
@@ -1877,7 +1826,6 @@ class MandelbrotExplorer {
     this.initPlatform();
     this.grid.updateLayout(startState);
     this.eventHandler.setup();
-    this.grid.scheduler.start();
     this.grid.updateHiddenViews(); // Initial update of hidden boards
   }
 
@@ -2074,8 +2022,9 @@ function estimateLimit(data) {
 </script>
 <script id="workerCode" type="text/worker">
 class Board {
-  constructor(k, size, re, im, config) {
+  constructor(k, size, re, im, config, id) {
     this.k = k;
+    this.id = id;
     this.config = config;
     this.it = 0;
     this.zz = []; // current iterate for each pixel
@@ -2093,6 +2042,9 @@ class Board {
     this.pix = this.sizes[0] / this.config.dims;
     this.epsilon = Math.min(1e-12, this.pix / 10);
     this.epsilon2 = Math.min(1e-9, this.pix * 10);
+    this.lastTime = 0;
+    this.changeList = [];
+    this.updateSize = 0;
   }
 
   initboard(size, re, im) {
@@ -2153,12 +2105,14 @@ class Board {
 
       if (computeResult !== 0) {
         if (!changes) {
-          changes = { iter: this.it, nn: [], vv: [], zz: [], pp: [] };
+          changes = { iter: this.it, nn: [], vv: [] };
         }
         if (computeResult < 0) {
-          changes.vv.push(index);
-          changes.zz.push([this.zz[index * 2], this.zz[index * 2 + 1]]);
-          changes.pp.push(this.pp[index])
+          changes.vv.push({
+            index: index,
+            z: [this.zz[index * 2], this.zz[index * 2 + 1]],
+            p: this.pp[index]
+          });
         } else {
           changes.nn.push(index);
         }
@@ -2231,15 +2185,15 @@ class Board {
 }
 
 class PerturbationBoard extends Board {
-  constructor(k, size, re, im, config) {
-    super(k, size, re, im, config);
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
     this.quadIndexes = [];
     this.pertIndexes = [];
     // The 0.1 threshold is 2x faster than 0.01 but reveals some edge artfiacts
     // Bail when perturbation exceeds half the digits of precision
     this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dims)));
-    // For scheduling: each step is about 17x effort of default board.
-    this.effort = 17;
+    // For scheduling: each step is about 7x effort of default board.
+    this.effort = 7;
   }
 
   initboard(size, re, im) {
@@ -2258,7 +2212,7 @@ class PerturbationBoard extends Board {
     for (let gy = 0; gy < gridSize; gy++) {
       let ry = Math.round(gy * step + offset);
       let jFrac = (0.5 - (ry / this.config.dims));
-      let ci = qdAdd(im, qdScale(toQd(jFrac), size))
+      let cj = qdAdd(im, qdScale(toQd(jFrac), size))
       for (let gx = 0; gx < gridSize; gx++) {
         let rx = Math.round(gx * step + offset);
         let rFrac = ((rx / this.config.dims) - 0.5);
@@ -2266,10 +2220,10 @@ class PerturbationBoard extends Board {
         let cr = qdAdd(re, qdScale(toQd(rFrac), size));
 
         // Initialize reference point
-        let c = [cr[0], cr[1], ci[0], ci[1]];  // Quad-precision
+        let c = [cr[0], cr[1], cj[0], cj[1]];  // Quad-precision
         this.cc[refIndex] = c;
         this.quadIndexes.push(refIndex);
-        let refspike = this.inspikeQd(cr, ci);
+        let refspike = this.inspikeQd(cr, cj);
         if (refspike) {
           this.un -= 1;
           this.ch += 1;
@@ -2308,8 +2262,7 @@ class PerturbationBoard extends Board {
   }
 
   iterate() {
-    const changes = [];
-    let currentChange = null;
+    let changes = null;
 
     let i = this.it;
     let head = i, tail = 1;
@@ -2328,11 +2281,17 @@ class PerturbationBoard extends Board {
       newZ.push(z);
 
       if (r !== 0) {
-        if (!currentChange || currentChange.iter !== this.nn[index]) {
-          if (currentChange) changes.push(currentChange);
-          currentChange = { iter: this.nn[index], nn: [index] };
+        if (!changes) {
+          changes = { iter: this.it, nn: [], vv: [] };
+        }
+        if (r < 0) {
+          changes.vv.push({
+            index: index,
+            z: z,
+            p: this.pp[index]
+          });
         } else {
-          currentChange.nn.push(index);
+          changes.nn.push(index);
         }
       }
     }
@@ -2347,13 +2306,18 @@ class PerturbationBoard extends Board {
         results[r + 1] += 1;
         newZ.push(z);
         newQuadIndexes.push(index);
-
         if (r !== 0) {
-          if (!currentChange || currentChange.iter !== this.nn[index]) {
-            if (currentChange) changes.push(currentChange);
-            currentChange = { iter: this.nn[index], nn: [index] };
+          if (!changes) {
+            changes = { iter: this.it, nn: [], vv: [] };
+          }
+          if (r < 0) {
+            changes.vv.push({
+              index: index,
+              z: z,
+              p: this.pp[index]
+            });
           } else {
-            currentChange.nn.push(index);
+            changes.nn.push(index);
           }
         }
       }
@@ -2380,8 +2344,6 @@ class PerturbationBoard extends Board {
         this.zz[this.quadIndexes[ii]] = z;
       }
     });
-
-    if (currentChange) changes.push(currentChange);
 
     // Tally progress
     let diverged = results[2];
@@ -2443,7 +2405,7 @@ class PerturbationBoard extends Board {
       if (!this.pp[m]) { this.pp[m] = this.it; }
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
-        if (this.inspikeQd(cr, ci) && this.ch > 0) {
+        if (this.inspikeQd(cr, cj) && this.ch > 0) {
           this.ch -= 1;
           return [0, z];  // Already counted
         } else {
@@ -2552,16 +2514,25 @@ function workerLog(message) {
 let boards = new Map();
 let focusedBoardK = null;
 let hiddenBoards = new Set();
+let computationPaused = false;
+let steps = 0;
+let startTime = 0;
+let endTime = -1;
+let timer = null;
 
 self.onmessage = function(e) {
   const { type, data } = e.data;
   switch (type) {
     case 'addBoard':
+      workerLog(`Board ${data.k} added to {${[...boards.keys()]}}`);
       const board = data.size / data.config.dims < 1e-15 
-        ? new PerturbationBoard(data.k, data.size, data.re, data.im, data.config)
-        : new Board(data.k, data.size, data.re, data.im, data.config);
+        ? new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id)
+        : new Board(data.k, data.size, data.re, data.im, data.config, data.id);
       board.initboard(data.size, data.re, data.im);
       boards.set(data.k, board);
+      if (!timer) {
+        iterateBoards();
+      }
       break;
     case 'removeBoard':
       boards.delete(data.k);
@@ -2572,56 +2543,90 @@ self.onmessage = function(e) {
     case 'setHiddenBoards':
       hiddenBoards = new Set(data.hiddenBoards);
       break;
-    case 'iterate':
-      iterateBoards();
+    case 'pause':
+      computationPaused = data.pause;
       break;
   }
 };
 
 function iterateBoards() {
-  let totalRemainingWork = 0;
-  let boardsArray = Array.from(boards.entries());
-
-  // workerLog(`Starting iteration cycle. Total boards: ${boardsArray.length}`);
-
-  for (const [k, board] of boardsArray) {
-    if (hiddenBoards.has(k)) {
-      // workerLog(`Board ${k} is hidden, skipping`);
-      continue;
+  timer = null;
+  if (computationPaused) {
+    workerLog('Computation paused');
+    return;
+  }
+  let pri = Array.from(boards.values())
+        .filter(board => board.unfinished() || board.updateSize)
+        .filter(board => !hiddenBoards.has(board.k));
+  if (pri.length) {
+    // Start timer if it is not already running.
+    if (endTime) {
+      // workerLog(`Starting work`);
+      startTime = (new Date).getTime();
+      endTime = 0;
     }
-
-    // workerLog(`Processing board ${k}. Current iteration: ${board.it}, Unfinished: ${board.unfinished()}`);
-
-    if (board.unfinished()) {
-      const iterationCount = Math.min(board.unfinished(), 50000);
-      // workerLog(`Board ${k}: About to iterate. IterationCount: ${iterationCount}`);
-      const changes = board.iterate(iterationCount);
-      totalRemainingWork += board.unfinished() + board.ch;
-      
-      // workerLog(`Board ${k}: Iteration complete. Changes: ${changes.length}, New it: ${board.it}, Remaining unfinished: ${board.unfinished()}`);
-
+    if (steps % 2) {
+      // Prioritize most unfinished half the time.
+      pri = pri.sort((a, b) => b.unfinished() - a.unfinished());
+    } else {
+      // Prioritize the most recent half the time.
+      pri = pri.sort((a, b) => b.k - a.k);
+      // Allow the user to prioritize by pointing the mouse.
+      if (focusedBoardK !== null) {
+        pri.sort((a, b) => (a.k === focusedBoardK ? -1 : b.k === focusedBoardK ? 1 : 0));
+      }
+    }
+    // Exponential scheduling policy
+    let shift = Math.floor(steps++ / 2) + 1;
+    let p = 0;
+    while (shift & (1 << p)) { p += 1; }
+    const board = pri[Math.min(p, pri.length - 1)];
+    // workerLog(`Board ${k}: About to iterate. IterationCount: ${iterationCount}`);
+    for (let workDone = 0; workDone < 50007 && board.unfinished(); ) {
+      workDone += (board.un + board.ch) * board.effort;
+      const changes = board.iterate();
+      if (changes !== null) {
+        board.changeList.push(changes);
+        board.updateSize += changes.nn.length + changes.vv.length;
+      }
+    }
+    const now = (new Date()).getTime();
+    if (board.updateSize >= 1000 || now - board.lastTime >= 100) {
+      const remainingWork = pri.map(b => b.unfinished() * b.effort).reduce((a, b) => a + b);
       self.postMessage({
-        type: 'iterationComplete',
+        type: 'iterations',
         data: {
-          k: k,
-          changes: changes,
+          k: board.k,
+          id: board.id,
+          it: board.it,
           un: board.un,
           di: board.di,
           ch: board.ch,
-          it: board.it,
-          remainingWork: totalRemainingWork
+          changeList: board.changeList,
+          remainingWork
         }
       });
-    } else {
-      // workerLog(`Board ${k} is finished. Final iteration: ${board.it}`);
+      board.lastTime = now;
+      board.updateSize = 0;
+      board.changeList = [];
     }
+    if (!board.unfinished() && !board.updateSize) {
+      // Delete board when done.
+      boards.delete(board.k);
+      workerLog(`Board ${board.k} finished, leaving {${[...boards.keys()]}}`);
+    }
+  } else {
+    // End timer when there is no remaining work
+    if (!endTime) {
+       endTime = (new Date).getTime();
+       workerLog(`Finished in ${((endTime - startTime) / 1000).toFixed(3)}s`);
+    }
+    return;
   }
 
   // workerLog(`Completed iteration cycle. Total remaining work: ${totalRemainingWork}`);
-  setTimeout(iterateBoards, 0);
+  timer = setTimeout(iterateBoards, 1);
 }
-
-iterateBoards();
 
 </script>
 <script id="quadCode">
