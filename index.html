@@ -57,7 +57,7 @@ canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
   user-select: none; }
 .zoomnum[href]:hover { text-decoration: underline; }
 body.hidemarks .overlay { opacity: 0; }
-body.hidemarks .zoomnum { opacity: 0; }
+body.hidemarks #grid .zoomnum { opacity: 0; }
 body.hidemarks #grid .closebox { opacity: 0; }
 div.status { display: none; }
 div:hover a div.status { /* tooltips */
@@ -108,7 +108,7 @@ See information on iterations, progress, and coordinates by <span mobile="tappin
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Exploring a zoom path.</b>
-Each <span mobile="tap">click</span> on the fractal starts a new parallel computataion at a higher zoom level at the selected location.
+Each <span mobile="tap">click</span> on the fractal starts a new parallel computation worker at a higher zoom level at the selected location.
 After you zoom beyond trillion-fold magnification, we slow things down a bit to use a quad-precision perturbation algorithm that resolves fine details to more than 30 digits of accuracy.
 Once you have crafted an interesting path that shows the detail you want, you can <a class="moviemode">create and download your own Mandelbrot zoom video</a> or bookmark your URL to save and share your exploration.
 To create high-quality images and videos, this viewer computes subpixels with a <span class="pixelratio">2</span>:1 ratio<span mobile="">, and that can be increased to create more precise displays</span>.
@@ -2056,7 +2056,6 @@ class Board {
   }
 
   iterate() {
-    // workerLog(`Board ${this.k}: Starting iteration ${this.it}`);
     let changes = null;
 
     const results = [0, 0, 0];
@@ -2104,8 +2103,6 @@ class Board {
 
     this.un -= results[2] + results[0]; // newly finished
     this.di += results[2]; // diverged
-
-    // workerLog(`Board ${this.k}: Finished iteration ${this.it}. Changes: ${changes.length}, Unfinished: ${this.un}, Diverged: ${this.di}`);
 
     this.it++;
 
@@ -2161,7 +2158,6 @@ class Board {
   unfinished() {
     // Chaotic points in the spike counted as finished after 100000 iterations.
     const result = this.un + (this.it < 100000 ? this.ch : 0);
-    // workerLog(`Board ${this.k}: unfinished() called. un: ${this.un}, ch: ${this.ch}, it: ${this.it}, result: ${result}`);
     return result;
   }
 
@@ -2538,7 +2534,6 @@ self.onmessage = function(e) {
 function iterateBoards() {
   timer = null;
   if (computationPaused) {
-    workerLog('Computation paused');
     return;
   }
   let pri = Array.from(boards.values())
@@ -2547,7 +2542,6 @@ function iterateBoards() {
   if (pri.length) {
     // Start timer if it is not already running.
     if (endTime) {
-      // workerLog(`Starting work`);
       startTime = (new Date).getTime();
       endTime = 0;
     }
@@ -2566,8 +2560,7 @@ function iterateBoards() {
     let shift = Math.floor(steps++ / 2) + 1;
     let p = 0;
     while (shift & (1 << p)) { p += 1; }
-    const board = pri[Math.min(p, pri.length - 1)];
-    // workerLog(`Board ${k}: About to iterate. IterationCount: ${iterationCount}`);
+    const board = pri[Math.min(p, pri.length) % pri.length];
     for (let workDone = 0; workDone < 50007 && board.unfinished(); ) {
       workDone += (board.un + board.ch) * board.effort;
       const changes = board.iterate();
@@ -2609,9 +2602,7 @@ function iterateBoards() {
     }
     return;
   }
-
-  // workerLog(`Completed iteration cycle. Total remaining work: ${totalRemainingWork}`);
-  timer = setTimeout(iterateBoards, 1);
+  timer = setTimeout(iterateBoards, 0);
 }
 
 </script>
