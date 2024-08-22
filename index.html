@@ -2168,6 +2168,7 @@ class PerturbationBoard extends Board {
     super(k, size, re, im, config, id);
     this.quadIndexes = [];
     this.pertIndexes = [];
+    this.tt = [];
     // The 0.1 threshold is 2x faster than 0.01 but reveals some edge artfiacts
     // Bail when perturbation exceeds half the digits of precision
     this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dims)));
@@ -2177,7 +2178,7 @@ class PerturbationBoard extends Board {
 
   initboard(size, re, im) {
     this.it = 1;
-    this.cc = new Array(this.config.dims2).fill(null);
+    this.cc = new Array(this.config.dims2 * 4).fill(0);
     this.nn = new Array(this.config.dims2).fill(0);
     this.pp = new Array(this.config.dims2).fill(0);
     // Odd grid ensures that center point corresponds to a quad precision pixel
@@ -2185,24 +2186,29 @@ class PerturbationBoard extends Board {
     const step = this.config.dims / gridSize;
     const offset = step / 2;
     const pix = size / this.config.dims;
+    const cc = this.cc;
     re = toQd(re);
     im = toQd(im);
 
     for (let gy = 0; gy < gridSize; gy++) {
-      let ry = Math.round(gy * step + offset);
-      let jFrac = (0.5 - (ry / this.config.dims));
-      let cj = qdAdd(im, qdScale(toQd(jFrac), size))
+      const ry = Math.round(gy * step + offset);
+      const jFrac = (0.5 - (ry / this.config.dims));
+      const cj = qdAdd(im, qdScale(toQd(jFrac), size))
       for (let gx = 0; gx < gridSize; gx++) {
-        let rx = Math.round(gx * step + offset);
-        let rFrac = ((rx / this.config.dims) - 0.5);
-        let refIndex = ry * this.config.dims + rx;
-        let cr = qdAdd(re, qdScale(toQd(rFrac), size));
+        const rx = Math.round(gx * step + offset);
+        const rFrac = ((rx / this.config.dims) - 0.5);
+        const refIndex = (ry * this.config.dims + rx);
+        const ri = refIndex * 4;
+        const cr = qdAdd(re, qdScale(toQd(rFrac), size));
 
         // Initialize reference point
-        let c = [cr[0], cr[1], cj[0], cj[1]];  // Quad-precision
-        this.cc[refIndex] = c;
+
+        cc[ri] = cr[0];
+        cc[ri+1] = cr[1];
+        cc[ri+2] = cj[0];
+        cc[ri+3] = cj[1];
         this.quadIndexes.push(refIndex);
-        let refspike = this.inspikeQd(cr, cj);
+        let refspike = this.inspikeQdA(cr[0], cr[1], cj[0], cj[1]);
         if (refspike) {
           this.un -= 1;
           this.ch += 1;
@@ -2217,9 +2223,13 @@ class PerturbationBoard extends Board {
           const dci = (ry - py) * pix;
           for (let px = minX; px <= maxX; px++) {
             const dcr = (px - rx) * pix;
-            const pertIndex = py * this.config.dims + px;
-            if (this.cc[pertIndex] === null) {  // Avoid double-initialization
-              this.cc[pertIndex] = [dcr, dci, refIndex];
+            const pertIndex = (py * this.config.dims + px);
+            const pi = pertIndex * 4;
+            if (cc[pi+3] === 0) {  // Avoid double-initialization
+              cc[pi] = dcr;
+              cc[pi+1] = dci;
+              cc[pi+2] = refIndex;
+              cc[pi+3] = -1;
               this.pertIndexes.push(pertIndex);
               if (refspike && py == ry) {
                 this.un -= 1;
@@ -2231,12 +2241,13 @@ class PerturbationBoard extends Board {
       }
     }
     this.zz = this.cc.slice();
+    this.nz = this.cc.slice();
     this.bb = this.cc.slice();
   }
 
-  inspikeQd(re, im) {
+  inspikeQdA(re1, re2, im1, im2) {
     // We do not iterate infinitely for chaotic points in the spike.
-    return (qdEq(im, 0.0) && qdGt(re, -2.0) && qdLt(re, -1.401155) &&
+    return (im1 + im2 == 0.0 && re1 >= -2.0 && re1 < -1.401155 &&
             this.config.exponent == 2);
   }
 
@@ -2249,16 +2260,13 @@ class PerturbationBoard extends Board {
     let results = [0, 0, 0];
 
     // Precompute quad-precision point escape without updating z
-    const newZ = [];
     for (const index of this.quadIndexes) {
       if (head <= tail && !this.nn[index]) {
-        this.bb[index] = this.zz[index];
+        AqdcCopy(this.bb, index*4, this.zz, index*4);
         this.pp[index] = 0;
       }
-      let [r, z] = this.precomputeQuad(index);
+      let r = this.precomputeQuad(index);
       results[r + 1] += 1;
-      newZ.push(z);
-
       if (r !== 0) {
         if (!changes) {
           changes = { iter: this.it, nn: [], vv: [] };
@@ -2266,7 +2274,7 @@ class PerturbationBoard extends Board {
         if (r < 0) {
           changes.vv.push({
             index: index,
-            z: z,
+            z: AqdcGet(this.nz, index*4),
             p: this.pp[index]
           });
         } else {
@@ -2277,13 +2285,12 @@ class PerturbationBoard extends Board {
 
     // Iterate perturbation points that use the old z
     const newQuadIndexes = [];
-    let cache = { refIndex: null, binZpow: null };
+    let cache = { refIndex: null, binZpow: [] };
     for (const index of this.pertIndexes) {
       if (!this.computePerturbation(index, cache)) {
         this.convertToQuadPrecision(index);
-        let [r, z] = this.precomputeQuad(index);
+        let r = this.precomputeQuad(index);
         results[r + 1] += 1;
-        newZ.push(z);
         newQuadIndexes.push(index);
         if (r !== 0) {
           if (!changes) {
@@ -2318,11 +2325,9 @@ class PerturbationBoard extends Board {
     }
 
     // Finally update quad-precision z with precomputed values
-    newZ.forEach((z, ii) => {
-      if (z !== null) {
-        this.zz[this.quadIndexes[ii]] = z;
-      }
-    });
+    for (const index of this.quadIndexes) {
+      AqdcCopy(this.zz, index*4, this.nz, index*4);
+    }
 
     // Tally progress
     let diverged = results[2];
@@ -2354,68 +2359,90 @@ class PerturbationBoard extends Board {
 
   precomputeQuad(m) {
     // Quad-precision compute
-    if (this.nn[m]) return [0, null];
-    let r = this.zz[m].slice(0, 2);
-    let j = this.zz[m].slice(2, 4);
-    let cr = this.cc[m].slice(0, 2);
-    let cj = this.cc[m].slice(2, 4);
+    if (this.nn[m]) return 0;
+    const m4 = m * 4;
+    const tt = this.tt;
+    const nz = this.nz;
+    const r1 = this.zz[m4];
+    const r2 = this.zz[m4+1];
+    const j1 = this.zz[m4+2];
+    const j2 = this.zz[m4+3];
+    const cr1 = this.cc[m4];
+    const cr2 = this.cc[m4+1];
+    const cj1 = this.cc[m4+2];
+    const cj2 = this.cc[m4+3];
+    const br1 = this.bb[m4];
+    const br2 = this.bb[m4+1];
+    const bj1 = this.bb[m4+2];
+    const bj2 = this.bb[m4+3];
 
-    let r2 = qdSquare(r);
-    let j2 = qdSquare(j);
-    if (qdGt(qdAdd(r2, j2), 4)) {
+    AqdSquare(tt, 0, r1, r2);                    // 0: rsq = r**2
+    AqdSquare(tt, 2, j1, j2);                    // 2: jsq = j**2
+    AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // 4: d = rsq+jsq
+    if (tt[4] + tt[5] > 4) {
       this.nn[m] = this.it;
-      return [1, null];
+      return 1;
     }
-    let ra = qdSub(r2, j2);
-    let ja = qdMul(qdDouble(r), j);
+    AqdMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // 6: ja = 2*r*j
+    AqdAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // 8: ra = rsq-jsq
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
-      ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
-      ra = rt;
+      AqdMul(tt, 0, j1, j2, tt[6], tt[7]);         // 0: j * ja
+      AqdMul(tt, 2, r1, r2, tt[8], tt[9]);         // 2: r * ra
+      AqdAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // 4: rt = r*ra - j*ja
+      AqdMul(tt, 0, r1, r2, tt[6], tt[7]);         // 0: r * ja
+      AqdMul(tt, 2, j1, j2, tt[8], tt[9]);         // 2: j * ra
+      AqdAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // 6: ja = r*ja + j*ra
+      AqdSet(tt, 8, tt[4], tt[5]);                 // 8: ra = rt
     }
-    ra = qdAdd(ra, cr);
-    ja = qdAdd(ja, cj);
-    let z = [...ra, ...ja];
-    let rb = this.bb[m].slice(0, 2);
-    let jb = this.bb[m].slice(2, 4);
-    let db = qdAdd(qdAbs(qdSub(rb, ra)), qdAbs(qdSub(jb, ja)));
-    db = db[0] + db[1];
+    AqdAdd(nz, m4, tt[8], tt[9], cr1, cr2);        // nz: nzr = ra + cr
+    AqdAdd(nz, m4+2, tt[6], tt[7], cj1, cj2);      // nz+2: nzj = ja + cj
+    AqdAbsSub(tt, 0, br1, br2, nz[m4], nz[m4+1]);  // 0: abs(nzr - br)
+    AqdAbsSub(tt, 2, bj1, bj2, nz[m4+2], nz[m4+3]);// 2: abs(nzj - bj)
+    AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);     // 4: db = abs(nzr-br)+abs(nzj-bj)
+    const db = tt[4] + tt[5]
     if (db <= this.epsilon2) {
       if (!this.pp[m]) { this.pp[m] = this.it; }
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
-        if (this.inspikeQd(cr, cj) && this.ch > 0) {
+        if (this.inspikeQdA(cr1, cr2, cj1, cj2) && this.ch > 0) {
           this.ch -= 1;
-          return [0, z];  // Already counted
+          return 0;  // Already counted
         } else {
-          return [-1, z];
+          return -1;
         }
       }
     }
-    return [0, z];
+    return 0;
   }
 
   computePerturbation(index, cache) {
-    const [cr, ci, refIndex] = this.cc[index];
-    const [dr, di] = this.zz[index];
+    const m4 = index * 4;
+    const cr = this.cc[m4]
+    const ci = this.cc[m4+1]
+    const refIndex = this.cc[m4+2]
+    const ri4 = refIndex * 4;
+    const dr = this.zz[m4];
+    const di = this.zz[m4+1];
 
     // Switch to quad when approaching convergence.
     if (this.nn[refIndex] || this.pp[refIndex]) return false;
 
     // Compute binomial powers of z
     if (cache.refIndex !== refIndex) {
-      const [zr, zr0, zi, zi0] = this.zz[refIndex];
       cache.refIndex = refIndex;
-      cache.binZpow = this.computeBinZpow(zr, zi);
+      const ri4 = refIndex * 4;
+      const zr = this.zz[ri4];
+      const zi = this.zz[ri4+2];
+      this.fillBinZpow(cache.binZpow, zr, zi);
     }
     const binZpow = cache.binZpow;
 
     // Compute in (z+d)^n - z^n = nz^(n-1) d + (n(n-1)/2)z^(n-2) d^2...
     let r = dr;
     let i = di;
-    for (const [bzr, bzi] of binZpow) {
-      r += bzr;
-      i += bzi;
+    for (let ord = 0; ord < binZpow.length; ord += 2) {
+      r += binZpow[ord];
+      i += binZpow[ord+1];
       const rNew = r * dr - i * di;
       i = r * di + i * dr;
       r = rNew;
@@ -2429,17 +2456,18 @@ class PerturbationBoard extends Board {
       return false;
     }
 
-    this.zz[index] = [r, i];
+    this.zz[m4] = r;
+    this.zz[m4+1] = i;
     return true;
   }
 
-  computeBinZpow(zr, zi) {
-    const binZpow = [];
+  fillBinZpow(binZpow, zr, zi) {
     let zrCurrent = zr, ziCurrent = zi;
     let coeff = this.config.exponent;
 
     for (let k = 1; k < this.config.exponent - 1; k++) {
-      binZpow.push([coeff * zrCurrent, coeff * ziCurrent]);
+      binZpow[k*2-2] = coeff * zrCurrent;
+      binZpow[k*2-2] = coeff * ziCurrent;
 
       // Update z power
       const zrNew = zrCurrent * zr - ziCurrent * zi;
@@ -2452,10 +2480,9 @@ class PerturbationBoard extends Board {
 
     // Add the last element without computing the next z power or coefficient
     if (this.config.exponent > 1) {
-      binZpow.push([coeff * zrCurrent, coeff * ziCurrent]);
+      binZpow[this.config.exponent*2 - 4] = coeff * zrCurrent;
+      binZpow[this.config.exponent*2 - 3] = coeff * ziCurrent;
     }
-
-    return binZpow;
   }
 
   isThresholdExceeded(dr, di, refIndex) {
@@ -2463,23 +2490,23 @@ class PerturbationBoard extends Board {
     if (mag > this.perturbationThreshold) return true;
     // If orbit is getting large, then be more careful.
     if (mag * 10 < this.perturbationThreshold) return false;
-    const [zr, zr0, zi, zi0] = this.zz[refIndex];
+    const zr = this.zz[refIndex * 4];
+    const zi = this.zz[refIndex * 4 + 2];
     return ((dr + zr) ** 2 + (di + zi) ** 2 > 3);
   }
 
-  isEscaped(r, i) {
-    return r * r + i * i > 4;
-  }
-
   convertToQuadPrecision(index) {
-    const [dr, di] = this.zz[index];
-    const [cr, ci, refIndex] = this.cc[index];
-    this.zz[index] = qdcAdd(this.zz[refIndex], [dr, 0, di, 0]);
-    this.cc[index] = qdcAdd(this.cc[refIndex], [cr, 0, ci, 0]);
-  }
-
-  isQuadPrecision(index) {
-    return this.cc[index].length === 4;
+    const m4 = index * 4;
+    const dr = this.zz[m4];
+    const di = this.zz[m4+1];
+    const cr = this.cc[m4];
+    const ci = this.cc[m4+1];
+    const refIndex = this.cc[m4+2];
+    const ri4 = refIndex * 4;
+    AqdAdd(this.zz, m4, dr, 0, this.zz[ri4], this.zz[ri4+1])
+    AqdAdd(this.zz, m4+2, di, 0, this.zz[ri4+2], this.zz[ri4+3])
+    AqdAdd(this.cc, m4, cr, 0, this.cc[ri4], this.cc[ri4+1])
+    AqdAdd(this.cc, m4+2, ci, 0, this.cc[ri4+2], this.cc[ri4+3])
   }
 }
 
@@ -2509,9 +2536,6 @@ self.onmessage = function(e) {
         : new Board(data.k, data.size, data.re, data.im, data.config, data.id);
       board.initboard(data.size, data.re, data.im);
       boards.set(data.k, board);
-      if (!timer) {
-        iterateBoards();
-      }
       break;
     case 'removeBoard':
       boards.delete(data.k);
@@ -2524,10 +2548,10 @@ self.onmessage = function(e) {
       break;
     case 'pause':
       computationPaused = data.pause;
-      if (!data.pause && boards.size) {
-        iterateBoards();
-      }
       break;
+  }
+  if (!timer && boards.size && !computationPaused) {
+    iterateBoards();
   }
 };
 
@@ -2972,6 +2996,104 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
     result = result.replace(/\.0+$|(\.\d*[1-9])0+$/, "$1");
   }
   return s + result + epart;
+}
+
+// Array in-place quad precision, allows fast computation
+// by avoiding array constructors
+
+function Afast2Sum(r, i, a, b) {
+  let s = a + b;
+  r[i] = s;
+  r[i+1] = b - (s - a);
+}
+
+function Aslow2Sum(r, i, a, b) {
+  let s = a + b;
+  let c = s - a;
+  r[i] = s;
+  r[i+1] = (a - (s - c)) + (b - c);
+}
+
+function AqdSplit(r, i, a) {
+  const c = (134217729) * a;  // 2^27 + 1, Veltkamp-Dekker constant
+  const x = c - (c - a);
+  const y = a - x;
+  r[i] = x;
+  r[i+1] = y;
+}
+
+function AtwoProduct(r, i, a, b) {
+  const p = a * b;
+  AqdSplit(r, i, a);
+  const ah = r[i];
+  const al = r[i+1];
+  AqdSplit(r, i, b);
+  const bh = r[i];
+  const bl = r[i+1];
+  const err = ((ah * bh - p) + ah * bl + al * bh) + al * bl;
+  r[i] = p;
+  r[i+1] = err;
+}
+
+function AtwoSquare(r, i, a) {
+  const p = a * a;
+  AqdSplit(r, i, a);
+  const ah = r[i];
+  const al = r[i+1];
+  const err = ((ah * ah - p) + 2 * ah * al) + al * al;
+  r[i] = p;
+  r[i+1] = err;
+}
+
+function AqdAdd(r, i, a1, a2, b1, b2) {
+  Aslow2Sum(r, i, a1, b1);
+  const h1 = r[i];
+  const h2 = r[i+1];
+  Aslow2Sum(r, i, a2, b2);
+  const l1 = r[i];
+  const l2 = r[i+1];
+  Afast2Sum(r, i, h1, h2 + l1);
+  const v1 = r[i];
+  const v2 = r[i+1];
+  Afast2Sum(r, i, v1, v2 + l2);
+}
+
+function AqdMul(r, i, a1, a2, b1, b2) {
+  AtwoProduct(r, i, a1, b1);
+  const p1 = r[i];
+  const p2 = r[i+1];
+  Afast2Sum(r, i, p1, p2 + a1 * b2 + b1 * a2);
+}
+
+function AqdSet(r, i, a1, a2) {
+  r[i] = a1;
+  r[i+1] = a2;
+}
+
+function AqdcCopy(r, i, s, si) {
+  r[i] = s[si];
+  r[i+1] = s[si+1];
+  r[i+2] = s[si+2];
+  r[i+3] = s[si+3];
+}
+
+function AqdcGet(s, si) {
+  return s.slice(si, 4);
+}
+
+function AqdSquare(r, i, a1, a2) {
+  AtwoSquare(r, i, a1);
+  const p1 = r[i];
+  const p2 = r[i+1];
+  Afast2Sum(r, i, p1, p2 + 2 * a1 * a2);
+}
+
+function AqdAbsSub(r, i, a1, a2, b1, b2) {
+  AqdAdd(r, i, a1, a2, -b1, -b2);
+  if (r[i] + r[i+1] < 0) {
+    r[i] = -r[i];
+    r[i+1] = -r[i+1];
+  }
 }
 </script>
 <script>
