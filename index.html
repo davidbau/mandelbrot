@@ -2837,16 +2837,17 @@ function qdParse(s) {
 }
 
 function qdPow10(e) {
-  if (e === 0) return [1, 0];
-  let result = [1, 0];
   if (e < 0) return qdReciprocal(qdPow10(-e));
-  return [10 ** e, 0];
+  // Up to 1e16, the second component is zero.
+  if (e <= 16) { return [10 ** e, 0]; }
+  if (e % 2) { return qdMul([1e15, 0], qdPow10(e - 15)) };
+  return qdSquare(qdPow10(e / 2));
 }
 
 function qdFloor(q) {
   let [a, b] = q;
   let fl = Math.floor(a);
-  let [r0, r1] = qdSub([a, b], [fl, 0]);
+  let [r0, r1] = qdAdd([a, b], [-fl, 0]);
   if (r0 < 0 || (r0 === 0 && r1 < 0)) {
     fl -= 1;
   }
@@ -2862,11 +2863,7 @@ function qdCompare(a, b) {
 }
 
 function qdLt(a, s) {
-  return a[0] + a[1] < s;
-}
-
-function qdGt(a, s) {
-  return a[0] + a[1] > s;
+  return a[0] < s || (a[0] == s && a[1] < 0);
 }
 
 function qdEq(a, s) {
@@ -2899,22 +2896,11 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
      if (useFixedPoint) digits += 1;
      return '0' + (digits > 1 ? '.' + '0'.repeat(digits - 1) : '');
   }
-  // Scale q to be between 1 and 10, avoiding cumulative rounding
-  let e = 0;
-  let ex = [1, 0];
-  while (qdCompare(q, qdMul(ex, qdTen)) >= 0) {
-    e += 1;
-    ex = qdPow10(e);
-  }
-  if (e == 0) {
-    while (qdLt(qdMul(ex, q), 1)) {
-      e -= 1;
-      ex = qdPow10(-e);
-    }
-  }
-  if (e) {
-    q = (e > 0 ? qdDiv(q, ex) : qdMul(q, ex));
-  }
+  // Scale q to be between 1 and 10
+  let e = parseInt(q[0].toExponential().match(/e([+-]\d+)/)[1]);
+  if (qdCompare(q, qdPow10(e)) < 0) { e -= 1; }
+  if (qdCompare(q, qdPow10(1+e)) >= 0) { e += 1; }
+  if (e) { q = qdMul(q, qdPow10(-e)); }
   if (!qdLt(q, 10)) { // Hit boundary condition
     q = qdDiv(q, qdTen);
     e += 1;
@@ -2966,7 +2952,7 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
   }
   result = result.slice(0, nonzeroDigits);
   epart = '';
-  if (!useFixedPoint && (!autoFormat || e < -6 || e > 32)) {
+  if (!useFixedPoint && (!autoFormat || e < -6 || e >= 32)) {
     // Scientific notation
     if (result.length > 1) {
       result = result[0] + '.' + result.slice(1);
