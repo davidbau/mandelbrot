@@ -833,7 +833,6 @@ class ZoomManager {
     // Only accept clicks on cells with something computed in them.
     if (k >= this.grid.views.length || this.grid.views[k].uninteresting() ||
          this.grid.currentUpdateProcess) return;
-    this.grid.truncateviews(k + 1);
     setTimeout(() => { this.cellclickdelay(k, m, hideCurrent); }, 1);
   }
 
@@ -846,27 +845,24 @@ class ZoomManager {
     let cy = (m - cx) / this.config.dims;
     this.showZoomRect(k, cx / this.config.dims, cy / this.config.dims, this.config.zoomfactor);
     this.grid.truncateviews(k + 1);
-    // Do slow parts after a moment.
+    let nsize = osize / this.config.zoomfactor;
+    let nre = qdAdd(ore, [((cx / this.config.dims) - 0.5) * osize, 0]);
+    let nim = qdAdd(oim, [(0.5 - (cy / this.config.dims)) * osize, 0]);
+    let newView = this.grid.makeView(k + 1, nsize, nre, nim);
+    this.grid.makecanvas(k + 1);
+    if (hideCurrent) {
+      this.grid.canvas(k).parentElement.style.display = 'none';
+      this.updateZoomRectangles();
+    }
+    this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
+    this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
+    newView.draw(this.grid.canvas(k + 1).getContext('2d'));
+    this.grid.showcanvas(k + 1);
+    this.grid.notifyurl();
     setTimeout(() => {
-      let nsize = osize / this.config.zoomfactor;
-      let nre = qdAdd(ore, [((cx / this.config.dims) - 0.5) * osize, 0]);
-      let nim = qdAdd(oim, [(0.5 - (cy / this.config.dims)) * osize, 0]);
-      let newView = this.grid.makeView(k + 1, nsize, nre, nim);
-      this.grid.makecanvas(k + 1);
-      if (hideCurrent) {
-        this.grid.canvas(k).parentElement.style.display = 'none';
-        this.updateZoomRectangles();
-      }
-      this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
-      this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
-      newView.draw(this.grid.canvas(k + 1).getContext('2d'));
-      this.grid.showcanvas(k + 1);
-      this.grid.notifyurl();
-      setTimeout(() => {
-        // Make sure the rectangles are visible
-        document.body.className = '';
-      }, 1);
-    }, 1);
+      // Make sure the rectangles are visible
+      document.body.className = '';
+    }, 10);
   }
 
   centerViews(includeFirst) {
@@ -2925,13 +2921,6 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
     result += digit;
     q = qdSub(q, floorQ);
     q = qdMul(q, qdTen);
-  }
-  if (autoFormat) {
-    if (parseInt(result.slice(result.length - 3)) > 970 ||
-      parseInt(result.slice(result.length - 3)) < 30 ||
-      parseInt(result.slice(result.length - 2)) > 92) {
-      nonzeroDigits -= 1; // round to one fewer digit
-    }
   }
   // Rounding
   if (nonzeroDigits < 0) {
