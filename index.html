@@ -881,10 +881,10 @@ class ZoomManager {
           k, 0.5, 0.5, this.grid.views[k].sizes[0] / this.grid.views[k+1].sizes[0]);
       if (qdCompare(this.grid.views[k].sizes[1], ore) ||
           qdCompare(this.grid.views[k].sizes[2], oim)) {
+        this.grid.scheduler.removeBoardFromWorker(k);
         let nsize = this.grid.views[k].sizes[0];
         this.grid.makeView(k, nsize, ore, oim);
         this.grid.views[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
-        // this.grid.views[k].draw(this.grid.canvas(k).getContext('2d'));
         this.grid.clearseq(k);
       }
     }
