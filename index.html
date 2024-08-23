@@ -110,7 +110,7 @@ See information on iterations, progress, and coordinates by <span mobile="tappin
 <b>Exploring a zoom path.</b>
 Each <span mobile="tap">click</span> on the fractal starts a new parallel computation worker at a higher zoom level at the selected location.
 After you zoom beyond trillion-fold magnification, we slow things down a bit to use a quad-precision perturbation algorithm that resolves fine details to more than 30 digits of accuracy.
-Once you have crafted an interesting path that shows the detail you want, you can <a class="moviemode">create and download your own Mandelbrot zoom video</a> or bookmark your URL to save and share your exploration.
+Once you have crafted an interesting path that shows the detail you want, you can <a class="moviemode">create and download your own Mandelbrot deep zoom video</a> or bookmark your URL to save and share your exploration.
 To create high-quality images and videos, this viewer computes subpixels with a <span class="pixelratio">2</span>:1 ratio<span mobile="">, and that can be increased to create more precise displays</span>.
 </p>
 
@@ -232,6 +232,7 @@ class View {
     this.config = config;
     this.convergedData = new Map();
     this.initview(size, re, im);
+    this.workerInfo = 'no worker';
   }
 
   initview(size, re, im) {
@@ -262,6 +263,7 @@ class View {
     this.di = data.di;
     this.ch = data.ch;
     this.it = data.it;
+    this.workerInfo = data.workerInfo;
     // console.log(`View ${this.k}: Updated to iteration ${this.it}`);
   }
 
@@ -392,6 +394,7 @@ class View {
   debugStatus() {
     const debugGraph = this.renderHiGraph(600, 300);
     return `${this.di} diverged, ${this.un} unfinished, ${this.ch} chaotic\n` +
+           `${this.workerInfo}\n` +
            `<img src="${debugGraph}" style="width:300px;height:150px">`;
   }
 
@@ -1523,10 +1526,10 @@ class Scheduler {
       this.addWorker();
       minLoad = 0;
     }
-    const leastLoadedWorkerIndex = this.workerLoads.indexOf(minLoad);
-    const worker = this.workers[leastLoadedWorkerIndex];
+    const workerNumber = this.workerLoads.indexOf(minLoad);
+    const worker = this.workers[workerNumber];
     const estimatedWork = config.dims2 * ((size / config.dims < 1e-15) ? 7 : 1);
-    this.assignments[k] = leastLoadedWorkerIndex;
+    this.assignments[k] = workerNumber;
     
     worker.postMessage({
       type: 'addBoard',
@@ -1540,11 +1543,12 @@ class Scheduler {
           dims2: config.dims2,
           exponent: config.exponent
         },
-        id
+        id,
+        workerNumber
       }
     });
   
-    this.workerLoads[leastLoadedWorkerIndex] += estimatedWork;
+    this.workerLoads[workerNumber] += estimatedWork;
   }
 
   removeBoardFromWorker(k) {
@@ -1583,7 +1587,6 @@ class Scheduler {
         console.log(`Worker ${workerIndex}: ${data}`);
         break;
       case 'iterations':
-        // console.log(`Main thread: Received update for board ${data.k}, iteration ${data.it}, len ${data.changeList.length}`);
         this.grid.updateViewFromWorkerResult(data.k, data);
         this.workerLoads[workerIndex] = data.remainingWork;
         break;
@@ -2517,6 +2520,7 @@ function workerLog(message) {
   });
 }
 
+let workerNumber = null;
 let boards = new Map();
 let focusedBoardK = null;
 let hiddenBoards = new Set();
@@ -2530,7 +2534,8 @@ self.onmessage = function(e) {
   const { type, data } = e.data;
   switch (type) {
     case 'addBoard':
-      workerLog(`Board ${data.k} added to {${[...boards.keys()]}}`);
+      workerNumber = data.workerNumber;
+      // workerLog(`Board ${data.k} added to {${[...boards.keys()]}}`);
       const board = data.size / data.config.dims < 1e-15 
         ? new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id)
         : new Board(data.k, data.size, data.re, data.im, data.config, data.id);
@@ -2596,6 +2601,9 @@ function iterateBoards() {
     const now = (new Date()).getTime();
     if (board.updateSize >= 1000 || now - board.lastTime >= 100) {
       const remainingWork = pri.map(b => b.unfinished() * b.effort).reduce((a, b) => a + b);
+      const workerInfo = `worker ${workerNumber}: ` + (board.unfinished() ?
+           `boards {${[...boards.keys()]}}, work: ${remainingWork}` :
+           `board finished`);
       self.postMessage({
         type: 'iterations',
         data: {
@@ -2606,7 +2614,8 @@ function iterateBoards() {
           di: board.di,
           ch: board.ch,
           changeList: board.changeList,
-          remainingWork
+          remainingWork,
+          workerInfo
         }
       });
       board.lastTime = now;
@@ -2616,7 +2625,7 @@ function iterateBoards() {
     if (!board.unfinished() && !board.updateSize) {
       // Delete board when done.
       boards.delete(board.k);
-      workerLog(`Board ${board.k} finished, leaving {${[...boards.keys()]}}`);
+      // workerLog(`Board ${board.k} finished, leaving {${[...boards.keys()]}}`);
     }
   } else {
     // End timer when there is no remaining work
