@@ -1584,6 +1584,8 @@ class Scheduler {
         break;
       case 'iterations':
         this.grid.updateViewFromWorkerResult(data.k, data);
+        // fallthrough
+      case 'update':
         this.workerLoads[workerIndex] = data.remainingWork;
         break;
     }
@@ -2553,6 +2555,16 @@ self.onmessage = function(e) {
   }
   if (!timer && boards.size && !computationPaused) {
     iterateBoards();
+  } else {
+    const remainingWork = Array.from(boards.values()).
+        filter(board => !hiddenBoards.has(board.k)).
+        map(b => b.unfinished() * b.effort).reduce((a, b) => a + b, 0);
+    self.postMessage({
+      type: 'update',
+      data: {
+        remainingWork,
+      }
+    });
   }
 };
 
@@ -2596,7 +2608,7 @@ function iterateBoards() {
     }
     const now = (new Date()).getTime();
     if (board.updateSize >= 1000 || now - board.lastTime >= 100) {
-      const remainingWork = pri.map(b => b.unfinished() * b.effort).reduce((a, b) => a + b);
+      const remainingWork = pri.map(b => b.unfinished() * b.effort).reduce((a, b) => a + b, 0);
       const workerInfo = `worker ${workerNumber}: ` + (board.unfinished() ?
            `boards {${[...boards.keys()]}}, work: ${remainingWork}` :
            `board finished`);
