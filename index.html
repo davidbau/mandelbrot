@@ -2238,7 +2238,7 @@ class PerturbationBoard extends Board {
               cc[pi] = dcr;
               cc[pi+1] = dci;
               cc[pi+2] = refIndex;
-              cc[pi+3] = -1;
+              cc[pi+3] = Infinity;
               this.pertIndexes.push(pertIndex);
               if (refspike && py == ry) {
                 this.un -= 1;
@@ -3082,7 +3082,7 @@ function AqdcCopy(r, i, s, si) {
 }
 
 function AqdcGet(s, si) {
-  return s.slice(si, 4);
+  return s.slice(si, si+4);
 }
 
 function AqdSquare(r, i, a1, a2) {
