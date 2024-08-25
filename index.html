@@ -206,6 +206,12 @@ class Config {
     for (let el of document.getElementsByClassName('pixelratio')) {
       el.innerText = this.pixelRatio;
     }
+    for (let el of document.querySelectorAll('#text')) {
+      const minHelpWidth = 390;
+      const helpColumns = Math.ceil((minHelpWidth + 36) / (this.cssDims + 20));
+      // Columns plus margin minus padding
+      el.style.maxWidth = ((this.cssDims + 20) * helpColumns - 20 - 16) + 'px';
+    }
   }
 
   updateExponent(newExponent) {
@@ -824,7 +830,7 @@ class ZoomManager {
       this.updateZoomRectangles();
     }
     this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
-    this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
+    this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     newView.draw(this.grid.canvas(k + 1).getContext('2d'));
     this.grid.notifyurl();
   }
@@ -855,7 +861,7 @@ class ZoomManager {
       this.updateZoomRectangles();
     }
     this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
-    this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth' });
+    this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     newView.draw(this.grid.canvas(k + 1).getContext('2d'));
     this.grid.showcanvas(k + 1);
     this.grid.notifyurl();
@@ -1090,17 +1096,18 @@ class EventHandler {
       document.getElementById('text').scrollIntoView({ behavior: 'smooth' });
     }
     // G reduces the grid column count
-    if (e.key === 'g' && this.explorer.config.gridcols > 1) {
+    if (e.key === 'g' && this.explorer.config.gridcols > 1 &&
+        !this.explorer.grid.currentUpdateProcess) {
       this.explorer.config.gridcols -= 1;
       this.explorer.grid.updateLayout();
     }
     // H increases the grid column count
-    if (e.key === 'h') {
+    if (e.key === 'h' && !this.explorer.grid.currentUpdateProcess) {
       this.explorer.config.gridcols += 1;
       this.explorer.grid.updateLayout();
     }
     // R will restore any hidden views
-    if (e.key === 'r') {
+    if (e.key === 'r' && !this.explorer.grid.currentUpdateProcess) {
       this.explorer.grid.showAllViews();
       this.explorer.urlHandler.updateurl();
     }
@@ -1497,18 +1504,24 @@ class Scheduler {
     this.workers = [];
     this.workerLoads = [];
     this.assignments = {};
-    this.workerCount = Math.max(24, navigator.hardwareConcurrency || 1);
+    this.workerCount = Math.max(3, Math.floor(1.5 * (navigator.hardwareConcurrency || 1)));
   }
 
   addWorker() {
-    const workerCode = this.assembleWorkerCode();
-    const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
-    const workerUrl = URL.createObjectURL(workerBlob);
-    const worker = new Worker(workerUrl, { name: `Worker ${this.workers.length}` });
-    worker.onmessage = this.handleWorkerMessage.bind(this);
-    this.workers.push(worker);
-    this.workerLoads.push(0);
-    URL.revokeObjectURL(workerUrl);
+    try {
+      const workerCode = this.assembleWorkerCode();
+      const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+      const workerUrl = URL.createObjectURL(workerBlob);
+      const worker = new Worker(workerUrl, { name: `Worker ${this.workers.length}` });
+      URL.revokeObjectURL(workerUrl);
+      worker.onmessage = this.handleWorkerMessage.bind(this);
+      this.workers.push(worker);
+      this.workerLoads.push(0);
+      return true;
+    } catch (e) {
+      console.log('Failed to start webworker', e);
+      return false;
+    }
   }
 
   assembleWorkerCode() {
@@ -1527,8 +1540,9 @@ class Scheduler {
   assignBoardToWorker(k, size, re, im, config, id) {
     let minLoad = Math.min(...this.workerLoads);
     if (this.workers.length == 0 || minLoad && this.workers.length < this.workerCount) {
-      this.addWorker();
-      minLoad = 0;
+      if (this.addWorker()) {
+        minLoad = 0;
+      }
     }
     const workerNumber = this.workerLoads.indexOf(minLoad);
     const worker = this.workers[workerNumber];
@@ -1853,12 +1867,6 @@ class MandelbrotExplorer {
   }
 
   initPlatform() {
-    for (let el of document.querySelectorAll('#text')) {
-      const minHelpWidth = 350;
-      const helpColumns = Math.ceil((minHelpWidth + 36) / (this.config.cssDims + 20));
-      // Columns plus margin minus padding
-      el.style.maxWidth = ((this.config.cssDims + 20) * helpColumns - 20 - 16) + 'px';
-    }
     if (this.config.mac) {
       for (let el of document.querySelectorAll('[mac]')) {
         el.innerHTML = el.getAttribute('mac');
@@ -2645,7 +2653,7 @@ function iterateBoards() {
     // End timer when there is no remaining work
     if (!endTime) {
        endTime = (new Date).getTime();
-       workerLog(`Finished in ${((endTime - startTime) / 1000).toFixed(3)}s`);
+       // workerLog(`Finished in ${((endTime - startTime) / 1000).toFixed(3)}s`);
     }
     return;
   }
