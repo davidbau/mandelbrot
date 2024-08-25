@@ -84,9 +84,9 @@ body.starting div#b_0:after { display: flex; position: absolute;
 <div id=text style="max-width: 442px">
 <div class=closebox></div>
 
-<h4 style="margin-top:3px;margin-bottom:6px">
-Mandelbrot Set Fractal Viewer
-</h4>
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Mandelbrot Set Fractal Explorer
+</h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Colors show <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterations</a> to divergence; black points converge or cycle.
@@ -108,7 +108,7 @@ See information on iterations, progress, and coordinates by <span mobile="tappin
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Exploring a zoom path.</b>
-Each <span mobile="tap">click</span> on the fractal starts a new parallel computation worker at a higher zoom level at the selected location.
+Each <span mobile="tap">click</span> on the fractal opens a higher zoom level at the selected location, computed by a new webworker thread.
 After you zoom beyond trillion-fold magnification, we slow things down a bit to use a quad-precision perturbation algorithm that resolves fine details to more than 30 digits of accuracy.
 Once you have crafted an interesting path that shows the detail you want, you can <a class="moviemode">create and download your own Mandelbrot deep zoom video</a> or bookmark your URL to save and share your exploration.
 To create high-quality images and videos, this viewer computes subpixels with a <span class="pixelratio">2</span>:1 ratio<span mobile="">, and that can be increased to create more precise displays</span>.
@@ -1087,6 +1087,7 @@ class EventHandler {
     // Pressing ? will show the help window
     if (e.key == '?') {
       document.getElementById('text').style.display = 'block';
+      document.getElementById('text').scrollIntoView({ behavior: 'smooth' });
     }
     // G reduces the grid column count
     if (e.key === 'g' && this.explorer.config.gridcols > 1) {
@@ -1496,7 +1497,7 @@ class Scheduler {
     this.workers = [];
     this.workerLoads = [];
     this.assignments = {};
-    this.workerCount = Math.max(1, navigator.hardwareConcurrency || 1);
+    this.workerCount = Math.max(24, navigator.hardwareConcurrency || 1);
   }
 
   addWorker() {
@@ -1853,13 +1854,10 @@ class MandelbrotExplorer {
 
   initPlatform() {
     for (let el of document.querySelectorAll('#text')) {
-      if (this.config.cssDims < 360) {
-        // Two columns plus margin minus padding
-        el.style.maxWidth = (this.config.cssDims * 2 + 20 - 16) + 'px';
-      } else {
-        // One column minus padding
-        el.style.maxWidth = (this.config.cssDims - 16) + 'px';
-      }
+      const minHelpWidth = 350;
+      const helpColumns = Math.ceil((minHelpWidth + 36) / (this.config.cssDims + 20));
+      // Columns plus margin minus padding
+      el.style.maxWidth = ((this.config.cssDims + 20) * helpColumns - 20 - 16) + 'px';
     }
     if (this.config.mac) {
       for (let el of document.querySelectorAll('[mac]')) {
@@ -2181,8 +2179,8 @@ class PerturbationBoard extends Board {
     // The 0.1 threshold is 2x faster than 0.01 but reveals some edge artfiacts
     // Bail when perturbation exceeds half the digits of precision
     this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dims)));
-    // For scheduling: each step is about 7x effort of default board.
-    this.effort = 7;
+    // For scheduling: each step is about 3x effort of default board.
+    this.effort = 3;
   }
 
   initboard(size, re, im) {
