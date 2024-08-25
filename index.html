@@ -490,10 +490,10 @@ class Grid {
     this.scheduler.setHiddenBoards(hiddenViews);
   }
 
-  updateViewFromWorkerResult(k, data) {
+  updateViewFromWorkerResult(k, data, workerIndex) {
     if (this.views[k]) {
       if (this.views[k].id != data.id) {
-        console.log('Mismatched id from worker; discarding.');
+        console.log(`Mismatched id for board ${k} from worker ${workerIndex}; discarding.`);
         return;
       }
       this.views[k].updateFromWorkerResult(data);
@@ -1511,9 +1511,16 @@ class Scheduler {
   }
 
   assembleWorkerCode() {
-    const quadPrecisionScript = document.getElementById('quadCode');
-    const workerBoardScript = document.getElementById('workerCode');
-    return quadPrecisionScript.textContent + '\n' + workerBoardScript.textContent;
+    const workerCode = document.getElementById('workerCode');
+    const quadCode = document.getElementById('quadCode');
+    return '// Linefeeds to align line numbers with HTML.\n' +
+           ''.padStart(lastScriptLineNumber, '\n') +
+           '// <script id="workerCode">' +
+           workerCode.textContent +
+           '// <\/script>\n' +
+           '// <script id="quadCode">' +
+           quadCode.textContent +
+           '// <\/script>\n';
   }
 
   assignBoardToWorker(k, size, re, im, config, id) {
@@ -1526,7 +1533,7 @@ class Scheduler {
     const worker = this.workers[workerNumber];
     const estimatedWork = config.dims2 * ((size / config.dims < 1e-15) ? 7 : 1);
     this.assignments[k] = workerNumber;
-    
+
     worker.postMessage({
       type: 'addBoard',
       data: {
@@ -1543,7 +1550,7 @@ class Scheduler {
         workerNumber
       }
     });
-  
+
     this.workerLoads[workerNumber] += estimatedWork;
   }
 
@@ -1583,7 +1590,7 @@ class Scheduler {
         console.log(`Worker ${workerIndex}: ${data}`);
         break;
       case 'iterations':
-        this.grid.updateViewFromWorkerResult(data.k, data);
+        this.grid.updateViewFromWorkerResult(data.k, data, workerIndex);
         // fallthrough
       case 'update':
         this.workerLoads[workerIndex] = data.remainingWork;
@@ -2003,6 +2010,8 @@ function estimateLimit(data) {
   // The intercept is our estimate of the limit as 1/x approaches 0 (i.e., as x approaches infinity)
   return intercept;
 }
+
+const lastScriptLineNumber = parseInt(new Error().stack.match(/(:[\d]+)/)[0].replace(':',''));
 </script>
 <script id="workerCode" type="text/worker">
 class Board {
@@ -2106,7 +2115,6 @@ class Board {
     this.di += results[2]; // diverged
 
     this.it++;
-
     return changes;
   }
 
@@ -2534,7 +2542,7 @@ self.onmessage = function(e) {
     case 'addBoard':
       workerNumber = data.workerNumber;
       // workerLog(`Board ${data.k} added to {${[...boards.keys()]}}`);
-      const board = data.size / data.config.dims < 1e-15 
+      const board = data.size / data.config.dims < 1e-15
         ? new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id)
         : new Board(data.k, data.size, data.re, data.im, data.config, data.id);
       board.initboard(data.size, data.re, data.im);
