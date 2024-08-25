@@ -2582,7 +2582,7 @@ function iterateBoards() {
     return;
   }
   let pri = Array.from(boards.values())
-        .filter(board => board.unfinished() || board.updateSize)
+        .filter(board => (board.unfinished() || board.updateSize))
         .filter(board => !hiddenBoards.has(board.k));
   if (pri.length) {
     // Start timer if it is not already running.
@@ -2637,11 +2637,11 @@ function iterateBoards() {
       board.lastTime = now;
       board.updateSize = 0;
       board.changeList = [];
-    }
-    if (!board.unfinished() && !board.updateSize) {
-      // Delete board when done.
-      boards.delete(board.k);
-      // workerLog(`Board ${board.k} finished, leaving {${[...boards.keys()]}}`);
+      if (!board.unfinished()) {
+        // Delete board when done.
+        boards.delete(board.k);
+        // workerLog(`Board ${board.k} finished, leaving {${[...boards.keys()]}}`);
+      }
     }
   } else {
     // End timer when there is no remaining work
