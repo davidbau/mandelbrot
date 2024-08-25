@@ -2476,7 +2476,7 @@ class PerturbationBoard extends Board {
 
     for (let k = 1; k < this.config.exponent - 1; k++) {
       binZpow[k*2-2] = coeff * zrCurrent;
-      binZpow[k*2-2] = coeff * ziCurrent;
+      binZpow[k*2-1] = coeff * ziCurrent;
 
       // Update z power
       const zrNew = zrCurrent * zr - ziCurrent * zi;
