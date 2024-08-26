@@ -59,16 +59,19 @@ canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
 body.hidemarks .overlay { opacity: 0; }
 body.hidemarks #grid .zoomnum { opacity: 0; }
 body.hidemarks #grid .closebox { opacity: 0; }
-div.status { display: none; }
-div:hover a div.status { /* tooltips */
-  display: block; position: absolute; top: 12.5pt; right: 0;
+div a div.status { /* tooltips */
+  display: none; position: absolute; top: 17px; right: 0;
   width: auto; background-color: #ddd; color: #444;
   font: 11pt Arial; text-align: right; white-space: pre;
   padding: 3px 7px; box-shadow: 2px 2px 5px #777;
-  pointer-events: none; z-index: 2;
+  /* pointer-events: none; */ z-index: 2;
   opacity: 0; transition: opacity 0.25s ease;
 }
-div:hover a:focus div.status, div:hover a:hover div.status {
+div:hover a div.status {
+  display: block;
+}
+div:hover a:focus div.status, div a:hover div.status {
+  display: block;
   opacity: 0.95;
 }
 body.starting div#b_0:after { display: flex; position: absolute;
@@ -710,7 +713,7 @@ class Grid {
         statusDiv.innerHTML += '\n' + this.views[k].debugStatus();
       }
     }
-    if (overtarget.matches(':hover')) {
+    if (overtarget.matches(':hover') || overtarget.matches(':focus')) {
       setTimeout(() => this.updateProgress(overtarget, k), 100);
     }
   }
@@ -1157,6 +1160,8 @@ class EventHandler {
         if (overtarget.tagName == 'A') {
           overtarget.showDebug = e.ctrlKey || e.metaKey;
           this.explorer.grid.updateProgress(overtarget, k);
+          const statusDiv = overtarget.querySelector('.status');
+          if (statusDiv) { statusDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
         }
       } else if (target.id.startsWith('movie') && (!e.target || e.target.id != 'movie')) {
         document.body.className = '';
