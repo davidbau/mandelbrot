@@ -67,7 +67,7 @@ div a div.status { /* tooltips */
   /* pointer-events: none; */ z-index: 2;
   opacity: 0; transition: opacity 0.25s ease;
 }
-div:hover a div.status {
+#grid div:hover a div.status {
   display: block;
 }
 div:hover a:focus div.status, div a:hover div.status {
@@ -831,6 +831,7 @@ class ZoomManager {
     if (hideCurrent) {
       this.grid.canvas(k).parentElement.style.display = 'none';
       this.updateZoomRectangles();
+      this.grid.updateHiddenViews();
     }
     this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
     this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -862,6 +863,7 @@ class ZoomManager {
     if (hideCurrent) {
       this.grid.canvas(k).parentElement.style.display = 'none';
       this.updateZoomRectangles();
+      this.grid.updateHiddenViews();
     }
     this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
     this.grid.canvas(k + 1).parentElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1018,6 +1020,7 @@ class EventHandler {
         e.target.parentElement.style.display = 'none';
         this.explorer.grid.truncatehiddenviews();
         this.explorer.zoomManager.updateZoomRectangles();
+        this.explorer.grid.updateHiddenViews();
         this.explorer.urlHandler.updateurl();
       }
     };
@@ -1113,6 +1116,7 @@ class EventHandler {
     if (e.key === 'r' && !this.explorer.grid.currentUpdateProcess) {
       this.explorer.grid.showAllViews();
       this.explorer.urlHandler.updateurl();
+      this.explorer.grid.updateHiddenViews();
     }
     // Increase the exponent
     if (e.key === 'x') {
@@ -1167,7 +1171,6 @@ class EventHandler {
         document.body.className = '';
       }
     }
-    this.explorer.grid.updateHiddenViews();
   }
 
   eventtarget(e) {
@@ -1507,9 +1510,11 @@ class Scheduler {
   constructor(grid) {
     this.grid = grid;
     this.workers = [];
-    this.workerLoads = [];
+    this.boardEfforts = new Map();
     this.assignments = {};
-    this.workerCount = Math.max(3, Math.floor(1.5 * (navigator.hardwareConcurrency || 1)));
+    this.lastBalanceTime = 0;
+    this.balanceInterval = 5000; // 5 seconds
+    this.workerCount = Math.max(3, (navigator.hardwareConcurrency || 1));
   }
 
   addWorker() {
@@ -1517,11 +1522,12 @@ class Scheduler {
       const workerCode = this.assembleWorkerCode();
       const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
       const workerUrl = URL.createObjectURL(workerBlob);
-      const worker = new Worker(workerUrl, { name: `Worker ${this.workers.length}` });
+      const workerNum = this.workers.length;
+      const worker = new Worker(workerUrl, { name: `Worker ${workerNum}` });
       URL.revokeObjectURL(workerUrl);
       worker.onmessage = this.handleWorkerMessage.bind(this);
       this.workers.push(worker);
-      this.workerLoads.push(0);
+      window[`worker${workerNum}`] = worker;
       return true;
     } catch (e) {
       console.log('Failed to start webworker', e);
@@ -1543,15 +1549,15 @@ class Scheduler {
   }
 
   assignBoardToWorker(k, size, re, im, config, id) {
-    let minLoad = Math.min(...this.workerLoads);
-    if (this.workers.length == 0 || minLoad && this.workers.length < this.workerCount) {
+    let [workerNumber, minLoad] = this.findLeastLoadedWorker();
+    if (workerNumber == -1 || (minLoad > 0 && this.workers.length < this.workerCount)) {
       if (this.addWorker()) {
-        minLoad = 0;
+        workerNumber = this.workers.length - 1;
       }
     }
-    const workerNumber = this.workerLoads.indexOf(minLoad);
     const worker = this.workers[workerNumber];
     const estimatedWork = config.dims2 * ((size / config.dims < 1e-15) ? 7 : 1);
+    this.boardEfforts.set(k, estimatedWork);
     this.assignments[k] = workerNumber;
 
     worker.postMessage({
@@ -1570,8 +1576,6 @@ class Scheduler {
         workerNumber
       }
     });
-
-    this.workerLoads[workerNumber] += estimatedWork;
   }
 
   removeBoardFromWorker(k) {
@@ -1601,6 +1605,10 @@ class Scheduler {
     });
   }
 
+  pauseComputation(pause) {
+    this.workers.forEach(worker => worker.postMessage({ type: 'pause', data: { pause } }));
+  }
+
   handleWorkerMessage(e) {
     const { type, data } = e.data;
     const workerIndex = this.workers.indexOf(e.target);
@@ -1613,13 +1621,104 @@ class Scheduler {
         this.grid.updateViewFromWorkerResult(data.k, data, workerIndex);
         // fallthrough
       case 'update':
-        this.workerLoads[workerIndex] = data.remainingWork;
+        if ('boardEffort' in data) { this.boardEfforts.set(data.k, data.boardEffort); }
+        this.checkAndBalance(); // Check if we need to balance the load
+        break;
+      case 'downloadTransfer':
+        this.handleDownloadTransfer(data, workerIndex);
         break;
     }
   }
 
-  pauseComputation(pause) {
-    this.workers.forEach(worker => worker.postMessage({ type: 'pause', data: { pause } }));
+  checkAndBalance() {
+    // Only apply load balancing periodically.
+    const now = Date.now();
+    if (now - this.lastBalanceTime < this.balanceInterval) { return; }
+    this.lastBalanceTime = now;
+
+    const workerLoads = this.workers.map((_, index) => this.getWorkerLoad(index));
+    const lowEffort = Math.min(...workerLoads);
+    const highEffort = Math.max(...Array.from(this.boardEfforts.values()));
+
+    if (lowEffort * 2 < highEffort) {
+      const transferCandidates = [];
+      for (let workerIndex = 0; workerIndex < this.workers.length; workerIndex++) {
+        if (this.getWorkerLoad(workerIndex) > 2 * lowEffort) {
+          const workerBoards = this.getWorkerBoards(workerIndex);
+          if (workerBoards.length > 1) {
+            const sortedBoards = workerBoards.sort(
+                (a, b) => this.boardEfforts.get(b) - this.boardEfforts.get(a));
+            console.log(`requesting transfer of ${sortedBoards[1]} from ${workerIndex}`);
+            transferCandidates.push(sortedBoards[1]);
+            break;
+          }
+        }
+      }
+
+      if (transferCandidates.length > 0) {
+        this.requestTransfers(transferCandidates);
+      }
+    }
+
+  }
+
+  findLeastLoadedWorker() {
+    if (!this.workers.length) { return [-1, 0]; }
+    const workerLoads = new Array(this.workers.length).fill(0);
+    for (const [boardK, workerIndex] of Object.entries(this.assignments)) {
+      workerLoads[workerIndex] += this.boardEfforts.get(parseInt(boardK)) || 0;
+    }
+    const minLoad = Math.min(...workerLoads);
+    return [workerLoads.indexOf(minLoad), minLoad];
+  }
+
+  getWorkerLoad(workerIndex) {
+    return Object.entries(this.assignments)
+      .filter(([_, assignedWorker]) => assignedWorker === workerIndex)
+      .reduce((sum, [k, _]) => sum + (this.boardEfforts.get(parseInt(k)) || 0), 0);
+  }
+
+  getWorkerBoards(workerIndex) {
+    return Object.entries(this.assignments)
+      .filter(([_, assignedWorker]) => assignedWorker === workerIndex)
+      .map(([k, _]) => parseInt(k));
+  }
+
+  requestTransfers(boardKeys) {
+    // Group transfer requests by worker
+    for (const [workerIndex, worker] of this.workers.entries()) {
+      const workerBoards = boardKeys.filter(k => this.assignments[k] === workerIndex);
+      if (workerBoards.length > 0) {
+        worker.postMessage({
+          type: 'requestTransfer',
+          data: { boardKeys: workerBoards }
+        });
+      }
+    }
+  }
+
+  handleDownloadTransfer(data, sourceWorkerIndex) {
+    const { transferredBoards } = data;
+    for (const boardData of transferredBoards) {
+      // Remove the board from its original worker
+      delete this.assignments[boardData.k];
+
+      // Find the least loaded worker and assign the board to it
+      const [targetWorkerIndex, minLoad] = this.findLeastLoadedWorker();
+      this.uploadTransferredBoard(boardData, targetWorkerIndex);
+      console.log(`Transferred ${boardData.k} from worker ${sourceWorkerIndex} to ${targetWorkerIndex}`);
+    }
+  }
+
+  uploadTransferredBoard(boardData, targetWorkerIndex) {
+    // Send the board to its new worker
+    this.workers[targetWorkerIndex].postMessage({
+      type: 'uploadTransfer',
+      data: { boardData }
+    });
+
+    // Update assignments and worker loads
+    this.assignments[boardData.k] = targetWorkerIndex;
   }
 }
 
@@ -2651,10 +2750,10 @@ function workerLog(message) {
   });
 }
 
-let workerNumber = null;
-let boards = new Map();
-let focusedBoardK = null;
+const workerName = self.name;
+const boards = new Map();
 let hiddenBoards = new Set();
+let focusedBoardK = null;
 let computationPaused = false;
 let steps = 0;
 let startTime = 0;
@@ -2681,18 +2780,27 @@ self.onmessage = function(e) {
     case 'setHiddenBoards':
       hiddenBoards = new Set(data.hiddenBoards);
       break;
-    case 'uploadTransfer':
-      const uploaded = Board.fromSerialized(e.data);
-      boards.set(data.k, uploaded);
-      break;
     case 'requestTransfer':
-      if (boards.has(data.k)) {
-        const serialized = boards.get(data.k).serialize();
-        self.postMessage({
-          type: 'downloadTransfer',
-          data: serialized
-        });
+      const transferredBoards = [];
+      for (const k of data.boardKeys) {
+        if (boards.has(k)) {
+          const board = boards.get(k);
+          const serializedBoard = board.serialize();
+          boards.delete(k);
+          transferredBoards.push(serializedBoard);
+        }
       }
+      // Send the serialized boards back to the scheduler
+      self.postMessage({
+        type: 'downloadTransfer',
+        data: { transferredBoards }
+      });
+      break;
+    case 'uploadTransfer':
+      // Recreate the board from the serialized data and add it to this worker
+      const newBoard = Board.fromSerialized(data.boardData);
+      boards.set(newBoard.k, newBoard);
+      console.log(`received uploaded board ${newBoard.k}, now ${Array.from(boards.keys())}`)
       break;
     case 'pause':
       computationPaused = data.pause;
@@ -2711,6 +2819,7 @@ self.onmessage = function(e) {
       }
     });
   }
+  console.log(`handled ${type}, now ${Array.from(boards.keys())}`)
 };
 
 function iterateBoards() {
@@ -2753,8 +2862,9 @@ function iterateBoards() {
     }
     const now = (new Date()).getTime();
     if (board.updateSize >= 1000 || now - board.lastTime >= 100) {
+      const boardEffort = board.unfinished() * board.effort;
       const remainingWork = pri.map(b => b.unfinished() * b.effort).reduce((a, b) => a + b, 0);
-      const workerInfo = `worker ${workerNumber}: ` + (board.unfinished() ?
+      const workerInfo = `${workerName}: ` + (board.unfinished() ?
            `boards {${[...boards.keys()]}}, work: ${remainingWork}` :
            `board finished`);
       self.postMessage({
@@ -2767,6 +2877,7 @@ function iterateBoards() {
           di: board.di,
           ch: board.ch,
           changeList: board.changeList,
+          boardEffort,
           remainingWork,
           workerInfo
         }
