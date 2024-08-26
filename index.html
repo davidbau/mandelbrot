@@ -2022,34 +2022,79 @@ const lastScriptLineNumber = parseInt(new Error().stack.match(/(:[\d]+)/)[0].rep
 <script id="workerCode" type="text/worker">
 class Board {
   constructor(k, size, re, im, config, id) {
-    this.k = k;
-    this.id = id;
-    this.config = config;
-    this.it = 0;
-    this.zz = []; // current iterate for each pixel
-    this.cc = []; // current constant for each pixel
-    this.nn = []; // iterations when diverged / (neg) converged
-    this.bb = []; // recent remembered z
-    this.pp = []; // iteration at which converged within epsilon2
-    this.ss = null; // sparse list of indexes to compute
-    this.un = config.dims2; // count of unfinished points
-    this.di = 0; // diverged points
-    this.ch = 0; // potentially chaotic points in the spike
-    this.hi = [[0, 1, 1, 0]];
+    this.k = k;    // Number in explorer
     this.sizes = [size, toQd(re), toQd(im)];
-    this.effort = 1;
+    this.id = id;  // Random ID
+    this.config = config;  // Global config
+
+    this.it = 1;            // Current iteration
+    this.un = config.dims2; // Unfinished pixels
+    this.di = 0;            // Diverged pixels
+    this.ch = 0;            // Chaotic pixels
+    this.effort = 1;        // Work-per pixel
+
     this.pix = this.sizes[0] / this.config.dims;
     this.epsilon = Math.min(1e-12, this.pix / 10);
     this.epsilon2 = Math.min(1e-9, this.pix * 10);
-    this.lastTime = 0;
-    this.changeList = [];
-    this.updateSize = 0;
-  }
 
-  initboard(size, re, im) {
-    this.it = 1;
+    this.lastTime = 0;      // Time last message sent out
+    this.changeList = [];   // List of new data to send
+    this.updateSize = 0;    // Amount of data to send
+
+    // Initialize arrays
     this.nn = new Array(this.config.dims2).fill(0);
     this.pp = new Array(this.config.dims2).fill(0);
+    this.cc = [];
+    this.zz = [];
+    this.bb = [];
+  }
+
+  serialize() {
+    return {
+      type: this.constructor.name,
+      k: this.k,
+      sizes: this.sizes,
+      id: this.id,
+      config: this.config,
+      it: this.it,
+      un: this.un,
+      di: this.di,
+      ch: this.ch,
+    };
+  }
+
+  static fromSerialized(serialized) {
+    const subclasses = new Map([
+      ['CpuBoard', CpuBoard],
+      ['PerturbationBoard', PerturbationBoard]
+    ]);
+    return subclasses.get(serialized.type).fromSerialized(serialized);
+  }
+
+  inspike(re, im) {
+    // We do not iterate infinitely for chaotic points in the spike.
+    return (im == 0.0 && re > -2.0 && re < -1.401155 &&
+            this.config.exponent == 2);
+  }
+
+  inspikeQdA(re1, re2, im1, im2) {
+    // We do not iterate infinitely for chaotic points in the spike.
+    return (im1 + im2 == 0.0 && re1 >= -2.0 && re1 < -1.401155 &&
+            this.config.exponent == 2);
+  }
+
+  unfinished() {
+    // Chaotic points in the spike counted as finished after 100000 iterations.
+    const result = this.un + (this.it < 100000 ? this.ch : 0);
+    return result;
+  }
+}
+
+class CpuBoard extends Board {
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+
+    // Initialize board
     for (let y = 0; y < this.config.dims; y++) {
       const jFrac = (0.5 - (y / this.config.dims));
       const j = jFrac * size + im[0];
@@ -2063,12 +2108,49 @@ class Board {
         }
       }
     }
-    this.ss = [];
-    for (let m = 0; m < this.config.dims2; ++m) {
-      this.ss.push(m);
-    }
+
     this.zz = this.cc.slice();
     this.bb = this.cc.slice();
+    this.ss = Array(this.config.dims2).fill(null).map((_, i) => i);
+  }
+
+  static fromSerialized(serialized) {
+    const board = new CpuBoard(
+      serialized.k,
+      serialized.sizes[0],
+      serialized.sizes[1],
+      serialized.sizes[2],
+      serialized.config,
+      serialized.id
+    );
+
+    // Override initialized values with serialized data
+    Object.assign(board, serialized);
+
+    // Reconstruct full arrays from serialized data
+    board.zz = new Array(board.config.dims2 * 2).fill(0);
+    board.bb = new Array(board.config.dims2 * 2).fill(0);
+    board.pp = new Array(board.config.dims2).fill(0);
+    for (let i = 0; i < serialized.ss.length; i++) {
+      const index = serialized.ss[i];
+      board.zz[index * 2] = serialized.zz[i * 2];
+      board.zz[index * 2 + 1] = serialized.zz[i * 2 + 1];
+      board.bb[index * 2] = serialized.bb[i * 2];
+      board.bb[index * 2 + 1] = serialized.bb[i * 2 + 1];
+      board.pp[index] = serialized.pp[i];
+    }
+
+    return board;
+  }
+
+  serialize() {
+    return {
+      ...super.serialize(),
+      ss: this.ss,
+      zz: this.ss.flatMap(i => [this.zz[i*2], this.zz[i*2+1]]),
+      bb: this.ss.flatMap(i => [this.bb[i*2], this.bb[i*2+1]]),
+      pp: this.ss.map(index => this.pp[index]),
+    }
   }
 
   iterate() {
@@ -2164,38 +2246,22 @@ class Board {
     return 0;
   }
 
-  inspike(re, im) {
-    // We do not iterate infinitely for chaotic points in the spike.
-    return (im == 0.0 && re > -2.0 && re < -1.401155 &&
-            this.config.exponent == 2);
-  }
-
-  unfinished() {
-    // Chaotic points in the spike counted as finished after 100000 iterations.
-    const result = this.un + (this.it < 100000 ? this.ch : 0);
-    return result;
-  }
-
 }
 
 class PerturbationBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
+
     this.quadIndexes = [];
     this.pertIndexes = [];
     this.tt = [];
-    // The 0.1 threshold is 2x faster than 0.01 but reveals some edge artfiacts
-    // Bail when perturbation exceeds half the digits of precision
     this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dims)));
-    // For scheduling: each step is about 3x effort of default board.
     this.effort = 3;
+    this.initPerturbationBoard(size, re, im);
   }
 
-  initboard(size, re, im) {
-    this.it = 1;
+  initPerturbationBoard(size, re, im) {
     this.cc = new Array(this.config.dims2 * 4).fill(0);
-    this.nn = new Array(this.config.dims2).fill(0);
-    this.pp = new Array(this.config.dims2).fill(0);
     // Odd grid ensures that center point corresponds to a quad precision pixel
     const gridSize = Math.floor(this.config.dims / 17 / 2) * 2 + 1;
     const step = this.config.dims / gridSize;
@@ -2205,6 +2271,7 @@ class PerturbationBoard extends Board {
     re = toQd(re);
     im = toQd(im);
 
+    // Initialize reference points and perturbations
     for (let gy = 0; gy < gridSize; gy++) {
       const ry = Math.round(gy * step + offset);
       const jFrac = (0.5 - (ry / this.config.dims));
@@ -2217,7 +2284,6 @@ class PerturbationBoard extends Board {
         const cr = qdAdd(re, qdScale(toQd(rFrac), size));
 
         // Initialize reference point
-
         cc[ri] = cr[0];
         cc[ri+1] = cr[1];
         cc[ri+2] = cj[0];
@@ -2255,15 +2321,63 @@ class PerturbationBoard extends Board {
         }
       }
     }
+
     this.zz = this.cc.slice();
-    this.nz = this.cc.slice();
     this.bb = this.cc.slice();
+    this.nz = this.cc.slice();
   }
 
-  inspikeQdA(re1, re2, im1, im2) {
-    // We do not iterate infinitely for chaotic points in the spike.
-    return (im1 + im2 == 0.0 && re1 >= -2.0 && re1 < -1.401155 &&
-            this.config.exponent == 2);
+  static fromSerialized(serialized) {
+    const board = new PerturbationBoard(
+      serialized.k,
+      serialized.sizes[0],
+      serialized.sizes[1],
+      serialized.sizes[2],
+      serialized.config,
+      serialized.id
+    );
+
+    // Override initialized values with serialized data
+    Object.assign(board, serialized);
+
+    // Reconstruct full arrays from serialized data
+    board.zz = new Array(board.config.dims2 * 4).fill(0);
+    board.bb = new Array(board.config.dims2 * 4).fill(0);
+    board.nz = new Array(board.config.dims2 * 4).fill(0);
+    board.pp = new Array(board.config.dims2).fill(0);
+    for (let i = 0; i < serialized.quadIndexes.length; i++) {
+      const index = serialized.quadIndexes[i];
+      if (!isFinite(board.cc[index * 4 + 3])) {
+        board.convertToQuadPrecision(index);
+      }
+      for (let j = 0; j < 4; j++) {
+        board.zz[index * 4 + j] = serialized.zz[i * 4 + j];
+        board.bb[index * 4 + j] = serialized.bb[i * 4 + j];
+      }
+      board.pp[index] = serialized.pp[i];
+    }
+
+    for (let i = 0; i < serialized.pertIndexes.length; i++) {
+      const index = serialized.pertIndexes[i];
+      for (let j = 0; j < 3; j++) {
+        board.zz[index * 4 + j] = serialized.pertZZ[i * 3 + j];
+      }
+    }
+
+    return board;
+  }
+
+  serialize() {
+    return {
+      ...super.serialize(),
+      quadIndexes: this.quadIndexes,
+      pertIndexes: this.pertIndexes,
+      perturbationThreshold: this.perturbationThreshold,
+      zz: this.quadIndexes.flatMap(i => [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2], this.zz[i*4+3]]),
+      bb: this.quadIndexes.flatMap(i => [this.bb[i*4], this.bb[i*4+1], this.bb[i*4+2], this.bb[i*4+3]]),
+      pp: this.quadIndexes.map(index => this.pp[index]),
+      pertZZ: this.pertIndexes.flatMap(i => [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2]]),
+    };
   }
 
   iterate() {
@@ -2550,8 +2664,7 @@ self.onmessage = function(e) {
       // workerLog(`Board ${data.k} added to {${[...boards.keys()]}}`);
       const board = data.size / data.config.dims < 1e-15
         ? new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id)
-        : new Board(data.k, data.size, data.re, data.im, data.config, data.id);
-      board.initboard(data.size, data.re, data.im);
+        : new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
       boards.set(data.k, board);
       break;
     case 'removeBoard':
@@ -2562,6 +2675,19 @@ self.onmessage = function(e) {
       break;
     case 'setHiddenBoards':
       hiddenBoards = new Set(data.hiddenBoards);
+      break;
+    case 'uploadTransfer':
+      const uploaded = Board.fromSerialized(e.data);
+      boards.set(data.k, uploaded);
+      break;
+    case 'requestTransfer':
+      if (boards.has(data.k)) {
+        const serialized = boards.get(data.k).serialize();
+        self.postMessage({
+          type: 'downloadTransfer',
+          data: serialized
+        });
+      }
       break;
     case 'pause':
       computationPaused = data.pause;
