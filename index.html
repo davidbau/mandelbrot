@@ -402,7 +402,8 @@ class View {
 
   debugStatus() {
     const debugGraph = this.renderHiGraph(600, 300);
-    return `${this.di} diverged, ${this.un} unfinished, ${this.ch} chaotic\n` +
+    return `Board ${this.id}:\n` +
+           `${this.di} diverged, ${this.un} unfinished, ${this.ch} chaotic\n` +
            `${this.workerInfo}\n` +
            `<img src="${debugGraph}" style="width:300px;height:150px">`;
   }
@@ -471,7 +472,7 @@ class Grid {
   }
 
   makeView(k, size, re, im) {
-    const id = Math.random();
+    const id = k + Math.random();
     const view = new View(k, size, re, im, this.config, id);
     this.views[k] = view;
     this.scheduler.assignBoardToWorker(k, size, re, im, this.config, id);
@@ -489,8 +490,10 @@ class Grid {
   }
 
   setFocusedView(k) {
-    this.focusk = k;
-    this.scheduler.setFocusedBoard(k);
+    if (k != this.focusk) {
+      this.focusk = k;
+      this.scheduler.setFocusedBoard(k);
+    }
   }
 
   updateHiddenViews() {
@@ -700,6 +703,12 @@ class Grid {
       let statusDiv = overtarget.querySelector('.status');
       if (!statusDiv) return;
 
+      if (!overtarget.matches(':hover')) {
+        // (Clear text after animation transition)
+        setTimeout(() => { statusDiv.textContent = ''; }, 300);
+        return;
+      }
+
       // Regular status
       let regularStatus = 'center at ' +
         formatcomplex(k, this.views[k].sizes[1], this.views[k].sizes[2])
@@ -712,8 +721,7 @@ class Grid {
       if (overtarget.showDebug) {
         statusDiv.innerHTML += '\n' + this.views[k].debugStatus();
       }
-    }
-    if (overtarget.matches(':hover') || overtarget.matches(':focus')) {
+
       setTimeout(() => this.updateProgress(overtarget, k), 100);
     }
   }
@@ -1513,8 +1521,10 @@ class Scheduler {
     this.boardEfforts = new Map();
     this.assignments = {};
     this.lastBalanceTime = 0;
-    this.balanceInterval = 5000; // 5 seconds
-    this.workerCount = Math.max(3, (navigator.hardwareConcurrency || 1));
+    this.lastReportTime = 0;
+    this.balanceInterval = 5000; // Move jobs to load-balance every 5 seconds
+    this.reportInterval = 60000; // Report no more than once every 1 minute
+    this.workerCount = Math.max(1, (navigator.hardwareConcurrency - 1) || 1);
   }
 
   addWorker() {
@@ -1642,24 +1652,53 @@ class Scheduler {
 
     if (lowEffort * 2 < highEffort) {
       const transferCandidates = [];
-      for (let workerIndex = 0; workerIndex < this.workers.length; workerIndex++) {
-        if (this.getWorkerLoad(workerIndex) > 2 * lowEffort) {
+      const sortedLoad = workerLoads.map((load, index) => [index, load]).sort((a, b) => b[1] - a[1]);
+      for (let [workerIndex, load] of sortedLoad) {
+        if (load > 2 * lowEffort) {
           const workerBoards = this.getWorkerBoards(workerIndex);
           if (workerBoards.length > 1) {
             const sortedBoards = workerBoards.sort(
                 (a, b) => this.boardEfforts.get(b) - this.boardEfforts.get(a));
-            console.log(`requesting transfer of ${sortedBoards[1]} from ${workerIndex}`);
+            if (now - this.lastReportTime > this.reportInterval) {
+              console.log(this.report());
+              this.lastReportTime = now;
+            }
+            console.log(`requesting transfer of board ${sortedBoards[1]} ` +
+                        `(effort ${this.boardEfforts.get(sortedBoards[1])}) ` +
+                        `from worker ${workerIndex} (load ${load}) ` +
+                        `sharing board ${sortedBoards[0]} ` +
+                        `(effort ${this.boardEfforts.get(sortedBoards[0])}), ` +
+                        `low=${lowEffort}, high=${highEffort}`);
             transferCandidates.push(sortedBoards[1]);
             break;
           }
         }
       }
-
       if (transferCandidates.length > 0) {
         this.requestTransfers(transferCandidates);
       }
     }
+  }
 
+  report() {
+    if (!this.workers.length) { return 'no workers'; }
+    const workerLoads = this.workers.map(() => 0);
+    const workerBoards = this.workers.map(() => []);
+    for (const [boardK, workerIndex] of Object.entries(this.assignments)) {
+      const effort = this.boardEfforts.get(parseInt(boardK));
+      workerBoards[workerIndex].push([parseInt(boardK), effort]);
+      workerLoads[workerIndex] += effort || 0;
+    }
+    let result = '';
+    for (let i = 0; i < workerLoads.length; i++) {
+      result += `worker ${i} (load ${workerLoads[i]}): `;
+      workerBoards[i].sort((a, b) => b[1] - a[1]);
+      for (let j = 0; j < workerBoards[i].length; j++) {
+        result += `${workerBoards[i][j][0]}->${workerBoards[i][j][1]} `;
+      }
+      result += '\n';
+    }
+    return result;
   }
 
   findLeastLoadedWorker() {
@@ -1680,7 +1719,8 @@ class Scheduler {
 
   getWorkerBoards(workerIndex) {
     return Object.entries(this.assignments)
-      .filter(([_, assignedWorker]) => assignedWorker === workerIndex)
+      .filter(([k, assignedWorker]) =>
+           this.boardEfforts.get(parseInt(k)) > 0 && assignedWorker === workerIndex)
       .map(([k, _]) => parseInt(k));
   }
 
@@ -1706,7 +1746,8 @@ class Scheduler {
       // Find the least loaded worker and assign the board to it
       const [targetWorkerIndex, minLoad] = this.findLeastLoadedWorker();
       this.uploadTransferredBoard(boardData, targetWorkerIndex);
-      console.log(`Transferred ${boardData.k} from worker ${sourceWorkerIndex} to ${targetWorkerIndex}`);
+      console.log(`transferred ${boardData.k} from worker ${sourceWorkerIndex} ` +
+                  `to ${targetWorkerIndex} (load ${minLoad})`);
     }
   }
 
@@ -2167,6 +2208,9 @@ class Board {
     };
   }
 
+  compact() {
+  }
+
   static fromSerialized(serialized) {
     const subclasses = new Map([
       ['CpuBoard', CpuBoard],
@@ -2231,12 +2275,16 @@ class CpuBoard extends Board {
     // Override initialized values with serialized data
     Object.assign(board, serialized);
 
-    // Reconstruct full arrays from serialized data
-    board.zz = new Array(board.config.dims2 * 2).fill(0);
-    board.bb = new Array(board.config.dims2 * 2).fill(0);
-    board.pp = new Array(board.config.dims2).fill(0);
+    // Reconstruct sparse arrays from serialized data
+    const cc = board.cc;
+    board.cc = [];
+    board.zz = [];
+    board.bb = [];
+    board.pp = [];
     for (let i = 0; i < serialized.ss.length; i++) {
       const index = serialized.ss[i];
+      board.cc[index * 2] = cc[index * 2];
+      board.cc[index * 2 + 1] = cc[index * 2 + 1];
       board.zz[index * 2] = serialized.zz[i * 2];
       board.zz[index * 2 + 1] = serialized.zz[i * 2 + 1];
       board.bb[index * 2] = serialized.bb[i * 2];
@@ -2265,14 +2313,6 @@ class CpuBoard extends Board {
     // head and tail factor i into an odd num and largest power of 2.
     let head = this.it, tail = 1;
     while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
-    if (s.length > this.un * 1.25) {
-      let news = [];
-      for (let t = 0; t < s.length; ++t) {
-        if (this.nn[s[t]]) continue;
-        news.push(s[t]);
-      }
-      s = this.ss = news;
-    }
     if (head <= tail) {
       for (let t = 0; t < s.length; ++t) {
         let m = s[t];
@@ -2285,8 +2325,6 @@ class CpuBoard extends Board {
     for (let t = 0; t < s.length; ++t) {
       const index = s[t];
       const computeResult = this.compute(index);
-      results[computeResult + 1] += 1;
-
       if (computeResult !== 0) {
         if (!changes) {
           changes = { iter: this.it, nn: [], vv: [] };
@@ -2302,12 +2340,30 @@ class CpuBoard extends Board {
         }
       }
     }
-
-    this.un -= results[2] + results[0]; // newly finished
-    this.di += results[2]; // diverged
+    if (changes) {
+      this.un -= changes.nn.length + changes.vv.length; // newly finished
+      this.di += changes.nn.length; // diverged
+    }
+    if (s.length > this.un * 1.25) {
+      this.compact();
+      if (this.ss.length > this.un) {
+        throw new Error('excess ss', s.length, this.ss.length, this.un);
+      }
+    }
+    if (this.ss.length > this.un * 1.25) {
+      console.log(changes.nn.length, changes.vv.length);
+      throw new Error('too many excess ss');
+    }
+    if (this.un < 0) {
+      throw new Error('negative un');
+    }
 
     this.it++;
     return changes;
+  }
+
+  compact() {
+    this.ss = this.ss.filter(i => !this.nn[i]);
   }
 
   compute(m) {
@@ -2445,13 +2501,17 @@ class PerturbationBoard extends Board {
     Object.assign(board, serialized);
 
     // Reconstruct full arrays from serialized data
-    board.zz = new Array(board.config.dims2 * 4).fill(0);
-    board.bb = new Array(board.config.dims2 * 4).fill(0);
-    board.nz = new Array(board.config.dims2 * 4).fill(0);
-    board.pp = new Array(board.config.dims2).fill(0);
+    const cc = board.cc;
+    board.cc = [];
+    board.zz = [];
+    board.bb = [];
+    board.pp = [];
     for (let i = 0; i < serialized.quadIndexes.length; i++) {
       const index = serialized.quadIndexes[i];
-      if (!isFinite(board.cc[index * 4 + 3])) {
+      for (let j = 0; j < 4; j++) {
+        board.cc[index * 4 + j] = cc[index * 4 + j];
+      }
+      if (!isFinite(cc[index * 4 + 3])) {
         board.convertToQuadPrecision(index);
       }
       for (let j = 0; j < 4; j++) {
@@ -2460,14 +2520,12 @@ class PerturbationBoard extends Board {
       }
       board.pp[index] = serialized.pp[i];
     }
-
     for (let i = 0; i < serialized.pertIndexes.length; i++) {
       const index = serialized.pertIndexes[i];
       for (let j = 0; j < 3; j++) {
         board.zz[index * 4 + j] = serialized.pertZZ[i * 3 + j];
       }
     }
-
     return board;
   }
 
@@ -2570,24 +2628,24 @@ class PerturbationBoard extends Board {
 
     // Trim finished pixels from array.
     if (this.pertIndexes.length + this.quadIndexes.length > this.un * 1.25) {
-      const trimmedQuadIndexes = []
-      for (const index of this.quadIndexes) {
-        if (this.nn[index]) continue;
-        trimmedQuadIndexes.push(index);
-      }
+      this.compact();
       // Switch to full quad when perturbations are a small fraction of the work
-      if (this.pertIndexes.length < trimmedQuadIndexes.length * 0.5) {
+      if (this.pertIndexes.length < this.quadIndexes.length * 0.5) {
         for (const index of this.pertIndexes) {
           this.convertToQuadPrecision(index);
-          trimmedQuadIndexes.push(index);
+          this.quadIndexes.push(index);
         }
         this.pertIndexes = [];
       }
-      this.quadIndexes = trimmedQuadIndexes;
     }
 
     this.it++;
     return changes;
+  }
+
+  compact() {
+    const trimmedQuadIndexes = this.quadIndexes.filter(i => !this.nn[i]);
+    this.quadIndexes = trimmedQuadIndexes;
   }
 
   precomputeQuad(m) {
@@ -2785,6 +2843,7 @@ self.onmessage = function(e) {
       for (const k of data.boardKeys) {
         if (boards.has(k)) {
           const board = boards.get(k);
+          board.compact();
           const serializedBoard = board.serialize();
           boards.delete(k);
           transferredBoards.push(serializedBoard);
@@ -2800,7 +2859,7 @@ self.onmessage = function(e) {
       // Recreate the board from the serialized data and add it to this worker
       const newBoard = Board.fromSerialized(data.boardData);
       boards.set(newBoard.k, newBoard);
-      console.log(`received uploaded board ${newBoard.k}, now ${Array.from(boards.keys())}`)
+      // console.log(`received uploaded board ${newBoard.k}, now ${Array.from(boards.keys())}`)
       break;
     case 'pause':
       computationPaused = data.pause;
