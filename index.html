@@ -504,7 +504,7 @@ class Grid {
   updateViewFromWorkerResult(k, data, workerIndex) {
     if (this.views[k]) {
       if (this.views[k].id != data.id) {
-        console.log(`Mismatched id for board ${k} from worker ${workerIndex}; discarding.`);
+        console.log(`Discarding stale id ${data.id} from worker ${workerIndex}.`);
         return;
       }
       this.views[k].updateFromWorkerResult(data);
@@ -1663,12 +1663,14 @@ class Scheduler {
               console.log(this.report());
               this.lastReportTime = now;
             }
+            /*
             console.log(`requesting transfer of board ${sortedBoards[1]} ` +
                         `(effort ${this.boardEfforts.get(sortedBoards[1])}) ` +
                         `from worker ${workerIndex} (load ${load}) ` +
                         `sharing board ${sortedBoards[0]} ` +
                         `(effort ${this.boardEfforts.get(sortedBoards[0])}), ` +
                         `low=${lowEffort}, high=${highEffort}`);
+            */
             transferCandidates.push(sortedBoards[1]);
             break;
           }
