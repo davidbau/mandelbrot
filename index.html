@@ -273,7 +273,6 @@ class View {
     this.ch = data.ch;
     this.it = data.it;
     this.workerInfo = data.workerInfo;
-    // console.log(`View ${this.k}: Updated to iteration ${this.it}`);
   }
 
   currentc(j) {
@@ -2576,105 +2575,6 @@ class PerturbationBoard extends Board {
     };
   }
 
-  testSerialize() {
-    this.compact();
-    const s1 = this.serialize();
-    let b = Board.fromSerialized(s1);
-    const s2 = b.serialize();
-    if (JSON.stringify(s1) !== JSON.stringify(s2)) {
-      throw new Error('Serialization mismatch');
-    }
-    for (let index of this.quadIndexes) {
-      for (let j = 0; j < 4; j++) {
-        if (this.cc[index * 4 + j] !== b.cc[index * 4 + j]) {
-          console.warn(`cc different at ${index + 4 + j}`);
-        }
-        if (this.zz[index * 4 + j] !== b.zz[index * 4 + j]) {
-          console.warn(`zz different at ${index + 4 + j}`);
-        }
-        if (this.bb[index * 4 + j] !== b.bb[index * 4 + j]) {
-          console.warn(`bb different at ${index + 4 + j}`);
-        }
-        if (this.pp[index] !== b.pp[index]) {
-          console.warn(`pp different at ${index}`);
-        }
-      }
-    }
-    for (let index of this.pertIndexes) {
-      const refindex = this.cc[index * 4 + 2];
-      if (this.quadIndexes.indexOf(refindex) < 0) {
-        console.log(`refindex ${refindex} at perIndexes[${index}] not found`);
-      }
-    }
-
-    // Iterate once on both boards
-    this.iterate();
-    debugger;
-    b.iterate();
-
-    // Compare list lengths
-    const listChecks = ['quadIndexes', 'pertIndexes'];
-    for (const list of listChecks) {
-      if (this[list].length !== b[list].length) {
-        console.warn(`Mismatch in ${list} length after iteration`);
-        console.log(`Original ${list} length:`, this[list].length);
-        console.log(`Serialized ${list} length:`, b[list].length);
-      }
-    }
-
-    // Compare un, di, ch values
-    const countChecks = ['un', 'di', 'ch'];
-    for (const count of countChecks) {
-      if (this[count] !== b[count]) {
-        console.warn(`Mismatch in ${count} after iteration`);
-        console.log(`Original ${count}:`, this[count]);
-        console.log(`Serialized ${count}:`, b[count]);
-      }
-    }
-
-    // Check every result for differences
-    const properties = ['it', 'un', 'di', 'ch', 'effort', 'updateSize'];
-    for (const prop of properties) {
-      if (this[prop] !== b[prop]) {
-        throw new Error(`Mismatch in ${prop} after iteration`);
-      }
-    }
-
-    // Check significant entries of arrays
-    const arrayChecks = [
-      { name: 'nn', indexes: this.quadIndexes.concat(this.pertIndexes) },
-      { name: 'pp', indexes: this.quadIndexes },
-      { name: 'cc', indexes: this.quadIndexes, stride: 4 },
-      { name: 'zz', indexes: this.quadIndexes.concat(this.pertIndexes), stride: 4 },
-      { name: 'bb', indexes: this.quadIndexes, stride: 4 }
-    ];
-
-    for (const check of arrayChecks) {
-      for (const index of check.indexes) {
-        if (check.stride) {
-          for (let i = 0; i < check.stride; i++) {
-            if (this[check.name][index * check.stride + i] !== b[check.name][index * check.stride + i]) {
-              throw new Error(`Mismatch in ${check.name}[${index * check.stride + i}] after iteration`);
-            }
-          }
-        } else {
-          if (this[check.name][index] !== b[check.name][index]) {
-            throw new Error(`Mismatch in ${check.name}[${index}] after iteration`);
-          }
-        }
-      }
-    }
-
-    // Check changeList
-    if (JSON.stringify(this.changeList) !== JSON.stringify(b.changeList)) {
-      throw new Error('Mismatch in changeList after iteration');
-    }
-
-    if (JSON.stringify(s1) !== JSON.stringify(s2)) {
-      throw new Error('Serialization mismatch');
-    }
-  }
-
   iterate() {
     let changes = null;
 
@@ -3003,7 +2903,6 @@ self.onmessage = function(e) {
       // Recreate the board from the serialized data and add it to this worker
       const newBoard = Board.fromSerialized(data.boardData);
       boards.set(newBoard.k, newBoard);
-      // console.log(`received uploaded board ${newBoard.k}, now ${Array.from(boards.keys())}`)
       break;
     case 'pause':
       computationPaused = data.pause;
@@ -3022,7 +2921,6 @@ self.onmessage = function(e) {
       }
     });
   }
-  // console.log(`handled ${type}, now ${Array.from(boards.keys())}`)
 };
 
 function iterateBoards() {
