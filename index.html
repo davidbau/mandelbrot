@@ -1523,7 +1523,7 @@ class Scheduler {
     this.lastReportTime = 0;
     this.balanceInterval = 5000; // Move jobs to load-balance every 5 seconds
     this.reportInterval = 60000; // Report no more than once every 1 minute
-    this.workerCount = Math.max(1, navigator.hardwareConcurrency || 1);
+    this.workerCount = Math.max(1, Math.ceil(navigator.hardwareConcurrency * 0.75) || 1);
   }
 
   addWorker() {
@@ -2209,13 +2209,16 @@ class Board {
       un: this.un,
       di: this.di,
       ch: this.ch,
+      lastTime: this.lastTime,
+      changeList: this.changeList,
+      updateSize: this.updateSize
     };
   }
 
   compact() {
   }
 
-  processChanges(changes) {
+  queueChanges(changes) {
     if (changes !== null) {
       this.changeList.push(changes);
       this.updateSize += changes.nn.length + changes.vv.length;
@@ -2390,7 +2393,7 @@ class CpuBoard extends Board {
     }
 
     this.it++;
-    this.processChanges(changes);
+    this.queueChanges(changes);
   }
 
   compact() {
@@ -2673,7 +2676,7 @@ class PerturbationBoard extends Board {
     }
 
     this.it++;
-    this.processChanges(changes);
+    this.queueChanges(changes);
   }
 
   compact() {
