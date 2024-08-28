@@ -1275,7 +1275,7 @@ class MovieMode {
       `<canvas width=${this.explorer.config.dims} height=${this.explorer.config.dims} ` +
       `style="width:${this.explorer.config.cssDims}px;` +
       `height:${this.explorer.config.cssDims}px"></canvas>` +
-      `<a id="moviescale" class="zoomnum">Rendering movie...</a></div>`;
+      `<a id="moviescale" class="zoomnum">Pre-rendering movie...</a></div>`;
     this.movieCanvas = this.explorer.movieContainer.firstElementChild.firstElementChild;
     this.movieCtx = this.movieCanvas.getContext('2d');
     this.movieCtx.drawImage(this.explorer.grid.canvas(0), 0, 0);
@@ -1296,7 +1296,7 @@ class MovieMode {
         let status = document.getElementById('moviescale');
         if (status) {
           status.textContent =
-            `Rendering ${formatScale(3.0 / this.explorer.grid.views[k].sizes[0])}`;
+            `Pre-rendering ${formatScale(3.0 / this.explorer.grid.views[k].sizes[0])}`;
         }
         let canvas1 = null;
         let canvas2 = null;
