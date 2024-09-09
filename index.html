@@ -1838,13 +1838,13 @@ class OrbitComputer {
         if (view.nn[j] > 0) {
           title += '\ndiverges in ' + view.nn[j];
         } else {
-          let period = this.figureperiod(view.currentp(j));
+          let period = figurePeriod(view.currentp(j));
           if (period == 1) {
             title += '\nconverges after ' + view.currentp(j);
           } else {
             title += '\nafter ' + view.currentp(j) + ', period ' + period;
           }
-          let clen = this.figureperiod(view.currentp(j));
+          let clen = figurePeriod(view.currentp(j));
           cyc = this.suborbit(z, c, clen);
         }
       } else {
@@ -1898,13 +1898,6 @@ class OrbitComputer {
       result.push(r[0], r[1], j[0], j[1]);
     }
     return result;
-  }
-
-  figureperiod(i) {
-    // Reverse the computation that was done for exponential backoff.
-    let head = i, tail = 1;
-    while (head > tail) { head >>= 1; tail <<= 1; }
-    return i - (head * tail) + 1;
   }
 
   showseq(k, seq, color) {
@@ -2327,9 +2320,7 @@ class CpuBoard extends Board {
     const results = [0, 0, 0];
     let s = this.ss;    // speedy list of indexes to compute
     // head and tail factor i into an odd num and largest power of 2.
-    let head = this.it, tail = 1;
-    while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
-    if (head <= tail) {
+    if (figurePeriod(this.it) == 1) {
       for (let t = 0; t < s.length; ++t) {
         let m = s[t];
         if (this.nn[m]) continue;
@@ -3450,6 +3441,16 @@ function AqdAbsSub(r, i, a1, a2, b1, b2) {
     r[i] = -r[i];
     r[i+1] = -r[i+1];
   }
+}
+
+// Additional shared utility function for tracking cycles.
+
+function figurePeriod(iteration) {
+  // Returns 1 plus the number of iterations since the most recent multiple
+  // of a high power-of-two-exceeding-sqrt(iteration).
+  let tail = 1;
+  while (iteration / tail > tail) { tail *= 2; }
+  return iteration - (Math.floor(iteration / tail) * tail) + 1;
 }
 </script>
 <script>
