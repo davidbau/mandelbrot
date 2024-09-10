@@ -401,8 +401,13 @@ class View {
 
   debugStatus() {
     const debugGraph = this.renderHiGraph(600, 300);
+    const maxPeriod = this.convergedData.values().map(
+        d => figurePeriod(d.p)).reduce((a, b) => Math.max(a, b), 0);
+    const maxEscape = this.nn.reduce((a, b) => Math.max(a, b), 0)
+    this.nn.reduce((iMin, x, i, arr) => x < arr[iMin] ? i : iMin, 0);
     return `Board ${this.id}:\n` +
            `${this.di} diverged, ${this.un} unfinished, ${this.ch} chaotic\n` +
+           `max period ${maxPeriod}, max escape ${maxEscape}\n` +
            `${this.workerInfo}\n` +
            `<img src="${debugGraph}" style="width:300px;height:150px">`;
   }
@@ -2949,14 +2954,14 @@ function iterateBoards() {
     let p = 0;
     while (shift & (1 << p)) { p += 1; }
     const board = pri[Math.min(p, pri.length) % pri.length];
-    for (let workDone = 0; workDone < 50007 && board.unfinished(); ) {
+    for (let workDone = 0; workDone < 17377 && board.unfinished(); ) {
       workDone += (board.un + board.ch) * board.effort;
       // Iterate the board and process any changes
       // Note: updates the board's changeList and updateSize
       board.iterate();
     }
     const now = (new Date()).getTime();
-    if (board.updateSize >= 1000 || now - board.lastTime >= 100) {
+    if (board.updateSize >= 1429 || now - board.lastTime >= 100) {
       const boardEffort = board.unfinished() * board.effort;
       const remainingWork = pri.map(b => b.unfinished() * b.effort).reduce((a, b) => a + b, 0);
       const workerInfo = `${workerName}: ` + (board.unfinished() ?
