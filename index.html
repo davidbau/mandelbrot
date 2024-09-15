@@ -394,7 +394,7 @@ class View {
 
   unfinished() {
     // Chaotic points in the spike counted as finished after 100000 iterations.
-    const result = this.un + (this.it < 100000 ? this.ch : 0);
+    const result = Math.max(0, this.un + (this.it < 100000 ? 0 : -this.ch));
     return result;
   }
 
@@ -2247,7 +2247,7 @@ class Board {
 
   unfinished() {
     // Chaotic points in the spike counted as finished after 100000 iterations.
-    const result = this.un + (this.it < 100000 ? this.ch : 0);
+    const result = Math.max(0, this.un + (this.it < 100000 ? 0 : -this.ch));
     return result;
   }
 }
@@ -2265,7 +2265,6 @@ class CpuBoard extends Board {
         const r = rFrac * size + re[0];
         this.cc.push(r, j);
         if (this.inspike(r, j)) {
-          this.un -= 1;
           this.ch += 1;
         }
       }
@@ -2430,7 +2429,6 @@ class CpuBoard extends Board {
         this.nn[m] = -this.it;
         if (this.inspike(this.cc[m2], this.cc[m2i]) && this.ch > 0) {
           this.ch -= 1;
-          return 0;  // Points in spike are already counted
         }
         return -1;
       }
@@ -2483,7 +2481,6 @@ class PerturbationBoard extends Board {
         this.quadIndexes.push(refIndex);
         let refspike = this.inspikeQdA(cr[0], cr[1], cj[0], cj[1]);
         if (refspike) {
-          this.un -= 1;
           this.ch += 1;
         }
 
@@ -2505,7 +2502,6 @@ class PerturbationBoard extends Board {
               cc[pi+3] = Infinity;
               this.pertIndexes.push(pertIndex);
               if (refspike && py == ry) {
-                this.un -= 1;
                 this.ch += 1;
               }
             }
@@ -2732,10 +2728,8 @@ class PerturbationBoard extends Board {
         this.nn[m] = -this.it;
         if (this.inspikeQdA(cr1, cr2, cj1, cj2) && this.ch > 0) {
           this.ch -= 1;
-          return 0;  // Already counted
-        } else {
-          return -1;
         }
+        return -1;
       }
     }
     return 0;
@@ -2955,7 +2949,7 @@ function iterateBoards() {
     while (shift & (1 << p)) { p += 1; }
     const board = pri[Math.min(p, pri.length) % pri.length];
     for (let workDone = 0; workDone < 17377 && board.unfinished(); ) {
-      workDone += (board.un + board.ch) * board.effort;
+      workDone += board.un * board.effort;
       // Iterate the board and process any changes
       // Note: updates the board's changeList and updateSize
       board.iterate();
