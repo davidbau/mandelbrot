@@ -718,7 +718,7 @@ class Grid {
         formatcomplex(k, this.views[k].sizes[1], this.views[k].sizes[2])
           .replaceAll('-', '\u2212') + '\n' +
         Math.floor(1000 * (1.0 - this.views[k].unfinished() / this.config.dims2))/10.0  +
-          '% done after ' + this.views[k].it + ' iters';
+          '% done after ' + formatLargeInt(this.views[k].it) + ' iters';
       statusDiv.textContent = regularStatus;
 
       // Debug status
@@ -1845,9 +1845,9 @@ class OrbitComputer {
         } else {
           let period = figurePeriod(view.currentp(j));
           if (period == 1) {
-            title += '\nconverges after ' + view.currentp(j);
+            title += '\nconverges after ' + formatLargeInt(view.currentp(j));
           } else {
-            title += '\nafter ' + view.currentp(j) + ', period ' + period;
+            title += '\nafter ' + formatLargeInt(view.currentp(j)) + ', period ' + formatLargeInt(period);
           }
           let clen = figurePeriod(view.currentp(j));
           cyc = this.suborbit(z, c, clen);
@@ -2064,6 +2064,14 @@ function formatcomplex(k, re, im) {
   let rs = re[0] < 0.0 ? '-' : '+';
   let is = im[0] < 0.0 ? '-' : '+';
   return rs + rd + is + id + 'i';
+}
+
+function formatLargeInt(i) {
+  // Put a thin space between thousands, millions, etc.
+  const s = i.toString();
+  if (s.length <= 5) { return s; }
+  const groups = i.toString().match(/\d{1,3}(?=(\d{3})*$)/g);
+  return groups.join('\u2009');
 }
 
 function catmullRom1D(p0, p1, p2, p3, t) {
@@ -3446,10 +3454,10 @@ function AqdAbsSub(r, i, a1, a2, b1, b2) {
 
 function figurePeriod(iteration) {
   // Returns 1 plus the number of iterations since the most recent multiple
-  // of a high power-of-two-exceeding-sqrt(iteration).
+  // of a high power-of-two-exceeding-3/4-digits-of(iteration).
   let tail = 1;
-  while (iteration / tail > tail) { tail *= 2; }
-  return iteration - (Math.floor(iteration / tail) * tail) + 1;
+  if (iteration) while (Math.floor(iteration / tail) ** 3 > tail) { tail *= 2; }
+  return iteration - (Math.floor(iteration / tail) * tail) + 1
 }
 </script>
 <script>
