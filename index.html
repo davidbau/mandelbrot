@@ -37,6 +37,7 @@ canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
 #grid:empty ~ #text { display: none; }
 #text { text-align: left; width: auto; background:#aaa; margin: 10px;
   position:relative;padding:3px 8px;font-size: 11pt }
+.exponent { line-height: 0; }
 .closebox { position: absolute; right: 3px; top: 0; cursor: pointer;
   transition: opacity 0.3s; user-select: none; }
 .closebox:after { content: '\00d7'; font-size: 20px; }
@@ -92,11 +93,11 @@ Mandelbrot Set Fractal Explorer
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Colors show <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterations</a> to divergence; black points <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">converge or cycle</a>.
+<b><span mobile="Tap">Click</span> to zoom.</b>  <span mobile="">Right-click to save images, <b>M</b> to make and save a movie of your zoom path.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Tap">Click</span> to zoom.</b>  <span mobile="">Right-click to save images, <b>M</b> to make and save a movie of your zoom path.</span>
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Colors show <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterations</a> to divergence; black points <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">converge or cycle</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
