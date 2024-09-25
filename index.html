@@ -2961,7 +2961,9 @@ function iterateBoards() {
       board.iterate();
     }
     const now = (new Date()).getTime();
-    if (board.updateSize >= 1429 || now - board.lastTime >= 100) {
+    if (focusedBoardK == board.k ?
+        (board.updateSize >= 1429 || now - board.lastTime >= 100) :
+        (board.updateSize >= 4673 || now - board.lastTime >= 500)) {
       const boardEffort = board.unfinished() * board.effort;
       const remainingWork = pri.map(b => b.unfinished() * b.effort).reduce((a, b) => a + b, 0);
       const workerInfo = `${workerName}: ` + (board.unfinished() ?
