@@ -2457,7 +2457,7 @@ class PerturbationBoard extends Board {
   }
 
   initPerturbationBoard(size, re, im) {
-    this.cc = new Array(this.config.dims2 * 4).fill(0);
+    this.cc = new Array(this.config.dims2 * 4).fill(NaN);
     // Odd grid ensures that center point corresponds to a quad precision pixel
     const gridSize = Math.floor(this.config.dims / 17 / 2) * 2 + 1;
     const step = this.config.dims / gridSize;
@@ -2501,7 +2501,7 @@ class PerturbationBoard extends Board {
             const dcr = (px - rx) * pix;
             const pertIndex = (py * this.config.dims + px);
             const pi = pertIndex * 4;
-            if (cc[pi+3] === 0) {  // Avoid double-initialization
+            if (isNaN(cc[pi+3])) {  // Avoid double-initialization
               cc[pi] = dcr;
               cc[pi+1] = dci;
               cc[pi+2] = refIndex;
