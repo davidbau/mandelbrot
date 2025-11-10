@@ -3432,8 +3432,8 @@ class WebGPUBoard extends Board {
           let zr2 = zr * zr;
           let zi2 = zi * zi;
 
-          // Check divergence
-          if (zr2 + zi2 > 16.0) {
+          // Check divergence (escape radius 2, so magnitude² > 4)
+          if (zr2 + zi2 > 4.0) {
             status[index] = 1u;  // Diverged
             break;
           }
@@ -3876,6 +3876,11 @@ class WebGPUBoard extends Board {
       serialized.id
     );
   }
+
+  static isAvailable() {
+    // Synchronously check if WebGPU is available in this browser
+    return typeof navigator !== 'undefined' && 'gpu' in navigator;
+  }
 }
 
 function workerLog(message) {
@@ -3902,15 +3907,21 @@ self.onmessage = function(e) {
       workerNumber = data.workerNumber;
       const useZhuoranApproach = false;  // PerturbationBoard is 5-6x faster in benchmarks
       const testWebGPU = true;  // Testing WebGPU implementation
+      const webGPUAvailable = WebGPUBoard.isAvailable();
+
+      if (testWebGPU && !webGPUAvailable) {
+        console.log('WebGPU not available in this browser, falling back to CPU boards');
+      }
 
       let board;
-      if (testWebGPU) {
+      if (testWebGPU && webGPUAvailable) {
         // Use WebGPU for shallow zooms (large pixel_size) where float32 is sufficient
         // Use CpuBoard for deep zooms (small pixel_size) where we need double precision
         board = data.size / data.config.dims > 1e-6
           ? new WebGPUBoard(data.k, data.size, data.re, data.im, data.config, data.id)
           : new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
       } else {
+        // WebGPU disabled or unavailable - use CPU-based boards
         board = data.size / data.config.dims < 1e-15
           ? (useZhuoranApproach
               ? new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id)
