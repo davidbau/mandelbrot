@@ -2873,6 +2873,7 @@ class ZhuoranBoard extends Board {
     this.dz = [];  // Current perturbation delta [real, imag] pairs
     this.refIter = [];  // Which iteration of reference each pixel is following
     this.pixelIndexes = [];  // Active pixel indices
+    this.maxRefIter = 1;  // Track maximum refIter to avoid scanning all pixels
 
     // Working array for quad-double operations
     this.tt = new Array(16);
@@ -2938,6 +2939,17 @@ class ZhuoranBoard extends Board {
 
     // Restore state
     Object.assign(board, serialized);
+
+    // Recompute maxRefIter if not in serialized data
+    if (!serialized.maxRefIter) {
+      board.maxRefIter = 1;
+      for (let i = 0; i < board.refIter.length; i++) {
+        if (board.refIter[i] > board.maxRefIter) {
+          board.maxRefIter = board.refIter[i];
+        }
+      }
+    }
+
     return board;
   }
 
@@ -2959,16 +2971,8 @@ class ZhuoranBoard extends Board {
     let changes = null;
 
     // Step 1: Extend reference orbit if needed and not escaped
-    // Find the maximum refIter among all active pixels
-    let maxRefIter = 0;
-    for (const index of this.pixelIndexes) {
-      if (!this.nn[index] && this.refIter[index] > maxRefIter) {
-        maxRefIter = this.refIter[index];
-      }
-    }
-
-    // Extend reference orbit to cover all active pixels plus a buffer
-    const targetRefIterations = Math.max(this.it + 100, maxRefIter + 100);
+    // Use cached maxRefIter to avoid scanning all pixels every iteration
+    const targetRefIterations = Math.max(this.it + 100, this.maxRefIter + 100);
 
     while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
       this.extendReferenceOrbit();
@@ -3044,8 +3048,9 @@ class ZhuoranBoard extends Board {
     AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
 
     // tt[4] is the high part of the magnitude squared (tt[5] is just the low correction)
-    // Use larger escape radius (256) for numerical stability, matching pixel escape threshold
-    if (tt[4] > 256) {
+    // Use very large escape radius for reference orbit to support all pixel iterations
+    // Reference must stay valid longer than any pixel, so use much larger threshold
+    if (tt[4] > 1e10) {
       this.refOrbitEscaped = true;
       return;
     }
@@ -3164,13 +3169,12 @@ class ZhuoranBoard extends Board {
     this.dz[index2 + 1] = newDi;
 
     // Now check for divergence with the updated values
-    // Use larger escape radius (256 instead of 4) for numerical stability with perturbation theory
-    // This prevents artifacts near the boundary due to floating-point errors
+    // Use escape radius 4 (magnitude² > 16)
     const totalR = refR + newDr;
     const totalI = refI + newDi;
     const totalMag2 = totalR * totalR + totalI * totalI;
 
-    if (totalMag2 > 256) {
+    if (totalMag2 > 16) {
       return 1;  // Diverged
     }
 
@@ -3199,17 +3203,21 @@ class ZhuoranBoard extends Board {
     // Update reference iteration counter (dz was already updated above)
     this.refIter[index]++;
 
+    // Update cached maximum to avoid scanning all pixels
+    if (this.refIter[index] > this.maxRefIter) {
+      this.maxRefIter = this.refIter[index];
+    }
+
     return 0;  // Continue iterating
   }
 
   shouldRebase(index) {
-    // Zhuoran's rebasing condition (from Imagina):
-    // Rebase when |z_total| < |dz| * threshold
+    // Zhuoran's rebasing condition using Chebyshev norm (Imagina's optimization)
+    // Rebase when max(|z_total|) < max(|dz|)
     // This detects when we're near the critical point (0 for Mandelbrot)
     const index2 = index * 2;
     const dr = this.dz[index2];
     const di = this.dz[index2 + 1];
-    const dzMag = dr * dr + di * di;
 
     const refIter = this.refIter[index];
 
@@ -3227,16 +3235,14 @@ class ZhuoranBoard extends Board {
     const refR = ref[0] + ref[1];
     const refI = ref[2] + ref[3];
 
-    // Compute z_total = z_ref + dz
+    // Compute Chebyshev norm (L-infinity norm) - cheaper than magnitude squared
+    const dzNorm = Math.max(Math.abs(dr), Math.abs(di));
     const totalR = refR + dr;
     const totalI = refI + di;
-    const totalMag = totalR * totalR + totalI * totalI;
+    const totalNorm = Math.max(Math.abs(totalR), Math.abs(totalI));
 
     // Rebase when orbit approaches critical point (0)
-    // Threshold slightly above 1.0 for numerical stability
-    const rebaseThreshold = 1.000001;
-
-    return totalMag < dzMag * rebaseThreshold;
+    return totalNorm < dzNorm;
   }
 
   getCurrentRefZ(index) {
@@ -3270,7 +3276,7 @@ self.onmessage = function(e) {
   switch (type) {
     case 'addBoard':
       workerNumber = data.workerNumber;
-      const useZhuoranApproach = true;
+      const useZhuoranApproach = false;  // PerturbationBoard is 5-6x faster in benchmarks
 
       const board = data.size / data.config.dims < 1e-15
         ? (useZhuoranApproach
