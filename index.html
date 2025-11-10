@@ -2240,7 +2240,9 @@ class Board {
     const subclasses = new Map([
       ['CpuBoard', CpuBoard],
       ['PerturbationBoard', PerturbationBoard],
-      ['WebGPUBoard', WebGPUBoard]
+      ['ZhuoranBoard', ZhuoranBoard],
+      ['WebGPUBoard', WebGPUBoard],
+      ['WebGPUZhuoranBoard', WebGPUZhuoranBoard]
     ]);
     return subclasses.get(serialized.type).fromSerialized(serialized);
   }
@@ -3883,6 +3885,599 @@ class WebGPUBoard extends Board {
   }
 }
 
+// WebGPU-accelerated perturbation board using Zhuoran's approach
+// Computes high-precision reference orbit on CPU, perturbations on GPU
+class WebGPUZhuoranBoard extends Board {
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+
+    // Save parameters
+    this.size = size;
+    this.re = re;
+    this.im = im;
+
+    // WebGPU state
+    this.device = null;
+    this.pipeline = null;
+    this.buffers = {};
+    this.isGPUReady = false;
+    this.gpuInitPromise = null;
+    this.isComputing = false;
+    this.lastReportedIters = null;
+    this.cpuStatus = null;
+
+    this.effort = 2;  // Same as ZhuoranBoard
+
+    // Reference orbit for perturbation theory (computed on CPU in quad-double)
+    this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low]
+    this.refOrbitEscaped = false;
+    this.refIterations = 0;
+    this.maxRefIterations = 10000;
+
+    // Reference point (center of image)
+    const refRe = Array.isArray(re) ? re : toQd(re);
+    const refIm = Array.isArray(im) ? im : toQd(im);
+    this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
+
+    // Initialize reference orbit: iteration 0 is z=0, iteration 1 is z=c
+    this.refOrbit.push([0, 0, 0, 0]);
+    this.refOrbit.push(this.refC.slice());
+    this.refIterations = 1;
+
+    // Working array for quad-double operations
+    this.tt = new Array(16);
+
+    // Initialize per-pixel perturbation data
+    this.initPixels(size, re, im);
+
+    // Start GPU initialization (async)
+    this.gpuInitPromise = this.initGPU();
+  }
+
+  initPixels(size, re, im) {
+    const dims = this.config.dims;
+    const dims2 = dims * dims;
+
+    // Convert re/im to quad-double if needed
+    const re_qd = Array.isArray(re) ? re : toQd(re);
+    const im_qd = Array.isArray(im) ? im : toQd(im);
+    const size_qd = toQd(size);
+
+    // Per-pixel data arrays
+    this.dc = new Float32Array(dims2 * 2);  // Delta c from reference [real, imag] pairs
+    this.dz = new Float32Array(dims2 * 2);  // Current perturbation delta [real, imag] pairs
+    this.refIter = new Uint32Array(dims2);  // Which iteration of reference each pixel is following
+
+    // Working arrays for quad-double arithmetic
+    const cr_qd = new Array(4);
+    const ci_qd = new Array(4);
+    const dcr_qd = new Array(4);
+    const dci_qd = new Array(4);
+    const temp = new Array(4);
+
+    // Initialize all pixels as perturbations from the reference point
+    for (let y = 0; y < dims; y++) {
+      const yFrac = (0.5 - y / dims);
+
+      // ci_qd = im_qd + yFrac * size_qd (in quad-double)
+      AqdMul(temp, 0, toQd(yFrac)[0], toQd(yFrac)[1], size_qd[0], size_qd[1]);
+      AqdAdd(ci_qd, 0, im_qd[0], im_qd[1], temp[0], temp[1]);
+
+      // dci_qd = ci_qd - refC_imag
+      AqdAdd(dci_qd, 0, ci_qd[0], ci_qd[1], -this.refC[2], -this.refC[3]);
+
+      for (let x = 0; x < dims; x++) {
+        const xFrac = (x / dims - 0.5);
+
+        // cr_qd = re_qd + xFrac * size_qd (in quad-double)
+        AqdMul(temp, 0, toQd(xFrac)[0], toQd(xFrac)[1], size_qd[0], size_qd[1]);
+        AqdAdd(cr_qd, 0, re_qd[0], re_qd[1], temp[0], temp[1]);
+
+        // dcr_qd = cr_qd - refC_real
+        AqdAdd(dcr_qd, 0, cr_qd[0], cr_qd[1], -this.refC[0], -this.refC[1]);
+
+        const index = y * dims + x;
+        const index2 = index * 2;
+
+        // Convert quad-double deltas to float32
+        this.dc[index2] = dcr_qd[0] + dcr_qd[1];
+        this.dc[index2 + 1] = dci_qd[0] + dci_qd[1];
+
+        // Start with dz = dc (so z = c_ref + dc = c)
+        this.dz[index2] = this.dc[index2];
+        this.dz[index2 + 1] = this.dc[index2 + 1];
+
+        // Start at iteration 1 (where refOrbit[1] = c_ref)
+        this.refIter[index] = 1;
+      }
+    }
+
+    this.checkSpike(size, re, im);
+  }
+
+  checkSpike(size, re, im) {
+    // Count chaotic pixels in spike region
+    const dims = this.config.dims;
+    const re_double = Array.isArray(re) ? (re[0] + re[1]) : re;
+    const im_double = Array.isArray(im) ? (im[0] + im[1]) : im;
+
+    for (let y = 0; y < dims; y++) {
+      const yFrac = (0.5 - y / dims);
+      const ci = im_double + yFrac * size;
+
+      for (let x = 0; x < dims; x++) {
+        const xFrac = (x / dims - 0.5);
+        const cr = re_double + xFrac * size;
+
+        if (this.inspike(cr, ci)) {
+          this.ch += 1;
+        }
+      }
+    }
+  }
+
+  async createBuffers() {
+    const dims2 = this.config.dims * this.config.dims;
+
+    // Storage buffer for iteration counts
+    this.buffers.iterations = this.device.createBuffer({
+      size: dims2 * 4,  // 4 bytes per u32
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      label: 'Iterations buffer'
+    });
+
+    // Storage buffer for status flags
+    this.buffers.status = this.device.createBuffer({
+      size: dims2 * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      label: 'Status buffer'
+    });
+
+    // Storage buffer for dc (delta c - constant offsets)
+    this.buffers.dc = this.device.createBuffer({
+      size: dims2 * 2 * 4,  // 2 f32 per pixel
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      label: 'Delta C buffer'
+    });
+
+    // Storage buffer for dz (delta z - perturbations)
+    this.buffers.dz = this.device.createBuffer({
+      size: dims2 * 2 * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      label: 'Delta Z buffer'
+    });
+
+    // Storage buffer for refIter (reference iteration indices)
+    this.buffers.refIter = this.device.createBuffer({
+      size: dims2 * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      label: 'RefIter buffer'
+    });
+
+    // Storage buffer for reference orbit (will be updated each iteration)
+    // Start with reasonable size, will recreate if needed
+    this.buffers.refOrbit = this.device.createBuffer({
+      size: Math.max(this.maxRefIterations * 2 * 4, 1024),
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      label: 'Reference orbit buffer'
+    });
+
+    // Storage buffer for active pixel indices (sparse)
+    this.buffers.activePixels = this.device.createBuffer({
+      size: dims2 * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      label: 'Active pixels buffer'
+    });
+
+    // Uniform buffer for parameters
+    this.buffers.params = this.device.createBuffer({
+      size: 16,  // 4 u32s
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      label: 'Params buffer'
+    });
+
+    // Initialize dc, dz, and refIter on GPU
+    this.device.queue.writeBuffer(this.buffers.dc, 0, this.dc);
+    this.device.queue.writeBuffer(this.buffers.dz, 0, this.dz);
+    this.device.queue.writeBuffer(this.buffers.refIter, 0, this.refIter);
+  }
+
+  createBindGroup() {
+    this.bindGroup = this.device.createBindGroup({
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.buffers.params } },
+        { binding: 1, resource: { buffer: this.buffers.iterations } },
+        { binding: 2, resource: { buffer: this.buffers.status } },
+        { binding: 3, resource: { buffer: this.buffers.dc } },
+        { binding: 4, resource: { buffer: this.buffers.dz } },
+        { binding: 5, resource: { buffer: this.buffers.refIter } },
+        { binding: 6, resource: { buffer: this.buffers.refOrbit } },
+        { binding: 7, resource: { buffer: this.buffers.activePixels } }
+      ],
+      label: 'Perturbation bind group'
+    });
+  }
+
+  // Copy extendReferenceOrbit from ZhuoranBoard
+  extendReferenceOrbit() {
+    // Compute one more iteration of the reference orbit in quad-double precision
+    const lastIndex = this.refIterations;
+    const last = this.refOrbit[lastIndex];
+    const tt = this.tt;
+
+    const r1 = last[0];
+    const r2 = last[1];
+    const j1 = last[2];
+    const j2 = last[3];
+
+    // Check for escape
+    AqdSquare(tt, 0, r1, r2);                    // rsq = r**2
+    AqdSquare(tt, 2, j1, j2);                    // jsq = j**2
+    AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
+
+    // Use very large escape radius for reference orbit
+    if (tt[4] > 1e10) {
+      this.refOrbitEscaped = true;
+      return;
+    }
+
+    // Compute z^exponent using quad-double
+    AqdSet(tt, 8, r1, r2);  // ra = r
+    AqdSet(tt, 6, j1, j2);  // ja = j
+    for (let ex = 1; ex < this.config.exponent; ex++) {
+      AqdMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
+      AqdMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
+      AqdAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
+      AqdMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
+      AqdMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
+      AqdAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
+      AqdSet(tt, 8, tt[4], tt[5]);                 // ra = rt
+    }
+
+    // Add c to get next z
+    const newZ = [0, 0, 0, 0];
+    AqdAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
+    AqdAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
+
+    this.refOrbit.push(newZ);
+    this.refIterations++;
+
+    // Grow array if needed
+    if (this.refIterations >= this.maxRefIterations) {
+      this.maxRefIterations *= 2;
+    }
+  }
+
+  async createComputePipeline() {
+    const shaderCode = `
+      struct Params {
+        dims: u32,
+        iterations_per_batch: u32,
+        active_count: u32,
+        ref_orbit_length: u32,
+      }
+
+      @group(0) @binding(0) var<uniform> params: Params;
+      @group(0) @binding(1) var<storage, read_write> iterations: array<u32>;
+      @group(0) @binding(2) var<storage, read_write> status: array<u32>;    // 0=computing, 1=diverged
+      @group(0) @binding(3) var<storage, read> dc: array<f32>;              // Delta c (constant)
+      @group(0) @binding(4) var<storage, read_write> dz: array<f32>;        // Delta z (perturbation)
+      @group(0) @binding(5) var<storage, read_write> refIter: array<u32>;   // Reference iteration index
+      @group(0) @binding(6) var<storage, read> refOrbit: array<f32>;        // Reference orbit [r,i pairs]
+      @group(0) @binding(7) var<storage, read> active_pixels: array<u32>;   // Sparse list of active indices
+
+      @compute @workgroup_size(64)
+      fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+        let work_index = global_id.x;
+        if (work_index >= params.active_count) { return; }
+
+        let index = active_pixels[work_index];
+        if (status[index] != 0u) { return; }  // Skip if already finished
+
+        let index2 = index * 2u;
+        var iter = iterations[index];
+        var dzr = dz[index2];
+        var dzi = dz[index2 + 1u];
+        var ref_iter = refIter[index];
+        let dcr = dc[index2];
+        let dci = dc[index2 + 1u];
+
+        // Iterate for the batch
+        for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
+          iter++;
+
+          // Check if we need to rebase
+          let ref_offset = ref_iter * 2u;
+          if (ref_offset + 1u < params.ref_orbit_length * 2u) {
+            let refr = refOrbit[ref_offset];
+            let refi = refOrbit[ref_offset + 1u];
+
+            // Chebyshev norm (L-infinity): max(|x|, |y|)
+            let dz_norm = max(abs(dzr), abs(dzi));
+            let ref_norm = max(abs(refr), abs(refi));
+            let total_r = refr + dzr;
+            let total_i = refi + dzi;
+            let total_norm = max(abs(total_r), abs(total_i));
+
+            // Rebase if orbit approaches critical point OR perturbation gets too large for float32
+            // For float32 (~7 digits), rebase when |dz| > 0.1 * |z_ref| or |z_total| < |dz|
+            let should_rebase = total_norm < dz_norm || (ref_norm > 0.0 && dz_norm > 0.1 * ref_norm);
+
+            if (ref_iter > 0u && should_rebase) {
+              // Set dz = z_total (absolute position)
+              dzr = total_r;
+              dzi = total_i;
+              ref_iter = 0u;  // Restart from beginning of reference orbit
+            }
+          }
+
+          // Get reference orbit value
+          let ref_offset2 = ref_iter * 2u;
+          if (ref_offset2 + 1u >= params.ref_orbit_length * 2u) {
+            // Reference orbit too short - mark as computing and skip
+            break;
+          }
+
+          let refr = refOrbit[ref_offset2];
+          let refi = refOrbit[ref_offset2 + 1u];
+
+          // Perturbation iteration: dz_new = 2*z_ref*dz + dz² + dc
+          // First: 2*z_ref*dz
+          let two_zref_dz_r = 2.0 * (refr * dzr - refi * dzi);
+          let two_zref_dz_i = 2.0 * (refr * dzi + refi * dzr);
+
+          // Second: dz²
+          let dz_sq_r = dzr * dzr - dzi * dzi;
+          let dz_sq_i = 2.0 * dzr * dzi;
+
+          // Combine: dz_new = 2*z_ref*dz + dz² + dc
+          dzr = two_zref_dz_r + dz_sq_r + dcr;
+          dzi = two_zref_dz_i + dz_sq_i + dci;
+
+          // Advance reference iteration
+          ref_iter++;
+
+          // Get NEW reference orbit value for divergence check
+          let new_ref_offset = ref_iter * 2u;
+          if (new_ref_offset + 1u >= params.ref_orbit_length * 2u) {
+            break;  // Reference orbit too short
+          }
+          let new_refr = refOrbit[new_ref_offset];
+          let new_refi = refOrbit[new_ref_offset + 1u];
+
+          // Check divergence: |z_total|² > 4
+          let total_r = new_refr + dzr;
+          let total_i = new_refi + dzi;
+          let mag_sq = total_r * total_r + total_i * total_i;
+
+          if (mag_sq > 4.0) {
+            status[index] = 1u;  // Diverged
+            break;
+          }
+        }
+
+        // Write back state
+        iterations[index] = iter;
+        dz[index2] = dzr;
+        dz[index2 + 1u] = dzi;
+        refIter[index] = ref_iter;
+      }
+    `;
+
+    const shaderModule = this.device.createShaderModule({
+      code: shaderCode,
+      label: 'Perturbation compute shader'
+    });
+
+    this.pipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: {
+        module: shaderModule,
+        entryPoint: 'main'
+      },
+      label: 'Perturbation compute pipeline'
+    });
+  }
+
+  async initGPU() {
+    try {
+      // Check WebGPU availability
+      if (!navigator.gpu) {
+        console.warn('WebGPU not supported');
+        return false;
+      }
+
+      // Request adapter and device
+      const adapter = await navigator.gpu.requestAdapter();
+      if (!adapter) {
+        console.warn('No WebGPU adapter found');
+        return false;
+      }
+
+      this.device = await adapter.requestDevice();
+      if (!this.device) {
+        console.warn('Failed to get WebGPU device');
+        return false;
+      }
+
+      // Create compute pipeline
+      await this.createComputePipeline();
+
+      // Create GPU buffers
+      await this.createBuffers();
+
+      // Create bind group
+      this.createBindGroup();
+
+      this.isGPUReady = true;
+      console.log('WebGPUZhuoranBoard: GPU initialized');
+      return true;
+    } catch (error) {
+      console.error('WebGPUZhuoranBoard GPU initialization failed:', error);
+      return false;
+    }
+  }
+
+  iterate() {
+    if (!this.isGPUReady || this.isComputing) {
+      return;
+    }
+    this.compute();
+  }
+
+  async compute() {
+    this.isComputing = true;
+
+    const dims2 = this.config.dims * this.config.dims;
+
+    // Step 1: Extend reference orbit on CPU as needed
+    // Extend ahead of what pixels currently need
+    const targetRefIterations = Math.max(this.it + 100, this.refIterations + 100);
+    while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
+      this.extendReferenceOrbit();
+    }
+
+    // Step 2: Convert reference orbit to f32 and upload to GPU
+    const refOrbitF32 = new Float32Array(this.refIterations * 2);
+    for (let i = 0; i <= this.refIterations; i++) {
+      const ref = this.refOrbit[i];
+      refOrbitF32[i * 2] = ref[0] + ref[1];      // Convert quad to single precision
+      refOrbitF32[i * 2 + 1] = ref[2] + ref[3];
+    }
+
+    // Resize refOrbit buffer if needed
+    const requiredSize = this.refIterations * 2 * 4;
+    if (this.buffers.refOrbit.size < requiredSize) {
+      this.buffers.refOrbit.destroy();
+      this.buffers.refOrbit = this.device.createBuffer({
+        size: Math.max(requiredSize * 2, 1024),  // Double size for growth
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        label: 'Reference orbit buffer'
+      });
+      // Need to recreate bind group with new buffer
+      this.createBindGroup();
+    }
+
+    this.device.queue.writeBuffer(this.buffers.refOrbit, 0, refOrbitF32);
+
+    // Step 3: Build active pixels list
+    if (!this.cpuStatus) {
+      this.cpuStatus = new Uint32Array(dims2).fill(0);
+    }
+
+    const activePixels = [];
+    for (let i = 0; i < dims2; i++) {
+      if (this.cpuStatus[i] === 0) {  // Still computing
+        activePixels.push(i);
+      }
+    }
+
+    if (activePixels.length === 0) {
+      this.isComputing = false;
+      return;  // All done
+    }
+
+    const activePixelsArray = new Uint32Array(activePixels);
+    this.device.queue.writeBuffer(this.buffers.activePixels, 0, activePixelsArray);
+
+    // Step 4: Set up parameters
+    const iterationsPerBatch = Math.min(1000, Math.floor(1111211 / Math.max(activePixels.length, 1)));
+    const params = new Uint32Array([
+      this.config.dims,
+      iterationsPerBatch,
+      activePixels.length,
+      this.refIterations + 1  // Length includes iteration 0
+    ]);
+    this.device.queue.writeBuffer(this.buffers.params, 0, params);
+
+    // Step 5: Dispatch GPU compute
+    const workgroupSize = 64;
+    const numWorkgroups = Math.ceil(activePixels.length / workgroupSize);
+
+    const commandEncoder = this.device.createCommandEncoder({ label: 'Perturbation compute' });
+    const passEncoder = commandEncoder.beginComputePass({ label: 'Perturbation pass' });
+    passEncoder.setPipeline(this.pipeline);
+    passEncoder.setBindGroup(0, this.bindGroup);
+    passEncoder.dispatchWorkgroups(numWorkgroups);
+    passEncoder.end();
+
+    this.device.queue.submit([commandEncoder.finish()]);
+
+    // Step 6: Read back results
+    await this.device.queue.onSubmittedWorkDone();
+
+    const iterationsData = await this.readBuffer(this.buffers.iterations, Uint32Array);
+    const statusData = await this.readBuffer(this.buffers.status, Uint32Array);
+
+    // Step 7: Update board state
+    let changes = null;
+    for (const i of activePixels) {
+      const iters = iterationsData[i];
+      const status = statusData[i];
+      const wasFinished = this.cpuStatus[i] !== 0;
+
+      if (!wasFinished && status === 1) {
+        // Newly diverged
+        this.nn[i] = iters;
+        this.pp[i] = 1;
+        this.cpuStatus[i] = 1;
+
+        if (!changes) {
+          changes = { iter: iters, nn: [], vv: [] };
+        }
+        changes.nn.push(i);
+        this.di++;
+        this.un--;
+      }
+    }
+
+    this.it += iterationsPerBatch;
+    this.queueChanges(changes);
+
+    this.isComputing = false;
+  }
+
+  async readBuffer(buffer, TypedArrayConstructor) {
+    const size = buffer.size;
+    const stagingBuffer = this.device.createBuffer({
+      size,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      label: 'Staging buffer'
+    });
+
+    const commandEncoder = this.device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(buffer, 0, stagingBuffer, 0, size);
+    this.device.queue.submit([commandEncoder.finish()]);
+
+    await stagingBuffer.mapAsync(GPUMapMode.READ);
+    const data = new TypedArrayConstructor(stagingBuffer.getMappedRange().slice(0));
+    stagingBuffer.unmap();
+    stagingBuffer.destroy();
+
+    return data;
+  }
+
+  unfinished() {
+    return this.un;
+  }
+
+  static fromSerialized(serialized) {
+    return new WebGPUZhuoranBoard(
+      serialized.k,
+      serialized.sizes[0],
+      serialized.sizes[1],
+      serialized.sizes[2],
+      serialized.config,
+      serialized.id
+    );
+  }
+
+  static isAvailable() {
+    return typeof navigator !== 'undefined' && 'gpu' in navigator;
+  }
+}
+
 function workerLog(message) {
   self.postMessage({
     type: 'log',
@@ -3915,18 +4510,25 @@ self.onmessage = function(e) {
 
       let board;
       if (testWebGPU && webGPUAvailable) {
-        // Use WebGPU for shallow zooms (large pixel_size) where float32 is sufficient
-        // Use CpuBoard for deep zooms (small pixel_size) where we need double precision
-        board = data.size / data.config.dims > 1e-6
-          ? new WebGPUBoard(data.k, data.size, data.re, data.im, data.config, data.id)
-          : new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        // Two-tier strategy with WebGPU:
+        // - Shallow zooms (pixel > 1e-6): WebGPUBoard with simple float32 iteration
+        // - Deep zooms (pixel <= 1e-6): WebGPUZhuoranBoard with quad-double reference + float32 perturbations
+        // WebGPUZhuoranBoard should work to arbitrary depth since reference orbit is quad-double
+        const pixelSize = data.size / data.config.dims;
+        if (pixelSize > 1e-6) {
+          board = new WebGPUBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        } else {
+          board = new WebGPUZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        }
       } else {
         // WebGPU disabled or unavailable - use CPU-based boards
-        board = data.size / data.config.dims < 1e-15
-          ? (useZhuoranApproach
-              ? new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id)
-              : new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id))
-          : new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        // Use double-precision thresholds (CpuBoard can handle deeper zooms than float32)
+        const pixelSize = data.size / data.config.dims;
+        if (pixelSize >= 1e-15) {
+          board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        } else {
+          board = new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        }
       }
 
       boards.set(data.k, board);
