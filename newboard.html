@@ -1,0 +1,402 @@
+class PerturbationBoard extends Board {
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+
+    this.quadIndexes = [];
+    this.pertIndexes = [];
+    this.tt = [];
+    this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dims)));
+    this.effort = 3;
+    this.initPerturbationBoard(size, re, im);
+  }
+
+  initPerturbationBoard(size, re, im) {
+    this.cc = new Array(this.config.dims2 * 4).fill(0);
+    // Odd grid ensures that center point corresponds to a quad precision pixel
+    const gridSize = Math.floor(this.config.dims / 17 / 2) * 2 + 1;
+    const step = this.config.dims / gridSize;
+    const offset = step / 2;
+    const pix = size / this.config.dims;
+    const cc = this.cc;
+    re = toQd(re);
+    im = toQd(im);
+
+    // Initialize reference points and perturbations
+    for (let gy = 0; gy < gridSize; gy++) {
+      const ry = Math.round(gy * step + offset);
+      const jFrac = (0.5 - (ry / this.config.dims));
+      const cj = qdAdd(im, qdScale(toQd(jFrac), size))
+      for (let gx = 0; gx < gridSize; gx++) {
+        const rx = Math.round(gx * step + offset);
+        const rFrac = ((rx / this.config.dims) - 0.5);
+        const refIndex = (ry * this.config.dims + rx);
+        const ri = refIndex * 4;
+        const cr = qdAdd(re, qdScale(toQd(rFrac), size));
+
+        // Initialize reference point
+        cc[ri] = cr[0];
+        cc[ri+1] = cr[1];
+        cc[ri+2] = cj[0];
+        cc[ri+3] = cj[1];
+        this.quadIndexes.push(refIndex);
+        let refspike = this.inspikeQdA(cr[0], cr[1], cj[0], cj[1]);
+        if (refspike) {
+          this.ch += 1;
+        }
+
+        // Initialize perturbations around this reference point
+        const minY = Math.max(0, Math.floor(ry - offset));
+        const maxY = Math.min(this.config.dims - 1, Math.ceil(ry + offset));
+        const minX = Math.max(0, Math.floor(rx - offset));
+        const maxX = Math.min(this.config.dims - 1, Math.ceil(rx + offset));
+        for (let py = minY; py <= maxY; py++) {
+          const dci = (ry - py) * pix;
+          for (let px = minX; px <= maxX; px++) {
+            const dcr = (px - rx) * pix;
+            const pertIndex = (py * this.config.dims + px);
+            const pi = pertIndex * 4;
+            if (cc[pi+3] === 0) {  // Avoid double-initialization
+              cc[pi] = dcr;
+              cc[pi+1] = dci;
+              cc[pi+2] = refIndex;
+              cc[pi+3] = Infinity;
+              this.pertIndexes.push(pertIndex);
+              if (refspike && py == ry) {
+                this.ch += 1;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    this.zz = this.cc.slice();
+    this.bb = [];
+    this.nz = [];
+  }
+
+  static fromSerialized(serialized) {
+    const board = new PerturbationBoard(
+      serialized.k,
+      serialized.sizes[0],
+      serialized.sizes[1],
+      serialized.sizes[2],
+      serialized.config,
+      serialized.id
+    );
+    const cc = board.cc;
+
+    // Override initialized values with serialized data
+    Object.assign(board, serialized);
+    delete board.pertZZ;
+
+    // Reconstruct arrays from serialized data, leaving empty spots
+    board.cc = [];
+    board.zz = [];
+    board.nz = [];
+    board.bb = [];
+    board.pp = [];
+    for (let i = 0; i < serialized.quadIndexes.length; i++) {
+      const index = serialized.quadIndexes[i];
+      for (let j = 0; j < 4; j++) {
+        board.zz[index * 4 + j] = board.nz[index * 4 + j] = serialized.zz[i * 4 + j];
+        board.bb[index * 4 + j] = serialized.bb[i * 4 + j];
+        board.cc[index * 4 + j] = cc[index * 4 + j];
+      }
+      if (!isFinite(cc[index * 4 + 3])) {
+        board.initAsQuadPrecision(index, cc);
+      }
+      board.pp[index] = serialized.pp[i];
+    }
+    for (let i = 0; i < serialized.pertIndexes.length; i++) {
+      const index = serialized.pertIndexes[i];
+      for (let j = 0; j < 3; j++) {
+        board.zz[index * 4 + j] = serialized.pertZZ[i * 3 + j];
+        board.cc[index * 4 + j] = cc[index * 4 + j];
+      }
+      board.zz[index * 4 + 3] = board.cc[index * 4 + 3] = Infinity;
+      board.pp[index] = 0;
+    }
+    return board;
+  }
+
+  serialize() {
+    return {
+      ...super.serialize(),
+      quadIndexes: this.quadIndexes,
+      pertIndexes: this.pertIndexes,
+      zz: this.quadIndexes.flatMap(i => [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2], this.zz[i*4+3]]),
+      bb: this.quadIndexes.flatMap(i => [this.bb[i*4], this.bb[i*4+1], this.bb[i*4+2], this.bb[i*4+3]]),
+      pp: this.quadIndexes.map(index => this.pp[index]),
+      pertZZ: this.pertIndexes.flatMap(i => [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2]]),
+    };
+  }
+
+  iterate() {
+    let changes = null;
+
+    let i = this.it;
+    let head = i, tail = 1;
+    while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
+    let results = [0, 0, 0];
+
+    // Precompute quad-precision point escape without updating z
+    for (const index of this.quadIndexes) {
+      if (head <= tail && !this.nn[index]) {
+        AqdcCopy(this.bb, index*4, this.zz, index*4);
+        this.pp[index] = 0;
+      }
+      let r = this.precomputeQuad(index);
+      results[r + 1] += 1;
+      if (r !== 0) {
+        if (!changes) {
+          changes = { iter: this.it, nn: [], vv: [] };
+        }
+        if (r < 0) {
+          changes.vv.push({
+            index: index,
+            z: AqdcGet(this.nz, index*4),
+            p: this.pp[index]
+          });
+        } else {
+          changes.nn.push(index);
+        }
+      }
+    }
+
+    // Iterate perturbation points that use the old z
+    const newQuadIndexes = [];
+    let cache = { refIndex: null, binZpow: [] };
+    for (const index of this.pertIndexes) {
+      if (!this.computePerturbation(index, cache)) {
+        this.convertToQuadPrecision(index);
+        let r = this.precomputeQuad(index);
+        results[r + 1] += 1;
+        newQuadIndexes.push(index);
+        if (r !== 0) {
+          if (!changes) {
+            changes = { iter: this.it, nn: [], vv: [] };
+          }
+          if (r < 0) {
+            changes.vv.push({
+              index: index,
+              z: z,
+              p: this.pp[index]
+            });
+          } else {
+            changes.nn.push(index);
+          }
+        }
+      }
+    }
+
+    // Update index arrays
+    if (newQuadIndexes.length > 0) {
+      const newPertIndexes = [];
+      let qi = 0;
+      for (const index of this.pertIndexes) {
+        if (newQuadIndexes[qi] == index) {
+          qi += 1;
+        } else {
+          newPertIndexes.push(index);
+        }
+      }
+      this.quadIndexes = this.quadIndexes.concat(newQuadIndexes);
+      this.pertIndexes = newPertIndexes;
+    }
+
+    // Finally update quad-precision z with precomputed values
+    for (const index of this.quadIndexes) {
+      AqdcCopy(this.zz, index*4, this.nz, index*4);
+    }
+
+    // Tally progress
+    let diverged = results[2];
+    let count = results[0] + diverged;
+    this.un -= count;
+    this.di += diverged;
+
+    // Trim finished pixels from array.
+    if (this.pertIndexes.length + this.quadIndexes.length > this.un * 1.25) {
+      this.compact();
+      // Switch to full quad when perturbations are a small fraction of the work
+      if (this.pertIndexes.length < this.quadIndexes.length * 0.5) {
+        for (const index of this.pertIndexes) {
+          this.convertToQuadPrecision(index);
+          this.quadIndexes.push(index);
+        }
+        this.pertIndexes = [];
+      }
+    }
+
+    this.it++;
+    this.queueChanges(changes);
+  }
+
+  compact() {
+    const trimmedQuadIndexes = this.quadIndexes.filter(i => !this.nn[i]);
+    this.quadIndexes = trimmedQuadIndexes;
+  }
+
+  precomputeQuad(m) {
+    // Quad-precision compute
+    if (this.nn[m]) return 0;
+    const m4 = m * 4;
+    const tt = this.tt;
+    const nz = this.nz;
+    const r1 = this.zz[m4];
+    const r2 = this.zz[m4+1];
+    const j1 = this.zz[m4+2];
+    const j2 = this.zz[m4+3];
+    const cr1 = this.cc[m4];
+    const cr2 = this.cc[m4+1];
+    const cj1 = this.cc[m4+2];
+    const cj2 = this.cc[m4+3];
+    const br1 = this.bb[m4];
+    const br2 = this.bb[m4+1];
+    const bj1 = this.bb[m4+2];
+    const bj2 = this.bb[m4+3];
+
+    AqdSquare(tt, 0, r1, r2);                    // 0: rsq = r**2
+    AqdSquare(tt, 2, j1, j2);                    // 2: jsq = j**2
+    AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // 4: d = rsq+jsq
+    if (tt[4] + tt[5] > 4) {
+      this.nn[m] = this.it;
+      AqdcCopy(nz, m4, this.zz, m4);
+      return 1;
+    }
+    AqdMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // 6: ja = 2*r*j
+    AqdAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // 8: ra = rsq-jsq
+    for (let ord = 2; ord < this.config.exponent; ord++) {
+      AqdMul(tt, 0, j1, j2, tt[6], tt[7]);         // 0: j * ja
+      AqdMul(tt, 2, r1, r2, tt[8], tt[9]);         // 2: r * ra
+      AqdAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // 4: rt = r*ra - j*ja
+      AqdMul(tt, 0, r1, r2, tt[6], tt[7]);         // 0: r * ja
+      AqdMul(tt, 2, j1, j2, tt[8], tt[9]);         // 2: j * ra
+      AqdAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // 6: ja = r*ja + j*ra
+      AqdSet(tt, 8, tt[4], tt[5]);                 // 8: ra = rt
+    }
+    AqdAdd(nz, m4, tt[8], tt[9], cr1, cr2);        // nz: nzr = ra + cr
+    AqdAdd(nz, m4+2, tt[6], tt[7], cj1, cj2);      // nz+2: nzj = ja + cj
+    AqdAbsSub(tt, 0, br1, br2, nz[m4], nz[m4+1]);  // 0: abs(nzr - br)
+    AqdAbsSub(tt, 2, bj1, bj2, nz[m4+2], nz[m4+3]);// 2: abs(nzj - bj)
+    AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);     // 4: db = abs(nzr-br)+abs(nzj-bj)
+    const db = tt[4] + tt[5]
+    if (db <= this.epsilon2) {
+      if (!this.pp[m]) { this.pp[m] = this.it; }
+      if (db <= this.epsilon) {
+        this.nn[m] = -this.it;
+        if (this.inspikeQdA(cr1, cr2, cj1, cj2) && this.ch > 0) {
+          this.ch -= 1;
+        }
+        return -1;
+      }
+    }
+    return 0;
+  }
+
+  computePerturbation(index, cache) {
+    const m4 = index * 4;
+    const cr = this.cc[m4]
+    const ci = this.cc[m4+1]
+    const refIndex = this.cc[m4+2]
+    const ri4 = refIndex * 4;
+    const dr = this.zz[m4];
+    const di = this.zz[m4+1];
+
+    // Switch to quad when approaching convergence.
+    if (this.nn[refIndex] || this.pp[refIndex]) return false;
+
+    // Compute binomial powers of z
+    if (cache.refIndex !== refIndex) {
+      cache.refIndex = refIndex;
+      const ri4 = refIndex * 4;
+      const zr = this.zz[ri4];
+      const zi = this.zz[ri4+2];
+      this.fillBinZpow(cache.binZpow, zr, zi);
+    }
+    const binZpow = cache.binZpow;
+
+    // Compute in (z+d)^n - z^n = nz^(n-1) d + (n(n-1)/2)z^(n-2) d^2...
+    let r = dr;
+    let i = di;
+    for (let ord = 0; ord < binZpow.length; ord += 2) {
+      r += binZpow[ord];
+      i += binZpow[ord+1];
+      const rNew = r * dr - i * di;
+      i = r * di + i * dr;
+      r = rNew;
+    }
+
+    // Add perturbation in c
+    r += cr;
+    i += ci;
+
+    if (this.isThresholdExceeded(r, i, refIndex)) {
+      return false;
+    }
+
+    this.zz[m4] = r;
+    this.zz[m4+1] = i;
+    return true;
+  }
+
+  fillBinZpow(binZpow, zr, zi) {
+    let zrCurrent = zr, ziCurrent = zi;
+    let coeff = this.config.exponent;
+
+    for (let k = 1; k < this.config.exponent - 1; k++) {
+      binZpow[k*2-2] = coeff * zrCurrent;
+      binZpow[k*2-1] = coeff * ziCurrent;
+
+      // Update z power
+      const zrNew = zrCurrent * zr - ziCurrent * zi;
+      ziCurrent = zrCurrent * zi + ziCurrent * zr;
+      zrCurrent = zrNew;
+
+      // Update coefficient for next iteration
+      coeff *= (this.config.exponent - k) / (k + 1);
+    }
+
+    // Add the last element without computing the next z power or coefficient
+    if (this.config.exponent > 1) {
+      binZpow[this.config.exponent*2 - 4] = coeff * zrCurrent;
+      binZpow[this.config.exponent*2 - 3] = coeff * ziCurrent;
+    }
+  }
+
+  isThresholdExceeded(dr, di, refIndex) {
+    const mag = Math.max(Math.abs(dr), Math.abs(di));
+    if (mag > this.perturbationThreshold) return true;
+    // If orbit is getting large, then be more careful.
+    if (mag * 10 < this.perturbationThreshold) return false;
+    const zr = this.zz[refIndex * 4];
+    const zi = this.zz[refIndex * 4 + 2];
+    return ((dr + zr) ** 2 + (di + zi) ** 2 > 3);
+  }
+
+  convertToQuadPrecision(index) {
+    const m4 = index * 4;
+    const dr = this.zz[m4];
+    const di = this.zz[m4+1];
+    const cr = this.cc[m4];
+    const ci = this.cc[m4+1];
+    const refIndex = this.cc[m4+2];
+    const ri4 = refIndex * 4;
+    AqdAdd(this.zz, m4, dr, 0, this.zz[ri4], this.zz[ri4+1])
+    AqdAdd(this.zz, m4+2, di, 0, this.zz[ri4+2], this.zz[ri4+3])
+    AqdAdd(this.cc, m4, cr, 0, this.cc[ri4], this.cc[ri4+1])
+    AqdAdd(this.cc, m4+2, ci, 0, this.cc[ri4+2], this.cc[ri4+3])
+  }
+
+  initAsQuadPrecision(index, refcc) {
+    const m4 = index * 4;
+    const cr = this.cc[m4];
+    const ci = this.cc[m4+1];
+    const refIndex = this.cc[m4+2];
+    const ri4 = refIndex * 4;
+    AqdAdd(this.cc, m4, cr, 0, refcc[ri4], refcc[ri4+1])
+    AqdAdd(this.cc, m4+2, ci, 0, refcc[ri4+2], refcc[ri4+3])
+  }
+}
+

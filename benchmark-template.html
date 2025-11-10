@@ -1,0 +1,247 @@
+<!doctype html>
+<html>
+<head>
+<title>Board Performance Benchmark</title>
+<style>
+body {
+  font-family: monospace;
+  padding: 20px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+}
+.results {
+  background: #252526;
+  padding: 15px;
+  border-radius: 5px;
+  margin: 10px 0;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 10px 0;
+}
+th, td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid #444;
+}
+th {
+  font-weight: bold;
+  border-bottom: 2px solid #666;
+}
+.winner { color: #4ec9b0; }
+.tie { color: #ce9178; }
+button {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-family: monospace;
+  margin: 5px;
+  cursor: pointer;
+}
+#status {
+  color: #4ec9b0;
+  margin: 10px 0;
+}
+</style>
+</head>
+<body>
+
+<h1>Mandelbrot Board Performance Benchmark</h1>
+<p>Testing optimized ZhuoranBoard with Chebyshev norm rebasing check</p>
+
+<div>
+  <button onclick="runBenchmark('deep')">Benchmark: Deep Zoom (1e-13)</button>
+  <button onclick="runBenchmark('verydeep')">Benchmark: Very Deep (1e-16)</button>
+  <button onclick="runBenchmark('extreme')">Benchmark: Extreme (1e-20)</button>
+  <button onclick="runAllBenchmarks()">Run All Benchmarks</button>
+</div>
+
+<div id="status"></div>
+<div id="results"></div>
+
+<script id="quadCode">
+QUAD_CODE_PLACEHOLDER
+</script>
+
+<script id="workerCode">
+WORKER_CODE_PLACEHOLDER
+</script>
+
+<script>
+const testLocations = {
+  deep: {
+    name: "Deep zoom (1e-13)",
+    re: -0.7325494582388732,
+    im: 0.24145866660812834,
+    size: 7.86432e-13
+  },
+  verydeep: {
+    name: "Very deep zoom (1e-16)",
+    re: -0.7325494582388732,
+    im: 0.24145866660812834,
+    size: 1e-16
+  },
+  extreme: {
+    name: "Extreme deep zoom (1e-20)",
+    re: -0.7325494582388732,
+    im: 0.24145866660812834,
+    size: 1e-20
+  }
+};
+
+const config = {
+  dims: 128,
+  dims2: 128 * 128,
+  exponent: 2,
+  unknownColor: 0,
+  colorTheme: 0
+};
+
+function benchmarkBoard(BoardClass, location, maxIterations = 1000) {
+  const startTime = performance.now();
+
+  const board = new BoardClass(
+    0,
+    location.size,
+    location.re,
+    location.im,
+    config,
+    'benchmark'
+  );
+
+  const initTime = performance.now() - startTime;
+
+  let iterations = 0;
+  let totalIterTime = 0;
+
+  const iterStartTime = performance.now();
+
+  while (iterations < maxIterations && board.unfinished() > 0) {
+    const iterStart = performance.now();
+    board.iterate();
+    totalIterTime += performance.now() - iterStart;
+    iterations++;
+  }
+
+  const totalTime = performance.now() - iterStartTime;
+
+  return {
+    boardType: BoardClass.name,
+    initTime,
+    iterations,
+    totalIterTime,
+    totalTime,
+    avgIterTime: totalIterTime / iterations,
+    unfinished: board.unfinished(),
+    diverged: board.di,
+    converged: config.dims2 - board.un - board.di
+  };
+}
+
+function formatTime(ms) {
+  if (ms >= 1000) return `${(ms/1000).toFixed(2)}s`;
+  return `${ms.toFixed(1)}ms`;
+}
+
+function runBenchmark(locKey) {
+  const location = testLocations[locKey];
+  const status = document.getElementById('status');
+
+  status.textContent = `Running PerturbationBoard for ${location.name}...`;
+
+  setTimeout(() => {
+    const pertResult = benchmarkBoard(PerturbationBoard, location);
+    status.textContent = `Running ZhuoranBoard for ${location.name}...`;
+
+    setTimeout(() => {
+      const zhuoranResult = benchmarkBoard(ZhuoranBoard, location);
+
+      displayResults(location, pertResult, zhuoranResult);
+      status.textContent = 'Benchmark complete!';
+    }, 10);
+  }, 10);
+}
+
+function displayResults(location, pertResult, zhuoranResult) {
+  const resultsDiv = document.getElementById('results');
+
+  let html = `<div class="results">`;
+  html += `<h3>${location.name}</h3>`;
+  html += `<div>Center: (${location.re}, ${location.im})</div>`;
+  html += `<div>Size: ${location.size.toExponential(2)}</div>`;
+  html += `<div>Grid: ${config.dims}x${config.dims} (${config.dims2} pixels)</div>`;
+
+  html += `<table>`;
+  html += `<tr><th>Metric</th><th>PerturbationBoard</th><th>ZhuoranBoard</th><th>Winner</th></tr>`;
+
+  const metrics = [
+    ['Init time', 'initTime', true],
+    ['Total iterations', 'iterations', false],
+    ['Total iteration time', 'totalIterTime', true],
+    ['Avg time per iteration', 'avgIterTime', true],
+    ['Total time', 'totalTime', true],
+    ['Pixels diverged', 'diverged', false],
+    ['Pixels unfinished', 'unfinished', false]
+  ];
+
+  for (const [label, key, isTime] of metrics) {
+    const pertVal = pertResult[key];
+    const zhuoranVal = zhuoranResult[key];
+
+    let pertStr, zhuoranStr, winner, winnerClass;
+
+    if (isTime) {
+      pertStr = formatTime(pertVal);
+      zhuoranStr = formatTime(zhuoranVal);
+      const diff = Math.abs(pertVal - zhuoranVal) / Math.min(pertVal, zhuoranVal);
+      if (diff < 0.05) {
+        winner = 'Tie';
+        winnerClass = 'tie';
+      } else {
+        winner = pertVal < zhuoranVal ? 'Perturbation' : 'Zhuoran';
+        winnerClass = 'winner';
+      }
+    } else {
+      pertStr = pertVal.toString();
+      zhuoranStr = zhuoranVal.toString();
+      winner = pertVal === zhuoranVal ? 'Tie' : (pertVal < zhuoranVal ? 'Perturbation' : 'Zhuoran');
+      winnerClass = pertVal === zhuoranVal ? 'tie' : 'winner';
+    }
+
+    html += `<tr><td>${label}</td><td>${pertStr}</td><td>${zhuoranStr}</td><td class="${winnerClass}">${winner}</td></tr>`;
+  }
+
+  html += `</table>`;
+
+  const speedup = pertResult.totalTime / zhuoranResult.totalTime;
+  if (speedup > 1.05) {
+    html += `<div class="winner">⚡ ZhuoranBoard is ${speedup.toFixed(2)}x faster</div>`;
+  } else if (speedup < 0.95) {
+    html += `<div class="winner">⚡ PerturbationBoard is ${(1/speedup).toFixed(2)}x faster</div>`;
+  } else {
+    html += `<div class="tie">⚖️  Similar performance (${speedup.toFixed(2)}x)</div>`;
+  }
+
+  html += `</div>`;
+
+  resultsDiv.innerHTML = html + resultsDiv.innerHTML;
+}
+
+function runAllBenchmarks() {
+  const keys = ['deep', 'verydeep', 'extreme'];
+  let index = 0;
+
+  function runNext() {
+    if (index < keys.length) {
+      runBenchmark(keys[index]);
+      index++;
+      setTimeout(runNext, 100);
+    }
+  }
+
+  runNext();
+}
+</script>
+
+</body>
+</html>

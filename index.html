@@ -3282,6 +3282,13 @@ class WebGPUBoard extends Board {
     this.cpuStatus = null;
 
     this.effort = 1;
+
+    // Epsilon values adjusted for float32 precision (~7 decimal digits)
+    // Float32 can't reliably distinguish values closer than ~1e-7
+    const pix = size / this.config.dims;
+    this.epsilon = Math.min(1e-7, pix / 10);   // Final convergence threshold
+    this.epsilon2 = Math.min(1e-5, pix * 10);  // Getting close threshold
+
     this.checkSpike(size, re, im);
 
     // Start GPU initialization (async)
@@ -3359,6 +3366,7 @@ class WebGPUBoard extends Board {
         iterations_per_batch: u32,
         active_count: u32,
         epsilon: f32,
+        epsilon2: f32,
       }
 
       @group(0) @binding(0) var<uniform> params: Params;
@@ -3369,7 +3377,7 @@ class WebGPUBoard extends Board {
       @group(0) @binding(5) var<storage, read_write> base_values: array<f32>;  // Base z for period detection
       @group(0) @binding(6) var<storage, read_write> period: array<u32>;   // Period when converged
 
-      // Check if iteration is a power of 2 (for period detection checkpoints)
+      // Check if iteration is a power of 2 (for simple checkpointing)
       fn is_power_of_2(n: u32) -> bool {
         return n > 0u && (n & (n - 1u)) == 0u;
       }
@@ -3402,9 +3410,24 @@ class WebGPUBoard extends Board {
         var base_i = base_values[index * 2u + 1u];
         var p = period[index];
 
+        // If this is the first batch and base is still zero, initialize it
+        if (iter == 0u && base_r == 0.0 && base_i == 0.0) {
+          base_r = zr;  // Initialize to starting z (which is 0,0)
+          base_i = zi;
+        }
+
         // Iterate for this batch
         for (var i = 0u; i < params.iterations_per_batch; i++) {
           iter++;
+
+          // Period detection: save base at power-of-2 iterations BEFORE computing new z
+          var saved_base_this_iter = false;
+          if (is_power_of_2(iter)) {
+            base_r = zr;
+            base_i = zi;
+            p = 0u;  // Reset to track first convergence after this checkpoint
+            saved_base_this_iter = true;
+          }
 
           let zr2 = zr * zr;
           let zi2 = zi * zi;
@@ -3421,24 +3444,24 @@ class WebGPUBoard extends Board {
           zr = new_zr;
           zi = new_zi;
 
-          // Check if orbit is periodic (converged to attracting cycle)
-          // Only check on iterations AFTER we've set a base (not on the same iteration)
-          if (p > 0u && iter > p) {
+          // Check if orbit is periodic (compare new z to base)
+          // Skip if we just saved the base (avoid comparing consecutive z values)
+          if (!saved_base_this_iter) {
             let dr = zr - base_r;
             let di = zi - base_i;
-            let dist2 = dr * dr + di * di;
+            let db = abs(dr) + abs(di);
 
-            if (dist2 < params.epsilon * params.epsilon) {
-              status[index] = 2u;  // Converged (periodic)
-              break;
+            if (db <= params.epsilon2) {
+              // First time within epsilon2, record the iteration
+              if (p == 0u) {
+                p = iter;
+              }
+              // Check if truly converged (within epsilon)
+              if (db <= params.epsilon) {
+                status[index] = 2u;  // Converged (periodic)
+                break;
+              }
             }
-          }
-
-          // Period detection: save base at power-of-2 iterations
-          if (is_power_of_2(iter)) {
-            base_r = zr;
-            base_i = zi;
-            p = iter;  // Save the iteration where we set base
           }
         }
 
@@ -3489,7 +3512,7 @@ class WebGPUBoard extends Board {
     // Storage buffer for z values (two f32 per pixel: zr, zi)
     this.buffers.zValues = this.device.createBuffer({
       size: dims2 * 2 * 4,  // 2 floats per pixel, 4 bytes per float
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'Z values buffer'
     });
 
@@ -3517,7 +3540,7 @@ class WebGPUBoard extends Board {
     // Storage buffer for period values
     this.buffers.period = this.device.createBuffer({
       size: dims2 * 4,  // 4 bytes per u32
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'Period buffer'
     });
 
@@ -3636,8 +3659,8 @@ class WebGPUBoard extends Board {
     }
 
     // Dynamic batch sizing: scale iterations inversely with active pixels
-    // Target: ~20M pixel-iterations per batch for consistent work
-    const targetWork = 20000000;
+    // Target: ~1.1M pixel-iterations per batch for responsive UI with period detection
+    const targetWork = 1111211;  // Prime with all nonzero digits
     let iterationsPerBatch = Math.floor(targetWork / Math.max(activeCount, 1));
     // Clamp to reasonable bounds (min 10, max 123457 - a prime with all nonzero digits)
     iterationsPerBatch = Math.max(10, Math.min(iterationsPerBatch, 123457));
@@ -3658,6 +3681,7 @@ class WebGPUBoard extends Board {
     paramsU32[4] = iterationsPerBatch;
     paramsU32[5] = activeCount;
     paramsF32[6] = this.epsilon;
+    paramsF32[7] = this.epsilon2;
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
@@ -3741,17 +3765,18 @@ class WebGPUBoard extends Board {
     let totalConverged = 0;
     let stillComputing = 0;
 
-    for (let i = 0; i < dims2; i++) {
+    // Only process pixels that were in the active list (actually computed by GPU)
+    for (const i of activePixels) {
       const iters = iterationsData[i];
       const status = statusData[i];
       const lastIters = this.lastReportedIters[i];
+      const wasActive = this.cpuStatus[i] === 0;  // Check BEFORE updating
 
       // Update CPU-side status tracking
       this.cpuStatus[i] = status;
 
       if (status === 1) {
         // Diverged
-        totalDiverged++;
         // Newly diverged in this batch?
         if (lastIters === 0 || iters !== lastIters) {
           this.nn[i] = iters;
@@ -3766,16 +3791,16 @@ class WebGPUBoard extends Board {
         }
       } else if (status === 2) {
         // Converged (periodic orbit detected)
-        totalConverged++;
         // Newly converged in this batch?
         if (lastIters === 0 || iters !== lastIters) {
           this.nn[i] = -iters;  // NEGATIVE iteration for converged pixels (convention)
-          this.pp[i] = 2;   // Mark as converged
 
           // Get z-value and period from GPU data
           const zr = zValuesData[i * 2];
           const zi = zValuesData[i * 2 + 1];
           const period = periodData[i];
+
+          this.pp[i] = period;   // Record the period from GPU
 
           // Add to converged iteration group (will be sent to main thread in vv array)
           if (!convergedByIteration.has(iters)) {
@@ -3789,9 +3814,20 @@ class WebGPUBoard extends Board {
           this.lastReportedIters[i] = iters;
           newlyConverged++;
         }
-      } else {
-        stillComputing++;
       }
+      // Note: status 0 (still computing) is not counted here,
+      // we'll count all statuses in the next loop
+    }
+
+    // Count total finished pixels across entire grid (for statistics)
+    totalDiverged = 0;
+    totalConverged = 0;
+    stillComputing = 0;
+    for (let i = 0; i < dims2; i++) {
+      const status = this.cpuStatus[i];
+      if (status === 1) totalDiverged++;
+      else if (status === 2) totalConverged++;
+      else stillComputing++;
     }
 
     // Create change objects for newly diverged and converged pixels
@@ -3822,6 +3858,12 @@ class WebGPUBoard extends Board {
 
   unfinished() {
     return this.un;
+  }
+
+  figurePeriod(iteration) {
+    let tail = 1;
+    if (iteration) while (Math.floor(iteration / tail) ** 3 > tail) { tail *= 2; }
+    return iteration - (Math.floor(iteration / tail) * tail) + 1;
   }
 
   static fromSerialized(serialized) {

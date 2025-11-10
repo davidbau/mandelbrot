@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+
+const fs = require('fs');
+
+const htmlLines = fs.readFileSync('index.html', 'utf8').split('\n');
+const template = fs.readFileSync('benchmark-template.html', 'utf8');
+
+// Line 2177: <script id="workerCode">
+// Lines 2178-3413: code
+// Line 3414: </script>
+const workerCode = htmlLines.slice(2177, 3413).join('\n');
+
+// Line 3415: <script id="quadCode">
+// Lines 3416-3868: code
+// Line 3869: </script>
+const quadCode = htmlLines.slice(3415, 3868).join('\n');
+
+console.log(`Extracted workerCode: ${workerCode.split('\n').length} lines`);
+console.log(`Extracted quadCode: ${quadCode.split('\n').length} lines`);
+
+if (!workerCode.includes('class Board')) {
+  console.error('ERROR: Board class not found in workerCode!');
+  process.exit(1);
+}
+
+if (!quadCode.includes('function toQd')) {
+  console.error('ERROR: toQd function not found in quadCode!');
+  process.exit(1);
+}
+
+let benchmark = template.replace('QUAD_CODE_PLACEHOLDER', quadCode);
+benchmark = benchmark.replace('WORKER_CODE_PLACEHOLDER', workerCode);
+
+fs.writeFileSync('benchmark.html', benchmark);
+
+console.log('✓ Created benchmark.html');
+console.log('✓ Open benchmark.html in your browser to test the optimized code.');
