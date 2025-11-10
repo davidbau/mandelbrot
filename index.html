@@ -2234,7 +2234,8 @@ class Board {
   static fromSerialized(serialized) {
     const subclasses = new Map([
       ['CpuBoard', CpuBoard],
-      ['PerturbationBoard', PerturbationBoard]
+      ['PerturbationBoard', PerturbationBoard],
+      ['WebGPUBoard', WebGPUBoard]
     ]);
     return subclasses.get(serialized.type).fromSerialized(serialized);
   }
@@ -3254,6 +3255,582 @@ class ZhuoranBoard extends Board {
   }
 }
 
+// WebGPU-accelerated Mandelbrot computation using single-precision float32
+// GPU computes all pixels in parallel using standard Mandelbrot iteration
+class WebGPUBoard extends Board {
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+
+    // Save parameters
+    this.size = size;
+    this.re = re;
+    this.im = im;
+
+    // WebGPU state
+    this.device = null;
+    this.pipeline = null;
+    this.buffers = {};
+    this.isGPUReady = false;
+    this.gpuInitPromise = null;
+    this.isComputing = false;
+    this.lastReportedIters = null;
+    this.cpuStatus = null;
+
+    this.effort = 1;
+    this.checkSpike(size, re, im);
+
+    // Start GPU initialization (async)
+    this.gpuInitPromise = this.initGPU();
+  }
+
+  checkSpike(size, re, im) {
+    // Count chaotic pixels in spike region
+    const dims = this.config.dims;
+    const re_double = Array.isArray(re) ? (re[0] + re[1]) : re;
+    const im_double = Array.isArray(im) ? (im[0] + im[1]) : im;
+
+    for (let y = 0; y < dims; y++) {
+      const yFrac = (0.5 - y / dims);
+      const ci = im_double + yFrac * size;
+
+      for (let x = 0; x < dims; x++) {
+        const xFrac = (x / dims - 0.5);
+        const cr = re_double + xFrac * size;
+
+        if (this.inspike(cr, ci)) {
+          this.ch += 1;
+        }
+      }
+    }
+  }
+
+  async initGPU() {
+    try {
+      // Check WebGPU availability
+      if (!navigator.gpu) {
+        console.warn('WebGPU not supported');
+        return false;
+      }
+
+      // Request adapter and device
+      const adapter = await navigator.gpu.requestAdapter();
+      if (!adapter) {
+        console.warn('No WebGPU adapter found');
+        return false;
+      }
+
+      this.device = await adapter.requestDevice();
+      if (!this.device) {
+        console.warn('Failed to get WebGPU device');
+        return false;
+      }
+
+      // Create compute pipeline
+      await this.createComputePipeline();
+
+      // Create GPU buffers
+      await this.createBuffers();
+
+      // Create bind group
+      this.createBindGroup();
+
+      this.isGPUReady = true;
+      return true;
+
+    } catch (error) {
+      console.error('WebGPU initialization failed:', error);
+      return false;
+    }
+  }
+
+  async createComputePipeline() {
+    // Mandelbrot shader with period detection for convergence
+    const shaderCode = `
+      struct Params {
+        center_re: f32,
+        center_im: f32,
+        pixel_size: f32,
+        dims: u32,
+        iterations_per_batch: u32,
+        active_count: u32,
+        epsilon: f32,
+      }
+
+      @group(0) @binding(0) var<uniform> params: Params;
+      @group(0) @binding(1) var<storage, read_write> iterations: array<u32>;
+      @group(0) @binding(2) var<storage, read_write> z_values: array<f32>;  // [zr0, zi0, zr1, zi1, ...]
+      @group(0) @binding(3) var<storage, read_write> status: array<u32>;    // 0=computing, 1=diverged, 2=converged
+      @group(0) @binding(4) var<storage, read> active_pixels: array<u32>;   // Sparse list of active pixel indices
+      @group(0) @binding(5) var<storage, read_write> base_values: array<f32>;  // Base z for period detection
+      @group(0) @binding(6) var<storage, read_write> period: array<u32>;   // Period when converged
+
+      // Check if iteration is a power of 2 (for period detection checkpoints)
+      fn is_power_of_2(n: u32) -> bool {
+        return n > 0u && (n & (n - 1u)) == 0u;
+      }
+
+      @compute @workgroup_size(64)
+      fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+        let active_idx = global_id.x;
+
+        if (active_idx >= params.active_count) {
+          return;
+        }
+
+        let index = active_pixels[active_idx];
+        let x = index % params.dims;
+        let y = index / params.dims;
+
+        // Compute c for this pixel
+        let xFrac = (f32(x) / f32(params.dims)) - 0.5;
+        let yFrac = 0.5 - (f32(y) / f32(params.dims));
+        let cr = params.center_re + xFrac * params.pixel_size;
+        let ci = params.center_im + yFrac * params.pixel_size;
+
+        // Continue from current z value
+        var zr = z_values[index * 2u];
+        var zi = z_values[index * 2u + 1u];
+        var iter = iterations[index];
+
+        // Load base values for period detection
+        var base_r = base_values[index * 2u];
+        var base_i = base_values[index * 2u + 1u];
+        var p = period[index];
+
+        // Iterate for this batch
+        for (var i = 0u; i < params.iterations_per_batch; i++) {
+          iter++;
+
+          let zr2 = zr * zr;
+          let zi2 = zi * zi;
+
+          // Check divergence
+          if (zr2 + zi2 > 16.0) {
+            status[index] = 1u;  // Diverged
+            break;
+          }
+
+          // z = z^2 + c
+          let new_zr = zr2 - zi2 + cr;
+          let new_zi = 2.0 * zr * zi + ci;
+          zr = new_zr;
+          zi = new_zi;
+
+          // Check if orbit is periodic (converged to attracting cycle)
+          // Only check on iterations AFTER we've set a base (not on the same iteration)
+          if (p > 0u && iter > p) {
+            let dr = zr - base_r;
+            let di = zi - base_i;
+            let dist2 = dr * dr + di * di;
+
+            if (dist2 < params.epsilon * params.epsilon) {
+              status[index] = 2u;  // Converged (periodic)
+              break;
+            }
+          }
+
+          // Period detection: save base at power-of-2 iterations
+          if (is_power_of_2(iter)) {
+            base_r = zr;
+            base_i = zi;
+            p = iter;  // Save the iteration where we set base
+          }
+        }
+
+        // Save state
+        z_values[index * 2u] = zr;
+        z_values[index * 2u + 1u] = zi;
+        base_values[index * 2u] = base_r;
+        base_values[index * 2u + 1u] = base_i;
+        iterations[index] = iter;
+        period[index] = p;
+      }
+    `;
+
+    const shaderModule = this.device.createShaderModule({
+      code: shaderCode,
+      label: 'Mandelbrot compute shader'
+    });
+
+    this.pipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: {
+        module: shaderModule,
+        entryPoint: 'main'
+      },
+      label: 'Mandelbrot compute pipeline'
+    });
+  }
+
+  async createBuffers() {
+    const dims2 = this.config.dims * this.config.dims;
+
+    // Uniform buffer for shader parameters
+    // struct Params { center_re: f32, center_im: f32, pixel_size: f32, dims: u32, iterations_per_batch: u32 }
+    // Size: 3 floats + 2 u32s = 20 bytes, round up to 32 for alignment
+    this.buffers.params = this.device.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      label: 'Parameters buffer'
+    });
+
+    // Storage buffer for iteration counts (one u32 per pixel)
+    this.buffers.iterations = this.device.createBuffer({
+      size: dims2 * 4,  // 4 bytes per u32
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      label: 'Iterations buffer'
+    });
+
+    // Storage buffer for z values (two f32 per pixel: zr, zi)
+    this.buffers.zValues = this.device.createBuffer({
+      size: dims2 * 2 * 4,  // 2 floats per pixel, 4 bytes per float
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      label: 'Z values buffer'
+    });
+
+    // Storage buffer for status flags (one u32 per pixel: 0=computing, 1=diverged)
+    this.buffers.status = this.device.createBuffer({
+      size: dims2 * 4,  // 4 bytes per u32
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      label: 'Status buffer'
+    });
+
+    // Storage buffer for active pixel indices (sparse list, max size = dims2)
+    this.buffers.activePixels = this.device.createBuffer({
+      size: dims2 * 4,  // 4 bytes per u32
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      label: 'Active pixels buffer'
+    });
+
+    // Storage buffer for base values (period detection)
+    this.buffers.baseValues = this.device.createBuffer({
+      size: dims2 * 2 * 4,  // 2 floats per pixel
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      label: 'Base values buffer'
+    });
+
+    // Storage buffer for period values
+    this.buffers.period = this.device.createBuffer({
+      size: dims2 * 4,  // 4 bytes per u32
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      label: 'Period buffer'
+    });
+
+    // Staging buffer for reading results back to CPU
+    this.buffers.staging = this.device.createBuffer({
+      size: Math.max(dims2 * 4, dims2 * 4),
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      label: 'Staging buffer'
+    });
+
+    // Initialize all buffers
+    const zeroData = new Float32Array(dims2 * 2).fill(0);
+    this.device.queue.writeBuffer(this.buffers.zValues, 0, zeroData);
+    this.device.queue.writeBuffer(this.buffers.baseValues, 0, zeroData);
+
+    const statusData = new Uint32Array(dims2).fill(0);
+    this.device.queue.writeBuffer(this.buffers.status, 0, statusData);
+
+    const iterData = new Uint32Array(dims2).fill(0);
+    this.device.queue.writeBuffer(this.buffers.iterations, 0, iterData);
+
+    const periodData = new Uint32Array(dims2).fill(0);
+    this.device.queue.writeBuffer(this.buffers.period, 0, periodData);
+
+    // Initialize active pixels list (all pixels start active)
+    const activePixels = new Uint32Array(dims2);
+    for (let i = 0; i < dims2; i++) {
+      activePixels[i] = i;
+    }
+    this.device.queue.writeBuffer(this.buffers.activePixels, 0, activePixels);
+  }
+
+  createBindGroup() {
+    // Create bind group with all buffers
+    this.bindGroup = this.device.createBindGroup({
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: [
+        {
+          binding: 0,
+          resource: { buffer: this.buffers.params }
+        },
+        {
+          binding: 1,
+          resource: { buffer: this.buffers.iterations }
+        },
+        {
+          binding: 2,
+          resource: { buffer: this.buffers.zValues }
+        },
+        {
+          binding: 3,
+          resource: { buffer: this.buffers.status }
+        },
+        {
+          binding: 4,
+          resource: { buffer: this.buffers.activePixels }
+        },
+        {
+          binding: 5,
+          resource: { buffer: this.buffers.baseValues }
+        },
+        {
+          binding: 6,
+          resource: { buffer: this.buffers.period }
+        }
+      ],
+      label: 'Mandelbrot bind group'
+    });
+  }
+
+  async ensureGPUReady() {
+    if (this.gpuInitPromise) {
+      await this.gpuInitPromise;
+      this.gpuInitPromise = null;
+    }
+    return this.isGPUReady;
+  }
+
+  iterate() {
+    if (!this.isGPUReady || this.isComputing) {
+      return;
+    }
+    this.compute();
+  }
+
+  async compute() {
+    this.isComputing = true;
+
+    const dims2 = this.config.dims * this.config.dims;
+    const workgroupSize = 64;
+
+    // Prepare parameters for GPU
+    const re_double = Array.isArray(this.re) ? (this.re[0] + this.re[1]) : this.re;
+    const im_double = Array.isArray(this.im) ? (this.im[0] + this.im[1]) : this.im;
+    const pixel_size = this.size;
+
+    // Initialize CPU-side status tracking if needed
+    if (!this.cpuStatus) {
+      this.cpuStatus = new Uint32Array(dims2).fill(0);  // 0 = computing
+    }
+
+    // Build sparse active pixel list (only pixels still computing)
+    const activePixels = [];
+    for (let i = 0; i < dims2; i++) {
+      if (this.cpuStatus[i] === 0) {
+        activePixels.push(i);
+      }
+    }
+
+    const activeCount = activePixels.length;
+
+    if (activeCount === 0) {
+      this.un = 0;
+      this.isComputing = false;
+      return;
+    }
+
+    // Dynamic batch sizing: scale iterations inversely with active pixels
+    // Target: ~20M pixel-iterations per batch for consistent work
+    const targetWork = 20000000;
+    let iterationsPerBatch = Math.floor(targetWork / Math.max(activeCount, 1));
+    // Clamp to reasonable bounds (min 10 for responsiveness, max 100000 to blast through final pixels)
+    iterationsPerBatch = Math.max(10, Math.min(iterationsPerBatch, 100000));
+
+    // Upload active pixel list to GPU
+    const activePixelsData = new Uint32Array(activePixels);
+    this.device.queue.writeBuffer(this.buffers.activePixels, 0, activePixelsData);
+
+    // Upload parameters to uniform buffer
+    const paramsBuffer = new ArrayBuffer(32);
+    const paramsF32 = new Float32Array(paramsBuffer);
+    const paramsU32 = new Uint32Array(paramsBuffer);
+
+    paramsF32[0] = re_double;
+    paramsF32[1] = im_double;
+    paramsF32[2] = pixel_size;
+    paramsU32[3] = this.config.dims;
+    paramsU32[4] = iterationsPerBatch;
+    paramsU32[5] = activeCount;
+    paramsF32[6] = this.epsilon;
+
+    this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
+
+    // Dispatch only enough workgroups for active pixels (sparse computation!)
+    const numWorkgroups = Math.ceil(activeCount / workgroupSize);
+
+    // Create command encoder
+    const commandEncoder = this.device.createCommandEncoder({
+      label: 'Mandelbrot compute encoder'
+    });
+
+    // Compute pass
+    const passEncoder = commandEncoder.beginComputePass({
+      label: 'Mandelbrot compute pass'
+    });
+
+    passEncoder.setPipeline(this.pipeline);
+    passEncoder.setBindGroup(0, this.bindGroup);
+    passEncoder.dispatchWorkgroups(numWorkgroups);
+    passEncoder.end();
+
+    // Copy iterations to staging buffer for readback
+    commandEncoder.copyBufferToBuffer(
+      this.buffers.iterations,
+      0,
+      this.buffers.staging,
+      0,
+      dims2 * 4
+    );
+
+    // Submit commands
+    this.device.queue.submit([commandEncoder.finish()]);
+
+    // Read back iterations
+    await this.buffers.staging.mapAsync(GPUMapMode.READ);
+    const iterationsData = new Uint32Array(this.buffers.staging.getMappedRange()).slice();
+    this.buffers.staging.unmap();
+
+    // Read back status
+    const commandEncoder2 = this.device.createCommandEncoder();
+    commandEncoder2.copyBufferToBuffer(this.buffers.status, 0, this.buffers.staging, 0, dims2 * 4);
+    this.device.queue.submit([commandEncoder2.finish()]);
+
+    await this.buffers.staging.mapAsync(GPUMapMode.READ);
+    const statusData = new Uint32Array(this.buffers.staging.getMappedRange()).slice();
+    this.buffers.staging.unmap();
+
+    // Read back z_values (needed for converged pixels)
+    const commandEncoder3 = this.device.createCommandEncoder();
+    const zValuesStaging = this.device.createBuffer({
+      size: dims2 * 2 * 4,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+    });
+    commandEncoder3.copyBufferToBuffer(this.buffers.zValues, 0, zValuesStaging, 0, dims2 * 2 * 4);
+    this.device.queue.submit([commandEncoder3.finish()]);
+
+    await zValuesStaging.mapAsync(GPUMapMode.READ);
+    const zValuesData = new Float32Array(zValuesStaging.getMappedRange()).slice();
+    zValuesStaging.unmap();
+
+    // Read back period (needed for converged pixels)
+    const commandEncoder4 = this.device.createCommandEncoder();
+    commandEncoder4.copyBufferToBuffer(this.buffers.period, 0, this.buffers.staging, 0, dims2 * 4);
+    this.device.queue.submit([commandEncoder4.finish()]);
+
+    await this.buffers.staging.mapAsync(GPUMapMode.READ);
+    const periodData = new Uint32Array(this.buffers.staging.getMappedRange()).slice();
+    this.buffers.staging.unmap();
+
+    // Initialize lastReportedIters if needed
+    if (!this.lastReportedIters) {
+      this.lastReportedIters = new Uint32Array(dims2).fill(0);
+    }
+
+    // Find pixels that NEWLY diverged or converged this batch
+    const pixelsByIteration = new Map(); // For diverged: iter -> [indices]
+    const convergedByIteration = new Map(); // For converged: iter -> [{index, z, p}]
+    let newlyDiverged = 0;
+    let newlyConverged = 0;
+    let totalDiverged = 0;
+    let totalConverged = 0;
+    let stillComputing = 0;
+
+    for (let i = 0; i < dims2; i++) {
+      const iters = iterationsData[i];
+      const status = statusData[i];
+      const lastIters = this.lastReportedIters[i];
+
+      // Update CPU-side status tracking
+      this.cpuStatus[i] = status;
+
+      if (status === 1) {
+        // Diverged
+        totalDiverged++;
+        // Newly diverged in this batch?
+        if (lastIters === 0 || iters !== lastIters) {
+          this.nn[i] = iters;
+          this.pp[i] = 1;
+
+          if (!pixelsByIteration.has(iters)) {
+            pixelsByIteration.set(iters, []);
+          }
+          pixelsByIteration.get(iters).push(i);
+          this.lastReportedIters[i] = iters;
+          newlyDiverged++;
+        }
+      } else if (status === 2) {
+        // Converged (periodic orbit detected)
+        totalConverged++;
+        // Newly converged in this batch?
+        if (lastIters === 0 || iters !== lastIters) {
+          this.nn[i] = -iters;  // NEGATIVE iteration for converged pixels (convention)
+          this.pp[i] = 2;   // Mark as converged
+
+          // Get z-value and period from GPU data
+          const zr = zValuesData[i * 2];
+          const zi = zValuesData[i * 2 + 1];
+          const period = periodData[i];
+
+          // Add to converged iteration group (will be sent to main thread in vv array)
+          if (!convergedByIteration.has(iters)) {
+            convergedByIteration.set(iters, []);
+          }
+          convergedByIteration.get(iters).push({
+            index: i,
+            z: [zr, 0, zi, 0],  // quad-double format
+            p: period
+          });
+          this.lastReportedIters[i] = iters;
+          newlyConverged++;
+        }
+      } else {
+        stillComputing++;
+      }
+    }
+
+    // Create change objects for newly diverged and converged pixels
+    const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+    const sortedIterations = Array.from(allIterations).sort((a, b) => a - b);
+    let totalChanges = 0;
+
+    for (const iter of sortedIterations) {
+      const divergedIndices = pixelsByIteration.get(iter) || [];
+      const convergedData = convergedByIteration.get(iter) || [];
+
+      this.changeList.push({
+        iter: iter,
+        nn: divergedIndices,
+        vv: convergedData
+      });
+      totalChanges += divergedIndices.length + convergedData.length;
+    }
+
+    // Update board statistics
+    this.it += iterationsPerBatch;
+    this.di = totalDiverged;
+    this.un = stillComputing;
+    this.updateSize = totalChanges;
+
+    this.isComputing = false;
+  }
+
+  unfinished() {
+    return this.un;
+  }
+
+  static fromSerialized(serialized) {
+    return new WebGPUBoard(
+      serialized.k,
+      serialized.sizes[0],
+      serialized.sizes[1],
+      serialized.sizes[2],
+      serialized.config,
+      serialized.id
+    );
+  }
+}
+
 function workerLog(message) {
   self.postMessage({
     type: 'log',
@@ -3277,12 +3854,22 @@ self.onmessage = function(e) {
     case 'addBoard':
       workerNumber = data.workerNumber;
       const useZhuoranApproach = false;  // PerturbationBoard is 5-6x faster in benchmarks
+      const testWebGPU = true;  // Testing WebGPU implementation
 
-      const board = data.size / data.config.dims < 1e-15
-        ? (useZhuoranApproach
-            ? new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id)
-            : new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id))
-        : new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+      let board;
+      if (testWebGPU) {
+        // Use WebGPU for shallow zooms (large pixel_size) where float32 is sufficient
+        // Use CpuBoard for deep zooms (small pixel_size) where we need double precision
+        board = data.size / data.config.dims > 1e-6
+          ? new WebGPUBoard(data.k, data.size, data.re, data.im, data.config, data.id)
+          : new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+      } else {
+        board = data.size / data.config.dims < 1e-15
+          ? (useZhuoranApproach
+              ? new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id)
+              : new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id))
+          : new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+      }
 
       boards.set(data.k, board);
       console.log(`View ${data.k}: ${board.constructor.name}`);
