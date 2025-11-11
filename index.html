@@ -2207,6 +2207,8 @@ class Board {
     this.cc = [];
     this.zz = [];
     this.bb = [];
+    this.hasCheckpoint = new Array(this.config.dims2).fill(false);  // Track if bb checkpoint is valid
+    this.checkpointIter = new Array(this.config.dims2).fill(0);  // Iteration when checkpoint was saved
   }
 
   serialize() {
@@ -3007,10 +3009,16 @@ class ZhuoranBoard extends Board {
         } else {
           // Converged
           const index2 = index * 2;
+          // Report the CURRENT z position after the iteration
+          // Note: refIter was NOT incremented (returned before increment)
+          // dz corresponds to refIter+1
+          const nextRefIter = this.refIter[index] + 1;
+          const ref = nextRefIter < this.refOrbit.length ? this.refOrbit[nextRefIter] : this.refOrbit[this.refOrbit.length - 1];
+          const refR = ref ? (ref[0] + ref[1]) : 0;
+          const refI = ref ? (ref[2] + ref[3]) : 0;
           changes.vv.push({
             index: index,
-            z: [this.dz[index2] + this.getCurrentRefZ(index)[0],
-                this.dz[index2 + 1] + this.getCurrentRefZ(index)[2]],
+            z: [refR + this.dz[index2], refI + this.dz[index2 + 1]],
             p: this.pp[index]
           });
           this.nn[index] = -this.it;
@@ -3160,6 +3168,11 @@ class ZhuoranBoard extends Board {
     const dr = this.dz[index2];
     const di = this.dz[index2 + 1];
 
+    // Save the OLD z value (before this iteration) for checkpoint timing
+    // This matches CpuBoard's behavior where bb is set BEFORE computing the new z
+    const oldZR = refR + dr;
+    const oldZI = refI + di;
+
     // Compute dz^2
     const dzSqR = dr * dr - di * di;
     const dzSqI = 2 * dr * di;
@@ -3177,34 +3190,63 @@ class ZhuoranBoard extends Board {
     this.dz[index2 + 1] = newDi;
 
     // Now check for divergence with the updated values
-    // Use escape radius 4 (magnitude² > 16)
-    const totalR = refR + newDr;
-    const totalI = refI + newDi;
+    // IMPORTANT: The new z value is refOrbit[refIter+1] + newDz, not refOrbit[refIter] + newDz!
+    // We used refOrbit[refIter] to COMPUTE newDz, but the result corresponds to the NEXT reference iteration
+    const nextRefIter = refIter + 1;
+    if (nextRefIter >= this.refOrbit.length) {
+      // This shouldn't happen because we extend the reference orbit beforehand
+      console.error(`nextRefIter ${nextRefIter} >= refOrbit.length ${this.refOrbit.length}`);
+      return 1;
+    }
+    const nextRef = this.refOrbit[nextRefIter];
+    const nextRefR = nextRef[0] + nextRef[1];
+    const nextRefI = nextRef[2] + nextRef[3];
+
+    // Use escape radius 2 (magnitude² > 4)
+    const totalR = nextRefR + newDr;
+    const totalI = nextRefI + newDi;
     const totalMag2 = totalR * totalR + totalI * totalI;
 
-    if (totalMag2 > 16) {
+    if (totalMag2 > 4) {
       return 1;  // Diverged
     }
 
-    // Check for convergence using the same pattern as CpuBoard
-    // Note: we're using the updated dz values that we just stored
-    if (figurePeriod(this.it) == 1) {
-      if (!this.bb[index2]) {
-        this.bb[index2] = this.dz[index2];
-        this.bb[index2 + 1] = this.dz[index2 + 1];
-        this.pp[index] = 0;
-      } else {
-        const db = Math.abs(this.dz[index2] - this.bb[index2]) + Math.abs(this.dz[index2 + 1] - this.bb[index2 + 1]);
-        if (db <= this.epsilon2) {
-          if (!this.pp[index]) {
-            this.pp[index] = this.it;
-          }
-          if (db <= this.epsilon) {
-            return -1;  // Converged
-          }
+    // CONVERGENCE DETECTION using figurePeriod checkpoints
+    // Like CpuBoard: UPDATE checkpoint when figurePeriod==1, but CHECK every iteration
+    // IMPORTANT: Check convergence BEFORE incrementing refIter
+    // We already computed nextRefIter above (= refIter + 1)
+
+    // Step 1: Update checkpoint at figurePeriod intervals
+    const justUpdatedCheckpoint = (figurePeriod(this.it) == 1);
+    if (justUpdatedCheckpoint) {
+      // Use the OLD z value (before computing this iteration) to match CpuBoard's timing
+      // CpuBoard sets bb at the START of iterate(), before computing the new z
+      this.bb[index2] = oldZR;
+      this.bb[index2 + 1] = oldZI;
+      this.hasCheckpoint[index] = true;
+      this.checkpointIter[index] = this.it;  // Record when checkpoint was saved
+      this.pp[index] = 0;
+    }
+
+    // Step 2: Check convergence EVERY iteration (if we have a checkpoint and didn't just update it)
+    if (this.hasCheckpoint[index] && !justUpdatedCheckpoint) {
+      // Current z position (we already computed totalR, totalI above)
+      const zCurrentR = totalR;
+      const zCurrentI = totalI;
+
+      const deltaR = zCurrentR - this.bb[index2];
+      const deltaI = zCurrentI - this.bb[index2 + 1];
+      const db = Math.abs(deltaR) + Math.abs(deltaI);
+
+      if (db <= this.epsilon2) {
+        if (!this.pp[index]) {
+          // Record iteration number when first detected, like CpuBoard does
+          this.pp[index] = this.it;
         }
-        this.bb[index2] = this.dz[index2];
-        this.bb[index2 + 1] = this.dz[index2 + 1];
+        if (db <= this.epsilon) {
+          // Return -1 BEFORE incrementing refIter
+          return -1;  // Converged
+        }
       }
     }
 
@@ -3250,7 +3292,8 @@ class ZhuoranBoard extends Board {
     const totalNorm = Math.max(Math.abs(totalR), Math.abs(totalI));
 
     // Rebase when orbit approaches critical point (0)
-    return totalNorm < dzNorm;
+    // More aggressive threshold: rebase when totalNorm < 2 * dzNorm
+    return totalNorm < dzNorm * 2;
   }
 
   getCurrentRefZ(index) {
@@ -4501,7 +4544,7 @@ self.onmessage = function(e) {
     case 'addBoard':
       workerNumber = data.workerNumber;
       const useZhuoranApproach = false;  // PerturbationBoard is 5-6x faster in benchmarks
-      const testWebGPU = true;  // Testing WebGPU implementation
+      const testWebGPU = false;  // TEMPORARILY DISABLED - testing CPU ZhuoranBoard convergence
       const webGPUAvailable = WebGPUBoard.isAvailable();
 
       if (testWebGPU && !webGPUAvailable) {
@@ -4522,13 +4565,8 @@ self.onmessage = function(e) {
         }
       } else {
         // WebGPU disabled or unavailable - use CPU-based boards
-        // Use double-precision thresholds (CpuBoard can handle deeper zooms than float32)
-        const pixelSize = data.size / data.config.dims;
-        if (pixelSize >= 1e-15) {
-          board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
-        } else {
-          board = new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id);
-        }
+        // TESTING: Always use ZhuoranBoard to test convergence detection
+        board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
       }
 
       boards.set(data.k, board);
