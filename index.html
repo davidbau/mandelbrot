@@ -4273,54 +4273,42 @@ class WebGPUZhuoranBoard extends WebGPUBaseBoard {
 
         let index2 = index * 2u;
         var iter = iterations[index];
-
-        // Unpack dzAndCheckpoint
+        // Unpack: dz = perturbation delta, bb = checkpoint dz for convergence test
         var dzr = dzAndCheckpoint[index].x;
         var dzi = dzAndCheckpoint[index].y;
-        var bbr = dzAndCheckpoint[index].z;
-        var bbi = dzAndCheckpoint[index].w;
-
+        var bbr = dzAndCheckpoint[index].z;  // checkpoint dz real
+        var bbi = dzAndCheckpoint[index].w;  // checkpoint dz imag
         var ref_iter = refIter[index];
         let dcr = dc[index2];
         let dci = dc[index2 + 1u];
-
-        var checkpoint_iter_val = checkpointIter[index];
-        var pp = statusAndPeriod[index].y;
-
-        // Convergence thresholds (matching CPU ZhuoranBoard)
-        // Scale with pixel size for deep zooms
+        var ckpt_iter = checkpointIter[index];  // ref_iter when checkpoint was saved
+        var pp = statusAndPeriod[index].y;     // period = iter when convergence first detected
+        // Convergence thresholds scale with pixel size for deep zooms
         let epsilon = min(1e-12, params.pixel_size / 10.0);   // Final convergence threshold
         let epsilon2 = min(1e-9, params.pixel_size * 10.0);  // Getting close threshold
 
         // Iterate for the batch
         for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
           iter++;
-
           // Get current reference orbit values
           let ref_offset = ref_iter * 2u;
           if (ref_offset + 1u >= params.ref_orbit_length * 2u) {
             break;  // Reference orbit too short
           }
-
           var refr = refOrbit[ref_offset];
           var refi = refOrbit[ref_offset + 1u];
-
-          // Check if we need to rebase (before iteration)
+          // Rebase when orbit approaches critical point (totalNorm < dzNorm)
           let dz_norm = max(abs(dzr), abs(dzi));
           let total_r_pre = refr + dzr;
           let total_i_pre = refi + dzi;
           let total_norm = max(abs(total_r_pre), abs(total_i_pre));
-
           if (ref_iter > 0u && total_norm < dz_norm) {
-            // Set dz = z_total (absolute position)
-            dzr = total_r_pre;
+            dzr = total_r_pre;  // Set dz = z_total (absolute position)
             dzi = total_i_pre;
             ref_iter = 0u;  // Restart from beginning of reference orbit
-            // Re-read reference orbit from iteration 0
             refr = refOrbit[0];
             refi = refOrbit[1];
           }
-
           // Save dz before iteration (for checkpoint timing)
           let old_dzr = dzr;
           let old_dzi = dzi;
@@ -4331,10 +4319,8 @@ class WebGPUZhuoranBoard extends WebGPUBaseBoard {
           let dz_sq_i = 2.0 * dzr * dzi;
           let two_zref_dz_r = 2.0 * (refr * dzr - refi * dzi);
           let two_zref_dz_i = 2.0 * (refr * dzi + refi * dzr);
-
           dzr = two_zref_dz_r + dz_sq_r + dcr;
           dzi = two_zref_dz_i + dz_sq_i + dci;
-
           // Get NEW reference orbit value (refIter+1) for total z
           let next_ref_iter = ref_iter + 1u;
           let next_ref_offset = next_ref_iter * 2u;
@@ -4343,57 +4329,48 @@ class WebGPUZhuoranBoard extends WebGPUBaseBoard {
           }
           let next_refr = refOrbit[next_ref_offset];
           let next_refi = refOrbit[next_ref_offset + 1u];
-
           let total_r = next_refr + dzr;
           let total_i = next_refi + dzi;
-
           // Check divergence: |z_total|² > 4 (escape radius 2)
           let mag_sq = total_r * total_r + total_i * total_i;
           if (mag_sq > 4.0) {
             statusAndPeriod[index] = vec2<u32>(1u, pp);  // Diverged
             break;
           }
-
-          // CONVERGENCE DETECTION
+          // CONVERGENCE DETECTION: figurePeriod returns 1 at power-of-2-ish checkpoints
           let fig_period = figurePeriod(iter);
           let just_updated = (fig_period == 1u);
-
           if (just_updated) {
             // Update checkpoint with dz (not absolute position, to avoid precision loss)
             bbr = old_dzr;
             bbi = old_dzi;
-            checkpoint_iter_val = old_ref_iter;
+            ckpt_iter = old_ref_iter;
             pp = 0u;
           }
-
           // Check convergence (if we have a checkpoint and didn't just update it)
-          if (checkpoint_iter_val > 0u && !just_updated) {
+          if (ckpt_iter > 0u && !just_updated) {
             // Compare dz deltas to avoid precision loss from subtracting large coordinates
             let delta_r = dzr - bbr;
             let delta_i = dzi - bbi;
-            let db = abs(delta_r) + abs(delta_i);
-
+            let db = abs(delta_r) + abs(delta_i);  // distance from checkpoint
             if (db <= epsilon2) {
               if (pp == 0u) {
-                pp = iter;  // Record iteration number when first detected
+                pp = iter;  // Record iter when convergence first detected
               }
               if (db <= epsilon) {
-                // Converged! Don't advance ref_iter
-                statusAndPeriod[index] = vec2<u32>(2u, pp);
+                statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
                 break;
               }
             }
           }
 
-          // Advance reference iteration (only if not converged)
           ref_iter++;
         }
-
         // Write back state - pack into combined buffers
         iterations[index] = iter;
         dzAndCheckpoint[index] = vec4<f32>(dzr, dzi, bbr, bbi);
         refIter[index] = ref_iter;
-        checkpointIter[index] = checkpoint_iter_val;
+        checkpointIter[index] = ckpt_iter;
         // Write back pp even if not converged (so it persists across batches)
         if (statusAndPeriod[index].x == 0u) {
           statusAndPeriod[index] = vec2<u32>(0u, pp);
