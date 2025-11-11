@@ -3242,7 +3242,8 @@ class ZhuoranBoard extends Board {
     const totalNorm = Math.max(Math.abs(totalR), Math.abs(totalI));
 
     // Rebase when orbit approaches critical point (0)
-    return totalNorm < dzNorm;
+    // Use factor of 2 to rebase less aggressively, reducing cumulative errors
+    return totalNorm < dzNorm * 2.0;
   }
 
   getCurrentRefZ(index) {
@@ -4199,25 +4200,36 @@ class WebGPUZhuoranBoard extends WebGPUBaseBoard {
         // Iterate for the batch
         for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
           iter++;
-          // Get current reference orbit values
+          // BUG FIX: Check rebasing BEFORE loading reference orbit (matches CPU ZhuoranBoard)
+          // The old code loaded refr/refi first, then rebased, then used stale refr/refi
+          let dz_norm = max(abs(dzr), abs(dzi));
+
+          // Peek at reference orbit to check rebasing condition
+          let ref_offset_check = ref_iter * 2u;
+          if (ref_offset_check + 1u < params.ref_orbit_length * 2u) {
+            let refr_check = refOrbit[ref_offset_check];
+            let refi_check = refOrbit[ref_offset_check + 1u];
+            let total_r_pre = refr_check + dzr;
+            let total_i_pre = refi_check + dzi;
+            let total_norm = max(abs(total_r_pre), abs(total_i_pre));
+
+            // Rebase when orbit approaches critical point (less aggressive than CPU with * 2.0)
+            if (ref_iter > 0u && total_norm < dz_norm * 2.0) {
+              dzr = total_r_pre;  // Set dz = z_total (absolute position)
+              dzi = total_i_pre;
+              ref_iter = 0u;  // Restart from beginning of reference orbit
+              // Checkpoint becomes invalid after rebase (dz now absolute, not perturbation)
+              ckpt_iter = 0u;
+            }
+          }
+
+          // NOW load reference orbit values for current (possibly rebased) ref_iter
           let ref_offset = ref_iter * 2u;
           if (ref_offset + 1u >= params.ref_orbit_length * 2u) {
             break;  // Reference orbit too short
           }
           var refr = refOrbit[ref_offset];
           var refi = refOrbit[ref_offset + 1u];
-          // Rebase when orbit approaches critical point (totalNorm < dzNorm)
-          let dz_norm = max(abs(dzr), abs(dzi));
-          let total_r_pre = refr + dzr;
-          let total_i_pre = refi + dzi;
-          let total_norm = max(abs(total_r_pre), abs(total_i_pre));
-          if (ref_iter > 0u && total_norm < dz_norm) {
-            dzr = total_r_pre;  // Set dz = z_total (absolute position)
-            dzi = total_i_pre;
-            ref_iter = 0u;  // Restart from beginning of reference orbit
-            refr = refOrbit[0];
-            refi = refOrbit[1];
-          }
           // Save dz before iteration (for checkpoint timing)
           let old_dzr = dzr;
           let old_dzi = dzi;
