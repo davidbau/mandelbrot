@@ -3594,11 +3594,29 @@ class WebGPUBoard extends Board {
       label: 'Period buffer'
     });
 
-    // Staging buffer for reading results back to CPU
-    this.buffers.staging = this.device.createBuffer({
-      size: Math.max(dims2 * 4, dims2 * 4),
+    // Persistent staging buffers for reading results back to CPU
+    this.buffers.stagingIterations = this.device.createBuffer({
+      size: dims2 * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      label: 'Staging buffer'
+      label: 'Staging iterations buffer'
+    });
+
+    this.buffers.stagingStatus = this.device.createBuffer({
+      size: dims2 * 4,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      label: 'Staging status buffer'
+    });
+
+    this.buffers.stagingZValues = this.device.createBuffer({
+      size: dims2 * 2 * 4,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      label: 'Staging z-values buffer'
+    });
+
+    this.buffers.stagingPeriod = this.device.createBuffer({
+      size: dims2 * 4,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      label: 'Staging period buffer'
     });
 
     // Initialize all buffers
@@ -3709,11 +3727,10 @@ class WebGPUBoard extends Board {
     }
 
     // Dynamic batch sizing: scale iterations inversely with active pixels
-    // Target: ~1.1M pixel-iterations per batch for responsive UI with period detection
     const targetWork = 1111211;  // Prime with all nonzero digits
     let iterationsPerBatch = Math.floor(targetWork / Math.max(activeCount, 1));
-    // Clamp to reasonable bounds (min 10, max 123457 - a prime with all nonzero digits)
-    iterationsPerBatch = Math.max(10, Math.min(iterationsPerBatch, 123457));
+    // Clamp to reasonable bounds (min 97 - prime, max 1000)
+    iterationsPerBatch = Math.max(97, Math.min(iterationsPerBatch, 1000));
 
     // Upload active pixel list to GPU
     const activePixelsData = new Uint32Array(activePixels);
@@ -3753,53 +3770,25 @@ class WebGPUBoard extends Board {
     passEncoder.dispatchWorkgroups(numWorkgroups);
     passEncoder.end();
 
-    // Copy iterations to staging buffer for readback
-    commandEncoder.copyBufferToBuffer(
-      this.buffers.iterations,
-      0,
-      this.buffers.staging,
-      0,
-      dims2 * 4
-    );
+    // Batch all buffer copies into single command encoder for efficiency
+    commandEncoder.copyBufferToBuffer(this.buffers.iterations, 0, this.buffers.stagingIterations, 0, dims2 * 4);
+    commandEncoder.copyBufferToBuffer(this.buffers.status, 0, this.buffers.stagingStatus, 0, dims2 * 4);
 
-    // Submit commands
+    // Submit compute + buffer copies in single batch
     this.device.queue.submit([commandEncoder.finish()]);
+    await this.device.queue.onSubmittedWorkDone();
 
-    // Read back iterations
-    await this.buffers.staging.mapAsync(GPUMapMode.READ);
-    const iterationsData = new Uint32Array(this.buffers.staging.getMappedRange()).slice();
-    this.buffers.staging.unmap();
+    // Update iteration counter (before processing results, like CPU implementations)
+    this.it += iterationsPerBatch;
 
-    // Read back status
-    const commandEncoder2 = this.device.createCommandEncoder();
-    commandEncoder2.copyBufferToBuffer(this.buffers.status, 0, this.buffers.staging, 0, dims2 * 4);
-    this.device.queue.submit([commandEncoder2.finish()]);
+    // First pass: read lightweight buffers (iterations and status)
+    await this.buffers.stagingIterations.mapAsync(GPUMapMode.READ);
+    const iterationsData = new Uint32Array(this.buffers.stagingIterations.getMappedRange()).slice();
+    this.buffers.stagingIterations.unmap();
 
-    await this.buffers.staging.mapAsync(GPUMapMode.READ);
-    const statusData = new Uint32Array(this.buffers.staging.getMappedRange()).slice();
-    this.buffers.staging.unmap();
-
-    // Read back z_values (needed for converged pixels)
-    const commandEncoder3 = this.device.createCommandEncoder();
-    const zValuesStaging = this.device.createBuffer({
-      size: dims2 * 2 * 4,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
-    });
-    commandEncoder3.copyBufferToBuffer(this.buffers.zValues, 0, zValuesStaging, 0, dims2 * 2 * 4);
-    this.device.queue.submit([commandEncoder3.finish()]);
-
-    await zValuesStaging.mapAsync(GPUMapMode.READ);
-    const zValuesData = new Float32Array(zValuesStaging.getMappedRange()).slice();
-    zValuesStaging.unmap();
-
-    // Read back period (needed for converged pixels)
-    const commandEncoder4 = this.device.createCommandEncoder();
-    commandEncoder4.copyBufferToBuffer(this.buffers.period, 0, this.buffers.staging, 0, dims2 * 4);
-    this.device.queue.submit([commandEncoder4.finish()]);
-
-    await this.buffers.staging.mapAsync(GPUMapMode.READ);
-    const periodData = new Uint32Array(this.buffers.staging.getMappedRange()).slice();
-    this.buffers.staging.unmap();
+    await this.buffers.stagingStatus.mapAsync(GPUMapMode.READ);
+    const statusData = new Uint32Array(this.buffers.stagingStatus.getMappedRange()).slice();
+    this.buffers.stagingStatus.unmap();
 
     // Initialize lastReportedIters if needed
     if (!this.lastReportedIters) {
@@ -3811,23 +3800,19 @@ class WebGPUBoard extends Board {
     const convergedByIteration = new Map(); // For converged: iter -> [{index, z, p}]
     let newlyDiverged = 0;
     let newlyConverged = 0;
-    let totalDiverged = 0;
-    let totalConverged = 0;
-    let stillComputing = 0;
+    let hasConverged = false;
 
-    // Only process pixels that were in the active list (actually computed by GPU)
+    // First pass: process diverged pixels and detect if any converged
     for (const i of activePixels) {
       const iters = iterationsData[i];
       const status = statusData[i];
       const lastIters = this.lastReportedIters[i];
-      const wasActive = this.cpuStatus[i] === 0;  // Check BEFORE updating
 
       // Update CPU-side status tracking
       this.cpuStatus[i] = status;
 
       if (status === 1) {
-        // Diverged
-        // Newly diverged in this batch?
+        // Diverged - newly diverged in this batch?
         if (lastIters === 0 || iters !== lastIters) {
           this.nn[i] = iters;
           this.pp[i] = 1;
@@ -3840,39 +3825,61 @@ class WebGPUBoard extends Board {
           newlyDiverged++;
         }
       } else if (status === 2) {
-        // Converged (periodic orbit detected)
-        // Newly converged in this batch?
-        if (lastIters === 0 || iters !== lastIters) {
-          this.nn[i] = -iters;  // NEGATIVE iteration for converged pixels (convention)
+        // Converged - mark that we need to read heavy buffers
+        hasConverged = true;
+      }
+    }
 
-          // Get z-value and period from GPU data
+    // Second pass: only read heavy buffers if we have converged pixels
+    if (hasConverged) {
+      // Create a new command encoder for heavy buffer readback
+      const heavyEncoder = this.device.createCommandEncoder();
+      heavyEncoder.copyBufferToBuffer(this.buffers.zValues, 0, this.buffers.stagingZValues, 0, dims2 * 2 * 4);
+      heavyEncoder.copyBufferToBuffer(this.buffers.period, 0, this.buffers.stagingPeriod, 0, dims2 * 4);
+      this.device.queue.submit([heavyEncoder.finish()]);
+      await this.device.queue.onSubmittedWorkDone();
+
+      await this.buffers.stagingZValues.mapAsync(GPUMapMode.READ);
+      const zValuesData = new Float32Array(this.buffers.stagingZValues.getMappedRange()).slice();
+      this.buffers.stagingZValues.unmap();
+
+      await this.buffers.stagingPeriod.mapAsync(GPUMapMode.READ);
+      const periodData = new Uint32Array(this.buffers.stagingPeriod.getMappedRange()).slice();
+      this.buffers.stagingPeriod.unmap();
+
+      // Process converged pixels
+      for (const i of activePixels) {
+        const iters = iterationsData[i];
+        const status = statusData[i];
+        const lastIters = this.lastReportedIters[i];
+
+        if (status === 2 && (lastIters === 0 || iters !== lastIters)) {
+          this.nn[i] = -iters;  // Negative iteration for converged pixels
+
           const zr = zValuesData[i * 2];
           const zi = zValuesData[i * 2 + 1];
           const period = periodData[i];
 
-          this.pp[i] = period;   // Record the period from GPU
+          this.pp[i] = period;
 
-          // Add to converged iteration group (will be sent to main thread in vv array)
           if (!convergedByIteration.has(iters)) {
             convergedByIteration.set(iters, []);
           }
           convergedByIteration.get(iters).push({
             index: i,
-            z: [zr, 0, zi, 0],  // quad-double format
+            z: [zr, 0, zi, 0],
             p: period
           });
           this.lastReportedIters[i] = iters;
           newlyConverged++;
         }
       }
-      // Note: status 0 (still computing) is not counted here,
-      // we'll count all statuses in the next loop
     }
 
     // Count total finished pixels across entire grid (for statistics)
-    totalDiverged = 0;
-    totalConverged = 0;
-    stillComputing = 0;
+    let totalDiverged = 0;
+    let totalConverged = 0;
+    let stillComputing = 0;
     for (let i = 0; i < dims2; i++) {
       const status = this.cpuStatus[i];
       if (status === 1) totalDiverged++;
@@ -3898,7 +3905,6 @@ class WebGPUBoard extends Board {
     }
 
     // Update board statistics
-    this.it += iterationsPerBatch;
     this.di = totalDiverged;
     this.un = stillComputing;
     this.updateSize = totalChanges;
