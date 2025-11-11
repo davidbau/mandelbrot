@@ -4679,7 +4679,8 @@ function iterateBoards() {
           changeList: board.changeList,
           boardEffort,
           remainingWork,
-          workerInfo
+          workerInfo,
+          boardType: board.constructor.name
         }
       });
       board.lastTime = now;
