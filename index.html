@@ -1535,6 +1535,7 @@ class Scheduler {
     this.workers = [];
     this.boardEfforts = new Map();
     this.assignments = {};
+    this.gpuBoards = new Set(); // Track GPU boards that cannot be transferred
     this.lastBalanceTime = 0;
     this.lastReportTime = 0;
     this.balanceInterval = 5000; // Move jobs to load-balance every 5 seconds
@@ -1605,6 +1606,7 @@ class Scheduler {
 
   removeBoardFromWorker(k) {
     this.boardEfforts.set(k, 0);
+    this.gpuBoards.delete(k);
     this.workers.forEach(worker => {
       worker.postMessage({
         type: 'removeBoard',
@@ -1643,6 +1645,11 @@ class Scheduler {
       case 'log':
         console.log(`Worker ${workerIndex}: ${data}`);
         break;
+      case 'boardCreated':
+        if (data.isGPUBoard) {
+          this.gpuBoards.add(data.k);
+        }
+        break;
       case 'iterations':
         this.grid.updateViewFromWorkerResult(data.k, data, workerIndex);
         // fallthrough
@@ -1673,7 +1680,12 @@ class Scheduler {
         if (load > 2 * lowEffort) {
           const workerBoards = this.getWorkerBoards(workerIndex);
           if (workerBoards.length > 1) {
-            const sortedBoards = workerBoards.sort(
+            // Filter out GPU boards which cannot be transferred
+            const transferableBoards = workerBoards.filter(k => !this.gpuBoards.has(k));
+            if (transferableBoards.length < 2) {
+              continue; // Skip this worker - need at least 2 transferable boards
+            }
+            const sortedBoards = transferableBoards.sort(
                 (a, b) => this.boardEfforts.get(b) + b/1000 - this.boardEfforts.get(a) - a/1000);
             if (now - this.lastReportTime > this.reportInterval) {
               console.log(this.report());
@@ -4695,6 +4707,16 @@ self.onmessage = function(e) {
 
       boards.set(data.k, board);
       console.log(`View ${data.k}: ${board.constructor.name}`);
+
+      // Send board type info once on creation
+      self.postMessage({
+        type: 'boardCreated',
+        data: {
+          k: data.k,
+          boardType: board.constructor.name,
+          isGPUBoard: board instanceof WebGPUBoard || board instanceof WebGPUZhuoranBoard
+        }
+      });
       break;
     case 'removeBoard':
       boards.delete(data.k);
@@ -4710,6 +4732,11 @@ self.onmessage = function(e) {
       for (const k of data.boardKeys) {
         if (boards.has(k)) {
           const board = boards.get(k);
+          // Skip GPU boards - they cannot be transferred as they lose GPU state
+          if (board instanceof WebGPUBoard || board instanceof WebGPUZhuoranBoard) {
+            console.log(`Skipping transfer of GPU board ${k} (${board.constructor.name})`);
+            continue;
+          }
           board.compact();
           const serializedBoard = board.serialize();
           boards.delete(k);
@@ -4803,8 +4830,7 @@ function iterateBoards() {
           changeList: board.changeList,
           boardEffort,
           remainingWork,
-          workerInfo,
-          boardType: board.constructor.name
+          workerInfo
         }
       });
       board.lastTime = now;
