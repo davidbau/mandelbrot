@@ -2477,10 +2477,9 @@ class CpuBoard extends Board {
 class PerturbationBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-
-    this.quadIndexes = [];
-    this.pertIndexes = [];
-    this.tt = [];
+    this.quadIndexes = [];   // Pixels computed in quad-double precision
+    this.pertIndexes = [];   // Pixels computed as perturbations from quad points
+    this.tt = [];            // Working array for quad-double operations
     this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dims)));
     this.effort = 3;
     this.initPerturbationBoard(size, re, im);
@@ -2610,17 +2609,16 @@ class PerturbationBoard extends Board {
 
   iterate() {
     let changes = null;
-
     let i = this.it;
     let head = i, tail = 1;
     while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
     let results = [0, 0, 0];
-
     // Precompute quad-precision point escape without updating z
+    // Update checkpoints at power-of-2-ish intervals (when head <= tail)
     for (const index of this.quadIndexes) {
       if (head <= tail && !this.nn[index]) {
-        AqdcCopy(this.bb, index*4, this.zz, index*4);
-        this.pp[index] = 0;
+        AqdcCopy(this.bb, index*4, this.zz, index*4);  // bb = checkpoint z
+        this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
       }
       let r = this.precomputeQuad(index);
       results[r + 1] += 1;
@@ -2632,14 +2630,13 @@ class PerturbationBoard extends Board {
           changes.vv.push({
             index: index,
             z: AqdcGet(this.nz, index*4),
-            p: this.pp[index]
+            p: this.pp[index]  // period
           });
         } else {
           changes.nn.push(index);
         }
       }
     }
-
     // Iterate perturbation points that use the old z
     const newQuadIndexes = [];
     let cache = { refIndex: null, binZpow: [] };
@@ -2657,7 +2654,7 @@ class PerturbationBoard extends Board {
             changes.vv.push({
               index: index,
               z: z,
-              p: this.pp[index]
+              p: this.pp[index]  // period
             });
           } else {
             changes.nn.push(index);
@@ -2665,7 +2662,6 @@ class PerturbationBoard extends Board {
         }
       }
     }
-
     // Update index arrays
     if (newQuadIndexes.length > 0) {
       const newPertIndexes = [];
@@ -2680,18 +2676,15 @@ class PerturbationBoard extends Board {
       this.quadIndexes = this.quadIndexes.concat(newQuadIndexes);
       this.pertIndexes = newPertIndexes;
     }
-
     // Finally update quad-precision z with precomputed values
     for (const index of this.quadIndexes) {
       AqdcCopy(this.zz, index*4, this.nz, index*4);
     }
-
     // Tally progress
     let diverged = results[2];
     let count = results[0] + diverged;
     this.un -= count;
     this.di += diverged;
-
     // Trim finished pixels from array.
     if (this.pertIndexes.length + this.quadIndexes.length > this.un * 1.25) {
       this.compact();
@@ -2704,7 +2697,6 @@ class PerturbationBoard extends Board {
         this.pertIndexes = [];
       }
     }
-
     this.it++;
     this.queueChanges(changes);
   }
@@ -2715,7 +2707,7 @@ class PerturbationBoard extends Board {
   }
 
   precomputeQuad(m) {
-    // Quad-precision compute
+    // Quad-precision Mandelbrot iteration with convergence detection
     if (this.nn[m]) return 0;
     const m4 = m * 4;
     const tt = this.tt;
@@ -2728,18 +2720,17 @@ class PerturbationBoard extends Board {
     const cr2 = this.cc[m4+1];
     const cj1 = this.cc[m4+2];
     const cj2 = this.cc[m4+3];
-    const br1 = this.bb[m4];
+    const br1 = this.bb[m4];  // bb = checkpoint z (quad-double)
     const br2 = this.bb[m4+1];
     const bj1 = this.bb[m4+2];
     const bj2 = this.bb[m4+3];
-
     AqdSquare(tt, 0, r1, r2);                    // 0: rsq = r**2
     AqdSquare(tt, 2, j1, j2);                    // 2: jsq = j**2
     AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // 4: d = rsq+jsq
-    if (tt[4] > 4) {  // tt[4] is the high part of the magnitude squared
+    if (tt[4] > 4) {  // Check divergence: |z|² > 4
       this.nn[m] = this.it;
       AqdcCopy(nz, m4, this.zz, m4);
-      return 1;
+      return 1;  // Diverged
     }
     AqdMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // 6: ja = 2*r*j
     AqdAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // 8: ra = rsq-jsq
@@ -2754,21 +2745,22 @@ class PerturbationBoard extends Board {
     }
     AqdAdd(nz, m4, tt[8], tt[9], cr1, cr2);        // nz: nzr = ra + cr
     AqdAdd(nz, m4+2, tt[6], tt[7], cj1, cj2);      // nz+2: nzj = ja + cj
+    // Check convergence: compare new z to checkpoint
     AqdAbsSub(tt, 0, br1, br2, nz[m4], nz[m4+1]);  // 0: abs(nzr - br)
     AqdAbsSub(tt, 2, bj1, bj2, nz[m4+2], nz[m4+3]);// 2: abs(nzj - bj)
     AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);     // 4: db = abs(nzr-br)+abs(nzj-bj)
-    const db = tt[4] + tt[5]
+    const db = tt[4] + tt[5]  // distance from checkpoint
     if (db <= this.epsilon2) {
-      if (!this.pp[m]) { this.pp[m] = this.it; }
+      if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
         if (this.inspikeQdA(cr1, cr2, cj1, cj2) && this.ch > 0) {
           this.ch -= 1;
         }
-        return -1;
+        return -1;  // Converged
       }
     }
-    return 0;
+    return 0;  // Continue iterating
   }
 
   computePerturbation(index, cache) {
