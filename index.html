@@ -3325,7 +3325,9 @@ class ZhuoranBoard extends Board {
 
 // WebGPU-accelerated Mandelbrot computation using single-precision float32
 // GPU computes all pixels in parallel using standard Mandelbrot iteration
-class WebGPUBoard extends Board {
+// Base class for WebGPU-accelerated boards
+// Provides shared GPU infrastructure for different computation strategies
+class WebGPUBaseBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
@@ -3334,7 +3336,7 @@ class WebGPUBoard extends Board {
     this.re = re;
     this.im = im;
 
-    // WebGPU state
+    // WebGPU state (shared by all GPU board implementations)
     this.device = null;
     this.pipeline = null;
     this.buffers = {};
@@ -3343,19 +3345,6 @@ class WebGPUBoard extends Board {
     this.isComputing = false;
     this.lastReportedIters = null;
     this.cpuStatus = null;
-
-    this.effort = 1;
-
-    // Epsilon values for convergence detection
-    // Match CPU ZhuoranBoard thresholds for consistency
-    const pix = size / this.config.dims;
-    this.epsilon = Math.min(1e-12, pix / 10);   // Final convergence threshold
-    this.epsilon2 = Math.min(1e-9, pix * 10);  // Getting close threshold
-
-    this.checkSpike(size, re, im);
-
-    // Start GPU initialization (async)
-    this.gpuInitPromise = this.initGPU();
   }
 
   checkSpike(size, re, im) {
@@ -3400,13 +3389,9 @@ class WebGPUBoard extends Board {
         return false;
       }
 
-      // Create compute pipeline
+      // Subclass-specific initialization
       await this.createComputePipeline();
-
-      // Create GPU buffers
       await this.createBuffers();
-
-      // Create bind group
       this.createBindGroup();
 
       this.isGPUReady = true;
@@ -3416,6 +3401,85 @@ class WebGPUBoard extends Board {
       console.error('WebGPU initialization failed:', error);
       return false;
     }
+  }
+
+  async ensureGPUReady() {
+    if (this.gpuInitPromise) {
+      await this.gpuInitPromise;
+      this.gpuInitPromise = null;
+    }
+    return this.isGPUReady;
+  }
+
+  iterate() {
+    if (!this.isGPUReady || this.isComputing) {
+      return;
+    }
+    this.compute();
+  }
+
+  async readBuffer(buffer, TypedArrayConstructor) {
+    const size = buffer.size;
+    const stagingBuffer = this.device.createBuffer({
+      size,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      label: 'Staging buffer'
+    });
+
+    const commandEncoder = this.device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(buffer, 0, stagingBuffer, 0, size);
+    this.device.queue.submit([commandEncoder.finish()]);
+
+    await stagingBuffer.mapAsync(GPUMapMode.READ);
+    const data = new TypedArrayConstructor(stagingBuffer.getMappedRange()).slice();
+    stagingBuffer.unmap();
+    stagingBuffer.destroy();
+
+    return data;
+  }
+
+  unfinished() {
+    return this.un;
+  }
+
+  static isAvailable() {
+    return typeof navigator !== 'undefined' && 'gpu' in navigator;
+  }
+
+  // Abstract methods - subclasses must implement these
+  async createComputePipeline() {
+    throw new Error('createComputePipeline() must be implemented by subclass');
+  }
+
+  async createBuffers() {
+    throw new Error('createBuffers() must be implemented by subclass');
+  }
+
+  createBindGroup() {
+    throw new Error('createBindGroup() must be implemented by subclass');
+  }
+
+  async compute() {
+    throw new Error('compute() must be implemented by subclass');
+  }
+}
+
+class WebGPUBoard extends WebGPUBaseBoard {
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+
+    this.effort = 1;
+
+    // Epsilon values for convergence detection
+    // Match CPU ZhuoranBoard thresholds for consistency
+    const pix = size / this.config.dims;
+    this.epsilon = Math.min(1e-12, pix / 10);   // Final convergence threshold
+    this.epsilon2 = Math.min(1e-9, pix * 10);  // Getting close threshold
+
+    this.checkSpike(size, re, im);
+
+    // Start GPU initialization (async)
+    this.gpuInitPromise = this.initGPU();
   }
 
   async createComputePipeline() {
@@ -3692,21 +3756,6 @@ class WebGPUBoard extends Board {
     });
   }
 
-  async ensureGPUReady() {
-    if (this.gpuInitPromise) {
-      await this.gpuInitPromise;
-      this.gpuInitPromise = null;
-    }
-    return this.isGPUReady;
-  }
-
-  iterate() {
-    if (!this.isGPUReady || this.isComputing) {
-      return;
-    }
-    this.compute();
-  }
-
   async compute() {
     this.isComputing = true;
 
@@ -3925,10 +3974,6 @@ class WebGPUBoard extends Board {
     this.isComputing = false;
   }
 
-  unfinished() {
-    return this.un;
-  }
-
   figurePeriod(iteration) {
     let tail = 1;
     if (iteration) while (Math.floor(iteration / tail) ** 3 > tail) { tail *= 2; }
@@ -3945,33 +3990,13 @@ class WebGPUBoard extends Board {
       serialized.id
     );
   }
-
-  static isAvailable() {
-    // Synchronously check if WebGPU is available in this browser
-    return typeof navigator !== 'undefined' && 'gpu' in navigator;
-  }
 }
 
 // WebGPU-accelerated perturbation board using Zhuoran's approach
 // Computes high-precision reference orbit on CPU, perturbations on GPU
-class WebGPUZhuoranBoard extends Board {
+class WebGPUZhuoranBoard extends WebGPUBaseBoard {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-
-    // Save parameters
-    this.size = size;
-    this.re = re;
-    this.im = im;
-
-    // WebGPU state
-    this.device = null;
-    this.pipeline = null;
-    this.buffers = {};
-    this.isGPUReady = false;
-    this.gpuInitPromise = null;
-    this.isComputing = false;
-    this.lastReportedIters = null;
-    this.cpuStatus = null;
 
     this.effort = 2;  // Same as ZhuoranBoard
 
@@ -4060,27 +4085,6 @@ class WebGPUZhuoranBoard extends Board {
     }
 
     this.checkSpike(size, re, im);
-  }
-
-  checkSpike(size, re, im) {
-    // Count chaotic pixels in spike region
-    const dims = this.config.dims;
-    const re_double = Array.isArray(re) ? (re[0] + re[1]) : re;
-    const im_double = Array.isArray(im) ? (im[0] + im[1]) : im;
-
-    for (let y = 0; y < dims; y++) {
-      const yFrac = (0.5 - y / dims);
-      const ci = im_double + yFrac * size;
-
-      for (let x = 0; x < dims; x++) {
-        const xFrac = (x / dims - 0.5);
-        const cr = re_double + xFrac * size;
-
-        if (this.inspike(cr, ci)) {
-          this.ch += 1;
-        }
-      }
-    }
   }
 
   async createBuffers() {
@@ -4411,52 +4415,6 @@ class WebGPUZhuoranBoard extends Board {
     });
   }
 
-  async initGPU() {
-    try {
-      // Check WebGPU availability
-      if (!navigator.gpu) {
-        console.warn('WebGPU not supported');
-        return false;
-      }
-
-      // Request adapter and device
-      const adapter = await navigator.gpu.requestAdapter();
-      if (!adapter) {
-        console.warn('No WebGPU adapter found');
-        return false;
-      }
-
-      this.device = await adapter.requestDevice();
-      if (!this.device) {
-        console.warn('Failed to get WebGPU device');
-        return false;
-      }
-
-      // Create compute pipeline
-      await this.createComputePipeline();
-
-      // Create GPU buffers
-      await this.createBuffers();
-
-      // Create bind group
-      this.createBindGroup();
-
-      this.isGPUReady = true;
-      console.log('WebGPUZhuoranBoard: GPU initialized');
-      return true;
-    } catch (error) {
-      console.error('WebGPUZhuoranBoard GPU initialization failed:', error);
-      return false;
-    }
-  }
-
-  iterate() {
-    if (!this.isGPUReady || this.isComputing) {
-      return;
-    }
-    this.compute();
-  }
-
   async compute() {
     this.isComputing = true;
     const dims2 = this.config.dims * this.config.dims;
@@ -4618,30 +4576,6 @@ class WebGPUZhuoranBoard extends Board {
     }
   }
 
-  async readBuffer(buffer, TypedArrayConstructor) {
-    const size = buffer.size;
-    const stagingBuffer = this.device.createBuffer({
-      size,
-      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-      label: 'Staging buffer'
-    });
-
-    const commandEncoder = this.device.createCommandEncoder();
-    commandEncoder.copyBufferToBuffer(buffer, 0, stagingBuffer, 0, size);
-    this.device.queue.submit([commandEncoder.finish()]);
-
-    await stagingBuffer.mapAsync(GPUMapMode.READ);
-    const data = new TypedArrayConstructor(stagingBuffer.getMappedRange()).slice();
-    stagingBuffer.unmap();
-    stagingBuffer.destroy();
-
-    return data;
-  }
-
-  unfinished() {
-    return this.un;
-  }
-
   static fromSerialized(serialized) {
     return new WebGPUZhuoranBoard(
       serialized.k,
@@ -4651,10 +4585,6 @@ class WebGPUZhuoranBoard extends Board {
       serialized.config,
       serialized.id
     );
-  }
-
-  static isAvailable() {
-    return typeof navigator !== 'undefined' && 'gpu' in navigator;
   }
 }
 
