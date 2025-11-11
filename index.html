@@ -3310,8 +3310,7 @@ class ZhuoranBoard extends Board {
     const totalNorm = Math.max(Math.abs(totalR), Math.abs(totalI));
 
     // Rebase when orbit approaches critical point (0)
-    // More aggressive threshold: rebase when totalNorm < 2 * dzNorm
-    return totalNorm < dzNorm * 2;
+    return totalNorm < dzNorm;
   }
 
   getCurrentRefZ(index) {
@@ -4312,7 +4311,7 @@ class WebGPUZhuoranBoard extends WebGPUBaseBoard {
           let total_i_pre = refi + dzi;
           let total_norm = max(abs(total_r_pre), abs(total_i_pre));
 
-          if (ref_iter > 0u && total_norm < dz_norm * 2.0) {
+          if (ref_iter > 0u && total_norm < dz_norm) {
             // Set dz = z_total (absolute position)
             dzr = total_r_pre;
             dzi = total_i_pre;
