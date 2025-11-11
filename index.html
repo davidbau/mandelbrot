@@ -4069,11 +4069,11 @@ class WebGPUZhuoranBoard extends Board {
       label: 'Iterations buffer'
     });
 
-    // Storage buffer for status flags
-    this.buffers.status = this.device.createBuffer({
-      size: dims2 * 4,
+    // Storage buffer for status and period (packed: 2 u32 per pixel)
+    this.buffers.statusAndPeriod = this.device.createBuffer({
+      size: dims2 * 2 * 4,  // 2 u32 per pixel
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      label: 'Status buffer'
+      label: 'Status and period buffer'
     });
 
     // Storage buffer for dc (delta c - constant offsets)
@@ -4083,11 +4083,11 @@ class WebGPUZhuoranBoard extends Board {
       label: 'Delta C buffer'
     });
 
-    // Storage buffer for dz (delta z - perturbations)
-    this.buffers.dz = this.device.createBuffer({
-      size: dims2 * 2 * 4,
+    // Storage buffer for dz and checkpoint bb (packed: 4 f32 per pixel)
+    this.buffers.dzAndCheckpoint = this.device.createBuffer({
+      size: dims2 * 4 * 4,  // 4 f32 per pixel: dz.x, dz.y, bb.x, bb.y
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Delta Z buffer'
+      label: 'DZ and checkpoint buffer'
     });
 
     // Storage buffer for refIter (reference iteration indices)
@@ -4095,6 +4095,13 @@ class WebGPUZhuoranBoard extends Board {
       size: dims2 * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'RefIter buffer'
+    });
+
+    // Storage buffer for checkpoint iteration tracking
+    this.buffers.checkpointIter = this.device.createBuffer({
+      size: dims2 * 4,  // 1 u32 per pixel
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      label: 'Checkpoint iter buffer'
     });
 
     // Storage buffer for reference orbit (will be updated each iteration)
@@ -4105,24 +4112,27 @@ class WebGPUZhuoranBoard extends Board {
       label: 'Reference orbit buffer'
     });
 
-    // Storage buffer for active pixel indices (sparse)
-    this.buffers.activePixels = this.device.createBuffer({
-      size: dims2 * 4,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      label: 'Active pixels buffer'
-    });
-
     // Uniform buffer for parameters
     this.buffers.params = this.device.createBuffer({
-      size: 16,  // 4 u32s
+      size: 32,  // 4 u32s + 1 f32 + padding
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: 'Params buffer'
     });
 
-    // Initialize dc, dz, and refIter on GPU
+    // Initialize buffers with packed data
+    // dzAndCheckpoint: [dz.x, dz.y, bb.x=0, bb.y=0] per pixel
+    const dzAndCheckpointData = new Float32Array(dims2 * 4);
+    for (let i = 0; i < dims2; i++) {
+      dzAndCheckpointData[i * 4] = this.dz[i * 2];      // dz.x
+      dzAndCheckpointData[i * 4 + 1] = this.dz[i * 2 + 1];  // dz.y
+      dzAndCheckpointData[i * 4 + 2] = 0;  // bb.x
+      dzAndCheckpointData[i * 4 + 3] = 0;  // bb.y
+    }
+
     this.device.queue.writeBuffer(this.buffers.dc, 0, this.dc);
-    this.device.queue.writeBuffer(this.buffers.dz, 0, this.dz);
+    this.device.queue.writeBuffer(this.buffers.dzAndCheckpoint, 0, dzAndCheckpointData);
     this.device.queue.writeBuffer(this.buffers.refIter, 0, this.refIter);
+    // checkpointIter starts at 0 (no checkpoints), statusAndPeriod starts at 0 (unfinished)
   }
 
   createBindGroup() {
@@ -4131,12 +4141,12 @@ class WebGPUZhuoranBoard extends Board {
       entries: [
         { binding: 0, resource: { buffer: this.buffers.params } },
         { binding: 1, resource: { buffer: this.buffers.iterations } },
-        { binding: 2, resource: { buffer: this.buffers.status } },
+        { binding: 2, resource: { buffer: this.buffers.statusAndPeriod } },
         { binding: 3, resource: { buffer: this.buffers.dc } },
-        { binding: 4, resource: { buffer: this.buffers.dz } },
+        { binding: 4, resource: { buffer: this.buffers.dzAndCheckpoint } },
         { binding: 5, resource: { buffer: this.buffers.refIter } },
         { binding: 6, resource: { buffer: this.buffers.refOrbit } },
-        { binding: 7, resource: { buffer: this.buffers.activePixels } }
+        { binding: 7, resource: { buffer: this.buffers.checkpointIter } }
       ],
       label: 'Perturbation bind group'
     });
@@ -4199,112 +4209,168 @@ class WebGPUZhuoranBoard extends Board {
         iterations_per_batch: u32,
         active_count: u32,
         ref_orbit_length: u32,
+        pixel_size: f32,
       }
 
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> iterations: array<u32>;
-      @group(0) @binding(2) var<storage, read_write> status: array<u32>;    // 0=computing, 1=diverged
+      @group(0) @binding(2) var<storage, read_write> statusAndPeriod: array<vec2<u32>>;  // [status, pp]
       @group(0) @binding(3) var<storage, read> dc: array<f32>;              // Delta c (constant)
-      @group(0) @binding(4) var<storage, read_write> dz: array<f32>;        // Delta z (perturbation)
+      @group(0) @binding(4) var<storage, read_write> dzAndCheckpoint: array<vec4<f32>>;  // [dz.x, dz.y, bb.x, bb.y]
       @group(0) @binding(5) var<storage, read_write> refIter: array<u32>;   // Reference iteration index
       @group(0) @binding(6) var<storage, read> refOrbit: array<f32>;        // Reference orbit [r,i pairs]
-      @group(0) @binding(7) var<storage, read> active_pixels: array<u32>;   // Sparse list of active indices
+      @group(0) @binding(7) var<storage, read_write> checkpointIter: array<u32>;  // Iteration when checkpoint was set
+
+      // figurePeriod function - returns 1 at strategic intervals for checkpointing
+      fn figurePeriod(iteration: u32) -> u32 {
+        if (iteration == 0u) { return 1u; }
+        var tail = 1u;
+        var iter_val = iteration;
+        loop {
+          let quotient = iter_val / tail;
+          if (quotient * quotient * quotient <= tail) { break; }
+          tail = tail * 2u;
+        }
+        return iteration - (iteration / tail) * tail + 1u;
+      }
 
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-        let work_index = global_id.x;
-        if (work_index >= params.active_count) { return; }
+        let index = global_id.x;
+        let dims2 = params.dims * params.dims;
+        if (index >= dims2) { return; }
 
-        let index = active_pixels[work_index];
-        if (status[index] != 0u) { return; }  // Skip if already finished
+        // Skip if already finished
+        let status_val = statusAndPeriod[index].x;
+        if (status_val != 0u) { return; }
 
         let index2 = index * 2u;
         var iter = iterations[index];
-        var dzr = dz[index2];
-        var dzi = dz[index2 + 1u];
+
+        // Unpack dzAndCheckpoint
+        var dzr = dzAndCheckpoint[index].x;
+        var dzi = dzAndCheckpoint[index].y;
+        var bbr = dzAndCheckpoint[index].z;
+        var bbi = dzAndCheckpoint[index].w;
+
         var ref_iter = refIter[index];
         let dcr = dc[index2];
         let dci = dc[index2 + 1u];
+
+        var checkpoint_iter_val = checkpointIter[index];
+        var pp = statusAndPeriod[index].y;
+
+        // Convergence thresholds (matching ZhuoranBoard)
+        // Scale with pixel size for deep zooms
+        let epsilon = min(1e-7, params.pixel_size / 10.0);   // Final convergence threshold
+        let epsilon2 = min(1e-5, params.pixel_size * 10.0);  // Getting close threshold
 
         // Iterate for the batch
         for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
           iter++;
 
-          // Check if we need to rebase
+          // Check if we need to rebase (before iteration)
           let ref_offset = ref_iter * 2u;
           if (ref_offset + 1u < params.ref_orbit_length * 2u) {
             let refr = refOrbit[ref_offset];
             let refi = refOrbit[ref_offset + 1u];
 
-            // Chebyshev norm (L-infinity): max(|x|, |y|)
+            // Chebyshev norm - more aggressive rebasing (totalNorm < 2 * dzNorm)
             let dz_norm = max(abs(dzr), abs(dzi));
-            let ref_norm = max(abs(refr), abs(refi));
             let total_r = refr + dzr;
             let total_i = refi + dzi;
             let total_norm = max(abs(total_r), abs(total_i));
 
-            // Rebase if orbit approaches critical point OR perturbation gets too large for float32
-            // For float32 (~7 digits), rebase when |dz| > 0.1 * |z_ref| or |z_total| < |dz|
-            let should_rebase = total_norm < dz_norm || (ref_norm > 0.0 && dz_norm > 0.1 * ref_norm);
-
-            if (ref_iter > 0u && should_rebase) {
+            if (ref_iter > 0u && total_norm < dz_norm * 2.0) {
               // Set dz = z_total (absolute position)
               dzr = total_r;
               dzi = total_i;
               ref_iter = 0u;  // Restart from beginning of reference orbit
+              // Don't reset checkpoint - it persists across rebasing
             }
           }
 
-          // Get reference orbit value
+          // Get reference orbit value for current iteration
           let ref_offset2 = ref_iter * 2u;
           if (ref_offset2 + 1u >= params.ref_orbit_length * 2u) {
-            // Reference orbit too short - mark as computing and skip
-            break;
+            break;  // Reference orbit too short
           }
 
           let refr = refOrbit[ref_offset2];
           let refi = refOrbit[ref_offset2 + 1u];
 
+          // Save OLD z value for checkpoint timing (matches CpuBoard behavior)
+          let old_z_r = refr + dzr;
+          let old_z_i = refi + dzi;
+
           // Perturbation iteration: dz_new = 2*z_ref*dz + dz² + dc
-          // First: 2*z_ref*dz
+          let dz_sq_r = dzr * dzr - dzi * dzi;
+          let dz_sq_i = 2.0 * dzr * dzi;
           let two_zref_dz_r = 2.0 * (refr * dzr - refi * dzi);
           let two_zref_dz_i = 2.0 * (refr * dzi + refi * dzr);
 
-          // Second: dz²
-          let dz_sq_r = dzr * dzr - dzi * dzi;
-          let dz_sq_i = 2.0 * dzr * dzi;
-
-          // Combine: dz_new = 2*z_ref*dz + dz² + dc
           dzr = two_zref_dz_r + dz_sq_r + dcr;
           dzi = two_zref_dz_i + dz_sq_i + dci;
 
-          // Advance reference iteration
-          ref_iter++;
-
-          // Get NEW reference orbit value for divergence check
-          let new_ref_offset = ref_iter * 2u;
-          if (new_ref_offset + 1u >= params.ref_orbit_length * 2u) {
+          // Get NEW reference orbit value (refIter+1) for total z
+          let next_ref_iter = ref_iter + 1u;
+          let next_ref_offset = next_ref_iter * 2u;
+          if (next_ref_offset + 1u >= params.ref_orbit_length * 2u) {
             break;  // Reference orbit too short
           }
-          let new_refr = refOrbit[new_ref_offset];
-          let new_refi = refOrbit[new_ref_offset + 1u];
+          let next_refr = refOrbit[next_ref_offset];
+          let next_refi = refOrbit[next_ref_offset + 1u];
 
-          // Check divergence: |z_total|² > 4
-          let total_r = new_refr + dzr;
-          let total_i = new_refi + dzi;
+          let total_r = next_refr + dzr;
+          let total_i = next_refi + dzi;
+
+          // Check divergence: |z_total|² > 4 (escape radius 2)
           let mag_sq = total_r * total_r + total_i * total_i;
-
           if (mag_sq > 4.0) {
-            status[index] = 1u;  // Diverged
+            statusAndPeriod[index] = vec2<u32>(1u, pp);  // Diverged
             break;
           }
+
+          // CONVERGENCE DETECTION
+          let fig_period = figurePeriod(iter);
+          let just_updated = (fig_period == 1u);
+
+          if (just_updated) {
+            // Update checkpoint with OLD z value (before this iteration)
+            bbr = old_z_r;
+            bbi = old_z_i;
+            checkpoint_iter_val = iter;
+            pp = 0u;
+          }
+
+          // Check convergence (if we have a checkpoint and didn't just update it)
+          if (checkpoint_iter_val > 0u && !just_updated) {
+            let delta_r = total_r - bbr;
+            let delta_i = total_i - bbi;
+            let db = abs(delta_r) + abs(delta_i);
+
+            if (db <= epsilon2) {
+              if (pp == 0u) {
+                pp = iter;  // Record iteration number when first detected
+              }
+              if (db <= epsilon) {
+                // Converged! Don't advance ref_iter
+                statusAndPeriod[index] = vec2<u32>(2u, pp);
+                break;
+              }
+            }
+          }
+
+          // Advance reference iteration (only if not converged)
+          ref_iter++;
         }
 
-        // Write back state
+        // Write back state - pack into combined buffers
         iterations[index] = iter;
-        dz[index2] = dzr;
-        dz[index2 + 1u] = dzi;
+        dzAndCheckpoint[index] = vec4<f32>(dzr, dzi, bbr, bbi);
         refIter[index] = ref_iter;
+        checkpointIter[index] = checkpoint_iter_val;
+        // statusAndPeriod written in convergence/divergence handling above
       }
     `;
 
@@ -4404,39 +4470,31 @@ class WebGPUZhuoranBoard extends Board {
 
     this.device.queue.writeBuffer(this.buffers.refOrbit, 0, refOrbitF32);
 
-    // Step 3: Build active pixels list
-    if (!this.cpuStatus) {
-      this.cpuStatus = new Uint32Array(dims2).fill(0);
-    }
-
-    const activePixels = [];
-    for (let i = 0; i < dims2; i++) {
-      if (this.cpuStatus[i] === 0) {  // Still computing
-        activePixels.push(i);
-      }
-    }
-
-    if (activePixels.length === 0) {
+    // Step 3: Check if all done
+    if (this.un === 0) {
       this.isComputing = false;
-      return;  // All done
+      return;  // All pixels finished
     }
-
-    const activePixelsArray = new Uint32Array(activePixels);
-    this.device.queue.writeBuffer(this.buffers.activePixels, 0, activePixelsArray);
 
     // Step 4: Set up parameters
-    const iterationsPerBatch = Math.min(1000, Math.floor(1111211 / Math.max(activePixels.length, 1)));
-    const params = new Uint32Array([
-      this.config.dims,
-      iterationsPerBatch,
-      activePixels.length,
-      this.refIterations + 1  // Length includes iteration 0
-    ]);
-    this.device.queue.writeBuffer(this.buffers.params, 0, params);
+    const iterationsPerBatch = Math.min(1000, Math.floor(1111211 / Math.max(this.un, 1)));
+    const pixelSize = this.size / this.config.dims;
 
-    // Step 5: Dispatch GPU compute
+    // Pack params: 4 u32s + 1 f32
+    const paramsBuffer = new ArrayBuffer(32);
+    const paramsU32 = new Uint32Array(paramsBuffer);
+    const paramsF32 = new Float32Array(paramsBuffer);
+    paramsU32[0] = this.config.dims;
+    paramsU32[1] = iterationsPerBatch;
+    paramsU32[2] = dims2;  // Process all pixels, skip finished ones in shader
+    paramsU32[3] = this.refIterations + 1;  // Length includes iteration 0
+    paramsF32[4] = pixelSize;  // f32 at offset 16
+
+    this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
+
+    // Step 5: Dispatch GPU compute - process all pixels
     const workgroupSize = 64;
-    const numWorkgroups = Math.ceil(activePixels.length / workgroupSize);
+    const numWorkgroups = Math.ceil(dims2 / workgroupSize);
 
     const commandEncoder = this.device.createCommandEncoder({ label: 'Perturbation compute' });
     const passEncoder = commandEncoder.beginComputePass({ label: 'Perturbation pass' });
@@ -4451,26 +4509,52 @@ class WebGPUZhuoranBoard extends Board {
     await this.device.queue.onSubmittedWorkDone();
 
     const iterationsData = await this.readBuffer(this.buffers.iterations, Uint32Array);
-    const statusData = await this.readBuffer(this.buffers.status, Uint32Array);
+    const statusAndPeriodData = await this.readBuffer(this.buffers.statusAndPeriod, Uint32Array);
+    const dzAndCheckpointData = await this.readBuffer(this.buffers.dzAndCheckpoint, Float32Array);
+    const refIterData = await this.readBuffer(this.buffers.refIter, Uint32Array);
 
     // Step 7: Update board state
     let changes = null;
-    for (const i of activePixels) {
-      const iters = iterationsData[i];
-      const status = statusData[i];
-      const wasFinished = this.cpuStatus[i] !== 0;
+    for (let i = 0; i < dims2; i++) {
+      const status = statusAndPeriodData[i * 2];  // First u32 in vec2
+      const period = statusAndPeriodData[i * 2 + 1];  // Second u32 in vec2
 
-      if (!wasFinished && status === 1) {
+      if (this.nn[i]) continue;  // Already finished
+
+      if (status === 1) {
         // Newly diverged
-        this.nn[i] = iters;
-        this.pp[i] = 1;
-        this.cpuStatus[i] = 1;
+        this.nn[i] = iterationsData[i];
+        this.pp[i] = period;
 
         if (!changes) {
-          changes = { iter: iters, nn: [], vv: [] };
+          changes = { iter: iterationsData[i], nn: [], vv: [] };
         }
         changes.nn.push(i);
         this.di++;
+        this.un--;
+      } else if (status === 2) {
+        // Newly converged
+        this.nn[i] = -iterationsData[i];
+        this.pp[i] = period;
+
+        // Get converged position: refOrbit[refIter+1] + dz
+        const refIter = refIterData[i];
+        const nextRefIter = refIter + 1;
+        const dzr = dzAndCheckpointData[i * 4];
+        const dzi = dzAndCheckpointData[i * 4 + 1];
+
+        const ref = nextRefIter < this.refOrbit.length ? this.refOrbit[nextRefIter] : this.refOrbit[this.refOrbit.length - 1];
+        const refR = ref ? (ref[0] + ref[1]) : 0;
+        const refI = ref ? (ref[2] + ref[3]) : 0;
+
+        if (!changes) {
+          changes = { iter: iterationsData[i], nn: [], vv: [] };
+        }
+        changes.vv.push({
+          index: i,
+          z: [refR + dzr, refI + dzi],
+          p: period
+        });
         this.un--;
       }
     }
@@ -4544,7 +4628,7 @@ self.onmessage = function(e) {
     case 'addBoard':
       workerNumber = data.workerNumber;
       const useZhuoranApproach = false;  // PerturbationBoard is 5-6x faster in benchmarks
-      const testWebGPU = false;  // TEMPORARILY DISABLED - testing CPU ZhuoranBoard convergence
+      const testWebGPU = true;  // Enable WebGPU boards
       const webGPUAvailable = WebGPUBoard.isAvailable();
 
       if (testWebGPU && !webGPUAvailable) {
