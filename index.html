@@ -3741,8 +3741,8 @@ class WebGPUBoard extends Board {
     // Dynamic batch sizing: scale iterations inversely with active pixels
     const targetWork = 1111211;  // Prime with all nonzero digits
     let iterationsPerBatch = Math.floor(targetWork / Math.max(activeCount, 1));
-    // Clamp to reasonable bounds (min 97 - prime, max 1000)
-    iterationsPerBatch = Math.max(97, Math.min(iterationsPerBatch, 1000));
+    // Clamp to reasonable bounds (min 17)
+    iterationsPerBatch = Math.max(17, iterationsPerBatch);
 
     // Upload active pixel list to GPU
     const activePixelsData = new Uint32Array(activePixels);
@@ -4497,7 +4497,7 @@ class WebGPUZhuoranBoard extends Board {
     }
 
     // Step 4: Set up parameters
-    const iterationsPerBatch = Math.min(1000, Math.max(97, Math.floor(1111211 / Math.max(this.un, 1))));
+    const iterationsPerBatch = Math.max(17, Math.floor(1111211 / Math.max(this.un, 1)));
     const pixelSize = this.size / this.config.dims;
 
     // Pack params: 4 u32s + 1 f32
