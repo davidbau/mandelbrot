@@ -2261,8 +2261,8 @@ class Board {
       ['CpuBoard', CpuBoard],
       ['PerturbationBoard', PerturbationBoard],
       ['ZhuoranBoard', ZhuoranBoard],
-      ['WebGPUBoard', WebGPUBoard],
-      ['WebGPUZhuoranBoard', WebGPUZhuoranBoard]
+      ['GpuBoard', GpuBoard],
+      ['GpuZhuoranBoard', GpuZhuoranBoard]
     ]);
     return subclasses.get(serialized.type).fromSerialized(serialized);
   }
@@ -3259,7 +3259,7 @@ class ZhuoranBoard extends Board {
 // GPU computes all pixels in parallel using standard Mandelbrot iteration
 // Base class for WebGPU-accelerated boards
 // Provides shared GPU infrastructure for different computation strategies
-class WebGPUBaseBoard extends Board {
+class GpuBaseBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
@@ -3396,7 +3396,7 @@ class WebGPUBaseBoard extends Board {
   }
 }
 
-class WebGPUBoard extends WebGPUBaseBoard {
+class GpuBoard extends GpuBaseBoard {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
     this.effort = 1;
@@ -3890,7 +3890,7 @@ class WebGPUBoard extends WebGPUBaseBoard {
   }
 
   static fromSerialized(serialized) {
-    return new WebGPUBoard(
+    return new GpuBoard(
       serialized.k,
       serialized.sizes[0],
       serialized.sizes[1],
@@ -3903,7 +3903,7 @@ class WebGPUBoard extends WebGPUBaseBoard {
 
 // WebGPU-accelerated perturbation board using Zhuoran's approach
 // Computes high-precision reference orbit on CPU, perturbations on GPU
-class WebGPUZhuoranBoard extends WebGPUBaseBoard {
+class GpuZhuoranBoard extends GpuBaseBoard {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
@@ -4469,14 +4469,14 @@ class WebGPUZhuoranBoard extends WebGPUBaseBoard {
     this.queueChanges(changes);
 
     } catch (error) {
-      console.error(`WebGPUZhuoranBoard.compute() ERROR:`, error);
+      console.error(`GpuZhuoranBoard.compute() ERROR:`, error);
     } finally {
       this.isComputing = false;
     }
   }
 
   static fromSerialized(serialized) {
-    return new WebGPUZhuoranBoard(
+    return new GpuZhuoranBoard(
       serialized.k,
       serialized.sizes[0],
       serialized.sizes[1],
@@ -4511,7 +4511,7 @@ self.onmessage = function(e) {
       workerNumber = data.workerNumber;
       const useZhuoranApproach = false;  // PerturbationBoard is 5-6x faster in benchmarks
       const testWebGPU = true;  // Enable WebGPU boards
-      const webGPUAvailable = WebGPUBoard.isAvailable();
+      const webGPUAvailable = GpuBoard.isAvailable();
 
       if (testWebGPU && !webGPUAvailable) {
         console.log('WebGPU not available in this browser, falling back to CPU boards');
@@ -4521,13 +4521,13 @@ self.onmessage = function(e) {
       const pixelSize = data.size / data.config.dims;
       if (testWebGPU && webGPUAvailable) {
         // Two-tier strategy with WebGPU:
-        // - Shallow zooms (pixel > 1e-6): WebGPUBoard with simple float32 iteration
-        // - Deep zooms (pixel <= 1e-6): WebGPUZhuoranBoard with quad-double reference + float32 perturbations
-        // WebGPUZhuoranBoard should work to arbitrary depth since reference orbit is quad-double
+        // - Shallow zooms (pixel > 1e-6): GpuBoard with simple float32 iteration
+        // - Deep zooms (pixel <= 1e-6): GpuZhuoranBoard with quad-double reference + float32 perturbations
+        // GpuZhuoranBoard should work to arbitrary depth since reference orbit is quad-double
         if (pixelSize > 1e-6) {
-          board = new WebGPUBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+          board = new GpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         } else {
-          board = new WebGPUZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+          board = new GpuZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         }
       } else {
         // WebGPU disabled or unavailable - use CPU-based boards
@@ -4552,7 +4552,7 @@ self.onmessage = function(e) {
         data: {
           k: data.k,
           boardType: board.constructor.name,
-          isGPUBoard: board instanceof WebGPUBoard || board instanceof WebGPUZhuoranBoard
+          isGPUBoard: board instanceof GpuBoard || board instanceof GpuZhuoranBoard
         }
       });
       break;
@@ -4571,7 +4571,7 @@ self.onmessage = function(e) {
         if (boards.has(k)) {
           const board = boards.get(k);
           // Skip GPU boards - they cannot be transferred as they lose GPU state
-          if (board instanceof WebGPUBoard || board instanceof WebGPUZhuoranBoard) {
+          if (board instanceof GpuBoard || board instanceof GpuZhuoranBoard) {
             console.log(`Skipping transfer of GPU board ${k} (${board.constructor.name})`);
             continue;
           }
