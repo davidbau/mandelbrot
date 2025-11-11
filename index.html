@@ -2289,12 +2289,10 @@ class Board {
 class CpuBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-
     // Convert re and im to quad-double if they're scalars
     if (typeof re === 'number') re = toQd(re);
     if (typeof im === 'number') im = toQd(im);
-
-    // Initialize board
+    // Initialize board: cc = c values, zz = current z, bb = checkpoint z, ss = active pixel indices
     for (let y = 0; y < this.config.dims; y++) {
       const jFrac = (0.5 - (y / this.config.dims));
       const j = jFrac * size + im[0];
@@ -2307,10 +2305,9 @@ class CpuBoard extends Board {
         }
       }
     }
-
-    this.zz = this.cc.slice();
-    this.bb = this.cc.slice();
-    this.ss = Array(this.config.dims2).fill(null).map((_, i) => i);
+    this.zz = this.cc.slice();  // Start with z = c
+    this.bb = this.cc.slice();  // Initial checkpoint = c
+    this.ss = Array(this.config.dims2).fill(null).map((_, i) => i);  // All pixels active
   }
 
   static fromSerialized(serialized) {
@@ -2358,17 +2355,16 @@ class CpuBoard extends Board {
 
   iterate() {
     let changes = null;
-
     const results = [0, 0, 0];
-    let s = this.ss;    // speedy list of indexes to compute
-    // head and tail factor i into an odd num and largest power of 2.
+    let s = this.ss;    // speedy list of active pixel indices to compute
+    // Update checkpoints at figurePeriod intervals (returns 1 at power-of-2-ish points)
     if (figurePeriod(this.it) == 1) {
       for (let t = 0; t < s.length; ++t) {
         let m = s[t];
         if (this.nn[m]) continue;
-        this.bb[m * 2] = this.zz[m * 2];
+        this.bb[m * 2] = this.zz[m * 2];      // bb = checkpoint z position
         this.bb[m * 2 + 1] = this.zz[m * 2 + 1];
-        this.pp[m] = 0;
+        this.pp[m] = 0;  // Reset pp (period = iter when convergence first detected)
       }
     }
     for (let t = 0; t < s.length; ++t) {
@@ -2382,7 +2378,7 @@ class CpuBoard extends Board {
           changes.vv.push({
             index: index,
             z: [this.zz[index * 2], this.zz[index * 2 + 1]],
-            p: this.pp[index]
+            p: this.pp[index]  // period
           });
         } else {
           changes.nn.push(index);
@@ -2445,8 +2441,9 @@ class CpuBoard extends Board {
     const j2 = j * j;
     if (r2 + j2 > 4.0) {
       this.nn[m] = this.it;
-      return 1;
+      return 1;  // Diverged
     }
+    // Mandelbrot iteration: z = z^exponent + c
     let ra = r2 - j2;
     let ja = 2 * r * j;
     for (let ord = 2; ord < this.config.exponent; ord++) {
@@ -2458,20 +2455,21 @@ class CpuBoard extends Board {
     ja += this.cc[m2i];
     this.zz[m2] = ra;
     this.zz[m2i] = ja;
+    // Check convergence: compare current z to checkpoint
     const rb = this.bb[m2];
     const jb = this.bb[m2i];
-    const db = Math.abs(rb - ra) + Math.abs(jb - ja);
+    const db = Math.abs(rb - ra) + Math.abs(jb - ja);  // distance from checkpoint
     if (db <= this.epsilon2) {
-      if (!this.pp[m]) { this.pp[m] = this.it; }
+      if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
         if (this.inspike(this.cc[m2], this.cc[m2i]) && this.ch > 0) {
           this.ch -= 1;
         }
-        return -1;
+        return -1;  // Converged
       }
     }
-    return 0;
+    return 0;  // Continue iterating
   }
 
 }
