@@ -4485,7 +4485,7 @@ class WebGPUZhuoranBoard extends Board {
     }
 
     // Step 4: Set up parameters
-    const iterationsPerBatch = Math.min(17, Math.floor(1111211 / Math.max(this.un, 1)));
+    const iterationsPerBatch = Math.max(17, Math.floor(1111211 / Math.max(this.un, 1)));
     const pixelSize = this.size / this.config.dims;
 
     // Pack params: 4 u32s + 1 f32
