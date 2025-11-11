@@ -4322,9 +4322,10 @@ class WebGPUZhuoranBoard extends WebGPUBaseBoard {
             refi = refOrbit[1];
           }
 
-          // Save OLD z value for checkpoint timing (matches CpuBoard behavior)
-          let old_z_r = refr + dzr;
-          let old_z_i = refi + dzi;
+          // Save dz before iteration (for checkpoint timing)
+          let old_dzr = dzr;
+          let old_dzi = dzi;
+          let old_ref_iter = ref_iter;
 
           // Perturbation iteration: dz_new = 2*z_ref*dz + dz² + dc
           let dz_sq_r = dzr * dzr - dzi * dzi;
@@ -4359,17 +4360,18 @@ class WebGPUZhuoranBoard extends WebGPUBaseBoard {
           let just_updated = (fig_period == 1u);
 
           if (just_updated) {
-            // Update checkpoint with OLD z value (before this iteration)
-            bbr = old_z_r;
-            bbi = old_z_i;
-            checkpoint_iter_val = iter;
+            // Update checkpoint with dz (not absolute position, to avoid precision loss)
+            bbr = old_dzr;
+            bbi = old_dzi;
+            checkpoint_iter_val = old_ref_iter;
             pp = 0u;
           }
 
           // Check convergence (if we have a checkpoint and didn't just update it)
           if (checkpoint_iter_val > 0u && !just_updated) {
-            let delta_r = total_r - bbr;
-            let delta_i = total_i - bbi;
+            // Compare dz deltas to avoid precision loss from subtracting large coordinates
+            let delta_r = dzr - bbr;
+            let delta_i = dzi - bbi;
             let db = abs(delta_r) + abs(delta_i);
 
             if (db <= epsilon2) {
