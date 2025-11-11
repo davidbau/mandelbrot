@@ -847,6 +847,9 @@ class ZhuoranBoard extends Board {
 
 //////////// Test Driver ///////////
 
+// Only run tests if this file is executed directly
+if (require.main === module) {
+
 // Test configuration
 const testConfig = {
   c: [-0.24019862, 0.83739891],  // Complex center
@@ -991,3 +994,8 @@ function testBoard(board, name, maxIter) {
 
   return converged;
 }
+
+} // end if (require.main === module)
+
+// Export classes for use in other modules
+module.exports = { CpuBoard, ZhuoranBoard, Board };
