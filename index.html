@@ -3398,17 +3398,12 @@ class WebGPUBaseBoard extends Board {
 class WebGPUBoard extends WebGPUBaseBoard {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-
     this.effort = 1;
-
-    // Epsilon values for convergence detection
-    // Match CPU ZhuoranBoard thresholds for consistency
+    // Epsilon values for convergence detection scale with pixel size
     const pix = size / this.config.dims;
     this.epsilon = Math.min(1e-12, pix / 10);   // Final convergence threshold
     this.epsilon2 = Math.min(1e-9, pix * 10);  // Getting close threshold
-
     this.checkSpike(size, re, im);
-
     // Start GPU initialization (async)
     this.gpuInitPromise = this.initGPU();
   }
@@ -3432,89 +3427,72 @@ class WebGPUBoard extends WebGPUBaseBoard {
       @group(0) @binding(2) var<storage, read_write> z_values: array<f32>;  // [zr0, zi0, zr1, zi1, ...]
       @group(0) @binding(3) var<storage, read_write> status: array<u32>;    // 0=computing, 1=diverged, 2=converged
       @group(0) @binding(4) var<storage, read> active_pixels: array<u32>;   // Sparse list of active pixel indices
-      @group(0) @binding(5) var<storage, read_write> base_values: array<f32>;  // Base z for period detection
-      @group(0) @binding(6) var<storage, read_write> period: array<u32>;   // Period when converged
-
-      // Check if iteration is a power of 2 (for simple checkpointing)
+      @group(0) @binding(5) var<storage, read_write> base_values: array<f32>;  // base = checkpoint z for period detection
+      @group(0) @binding(6) var<storage, read_write> period: array<u32>;   // p = iter when convergence first detected
+      // Check if iteration is a power of 2 (for checkpointing)
       fn is_power_of_2(n: u32) -> bool {
         return n > 0u && (n & (n - 1u)) == 0u;
       }
-
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let active_idx = global_id.x;
-
         if (active_idx >= params.active_count) {
           return;
         }
-
         let index = active_pixels[active_idx];
         let x = index % params.dims;
         let y = index / params.dims;
-
         // Compute c for this pixel
         let xFrac = (f32(x) / f32(params.dims)) - 0.5;
         let yFrac = 0.5 - (f32(y) / f32(params.dims));
         let cr = params.center_re + xFrac * params.pixel_size;
         let ci = params.center_im + yFrac * params.pixel_size;
-
         // Continue from current z value
         var zr = z_values[index * 2u];
         var zi = z_values[index * 2u + 1u];
         var iter = iterations[index];
-
         // Load base values for period detection
         var base_r = base_values[index * 2u];
         var base_i = base_values[index * 2u + 1u];
         var p = period[index];
-
         // If this is the first batch and base is still zero, initialize it
         if (iter == 0u && base_r == 0.0 && base_i == 0.0) {
           base_r = zr;  // Initialize to starting z (which is 0,0)
           base_i = zi;
         }
-
         // Iterate for this batch
         for (var i = 0u; i < params.iterations_per_batch; i++) {
           iter++;
-
-          // Period detection: save base at power-of-2 iterations BEFORE computing new z
+          // Update checkpoint at power-of-2 iterations BEFORE computing new z
           var saved_base_this_iter = false;
           if (is_power_of_2(iter)) {
             base_r = zr;
             base_i = zi;
-            p = 0u;  // Reset to track first convergence after this checkpoint
+            p = 0u;  // Reset p (period = iter when convergence first detected)
             saved_base_this_iter = true;
           }
-
           let zr2 = zr * zr;
           let zi2 = zi * zi;
-
           // Check divergence (escape radius 2, so magnitude² > 4)
           if (zr2 + zi2 > 4.0) {
             status[index] = 1u;  // Diverged
             break;
           }
-
           // z = z^2 + c
           let new_zr = zr2 - zi2 + cr;
           let new_zi = 2.0 * zr * zi + ci;
           zr = new_zr;
           zi = new_zi;
-
-          // Check if orbit is periodic (compare new z to base)
+          // Check convergence: compare new z to checkpoint
           // Skip if we just saved the base (avoid comparing consecutive z values)
           if (!saved_base_this_iter) {
             let dr = zr - base_r;
             let di = zi - base_i;
-            let db = abs(dr) + abs(di);
-
+            let db = abs(dr) + abs(di);  // distance from checkpoint
             if (db <= params.epsilon2) {
-              // First time within epsilon2, record the iteration
               if (p == 0u) {
-                p = iter;
+                p = iter;  // Record iter when convergence first detected
               }
-              // Check if truly converged (within epsilon)
               if (db <= params.epsilon) {
                 status[index] = 2u;  // Converged (periodic)
                 break;
@@ -3522,7 +3500,6 @@ class WebGPUBoard extends WebGPUBaseBoard {
             }
           }
         }
-
         // Save state
         z_values[index * 2u] = zr;
         z_values[index * 2u + 1u] = zi;
