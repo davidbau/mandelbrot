@@ -4153,6 +4153,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         active_count: u32,
         ref_orbit_length: u32,
         pixel_size: f32,
+        exponent: u32,
       }
 
       @group(0) @binding(0) var<uniform> params: Params;
@@ -4241,13 +4242,44 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           let old_dzi = dzi;
           let old_ref_iter = ref_iter;
 
-          // Perturbation iteration: dz_new = 2*z_ref*dz + dz² + dc
-          let dz_sq_r = dzr * dzr - dzi * dzi;
-          let dz_sq_i = 2.0 * dzr * dzi;
-          let two_zref_dz_r = 2.0 * (refr * dzr - refi * dzi);
-          let two_zref_dz_i = 2.0 * (refr * dzi + refi * dzr);
-          dzr = two_zref_dz_r + dz_sq_r + dcr;
-          dzi = two_zref_dz_i + dz_sq_i + dci;
+          // Perturbation iteration using binomial expansion (Horner's method)
+          // (z_ref+dz)^n - z_ref^n = sum(k=1 to n) C(n,k) * z_ref^(n-k) * dz^k
+          // Computed as: dz * (C(n,1)*z_ref^(n-1) + dz * (C(n,2)*z_ref^(n-2) + ...))
+
+          // Build binomial powers: coeff * z_ref^power for each term
+          var z_pow_r = refr;
+          var z_pow_i = refi;
+          var coeff = f32(params.exponent);
+
+          // Start Horner's method with innermost term
+          var result_r = dzr;
+          var result_i = dzi;
+
+          // Horner's method: accumulate terms from highest to lowest power of z_ref
+          for (var k = 1u; k < params.exponent; k++) {
+            // Add coeff * z_ref^power term
+            let term_r = coeff * z_pow_r;
+            let term_i = coeff * z_pow_i;
+            result_r = result_r + term_r;
+            result_i = result_i + term_i;
+
+            // Multiply by dz (complex multiplication)
+            let temp_r = result_r * dzr - result_i * dzi;
+            result_i = result_r * dzi + result_i * dzr;
+            result_r = temp_r;
+
+            // Update z_ref power: z_pow = z_pow * z_ref
+            let new_z_pow_r = z_pow_r * refr - z_pow_i * refi;
+            z_pow_i = z_pow_r * refi + z_pow_i * refr;
+            z_pow_r = new_z_pow_r;
+
+            // Update coefficient: coeff *= (n-k) / (k+1)
+            coeff *= f32(params.exponent - k) / f32(k + 1u);
+          }
+
+          // Add perturbation in c
+          dzr = result_r + dcr;
+          dzi = result_i + dci;
           // Get NEW reference orbit value (refIter+1) for total z
           let next_ref_iter = ref_iter + 1u;
           let next_ref_offset = next_ref_iter * 2u;
@@ -4256,10 +4288,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           }
           let next_refr = refOrbit[next_ref_offset];
           let next_refi = refOrbit[next_ref_offset + 1u];
-          let total_r = next_refr + dzr;
-          let total_i = next_refi + dzi;
+          let z_total_r = next_refr + dzr;
+          let z_total_i = next_refi + dzi;
           // Check divergence: |z_total|² > 4 (escape radius 2)
-          let mag_sq = total_r * total_r + total_i * total_i;
+          let mag_sq = z_total_r * z_total_r + z_total_i * z_total_i;
           if (mag_sq > 4.0) {
             statusAndPeriod[index] = vec2<u32>(1u, pp);  // Diverged
             break;
@@ -4364,7 +4396,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const iterationsPerBatch = Math.max(17, Math.floor(1111211 / Math.max(this.un, 1)));
     const pixelSize = this.size / this.config.dims;
 
-    // Pack params: 4 u32s + 1 f32
+    // Pack params: 5 u32s + 1 f32 + 1 u32
     const paramsBuffer = new ArrayBuffer(32);
     const paramsU32 = new Uint32Array(paramsBuffer);
     const paramsF32 = new Float32Array(paramsBuffer);
@@ -4373,6 +4405,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     paramsU32[2] = dims2;  // Process all pixels, skip finished ones in shader
     paramsU32[3] = this.refIterations + 1;  // Length includes iteration 0
     paramsF32[4] = pixelSize;  // f32 at offset 16
+    paramsU32[5] = this.config.exponent || 2;  // u32 at offset 20
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
