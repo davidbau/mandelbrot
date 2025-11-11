@@ -4253,7 +4253,7 @@ class WebGPUZhuoranBoard extends WebGPUBaseBoard {
             // Update checkpoint with dz (not absolute position, to avoid precision loss)
             bbr = old_dzr;
             bbi = old_dzi;
-            ckpt_iter = old_ref_iter;
+            ckpt_iter = iter;  // Save current iteration, not ref_iter (which may be 0 after rebase)
             pp = 0u;
           }
           // Check convergence (if we have a checkpoint and didn't just update it)
@@ -4506,12 +4506,12 @@ self.onmessage = function(e) {
       }
 
       let board;
+      const pixelSize = data.size / data.config.dims;
       if (testWebGPU && webGPUAvailable) {
         // Two-tier strategy with WebGPU:
         // - Shallow zooms (pixel > 1e-6): WebGPUBoard with simple float32 iteration
         // - Deep zooms (pixel <= 1e-6): WebGPUZhuoranBoard with quad-double reference + float32 perturbations
         // WebGPUZhuoranBoard should work to arbitrary depth since reference orbit is quad-double
-        const pixelSize = data.size / data.config.dims;
         if (pixelSize > 1e-6) {
           board = new WebGPUBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         } else {
@@ -4519,8 +4519,16 @@ self.onmessage = function(e) {
         }
       } else {
         // WebGPU disabled or unavailable - use CPU-based boards
-        // TESTING: Always use ZhuoranBoard to test convergence detection
-        board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        if (useZhuoranApproach) {
+          // TESTING: Always use ZhuoranBoard to test convergence detection
+          board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        } else {
+          if (pixelSize > 1e-12) {
+            board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+          } else {
+            board = new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+          }
+        }
       }
 
       boards.set(data.k, board);
