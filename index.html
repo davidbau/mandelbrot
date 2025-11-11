@@ -3421,6 +3421,7 @@ class GpuBoard extends GpuBaseBoard {
         active_count: u32,
         epsilon: f32,
         epsilon2: f32,
+        exponent: u32,
       }
 
       @group(0) @binding(0) var<uniform> params: Params;
@@ -3479,11 +3480,16 @@ class GpuBoard extends GpuBaseBoard {
             status[index] = 1u;  // Diverged
             break;
           }
-          // z = z^2 + c
-          let new_zr = zr2 - zi2 + cr;
-          let new_zi = 2.0 * zr * zi + ci;
-          zr = new_zr;
-          zi = new_zi;
+          // z = z^exponent + c (generalized Mandelbrot)
+          var ra = zr2 - zi2;
+          var ja = 2.0 * zr * zi;
+          for (var ord = 2u; ord < params.exponent; ord++) {
+            let rt = zr * ra - zi * ja;
+            ja = zr * ja + zi * ra;
+            ra = rt;
+          }
+          zr = ra + cr;
+          zi = ja + ci;
           // Check convergence: compare new z to checkpoint
           // Skip if we just saved the base (avoid comparing consecutive z values)
           if (!saved_base_this_iter) {
@@ -3530,10 +3536,9 @@ class GpuBoard extends GpuBaseBoard {
     const dims2 = this.config.dims * this.config.dims;
 
     // Uniform buffer for shader parameters
-    // struct Params { center_re: f32, center_im: f32, pixel_size: f32, dims: u32, iterations_per_batch: u32 }
-    // Size: 3 floats + 2 u32s = 20 bytes, round up to 32 for alignment
+    // struct Params { 3 f32, 3 u32, 2 f32, 1 u32 } = 36 bytes, round up to 48 for alignment
     this.buffers.params = this.device.createBuffer({
-      size: 32,
+      size: 48,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: 'Parameters buffer'
     });
@@ -3708,7 +3713,7 @@ class GpuBoard extends GpuBaseBoard {
     this.device.queue.writeBuffer(this.buffers.activePixels, 0, activePixelsData);
 
     // Upload parameters to uniform buffer
-    const paramsBuffer = new ArrayBuffer(32);
+    const paramsBuffer = new ArrayBuffer(48);
     const paramsF32 = new Float32Array(paramsBuffer);
     const paramsU32 = new Uint32Array(paramsBuffer);
 
@@ -3720,6 +3725,7 @@ class GpuBoard extends GpuBaseBoard {
     paramsU32[5] = activeCount;
     paramsF32[6] = this.epsilon;
     paramsF32[7] = this.epsilon2;
+    paramsU32[8] = this.config.exponent;
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
