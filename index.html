@@ -3129,8 +3129,9 @@ class ZhuoranBoard extends Board {
         const dr = this.dz[index2];
         const di = this.dz[index2 + 1];
         // Set dz to current total position (Imagina's VecResetAndSync)
-        this.dz[index2] = lastRefR + dr;
-        this.dz[index2 + 1] = lastRefI + di;
+        // TESTING: Use Math.fround to simulate float32 precision like GPU
+        this.dz[index2] = Math.fround(lastRefR + dr);
+        this.dz[index2 + 1] = Math.fround(lastRefI + di);
         // Restart from iteration 0 (where z_ref = 0)
         this.refIter[index] = 0;
         refIter = 0;
@@ -3151,12 +3152,16 @@ class ZhuoranBoard extends Board {
       const dr = this.dz[index2];
       const di = this.dz[index2 + 1];
       // Set dz to current total position (z_ref + dz)
-      this.dz[index2] = refR + dr;
-      this.dz[index2 + 1] = refI + di;
+      // TESTING: Use Math.fround to simulate float32 precision like GPU
+      this.dz[index2] = Math.fround(refR + dr);
+      this.dz[index2 + 1] = Math.fround(refI + di);
       // Restart from iteration 0 (where z_ref = 0)
       this.refIter[index] = 0;
       refIter = 0;
-      // Checkpoint is still valid - it's an absolute position
+
+      // NOTE: We do NOT modify the checkpoint here
+      // The difference-based comparison works across rebases:
+      // z_current - z_checkpoint = [ref[0] - ref[ckpt_ref_iter]] + [dz_absolute - dz_ckpt]
     }
     // Get reference orbit value for current iteration
     const ref = this.refOrbit[refIter];
@@ -3167,48 +3172,23 @@ class ZhuoranBoard extends Board {
     }
     const refR = ref[0] + ref[1];  // Convert quad to double
     const refI = ref[2] + ref[3];
-    // Perturbation iteration using Horner's method (matching GPU)
+    // Perturbation iteration: dz = 2 * dz * z_ref + dz^2 + dc
     const dr = this.dz[index2];
     const di = this.dz[index2 + 1];
     // Save the OLD z value (before this iteration) for checkpoint timing
+    // This matches CpuBoard's behavior where bb is set BEFORE computing the new z
     const oldZR = refR + dr;
     const oldZI = refI + di;
-
-    // Horner's method for binomial expansion (matches GPU shader)
-    // (z_ref+dz)^n - z_ref^n = sum(k=1 to n) C(n,k) * z_ref^(n-k) * dz^k
-    let z_pow_r = refR;
-    let z_pow_i = refI;
-    let coeff = this.config.exponent;
-
-    // Start Horner's method with innermost term
-    let result_r = dr;
-    let result_i = di;
-
-    // Accumulate terms from highest to lowest power of z_ref
-    for (let k = 1; k < this.config.exponent; k++) {
-      // Add coeff * z_ref^power term
-      const term_r = coeff * z_pow_r;
-      const term_i = coeff * z_pow_i;
-      result_r = result_r + term_r;
-      result_i = result_i + term_i;
-
-      // Multiply by dz (complex multiplication)
-      const temp_r = result_r * dr - result_i * di;
-      result_i = result_r * di + result_i * dr;
-      result_r = temp_r;
-
-      // Update z_ref power: z_pow = z_pow * z_ref
-      const new_z_pow_r = z_pow_r * refR - z_pow_i * refI;
-      z_pow_i = z_pow_r * refI + z_pow_i * refR;
-      z_pow_r = new_z_pow_r;
-
-      // Update coefficient: coeff *= (n-k) / (k+1)
-      coeff = coeff * (this.config.exponent - k) / (k + 1);
-    }
-
-    // Add perturbation in c
-    const newDr = result_r + this.dc[index2];
-    const newDi = result_i + this.dc[index2 + 1];
+    // TESTING: Use Math.fround to simulate float32 precision like GPU
+    // Compute dz^2
+    const dzSqR = Math.fround(Math.fround(dr * dr) - Math.fround(di * di));
+    const dzSqI = Math.fround(2 * Math.fround(dr * di));
+    // Compute 2 * dz * z_ref
+    const twoZrefDzR = Math.fround(2 * Math.fround(Math.fround(dr * refR) - Math.fround(di * refI)));
+    const twoZrefDzI = Math.fround(2 * Math.fround(Math.fround(dr * refI) + Math.fround(di * refR)));
+    // New dz = 2 * dz * z_ref + dz^2 + dc
+    const newDr = Math.fround(Math.fround(twoZrefDzR + dzSqR) + this.dc[index2]);
+    const newDi = Math.fround(Math.fround(twoZrefDzI + dzSqI) + this.dc[index2 + 1]);
     // Update dz first before checking divergence
     this.dz[index2] = newDr;
     this.dz[index2 + 1] = newDi;
@@ -3236,24 +3216,65 @@ class ZhuoranBoard extends Board {
     // Step 1: Update checkpoint at figurePeriod intervals
     const justUpdatedCheckpoint = (figurePeriod(this.it) == 1);
     if (justUpdatedCheckpoint) {
-      // Use OLD z value (before iteration) to match timing with other implementations
-      this.bb[index2] = oldZR;  // bb = checkpoint z position
-      this.bb[index2 + 1] = oldZI;
+      // Store dz (perturbation) and which reference iteration we're at
+      // This allows precise difference computation: (ref[current] - ref[checkpoint]) + (dz[current] - dz[checkpoint])
+      // TESTING: Use Math.fround to simulate float32 precision like GPU
+      this.bb[index2] = Math.fround(dr);  // dz real at checkpoint (BEFORE iteration)
+      this.bb[index2 + 1] = Math.fround(di);  // dz imag at checkpoint
       this.hasCheckpoint[index] = true;
-      this.checkpointIter[index] = this.it;  // Record when checkpoint was saved
+      this.checkpointIter[index] = refIter;  // Which reference iteration (not this.it!)
       this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
     }
     // Step 2: Check convergence EVERY iteration (if we have a checkpoint and didn't just update it)
     if (this.hasCheckpoint[index] && !justUpdatedCheckpoint) {
-      const deltaR = totalR - this.bb[index2];
-      const deltaI = totalI - this.bb[index2 + 1];
-      const db = Math.abs(deltaR) + Math.abs(deltaI);  // distance from checkpoint
-      if (db <= this.epsilon2) {
-        if (!this.pp[index]) {
-          this.pp[index] = this.it;  // Record iter when convergence first detected
+      const checkpointRefIter = this.checkpointIter[index];
+
+      // NEW APPROACH: Check if we're at the same reference iteration
+      // If refIter matches checkpointRefIter, we're at the same point in the reference orbit cycle
+      // In that case, we only need to check if the perturbation dz is close to the checkpoint dz
+      // This works even across rebases: after rebase, we wait for refIter to cycle back to match
+      if (refIter === checkpointRefIter) {
+        const checkpoint_dr = this.bb[index2];
+        const checkpoint_di = this.bb[index2 + 1];
+
+        // Compute Chebyshev distance (L-infinity norm) between current INPUT dz and checkpoint dz
+        // Both are at the same refIter position, so we're comparing the same point in the orbit cycle
+        // TESTING: Use Math.fround to simulate float32 precision like GPU
+        const dzDiffR = Math.fround(Math.fround(dr) - Math.fround(checkpoint_dr));
+        const dzDiffI = Math.fround(Math.fround(di) - Math.fround(checkpoint_di));
+        const db = Math.max(Math.abs(dzDiffR), Math.abs(dzDiffI));
+
+        if (db <= this.epsilon2) {
+          if (!this.pp[index]) {
+            this.pp[index] = this.it;  // Record iter when convergence first detected
+          }
+          if (db <= this.epsilon) {
+            return -1;  // Converged! Return before incrementing refIter
+          }
         }
-        if (db <= this.epsilon) {
-          return -1;  // Converged! Return before incrementing refIter
+      } else if (refIter > checkpointRefIter + 5000) {
+        // FALLBACK: If refIter has advanced too far without cycling back, use absolute position comparison
+        // This handles orbits that never rebase (staying close to reference but never triggering rebase condition)
+        const checkpoint_dr = this.bb[index2];
+        const checkpoint_di = this.bb[index2 + 1];
+
+        // Compute absolute positions at checkpoint and current iteration
+        const refCheckpoint = this.refOrbit[checkpointRefIter];
+        const refCheckpointR = refCheckpoint[0] + refCheckpoint[1];
+        const refCheckpointI = refCheckpoint[2] + refCheckpoint[3];
+
+        // Total difference in absolute positions
+        const diffR = (refR + dr) - (refCheckpointR + checkpoint_dr);
+        const diffI = (refI + di) - (refCheckpointI + checkpoint_di);
+        const db = Math.max(Math.abs(diffR), Math.abs(diffI));
+
+        if (db <= this.epsilon2) {
+          if (!this.pp[index]) {
+            this.pp[index] = this.it;  // Record iter when convergence first detected
+          }
+          if (db <= this.epsilon) {
+            return -1;  // Converged! Return before incrementing refIter
+          }
         }
       }
     }
@@ -3486,24 +3507,10 @@ class GpuBoard extends GpuBaseBoard {
       @group(0) @binding(4) var<storage, read> active_pixels: array<u32>;   // Sparse list of active pixel indices
       @group(0) @binding(5) var<storage, read_write> base_values: array<f32>;  // base = checkpoint z for period detection
       @group(0) @binding(6) var<storage, read_write> period: array<u32>;   // p = iter when convergence first detected
-
-      // Compute next figurePeriod checkpoint (avoids repeated calls in hot loop)
-      fn next_figure_period_checkpoint(n: u32) -> u32 {
-        if (n == 0u) { return 1u; }
-        // Find tail: largest power of 2 where (n/tail)^3 <= tail
-        var tail = 1u;
-        loop {
-          let quotient = n / tail;
-          let cubed = quotient * quotient * quotient;
-          if (cubed <= tail) {
-            break;
-          }
-          tail *= 2u;
-        }
-        // Next checkpoint is at next multiple of tail
-        return ((n / tail) + 1u) * tail;
+      // Check if iteration is a power of 2 (for checkpointing)
+      fn is_power_of_2(n: u32) -> bool {
+        return n > 0u && (n & (n - 1u)) == 0u;
       }
-
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let active_idx = global_id.x;
@@ -3531,19 +3538,16 @@ class GpuBoard extends GpuBaseBoard {
           base_r = zr;  // Initialize to starting z (which is 0,0)
           base_i = zi;
         }
-        // Compute next checkpoint once before loop (avoid repeated computation)
-        var next_checkpoint = next_figure_period_checkpoint(iter);
         // Iterate for this batch
         for (var i = 0u; i < params.iterations_per_batch; i++) {
           iter++;
-          // Update checkpoint at figurePeriod intervals BEFORE computing new z
+          // Update checkpoint at power-of-2 iterations BEFORE computing new z
           var saved_base_this_iter = false;
-          if (iter == next_checkpoint) {
+          if (is_power_of_2(iter)) {
             base_r = zr;
             base_i = zi;
             p = 0u;  // Reset p (period = iter when convergence first detected)
             saved_base_this_iter = true;
-            next_checkpoint = next_figure_period_checkpoint(iter);
           }
           let zr2 = zr * zr;
           let zi2 = zi * zi;
@@ -4059,8 +4063,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         const index2 = index * 2;
 
         // Convert quad-double deltas to float32
-        this.dc[index2] = dcr_qd[0] + dcr_qd[1];
-        this.dc[index2 + 1] = dci_qd[0] + dci_qd[1];
+        // TESTING: Use Math.fround to simulate float32 precision like GPU
+        this.dc[index2] = Math.fround(dcr_qd[0] + dcr_qd[1]);
+        this.dc[index2 + 1] = Math.fround(dci_qd[0] + dci_qd[1]);
 
         // Start with dz = dc (so z = c_ref + dc = c)
         this.dz[index2] = this.dc[index2];
@@ -4237,21 +4242,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       @group(0) @binding(6) var<storage, read> refOrbit: array<f32>;        // Reference orbit [r,i pairs]
       @group(0) @binding(7) var<storage, read_write> checkpointIter: array<u32>;  // Iteration when checkpoint was set
 
-      // Compute next figurePeriod checkpoint (avoids repeated calls in hot loop)
-      fn next_figure_period_checkpoint(n: u32) -> u32 {
-        if (n == 0u) { return 1u; }
-        // Find tail: largest power of 2 where (n/tail)^3 <= tail
-        var tail = 1u;
-        loop {
-          let quotient = n / tail;
-          let cubed = quotient * quotient * quotient;
-          if (cubed <= tail) {
-            break;
-          }
-          tail *= 2u;
-        }
-        // Next checkpoint is at next multiple of tail
-        return ((n / tail) + 1u) * tail;
+      // Check if iteration is a power of 2 (for checkpointing)
+      fn is_power_of_2(n: u32) -> bool {
+        return n > 0u && (n & (n - 1u)) == 0u;
       }
 
       @compute @workgroup_size(64)
@@ -4274,14 +4267,11 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         var ref_iter = refIter[index];
         let dcr = dc[index2];
         let dci = dc[index2 + 1u];
-        var ckpt_iter = checkpointIter[index];  // Iteration when checkpoint was saved
+        var ckpt_iter = checkpointIter[index];  // ref_iter when checkpoint was saved
         var pp = statusAndPeriod[index].y;     // period = iter when convergence first detected
         // Convergence thresholds scale with pixel size for deep zooms
         let epsilon = min(1e-12, params.pixel_size / 10.0);   // Final convergence threshold
         let epsilon2 = min(1e-9, params.pixel_size * 10.0);  // Getting close threshold
-
-        // Compute next checkpoint once before loop (avoid repeated computation)
-        var next_checkpoint = next_figure_period_checkpoint(iter);
 
         // Iterate for the batch
         for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
@@ -4299,12 +4289,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             let total_i_pre = refi_check + dzi;
             let total_norm = max(abs(total_r_pre), abs(total_i_pre));
 
-            // Rebase when orbit approaches critical point (less aggressive than CPU with * 2.0)
+            // Rebase when orbit approaches critical point
             if (ref_iter > 0u && total_norm < dz_norm * 2.0) {
               dzr = total_r_pre;  // Set dz = z_total (absolute position)
               dzi = total_i_pre;
               ref_iter = 0u;  // Restart from beginning of reference orbit
-              // Checkpoint is still valid - it's an absolute position
+
+              // NOTE: We do NOT modify the checkpoint here
+              // The difference-based comparison works across rebases:
+              // z_current - z_checkpoint = [ref[0] - ref[ckpt_ref_iter]] + [dz_absolute - dz_ckpt]
             }
           }
 
@@ -4371,36 +4364,73 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           // Check divergence: |z_total|² > 4 (escape radius 2)
           let mag_sq = z_total_r * z_total_r + z_total_i * z_total_i;
           if (mag_sq > 4.0) {
-            statusAndPeriod[index] = vec2<u32>(1u, iter);  // Diverged at iteration iter
+            statusAndPeriod[index] = vec2<u32>(1u, pp);  // Diverged
             break;
           }
-          // Compute OLD absolute z position (before this iteration, for checkpoint)
-          let old_z_r = refr + old_dzr;
-          let old_z_i = refi + old_dzi;
-
-          // CONVERGENCE DETECTION: Update checkpoint at figurePeriod intervals
-          let just_updated = (iter == next_checkpoint);
+          // CONVERGENCE DETECTION: Update checkpoint at power-of-2 iterations
+          let just_updated = is_power_of_2(iter);
           if (just_updated) {
-            // Store absolute z position (like CPU does)
-            bbr = old_z_r;
-            bbi = old_z_i;
-            ckpt_iter = iter;
+            // Store dz (perturbation) and which reference iteration we're at
+            // This allows precise difference computation: (ref[current] - ref[checkpoint]) + (dz[current] - dz[checkpoint])
+            bbr = old_dzr;  // dz real at checkpoint (BEFORE iteration)
+            bbi = old_dzi;  // dz imag at checkpoint
+            ckpt_iter = old_ref_iter;  // Store reference iteration (not iter!)
             pp = 0u;
-            next_checkpoint = next_figure_period_checkpoint(iter);
           }
           // Check convergence (if we have a checkpoint and didn't just update it)
           if (ckpt_iter > 0u && !just_updated) {
-            // Compare absolute z positions directly
-            let delta_r = z_total_r - bbr;
-            let delta_i = z_total_i - bbi;
-            let db = abs(delta_r) + abs(delta_i);  // distance from checkpoint
-            if (db <= epsilon2) {
-              if (pp == 0u) {
-                pp = iter;  // Record iter when convergence first detected
+            let checkpoint_ref_iter = ckpt_iter;
+
+            // NEW APPROACH: Check if we're at the same reference iteration
+            // If ref_iter matches checkpoint_ref_iter, we're at the same point in the reference orbit cycle
+            // In that case, we only need to check if the perturbation dz is close to the checkpoint dz
+            // This works even across rebases: after rebase, we wait for ref_iter to cycle back to match
+            if (ref_iter == checkpoint_ref_iter) {
+              let checkpoint_dzr = bbr;
+              let checkpoint_dzi = bbi;
+
+              // Compute Chebyshev distance (L-infinity norm) between current INPUT dz and checkpoint dz
+              // Both are at the same ref_iter position, so we're comparing the same point in the orbit cycle
+              // Use old_dzr, old_dzi which are the INPUT dz values (before this iteration)
+              let dz_diff_r = old_dzr - checkpoint_dzr;
+              let dz_diff_i = old_dzi - checkpoint_dzi;
+              let db = max(abs(dz_diff_r), abs(dz_diff_i));
+
+              if (db <= epsilon2) {
+                if (pp == 0u) {
+                  pp = iter;  // Record iter when convergence first detected
+                }
+                if (db <= epsilon) {
+                  statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
+                  break;
+                }
               }
-              if (db <= epsilon) {
-                statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
-                break;
+            } else if (ref_iter > checkpoint_ref_iter + 5000u) {
+              // FALLBACK: If ref_iter has advanced too far without cycling back, use absolute position comparison
+              // This handles orbits that never rebase (staying close to reference but never triggering rebase condition)
+              let checkpoint_dzr = bbr;
+              let checkpoint_dzi = bbi;
+
+              // Compute absolute positions at checkpoint and current iteration
+              let checkpoint_ref_offset = checkpoint_ref_iter * 2u;
+              if (checkpoint_ref_offset + 1u < params.ref_orbit_length * 2u) {
+                let checkpoint_refr = refOrbit[checkpoint_ref_offset];
+                let checkpoint_refi = refOrbit[checkpoint_ref_offset + 1u];
+
+                // Total difference in absolute positions
+                let diff_r = (refr + old_dzr) - (checkpoint_refr + checkpoint_dzr);
+                let diff_i = (refi + old_dzi) - (checkpoint_refi + checkpoint_dzi);
+                let db = max(abs(diff_r), abs(diff_i));
+
+                if (db <= epsilon2) {
+                  if (pp == 0u) {
+                    pp = iter;  // Record iter when convergence first detected
+                  }
+                  if (db <= epsilon) {
+                    statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
+                    break;
+                  }
+                }
               }
             }
           }
@@ -4520,8 +4550,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     let refIterData = null;
 
     // Step 7: Update board state
-    const pixelsByIteration = new Map();  // Group diverged pixels by their exact iteration
-    const convergedByIteration = new Map();  // Group converged pixels by their exact iteration
+    let changes = null;
     let hasConverged = false;
 
     // First pass: check for diverged pixels and count converged
@@ -4535,15 +4564,14 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
       if (status === 1) {
         // Newly diverged
-        const iters = iterationsData[i];
         divergedCount++;
-        this.nn[i] = iters;
+        this.nn[i] = iterationsData[i];
         this.pp[i] = period;
 
-        if (!pixelsByIteration.has(iters)) {
-          pixelsByIteration.set(iters, []);
+        if (!changes) {
+          changes = { iter: this.it, nn: [], vv: [] };
         }
-        pixelsByIteration.get(iters).push(i);
+        changes.nn.push(i);
         this.di++;
         this.un--;
       } else if (status === 2) {
@@ -4565,8 +4593,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
         if (status === 2) {
           // Newly converged
-          const iters = iterationsData[i];
-          this.nn[i] = -iters;
+          this.nn[i] = -iterationsData[i];
           this.pp[i] = period;
 
           // Get converged position: refOrbit[refIter+1] + dz
@@ -4579,10 +4606,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           const refR = ref ? (ref[0] + ref[1]) : 0;
           const refI = ref ? (ref[2] + ref[3]) : 0;
 
-          if (!convergedByIteration.has(iters)) {
-            convergedByIteration.set(iters, []);
+          if (!changes) {
+            changes = { iter: this.it, nn: [], vv: [] };
           }
-          convergedByIteration.get(iters).push({
+          changes.vv.push({
             index: i,
             z: [refR + dzr, refI + dzi],
             p: period
@@ -4592,22 +4619,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       }
     }
 
-    // Create change objects grouped by iteration
-    const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
-    const sortedIterations = Array.from(allIterations).sort((a, b) => a - b);
-
-    for (const iter of sortedIterations) {
-      const divergedIndices = pixelsByIteration.get(iter) || [];
-      const convergedData = convergedByIteration.get(iter) || [];
-
-      if (divergedIndices.length > 0 || convergedData.length > 0) {
-        this.queueChanges({
-          iter: iter,
-          nn: divergedIndices,
-          vv: convergedData
-        });
-      }
-    }
+    this.queueChanges(changes);
 
     } catch (error) {
       console.error(`GpuZhuoranBoard.compute() ERROR:`, error);
@@ -4650,8 +4662,7 @@ self.onmessage = function(e) {
   switch (type) {
     case 'addBoard':
       workerNumber = data.workerNumber;
-      const useZhuoranApproach = false;  // PerturbationBoard is 5-6x faster in benchmarks
-      const forceZhuoran = data.config.forceZhuoran || false;  // URL flag to force Zhuoran boards
+      const useZhuoranApproach = data.config.forceZhuoran || false;  // Can override with zhuoran=1 URL flag
       const enableGPU = data.config.enableGPU;
       const webGPUAvailable = GpuBoard.isAvailable();
 
@@ -4665,14 +4676,16 @@ self.onmessage = function(e) {
         // Two-tier strategy with WebGPU:
         // - Shallow zooms (pixel > 1e-6): GpuBoard with simple float32 iteration
         // - Deep zooms (pixel <= 1e-6): GpuZhuoranBoard with quad-double reference + float32 perturbations
-        if (forceZhuoran || pixelSize <= 1e-6) {
-          board = new GpuZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
-        } else {
+        // GpuZhuoranBoard should work to arbitrary depth since reference orbit is quad-double
+        if (pixelSize > 1e-6) {
           board = new GpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        } else {
+          board = new GpuZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         }
       } else {
         // WebGPU disabled or unavailable - use CPU-based boards
-        if (useZhuoranApproach || forceZhuoran) {
+        if (useZhuoranApproach) {
+          // TESTING: Always use ZhuoranBoard to test convergence detection
           board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         } else {
           if (pixelSize > 1e-12) {
