@@ -3156,6 +3156,7 @@ class ZhuoranBoard extends Board {
       // Restart from iteration 0 (where z_ref = 0)
       this.refIter[index] = 0;
       refIter = 0;
+      // Checkpoint is still valid - it's an absolute position
     }
     // Get reference orbit value for current iteration
     const ref = this.refOrbit[refIter];
@@ -3166,22 +3167,48 @@ class ZhuoranBoard extends Board {
     }
     const refR = ref[0] + ref[1];  // Convert quad to double
     const refI = ref[2] + ref[3];
-    // Perturbation iteration: dz = 2 * dz * z_ref + dz^2 + dc
+    // Perturbation iteration using Horner's method (matching GPU)
     const dr = this.dz[index2];
     const di = this.dz[index2 + 1];
     // Save the OLD z value (before this iteration) for checkpoint timing
-    // This matches CpuBoard's behavior where bb is set BEFORE computing the new z
     const oldZR = refR + dr;
     const oldZI = refI + di;
-    // Compute dz^2
-    const dzSqR = dr * dr - di * di;
-    const dzSqI = 2 * dr * di;
-    // Compute 2 * dz * z_ref
-    const twoZrefDzR = 2 * (dr * refR - di * refI);
-    const twoZrefDzI = 2 * (dr * refI + di * refR);
-    // New dz = 2 * dz * z_ref + dz^2 + dc
-    const newDr = twoZrefDzR + dzSqR + this.dc[index2];
-    const newDi = twoZrefDzI + dzSqI + this.dc[index2 + 1];
+
+    // Horner's method for binomial expansion (matches GPU shader)
+    // (z_ref+dz)^n - z_ref^n = sum(k=1 to n) C(n,k) * z_ref^(n-k) * dz^k
+    let z_pow_r = refR;
+    let z_pow_i = refI;
+    let coeff = this.config.exponent;
+
+    // Start Horner's method with innermost term
+    let result_r = dr;
+    let result_i = di;
+
+    // Accumulate terms from highest to lowest power of z_ref
+    for (let k = 1; k < this.config.exponent; k++) {
+      // Add coeff * z_ref^power term
+      const term_r = coeff * z_pow_r;
+      const term_i = coeff * z_pow_i;
+      result_r = result_r + term_r;
+      result_i = result_i + term_i;
+
+      // Multiply by dz (complex multiplication)
+      const temp_r = result_r * dr - result_i * di;
+      result_i = result_r * di + result_i * dr;
+      result_r = temp_r;
+
+      // Update z_ref power: z_pow = z_pow * z_ref
+      const new_z_pow_r = z_pow_r * refR - z_pow_i * refI;
+      z_pow_i = z_pow_r * refI + z_pow_i * refR;
+      z_pow_r = new_z_pow_r;
+
+      // Update coefficient: coeff *= (n-k) / (k+1)
+      coeff = coeff * (this.config.exponent - k) / (k + 1);
+    }
+
+    // Add perturbation in c
+    const newDr = result_r + this.dc[index2];
+    const newDi = result_i + this.dc[index2 + 1];
     // Update dz first before checking divergence
     this.dz[index2] = newDr;
     this.dz[index2 + 1] = newDi;
@@ -4218,7 +4245,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         var ref_iter = refIter[index];
         let dcr = dc[index2];
         let dci = dc[index2 + 1u];
-        var ckpt_iter = checkpointIter[index];  // ref_iter when checkpoint was saved
+        var ckpt_iter = checkpointIter[index];  // Iteration when checkpoint was saved
         var pp = statusAndPeriod[index].y;     // period = iter when convergence first detected
         // Convergence thresholds scale with pixel size for deep zooms
         let epsilon = min(1e-12, params.pixel_size / 10.0);   // Final convergence threshold
@@ -4245,8 +4272,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
               dzr = total_r_pre;  // Set dz = z_total (absolute position)
               dzi = total_i_pre;
               ref_iter = 0u;  // Restart from beginning of reference orbit
-              // Checkpoint becomes invalid after rebase (dz now absolute, not perturbation)
-              ckpt_iter = 0u;
+              // Checkpoint is still valid - it's an absolute position
             }
           }
 
@@ -4316,20 +4342,24 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             statusAndPeriod[index] = vec2<u32>(1u, pp);  // Diverged
             break;
           }
+          // Compute OLD absolute z position (before this iteration, for checkpoint)
+          let old_z_r = refr + old_dzr;
+          let old_z_i = refi + old_dzi;
+
           // CONVERGENCE DETECTION: Update checkpoint at power-of-2 iterations
           let just_updated = is_power_of_2(iter);
           if (just_updated) {
-            // Update checkpoint with dz (not absolute position, to avoid precision loss)
-            bbr = old_dzr;
-            bbi = old_dzi;
-            ckpt_iter = iter;  // Save current iteration, not ref_iter (which may be 0 after rebase)
+            // Store absolute z position (like CPU does)
+            bbr = old_z_r;
+            bbi = old_z_i;
+            ckpt_iter = iter;
             pp = 0u;
           }
           // Check convergence (if we have a checkpoint and didn't just update it)
           if (ckpt_iter > 0u && !just_updated) {
-            // Compare dz deltas to avoid precision loss from subtracting large coordinates
-            let delta_r = dzr - bbr;
-            let delta_i = dzi - bbi;
+            // Compare absolute z positions directly
+            let delta_r = z_total_r - bbr;
+            let delta_i = z_total_i - bbi;
             let db = abs(delta_r) + abs(delta_i);  // distance from checkpoint
             if (db <= epsilon2) {
               if (pp == 0u) {
