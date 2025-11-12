@@ -1663,6 +1663,7 @@ class Scheduler {
       case 'update':
         if ('boardEffort' in data) { this.boardEfforts.set(data.k, data.boardEffort); }
         this.checkAndBalance(); // Check if we need to balance the load
+        explorer.checkAllViewsComplete();
         break;
       case 'downloadTransfer':
         this.handleDownloadTransfer(data, workerIndex);
@@ -2002,9 +2003,11 @@ class MandelbrotExplorer {
     this.orbitComputer = new OrbitComputer(this);
     this.redrawProcess = new RedrawProcess(this);
     this.movieContainer = document.getElementById('movie');
+    this.allViewsCompleted = false;
   }
 
   start() {
+    this.startTime = Date.now();
     console.log(new Date);
     let startState = this.urlHandler.parseUrl();
     this.config.initSizes();
@@ -2012,6 +2015,19 @@ class MandelbrotExplorer {
     this.grid.updateLayout(startState);
     this.eventHandler.setup();
     this.grid.updateHiddenViews(); // Initial update of hidden boards
+  }
+
+  checkAllViewsComplete() {
+    if (this.allViewsCompleted) return;
+
+    // Check if all views are done
+    const allDone = this.grid.views.every(view => view && view.un === 0);
+
+    if (allDone && this.grid.views.length > 0) {
+      this.allViewsCompleted = true;
+      const elapsed = Date.now() - this.startTime;
+      console.log(`All views completed in ${(elapsed / 1000).toFixed(2)}s`);
+    }
   }
 
   cycleUnknownColor(backward) {
