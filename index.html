@@ -3486,10 +3486,24 @@ class GpuBoard extends GpuBaseBoard {
       @group(0) @binding(4) var<storage, read> active_pixels: array<u32>;   // Sparse list of active pixel indices
       @group(0) @binding(5) var<storage, read_write> base_values: array<f32>;  // base = checkpoint z for period detection
       @group(0) @binding(6) var<storage, read_write> period: array<u32>;   // p = iter when convergence first detected
-      // Check if iteration is a power of 2 (for checkpointing)
-      fn is_power_of_2(n: u32) -> bool {
-        return n > 0u && (n & (n - 1u)) == 0u;
+
+      // Compute next figurePeriod checkpoint (avoids repeated calls in hot loop)
+      fn next_figure_period_checkpoint(n: u32) -> u32 {
+        if (n == 0u) { return 1u; }
+        // Find tail: largest power of 2 where (n/tail)^3 <= tail
+        var tail = 1u;
+        loop {
+          let quotient = n / tail;
+          let cubed = quotient * quotient * quotient;
+          if (cubed <= tail) {
+            break;
+          }
+          tail *= 2u;
+        }
+        // Next checkpoint is at next multiple of tail
+        return ((n / tail) + 1u) * tail;
       }
+
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let active_idx = global_id.x;
@@ -3517,16 +3531,19 @@ class GpuBoard extends GpuBaseBoard {
           base_r = zr;  // Initialize to starting z (which is 0,0)
           base_i = zi;
         }
+        // Compute next checkpoint once before loop (avoid repeated computation)
+        var next_checkpoint = next_figure_period_checkpoint(iter);
         // Iterate for this batch
         for (var i = 0u; i < params.iterations_per_batch; i++) {
           iter++;
-          // Update checkpoint at power-of-2 iterations BEFORE computing new z
+          // Update checkpoint at figurePeriod intervals BEFORE computing new z
           var saved_base_this_iter = false;
-          if (is_power_of_2(iter)) {
+          if (iter == next_checkpoint) {
             base_r = zr;
             base_i = zi;
             p = 0u;  // Reset p (period = iter when convergence first detected)
             saved_base_this_iter = true;
+            next_checkpoint = next_figure_period_checkpoint(iter);
           }
           let zr2 = zr * zr;
           let zi2 = zi * zi;
@@ -4220,9 +4237,21 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       @group(0) @binding(6) var<storage, read> refOrbit: array<f32>;        // Reference orbit [r,i pairs]
       @group(0) @binding(7) var<storage, read_write> checkpointIter: array<u32>;  // Iteration when checkpoint was set
 
-      // Check if iteration is a power of 2 (for checkpointing)
-      fn is_power_of_2(n: u32) -> bool {
-        return n > 0u && (n & (n - 1u)) == 0u;
+      // Compute next figurePeriod checkpoint (avoids repeated calls in hot loop)
+      fn next_figure_period_checkpoint(n: u32) -> u32 {
+        if (n == 0u) { return 1u; }
+        // Find tail: largest power of 2 where (n/tail)^3 <= tail
+        var tail = 1u;
+        loop {
+          let quotient = n / tail;
+          let cubed = quotient * quotient * quotient;
+          if (cubed <= tail) {
+            break;
+          }
+          tail *= 2u;
+        }
+        // Next checkpoint is at next multiple of tail
+        return ((n / tail) + 1u) * tail;
       }
 
       @compute @workgroup_size(64)
@@ -4250,6 +4279,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         // Convergence thresholds scale with pixel size for deep zooms
         let epsilon = min(1e-12, params.pixel_size / 10.0);   // Final convergence threshold
         let epsilon2 = min(1e-9, params.pixel_size * 10.0);  // Getting close threshold
+
+        // Compute next checkpoint once before loop (avoid repeated computation)
+        var next_checkpoint = next_figure_period_checkpoint(iter);
 
         // Iterate for the batch
         for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
@@ -4346,14 +4378,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           let old_z_r = refr + old_dzr;
           let old_z_i = refi + old_dzi;
 
-          // CONVERGENCE DETECTION: Update checkpoint at power-of-2 iterations
-          let just_updated = is_power_of_2(iter);
+          // CONVERGENCE DETECTION: Update checkpoint at figurePeriod intervals
+          let just_updated = (iter == next_checkpoint);
           if (just_updated) {
             // Store absolute z position (like CPU does)
             bbr = old_z_r;
             bbi = old_z_i;
             ckpt_iter = iter;
             pp = 0u;
+            next_checkpoint = next_figure_period_checkpoint(iter);
           }
           // Check convergence (if we have a checkpoint and didn't just update it)
           if (ckpt_iter > 0u && !just_updated) {
