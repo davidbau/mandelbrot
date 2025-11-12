@@ -113,8 +113,8 @@ See information on iterations, progress, and coordinates by <span mobile="tappin
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Exploring a zoom path.</b>
-Each <span mobile="tap">click</span> on the fractal opens a higher zoom level at the selected location, computed by a new webworker thread.
-After you zoom beyond trillion-fold magnification, we slow things down a bit to use a quad-precision perturbation algorithm that resolves fine details to more than 30 digits of accuracy.
+Each <span mobile="tap">click</span> on the fractal opens a higher zoom level at the selected location, computed on your GPU if available.
+After you zoom beyond trillion-fold magnification, we use a quad-precision perturbation algorithm that resolves fine details to more than 30 digits of accuracy.
 Once you have crafted an interesting path that shows the detail you want, you can <a class="moviemode">create and download your own Mandelbrot deep zoom video</a> or bookmark your URL to save and share your exploration.
 To create high-quality images and videos, this viewer computes subpixels with a <span class="pixelratio">2</span>:1 ratio<span mobile="">, and that can be increased to create more precise displays</span>.
 </p>
