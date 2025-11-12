@@ -153,6 +153,7 @@ class Config {
     this.gridcols = this.dgc;
     this.exponent = 2;
     this.enableGPU = true;
+    this.forceZhuoran = false;
     this.firstr = [-0.5, 0];
     this.firstj = [0.0, 0];
     this.firstsize = 3.0;
@@ -955,6 +956,9 @@ class URLHandler {
       if (null !== (m = opts[j].match(/gpu=(\d+)/))) {
         this.config.enableGPU = parseInt(m[1]) !== 0;
       }
+      if (null !== (m = opts[j].match(/zhuoran=(\d+)/))) {
+        this.config.forceZhuoran = parseInt(m[1]) !== 0;
+      }
       if (null !== (m = opts[j].match(/grid=(\d+)/))) {
         this.config.gridcols = Math.max(1, parseInt(m[1]));
       }
@@ -1020,6 +1024,7 @@ class URLHandler {
            (state.sizes[0][0] != 3.0 ? '&s=' + formatSize(this.grid.views[0].sizes[0]) : '') +
            (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
            (!this.config.enableGPU ? '&gpu=0' : '') +
+           (this.config.forceZhuoran ? '&zhuoran=1' : '') +
            (compactc.length ? '&c=' + compactc : '') +
            (this.config.gridcols != this.config.dgc ? '&grid=' + this.config.gridcols : '') +
            (state.hidden.length ? '&h=' + state.hidden : '') +
@@ -1603,7 +1608,8 @@ class Scheduler {
           dims: config.dims,
           dims2: config.dims2,
           exponent: config.exponent,
-          enableGPU: config.enableGPU
+          enableGPU: config.enableGPU,
+          forceZhuoran: config.forceZhuoran
         },
         id,
         workerNumber
@@ -4564,6 +4570,7 @@ self.onmessage = function(e) {
     case 'addBoard':
       workerNumber = data.workerNumber;
       const useZhuoranApproach = false;  // PerturbationBoard is 5-6x faster in benchmarks
+      const forceZhuoran = data.config.forceZhuoran || false;  // URL flag to force Zhuoran boards
       const enableGPU = data.config.enableGPU;
       const webGPUAvailable = GpuBoard.isAvailable();
 
@@ -4577,16 +4584,14 @@ self.onmessage = function(e) {
         // Two-tier strategy with WebGPU:
         // - Shallow zooms (pixel > 1e-6): GpuBoard with simple float32 iteration
         // - Deep zooms (pixel <= 1e-6): GpuZhuoranBoard with quad-double reference + float32 perturbations
-        // GpuZhuoranBoard should work to arbitrary depth since reference orbit is quad-double
-        if (pixelSize > 1e-6) {
-          board = new GpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
-        } else {
+        if (forceZhuoran || pixelSize <= 1e-6) {
           board = new GpuZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        } else {
+          board = new GpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         }
       } else {
         // WebGPU disabled or unavailable - use CPU-based boards
-        if (useZhuoranApproach) {
-          // TESTING: Always use ZhuoranBoard to test convergence detection
+        if (useZhuoranApproach || forceZhuoran) {
           board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         } else {
           if (pixelSize > 1e-12) {
