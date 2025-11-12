@@ -4187,17 +4187,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       @group(0) @binding(6) var<storage, read> refOrbit: array<f32>;        // Reference orbit [r,i pairs]
       @group(0) @binding(7) var<storage, read_write> checkpointIter: array<u32>;  // Iteration when checkpoint was set
 
-      // figurePeriod function - returns 1 at strategic intervals for checkpointing
-      fn figurePeriod(iteration: u32) -> u32 {
-        if (iteration == 0u) { return 1u; }
-        var tail = 1u;
-        var iter_val = iteration;
-        loop {
-          let quotient = iter_val / tail;
-          if (quotient * quotient * quotient <= tail) { break; }
-          tail = tail * 2u;
-        }
-        return iteration - (iteration / tail) * tail + 1u;
+      // Check if iteration is a power of 2 (for checkpointing)
+      fn is_power_of_2(n: u32) -> bool {
+        return n > 0u && (n & (n - 1u)) == 0u;
       }
 
       @compute @workgroup_size(64)
@@ -4318,9 +4310,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             statusAndPeriod[index] = vec2<u32>(1u, pp);  // Diverged
             break;
           }
-          // CONVERGENCE DETECTION: figurePeriod returns 1 at power-of-2-ish checkpoints
-          let fig_period = figurePeriod(iter);
-          let just_updated = (fig_period == 1u);
+          // CONVERGENCE DETECTION: Update checkpoint at power-of-2 iterations
+          let just_updated = is_power_of_2(iter);
           if (just_updated) {
             // Update checkpoint with dz (not absolute position, to avoid precision loss)
             bbr = old_dzr;
