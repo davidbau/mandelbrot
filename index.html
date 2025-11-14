@@ -3458,12 +3458,35 @@ class GpuBaseBoard extends Board {
     return typeof navigator !== 'undefined' && 'gpu' in navigator;
   }
 
-  static isSafeDims(dims) {
+  static async queryMaxBufferSize() {
+    if (GpuBaseBoard.cachedMaxBufferSize !== undefined) {
+      return GpuBaseBoard.cachedMaxBufferSize;
+    }
+    try {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (!adapter) return 200 * 1024 * 1024;
+      const device = await adapter.requestDevice();
+      const limit = Math.min(device.limits.maxBufferSize, device.limits.maxStorageBufferBindingSize);
+      GpuBaseBoard.cachedMaxBufferSize = Math.floor(limit * 0.9);  // 90% for safety
+      return GpuBaseBoard.cachedMaxBufferSize;
+    } catch (e) {
+      GpuBaseBoard.cachedMaxBufferSize = 200 * 1024 * 1024;
+      return GpuBaseBoard.cachedMaxBufferSize;
+    }
+  }
+
+  static isSafeDims(dims, bytesPerPixel = 16, maxBufferSize = 200 * 1024 * 1024) {
     // Check WebGPU buffer size limit (workgroup limit handled by 2D dispatch)
     const dims2 = dims * dims;
-    const maxSafeBufferSize = 200 * 1024 * 1024;  // 200 MB
-    const largestBufferSize = dims2 * 4 * 4;  // 16 bytes per pixel
-    return largestBufferSize <= maxSafeBufferSize;
+    const largestBufferSize = dims2 * bytesPerPixel;
+    return largestBufferSize <= maxBufferSize;
+  }
+
+  static getBoardClass(pixelSize) {
+    // Select board type based on zoom level
+    // Shallow zooms: GpuBoard (simple float32)
+    // Deep zooms: GpuZhuoranBoard (perturbation theory)
+    return pixelSize > 1e-6 ? GpuBoard : GpuZhuoranBoard;
   }
 
   // Abstract methods - subclasses must implement these
@@ -3485,6 +3508,8 @@ class GpuBaseBoard extends Board {
 }
 
 class GpuBoard extends GpuBaseBoard {
+  static BYTES_PER_PIXEL = 8;  // 2x vec2<f32> (zValues or baseValues buffer)
+
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
     this.effort = 1;
@@ -3625,13 +3650,15 @@ class GpuBoard extends GpuBaseBoard {
   async createBuffers() {
     const dims2 = this.config.dims * this.config.dims;
 
-    // Check buffer size limits before creating
-    // WebGPU spec requires maxBufferSize >= 256 MB, but some devices may have lower limits
-    const maxSafeBufferSize = 200 * 1024 * 1024;  // 200 MB (conservative, devices vary)
-    const largestBufferSize = dims2 * 2 * 4;  // zValues or baseValues buffer
+    // Check buffer size limits before creating (safety margin applied upstream)
+    const maxBufferSize = Math.min(
+      this.device.limits.maxBufferSize,
+      this.device.limits.maxStorageBufferBindingSize
+    );
+    const largestBufferSize = dims2 * 2 * 4;  // zValues or baseValues buffer (8 bytes/pixel)
 
-    if (largestBufferSize > maxSafeBufferSize) {
-      throw new Error(`Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) exceeds WebGPU safe limit (${maxSafeBufferSize / (1024 * 1024)} MB). Board dims=${this.config.dims} is too large for GPU acceleration.`);
+    if (largestBufferSize > maxBufferSize) {
+      throw new Error(`Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) exceeds WebGPU limit (${(maxBufferSize / (1024 * 1024)).toFixed(1)} MB). Board dims=${this.config.dims} is too large for GPU acceleration.`);
     }
 
     // Uniform buffer for shader parameters
@@ -4012,6 +4039,8 @@ class GpuBoard extends GpuBaseBoard {
 // WebGPU-accelerated perturbation board using Zhuoran's approach
 // Computes high-precision reference orbit on CPU, perturbations on GPU
 class GpuZhuoranBoard extends GpuBaseBoard {
+  static BYTES_PER_PIXEL = 16;  // 4x f32 (dzAndCheckpoint buffer)
+
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
@@ -4108,14 +4137,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   async createBuffers() {
     const dims2 = this.config.dims * this.config.dims;
 
-    // Check buffer size limits before creating
-    // WebGPU spec requires maxBufferSize >= 256 MB, but some devices may have lower limits
-    const maxSafeBufferSize = 200 * 1024 * 1024;  // 200 MB (conservative, devices vary)
-    const largestBufferSize = dims2 * 4 * 4;  // dzAndCheckpoint buffer
-    const totalBufferSize = dims2 * (4 + 8 + 8 + 16 + 4 + 4);  // All storage buffers
+    // Check buffer size limits before creating (safety margin applied upstream)
+    const maxBufferSize = Math.min(
+      this.device.limits.maxBufferSize,
+      this.device.limits.maxStorageBufferBindingSize
+    );
+    const largestBufferSize = dims2 * 4 * 4;  // dzAndCheckpoint buffer (16 bytes/pixel)
 
-    if (largestBufferSize > maxSafeBufferSize) {
-      throw new Error(`Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) exceeds WebGPU safe limit (${maxSafeBufferSize / (1024 * 1024)} MB). Board dims=${this.config.dims} is too large for GPU acceleration.`);
+    if (largestBufferSize > maxBufferSize) {
+      throw new Error(`Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) exceeds WebGPU limit (${(maxBufferSize / (1024 * 1024)).toFixed(1)} MB). Board dims=${this.config.dims} is too large for GPU acceleration.`);
     }
 
     // Storage buffer for iteration counts
@@ -4699,8 +4729,9 @@ let steps = 0;
 let startTime = 0;
 let endTime = -1;
 let timer = null;
+let gpuMaxBufferSize = null;
 
-self.onmessage = function(e) {
+self.onmessage = async function(e) {
   const { type, data } = e.data;
   switch (type) {
     case 'addBoard':
@@ -4713,25 +4744,28 @@ self.onmessage = function(e) {
         console.log('WebGPU not available in this browser, falling back to CPU boards');
       }
 
+      // Query GPU limits once on first use
+      if (enableGPU && webGPUAvailable && gpuMaxBufferSize === null) {
+        gpuMaxBufferSize = await GpuBaseBoard.queryMaxBufferSize();
+      }
+
       let board;
       const pixelSize = data.size / data.config.dims;
-      const gpuSafe = GpuBaseBoard.isSafeDims(data.config.dims);
+      const GpuBoardClass = GpuBaseBoard.getBoardClass(pixelSize);
+      const bytesPerPixel = GpuBoardClass.BYTES_PER_PIXEL;
+      const gpuSafe = GpuBaseBoard.isSafeDims(data.config.dims, bytesPerPixel, gpuMaxBufferSize || 200 * 1024 * 1024);
 
       if (enableGPU && webGPUAvailable && gpuSafe) {
         // Two-tier strategy with WebGPU:
-        // - Shallow zooms (pixel > 1e-6): GpuBoard with simple float32 iteration
-        // - Deep zooms (pixel <= 1e-6): GpuZhuoranBoard with quad-double reference + float32 perturbations
-        // GpuZhuoranBoard should work to arbitrary depth since reference orbit is quad-double
-        if (pixelSize > 1e-6) {
-          board = new GpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
-        } else {
-          board = new GpuZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
-        }
+        // - Shallow zooms: GpuBoard with simple float32 iteration
+        // - Deep zooms: GpuZhuoranBoard with quad-double reference + float32 perturbations
+        board = new GpuBoardClass(data.k, data.size, data.re, data.im, data.config, data.id);
       } else {
         if (enableGPU && webGPUAvailable && !gpuSafe) {
           const dims2 = data.config.dims * data.config.dims;
-          const bufferSizeMB = (dims2 * 16 / (1024*1024)).toFixed(1);
-          console.log(`Board ${data.k}: dims=${data.config.dims} too large for GPU (buffer size ${bufferSizeMB} MB > 200 MB), using CPU`);
+          const bufferSizeMB = (dims2 * bytesPerPixel / (1024*1024)).toFixed(0);
+          const limitMB = ((gpuMaxBufferSize || 200 * 1024 * 1024) / (1024*1024)).toFixed(0);
+          console.log(`Board ${data.k}: dims=${data.config.dims} too large for GPU (buffer size ${bufferSizeMB} MB > ${limitMB} MB), using CPU`);
         }
         // WebGPU disabled or unavailable - use CPU-based boards
         if (useZhuoranApproach) {
