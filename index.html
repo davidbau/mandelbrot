@@ -679,10 +679,13 @@ class Grid {
     }
   }
 
-  updateHiddenViews() {
-    const hiddenViews = this.views.map((v, i) =>
+  getHiddenViews() {
+    return this.views.map((v, i) =>
             this.hiddencanvas(i) ? i : -1).filter(i => i !== -1);
-    this.scheduler.setHiddenBoards(hiddenViews);
+  }
+
+  updateHiddenViews() {
+    this.scheduler.setHiddenBoards(this.getHiddenViews());
   }
 
   updateViewFromWorkerResult(k, data, workerIndex) {
@@ -737,6 +740,8 @@ class Grid {
       this.makecanvas(k);
       if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
     }
+    // Update workers with hidden boards BEFORE creating boards to prevent hidden boards from computing
+    this.updateHiddenViews();
     this.currentUpdateProcess = this.createUpdateProcess(state);
     this.currentUpdateProcess.start();
   }
@@ -1763,6 +1768,13 @@ class Scheduler {
       worker.onmessage = this.handleWorkerMessage.bind(this);
       this.workers.push(worker);
       window[`worker${workerNum}`] = worker;
+
+      // Initialize new worker with current hidden boards state
+      worker.postMessage({
+        type: 'setHiddenBoards',
+        data: { hiddenBoards: this.grid.getHiddenViews() }
+      });
+
       return true;
     } catch (e) {
       console.log('Failed to start webworker', e);
