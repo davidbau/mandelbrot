@@ -4425,6 +4425,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.device.queue.writeBuffer(this.buffers.dc, 0, this.dc);
     this.device.queue.writeBuffer(this.buffers.dzAndCheckpoint, 0, dzAndCheckpointData);
     this.device.queue.writeBuffer(this.buffers.refIter, 0, this.refIter);
+
+    // Initialize iterations buffer to 0 (iter++ happens at start of batch loop)
+    const iterData = new Uint32Array(dims2).fill(0);
+    this.device.queue.writeBuffer(this.buffers.iterations, 0, iterData);
     // checkpointIter starts at 0 (no checkpoints), statusAndPeriod starts at 0 (unfinished)
   }
 
@@ -4830,7 +4834,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     let refIterData = null;
 
     // Step 7: Update board state
-    let changes = null;
+    const pixelsByIteration = new Map();  // Group diverged pixels by their exact iteration
+    const convergedByIteration = new Map();  // Group converged pixels by their exact iteration
     let hasConverged = false;
 
     // First pass: check for diverged pixels and count converged
@@ -4844,14 +4849,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
       if (status === 1) {
         // Newly diverged
+        const iters = iterationsData[i];
         divergedCount++;
-        this.nn[i] = iterationsData[i];
+        this.nn[i] = iters;
         this.pp[i] = period;
 
-        if (!changes) {
-          changes = { iter: this.it, nn: [], vv: [] };
+        if (!pixelsByIteration.has(iters)) {
+          pixelsByIteration.set(iters, []);
         }
-        changes.nn.push(i);
+        pixelsByIteration.get(iters).push(i);
         this.di++;
         this.un--;
       } else if (status === 2) {
@@ -4873,7 +4879,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
         if (status === 2) {
           // Newly converged
-          this.nn[i] = -iterationsData[i];
+          const iters = iterationsData[i];
+          this.nn[i] = -iters;
           this.pp[i] = period;
 
           // Get converged position: refOrbit[refIter+1] + dz
@@ -4886,10 +4893,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           const refR = ref ? (ref[0] + ref[1]) : 0;
           const refI = ref ? (ref[2] + ref[3]) : 0;
 
-          if (!changes) {
-            changes = { iter: this.it, nn: [], vv: [] };
+          if (!convergedByIteration.has(iters)) {
+            convergedByIteration.set(iters, []);
           }
-          changes.vv.push({
+          convergedByIteration.get(iters).push({
             index: i,
             z: [refR + dzr, refI + dzi],
             p: period
@@ -4899,7 +4906,22 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       }
     }
 
-    this.queueChanges(changes);
+    // Create change objects grouped by iteration
+    const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+    const sortedIterations = Array.from(allIterations).sort((a, b) => a - b);
+
+    for (const iter of sortedIterations) {
+      const divergedIndices = pixelsByIteration.get(iter) || [];
+      const convergedData = convergedByIteration.get(iter) || [];
+
+      if (divergedIndices.length > 0 || convergedData.length > 0) {
+        this.queueChanges({
+          iter: iter,
+          nn: divergedIndices,
+          vv: convergedData
+        });
+      }
+    }
 
     } catch (error) {
       console.error(`GpuZhuoranBoard.compute() ERROR:`, error);
