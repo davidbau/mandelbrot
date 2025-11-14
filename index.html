@@ -3798,7 +3798,7 @@ class GpuBoard extends GpuBaseBoard {
 
   async compute() {
     this.isComputing = true;
-
+    try {
     const dims2 = this.config.dims * this.config.dims;
     const workgroupSize = 64;
 
@@ -3824,7 +3824,6 @@ class GpuBoard extends GpuBaseBoard {
 
     if (activeCount === 0) {
       this.un = 0;
-      this.isComputing = false;
       return;
     }
 
@@ -4015,7 +4014,11 @@ class GpuBoard extends GpuBaseBoard {
     this.un = stillComputing;
     this.updateSize = totalChanges;
 
-    this.isComputing = false;
+    } catch (error) {
+      console.error(`GpuBoard.compute() ERROR:`, error);
+    } finally {
+      this.isComputing = false;
+    }
   }
 
   figurePeriod(iteration) {
@@ -4887,6 +4890,8 @@ function iterateBoards() {
       // Iterate the board and process any changes
       // Note: updates the board's changeList and updateSize
       board.iterate();
+      // Break if async GPU compute started (subsequent iterates would no-op)
+      if (board.isComputing) break;
     }
     const now = (new Date()).getTime();
     if (focusedBoardK == board.k ?
