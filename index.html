@@ -3406,7 +3406,11 @@ class GpuBaseBoard extends Board {
       return true;
 
     } catch (error) {
-      console.error('WebGPU initialization failed:', error);
+      console.error(`Board ${this.id}: WebGPU initialization failed:`, error.message || error);
+      // Check if this is a buffer size error
+      if (error.message && error.message.includes('exceeds WebGPU safe limit')) {
+        console.warn(`Board ${this.id}: Dimensions too large for GPU (dims=${this.config.dims}). This board will NOT compute any pixels!`);
+      }
       return false;
     }
   }
@@ -3454,6 +3458,14 @@ class GpuBaseBoard extends Board {
     return typeof navigator !== 'undefined' && 'gpu' in navigator;
   }
 
+  static isSafeDims(dims) {
+    // Check WebGPU buffer size limit (workgroup limit handled by 2D dispatch)
+    const dims2 = dims * dims;
+    const maxSafeBufferSize = 200 * 1024 * 1024;  // 200 MB
+    const largestBufferSize = dims2 * 4 * 4;  // 16 bytes per pixel
+    return largestBufferSize <= maxSafeBufferSize;
+  }
+
   // Abstract methods - subclasses must implement these
   async createComputePipeline() {
     throw new Error('createComputePipeline() must be implemented by subclass');
@@ -3498,6 +3510,7 @@ class GpuBoard extends GpuBaseBoard {
         epsilon: f32,
         epsilon2: f32,
         exponent: u32,
+        workgroups_x: u32,
       }
 
       @group(0) @binding(0) var<uniform> params: Params;
@@ -3513,7 +3526,8 @@ class GpuBoard extends GpuBaseBoard {
       }
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-        let active_idx = global_id.x;
+        // 2D dispatch: calculate linear index from 2D coordinates
+        let active_idx = global_id.y * params.workgroups_x + global_id.x;
         if (active_idx >= params.active_count) {
           return;
         }
@@ -3611,10 +3625,19 @@ class GpuBoard extends GpuBaseBoard {
   async createBuffers() {
     const dims2 = this.config.dims * this.config.dims;
 
+    // Check buffer size limits before creating
+    // WebGPU spec requires maxBufferSize >= 256 MB, but some devices may have lower limits
+    const maxSafeBufferSize = 200 * 1024 * 1024;  // 200 MB (conservative, devices vary)
+    const largestBufferSize = dims2 * 2 * 4;  // zValues or baseValues buffer
+
+    if (largestBufferSize > maxSafeBufferSize) {
+      throw new Error(`Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) exceeds WebGPU safe limit (${maxSafeBufferSize / (1024 * 1024)} MB). Board dims=${this.config.dims} is too large for GPU acceleration.`);
+    }
+
     // Uniform buffer for shader parameters
-    // struct Params { 3 f32, 3 u32, 2 f32, 1 u32 } = 36 bytes, round up to 48 for alignment
+    // struct Params { 3 f32, 3 u32, 2 f32, 2 u32 } = 40 bytes, round up to 64 for alignment
     this.buffers.params = this.device.createBuffer({
-      size: 48,
+      size: 64,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: 'Parameters buffer'
     });
@@ -3788,8 +3811,13 @@ class GpuBoard extends GpuBaseBoard {
     const activePixelsData = new Uint32Array(activePixels);
     this.device.queue.writeBuffer(this.buffers.activePixels, 0, activePixelsData);
 
+    // 2D workgroup dispatch
+    const numWorkgroups = Math.ceil(activeCount / workgroupSize);
+    const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
+    const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
+
     // Upload parameters to uniform buffer
-    const paramsBuffer = new ArrayBuffer(48);
+    const paramsBuffer = new ArrayBuffer(64);
     const paramsF32 = new Float32Array(paramsBuffer);
     const paramsU32 = new Uint32Array(paramsBuffer);
 
@@ -3802,11 +3830,9 @@ class GpuBoard extends GpuBaseBoard {
     paramsF32[6] = this.epsilon;
     paramsF32[7] = this.epsilon2;
     paramsU32[8] = this.config.exponent;
+    paramsU32[9] = workgroupsX * workgroupSize;  // Total threads in X dimension
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
-
-    // Dispatch only enough workgroups for active pixels (sparse computation!)
-    const numWorkgroups = Math.ceil(activeCount / workgroupSize);
 
     // Create command encoder
     const commandEncoder = this.device.createCommandEncoder({
@@ -3820,7 +3846,7 @@ class GpuBoard extends GpuBaseBoard {
 
     passEncoder.setPipeline(this.pipeline);
     passEncoder.setBindGroup(0, this.bindGroup);
-    passEncoder.dispatchWorkgroups(numWorkgroups);
+    passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);  // 2D dispatch
     passEncoder.end();
 
     // Batch all buffer copies into single command encoder for efficiency
@@ -4082,6 +4108,16 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   async createBuffers() {
     const dims2 = this.config.dims * this.config.dims;
 
+    // Check buffer size limits before creating
+    // WebGPU spec requires maxBufferSize >= 256 MB, but some devices may have lower limits
+    const maxSafeBufferSize = 200 * 1024 * 1024;  // 200 MB (conservative, devices vary)
+    const largestBufferSize = dims2 * 4 * 4;  // dzAndCheckpoint buffer
+    const totalBufferSize = dims2 * (4 + 8 + 8 + 16 + 4 + 4);  // All storage buffers
+
+    if (largestBufferSize > maxSafeBufferSize) {
+      throw new Error(`Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) exceeds WebGPU safe limit (${maxSafeBufferSize / (1024 * 1024)} MB). Board dims=${this.config.dims} is too large for GPU acceleration.`);
+    }
+
     // Storage buffer for iteration counts
     this.buffers.iterations = this.device.createBuffer({
       size: dims2 * 4,  // 4 bytes per u32
@@ -4134,7 +4170,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Uniform buffer for parameters
     this.buffers.params = this.device.createBuffer({
-      size: 32,  // 4 u32s + 1 f32 + padding
+      size: 48,  // 6 u32s + 1 f32 + 1 u32 for workgroups_x
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: 'Params buffer'
     });
@@ -4231,6 +4267,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         ref_orbit_length: u32,
         pixel_size: f32,
         exponent: u32,
+        workgroups_x: u32,
       }
 
       @group(0) @binding(0) var<uniform> params: Params;
@@ -4249,7 +4286,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-        let index = global_id.x;
+        // 2D dispatch: calculate linear index from 2D coordinates
+        let index = global_id.y * params.workgroups_x + global_id.x;
         let dims2 = params.dims * params.dims;
         if (index >= dims2) { return; }
 
@@ -4510,8 +4548,16 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const iterationsPerBatch = Math.max(7, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
     const pixelSize = this.size / this.config.dims;
 
-    // Pack params: 5 u32s + 1 f32 + 1 u32
-    const paramsBuffer = new ArrayBuffer(32);
+    // Step 5: Dispatch GPU compute - process all pixels
+    const workgroupSize = 64;
+    const numWorkgroups = Math.ceil(dims2 / workgroupSize);
+
+    // 2D workgroup dispatch
+    const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
+    const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
+
+    // Pack params: 6 u32s + 1 f32 + 1 u32
+    const paramsBuffer = new ArrayBuffer(48);
     const paramsU32 = new Uint32Array(paramsBuffer);
     const paramsF32 = new Float32Array(paramsBuffer);
     paramsU32[0] = this.config.dims;
@@ -4520,18 +4566,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     paramsU32[3] = this.refIterations + 1;  // Length includes iteration 0
     paramsF32[4] = pixelSize;  // f32 at offset 16
     paramsU32[5] = this.config.exponent || 2;  // u32 at offset 20
+    paramsU32[6] = workgroupsX * workgroupSize;  // Total threads in X dimension
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
-
-    // Step 5: Dispatch GPU compute - process all pixels
-    const workgroupSize = 64;
-    const numWorkgroups = Math.ceil(dims2 / workgroupSize);
 
     const commandEncoder = this.device.createCommandEncoder({ label: 'Perturbation compute' });
     const passEncoder = commandEncoder.beginComputePass({ label: 'Perturbation pass' });
     passEncoder.setPipeline(this.pipeline);
     passEncoder.setBindGroup(0, this.bindGroup);
-    passEncoder.dispatchWorkgroups(numWorkgroups);
+    passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);  // 2D dispatch
     passEncoder.end();
 
     this.device.queue.submit([commandEncoder.finish()]);
@@ -4672,7 +4715,9 @@ self.onmessage = function(e) {
 
       let board;
       const pixelSize = data.size / data.config.dims;
-      if (enableGPU && webGPUAvailable) {
+      const gpuSafe = GpuBaseBoard.isSafeDims(data.config.dims);
+
+      if (enableGPU && webGPUAvailable && gpuSafe) {
         // Two-tier strategy with WebGPU:
         // - Shallow zooms (pixel > 1e-6): GpuBoard with simple float32 iteration
         // - Deep zooms (pixel <= 1e-6): GpuZhuoranBoard with quad-double reference + float32 perturbations
@@ -4683,6 +4728,11 @@ self.onmessage = function(e) {
           board = new GpuZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         }
       } else {
+        if (enableGPU && webGPUAvailable && !gpuSafe) {
+          const dims2 = data.config.dims * data.config.dims;
+          const bufferSizeMB = (dims2 * 16 / (1024*1024)).toFixed(1);
+          console.log(`Board ${data.k}: dims=${data.config.dims} too large for GPU (buffer size ${bufferSizeMB} MB > 200 MB), using CPU`);
+        }
         // WebGPU disabled or unavailable - use CPU-based boards
         if (useZhuoranApproach) {
           // TESTING: Always use ZhuoranBoard to test convergence detection
@@ -4697,7 +4747,11 @@ self.onmessage = function(e) {
       }
 
       boards.set(data.k, board);
-      console.log(`View ${data.k}: ${board.constructor.name}`);
+
+      const re_val = Array.isArray(data.re) ? (data.re[0] + data.re[1]) : data.re;
+      const im_val = Array.isArray(data.im) ? (data.im[0] + data.im[1]) : data.im;
+      const precision = Math.max(3, Math.min(15, Math.ceil(-Math.log10(pixelSize)) + 2));
+      console.log(`Board ${data.k}: ${board.constructor.name} @ (${re_val.toExponential(precision)}, ${im_val.toExponential(precision)}), dims=${data.config.dims}, pixel=${pixelSize.toExponential(3)}`);
 
       // Send board type info once on creation
       self.postMessage({
