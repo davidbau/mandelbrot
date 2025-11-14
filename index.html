@@ -632,7 +632,7 @@ class Grid {
            `<canvas class=overlay width=${this.config.dims} height="${this.config.dims}"` +
            ` style="height:${this.config.cssDims}px;width:${this.config.cssDims}px;">` +
            '</canvas>' +
-           `<a class="zoomnum" target="_blank" href="?grid=1">${factor}` +
+           `<a class="zoomnum" target="_blank" href="?grid=2">${factor}` +
            '<div class="status"></div></a>';
   }
 
@@ -757,7 +757,7 @@ class Grid {
            (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
            '&c=' + formatcomplex(k, ore, oim) +
            (this.config.theme != 'warm' ? '&theme=' + this.config.theme : '') +
-           (debug ? '' : '&grid=1');
+           (debug ? '' : '&grid=2');
   }
 
   clearseq(k) {
