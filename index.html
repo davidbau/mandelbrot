@@ -4685,29 +4685,6 @@ class GpuZhuoranBoard extends GpuBaseBoard {
                   break;
                 }
               }
-            } else if (ref_iter > checkpoint_ref_iter + 5000u) {
-              // FALLBACK: If ref_iter has advanced too far without cycling back, use absolute position comparison
-              // This handles orbits that never rebase (staying close to reference but never triggering rebase condition)
-              let checkpoint_ref_offset = checkpoint_ref_iter * 2u;
-              if (checkpoint_ref_offset + 1u < params.ref_orbit_length * 2u) {
-                let checkpoint_refr = refOrbit[checkpoint_ref_offset];
-                let checkpoint_refi = refOrbit[checkpoint_ref_offset + 1u];
-
-                // Total difference in absolute positions
-                let diff_r = (refr + old_dzr) - (checkpoint_refr + checkpoint_dzr);
-                let diff_i = (refi + old_dzi) - (checkpoint_refi + checkpoint_dzi);
-                let db = max(abs(diff_r), abs(diff_i));
-
-                if (db <= epsilon2) {
-                  if (pp == 0u) {
-                    pp = iter - 1u;  // Record iter-1 to account for skipped checkpoint iteration
-                  }
-                  if (db <= epsilon) {
-                    statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
-                    break;
-                  }
-                }
-              }
             }
           }
 
