@@ -4678,7 +4678,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
               if (db <= epsilon2) {
                 if (pp == 0u) {
-                  pp = iter;  // Record iter when first detected
+                  pp = iter - 1u;  // Record iter-1 to account for skipped checkpoint iteration
                 }
                 if (db <= epsilon) {
                   statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
@@ -4700,7 +4700,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
                 if (db <= epsilon2) {
                   if (pp == 0u) {
-                    pp = iter;  // Record iter when first detected
+                    pp = iter - 1u;  // Record iter-1 to account for skipped checkpoint iteration
                   }
                   if (db <= epsilon) {
                     statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
