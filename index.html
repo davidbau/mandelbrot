@@ -3880,6 +3880,16 @@ class GpuBoard extends GpuBaseBoard {
         epsilon2: f32,
         exponent: u32,
         workgroups_x: u32,
+        start_iter: u32,
+        checkpoint_count: u32,
+        ckpt0: u32,
+        ckpt1: u32,
+        ckpt2: u32,
+        ckpt3: u32,
+        ckpt4: u32,
+        ckpt5: u32,
+        ckpt6: u32,
+        ckpt7: u32,
       }
 
       @group(0) @binding(0) var<uniform> params: Params;
@@ -3889,10 +3899,6 @@ class GpuBoard extends GpuBaseBoard {
       @group(0) @binding(4) var<storage, read> active_pixels: array<u32>;   // Sparse list of active pixel indices
       @group(0) @binding(5) var<storage, read_write> base_values: array<f32>;  // base = checkpoint z for period detection
       @group(0) @binding(6) var<storage, read_write> period: array<u32>;   // p = iter when convergence first detected
-      // Check if iteration is a power of 2 (for checkpointing)
-      fn is_power_of_2(n: u32) -> bool {
-        return n > 0u && (n & (n - 1u)) == 0u;
-      }
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // 2D dispatch: calculate linear index from 2D coordinates
@@ -3921,14 +3927,31 @@ class GpuBoard extends GpuBaseBoard {
           base_r = zr;  // Initialize to starting z (which is 0,0)
           base_i = zi;
         }
+        // Track next checkpoint using O(1) counter for adaptive Fibonacci checkpoints
+        var next_checkpoint_idx = 0u;
         // Iterate for this batch
         for (var i = 0u; i < params.iterations_per_batch; i++) {
           iter++;
-          // Update checkpoint at power-of-2 iterations BEFORE computing new z
-          if (is_power_of_2(iter)) {
-            base_r = zr;
-            base_i = zi;
-            p = 0u;  // Reset p (period = iter when convergence first detected)
+          // Check if this iteration is a Fibonacci checkpoint
+          if (next_checkpoint_idx < params.checkpoint_count) {
+            var checkpoint_offset = 0u;
+            switch (next_checkpoint_idx) {
+              case 0u: { checkpoint_offset = params.ckpt0; }
+              case 1u: { checkpoint_offset = params.ckpt1; }
+              case 2u: { checkpoint_offset = params.ckpt2; }
+              case 3u: { checkpoint_offset = params.ckpt3; }
+              case 4u: { checkpoint_offset = params.ckpt4; }
+              case 5u: { checkpoint_offset = params.ckpt5; }
+              case 6u: { checkpoint_offset = params.ckpt6; }
+              case 7u: { checkpoint_offset = params.ckpt7; }
+              default: {}
+            }
+            if (i == checkpoint_offset) {
+              base_r = zr;
+              base_i = zi;
+              p = 0u;  // Reset p (period = iter when convergence first detected)
+              next_checkpoint_idx++;
+            }
           }
           let zr2 = zr * zr;
           let zi2 = zi * zi;
@@ -4001,7 +4024,7 @@ class GpuBoard extends GpuBaseBoard {
     }
 
     // Uniform buffer for shader parameters
-    // struct Params { 9 base fields + array<u32, 8> checkpoints } = ~80 bytes with alignment, rounded to 128
+    // struct Params { 12 base fields + 8 checkpoint offsets } = 20 u32s = 80 bytes, rounded to 128 for alignment
     this.buffers.params = this.device.createBuffer({
       size: 128,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -4181,8 +4204,19 @@ class GpuBoard extends GpuBaseBoard {
     const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
     const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
 
-    // Upload parameters to uniform buffer
-    const paramsBuffer = new ArrayBuffer(64);
+    // Precompute Fibonacci checkpoint offsets for this batch
+    const checkpointOffsets = [];
+    const bufferIter = this.it;  // Current iteration before increment
+    for (let i = 0; i < iterationsPerBatch; i++) {
+      const globalIter = bufferIter + i + 1;  // iter++ happens first in shader
+      if (fibonacciPeriod(globalIter) === 1) {
+        checkpointOffsets.push(i);
+      }
+    }
+    const checkpointCount = Math.min(checkpointOffsets.length, 8);
+
+    // Upload parameters to uniform buffer (20 u32s with checkpoint fields)
+    const paramsBuffer = new ArrayBuffer(128);  // 20 u32s = 80 bytes, rounded to 128 for alignment
     const paramsF32 = new Float32Array(paramsBuffer);
     const paramsU32 = new Uint32Array(paramsBuffer);
 
@@ -4196,6 +4230,13 @@ class GpuBoard extends GpuBaseBoard {
     paramsF32[7] = this.epsilon2;
     paramsU32[8] = this.config.exponent;
     paramsU32[9] = workgroupsX * workgroupSize;  // Total threads in X dimension
+    paramsU32[10] = bufferIter;  // Starting iteration
+    paramsU32[11] = checkpointCount;  // Number of checkpoints in this batch
+
+    // Pack all 8 checkpoint offsets (fill unused slots with 0)
+    for (let i = 0; i < 8; i++) {
+      paramsU32[12 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
+    }
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
