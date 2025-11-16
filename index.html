@@ -4003,9 +4003,9 @@ class GpuBoard extends GpuBaseBoard {
     }
 
     // Uniform buffer for shader parameters
-    // struct Params { 3 f32, 3 u32, 2 f32, 2 u32 } = 40 bytes, round up to 64 for alignment
+    // struct Params { 9 base fields + array<u32, 8> checkpoints } = ~80 bytes with alignment, rounded to 128
     this.buffers.params = this.device.createBuffer({
-      size: 64,
+      size: 128,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: 'Parameters buffer'
     });
@@ -4553,7 +4553,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Uniform buffer for parameters
     this.buffers.params = this.device.createBuffer({
-      size: 48,  // 6 u32s + 1 f32 + 1 u32 for workgroups_x
+      size: 128,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: 'Params buffer'
     });
@@ -4693,6 +4693,16 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         pixel_size: f32,
         exponent: u32,
         workgroups_x: u32,
+        start_iter: u32,
+        checkpoint_count: u32,
+        ckpt0: u32,
+        ckpt1: u32,
+        ckpt2: u32,
+        ckpt3: u32,
+        ckpt4: u32,
+        ckpt5: u32,
+        ckpt6: u32,
+        ckpt7: u32,
       }
 
       @group(0) @binding(0) var<uniform> params: Params;
@@ -4743,6 +4753,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         // Convergence thresholds scale with pixel size for deep zooms
         let epsilon = min(1e-12, params.pixel_size / 10.0);   // Final convergence threshold
         let epsilon2 = min(1e-9, params.pixel_size * 10.0);  // Getting close threshold
+
+        // Track next checkpoint using O(1) counter for adaptive checkpoints
+        var next_checkpoint_idx = 0u;
 
         // Iterate for the batch
         for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
@@ -4843,13 +4856,32 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             statusAndPeriod[index] = vec2<u32>(1u, pp);  // Diverged
             break;
           }
-          // CONVERGENCE DETECTION: Update checkpoint at power-of-2 iterations
-          let just_updated = is_power_of_2(iter);
-          if (just_updated) {
-            bbr = old_dzr;  // dz real at checkpoint (BEFORE iteration)
-            bbi = old_dzi;  // dz imag at checkpoint
-            ckpt_iter = old_ref_iter;  // Store reference iteration
-            pp = 0u;
+          // CONVERGENCE DETECTION: Check if this iteration is a checkpoint
+          var just_updated = false;
+          if (next_checkpoint_idx < params.checkpoint_count) {
+            // Get the offset for the next checkpoint based on index
+            var checkpoint_offset = 0u;
+            switch (next_checkpoint_idx) {
+              case 0u: { checkpoint_offset = params.ckpt0; }
+              case 1u: { checkpoint_offset = params.ckpt1; }
+              case 2u: { checkpoint_offset = params.ckpt2; }
+              case 3u: { checkpoint_offset = params.ckpt3; }
+              case 4u: { checkpoint_offset = params.ckpt4; }
+              case 5u: { checkpoint_offset = params.ckpt5; }
+              case 6u: { checkpoint_offset = params.ckpt6; }
+              case 7u: { checkpoint_offset = params.ckpt7; }
+              default: {}
+            }
+
+            // Check if current batch_iter matches this checkpoint
+            if (batch_iter == checkpoint_offset) {
+              just_updated = true;
+              bbr = old_dzr;  // dz real at checkpoint (BEFORE iteration)
+              bbi = old_dzi;  // dz imag at checkpoint
+              ckpt_iter = old_ref_iter;  // Store reference iteration
+              pp = 0u;
+              next_checkpoint_idx++;  // Move to next checkpoint
+            }
           }
           // Check convergence (if we have a checkpoint and didn't just update it)
           if (ckpt_iter > 0u && !just_updated) {
@@ -5047,6 +5079,26 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Batch size already calculated above (before reference orbit extension)
     const pixelSize = this.size / this.config.dims;
 
+    // Step 4a: Precompute checkpoint offsets for this batch using figurePeriod
+    const checkpointOffsets = [];
+    // Note: iterations buffer contains LAST COMPLETED iteration, so next iteration is +1
+    // In shader: iter++ happens first, so batch_iter=0 processes iteration (this.it-1)+1 = this.it
+    // But this.it is 1-indexed (starts at 1), while buffer is 0-indexed (starts at 0)
+    // So we need to compute based on what's actually in the buffer: this.it - 1
+    const bufferIter = this.it - 1;  // What's actually in the iterations buffer
+    for (let i = 0; i < iterationsPerBatch; i++) {
+      // Shader does: iter++ then compute, so batch_iter=i processes iteration (bufferIter + i + 1)
+      const globalIter = bufferIter + i + 1;
+      if (figurePeriod(globalIter) === 1) {
+        checkpointOffsets.push(i);  // Store batch-relative offset
+      }
+    }
+
+    // Cap at 8 checkpoints (hardware limit based on uniform buffer fields)
+    // Note: checkpointCount can be 0 if no checkpoints in this batch
+    // That's OK - we'll keep comparing to the last checkpoint from a previous batch
+    const checkpointCount = Math.min(checkpointOffsets.length, 8);
+
     // Step 5: Dispatch GPU compute - process all pixels
     const workgroupSize = 64;
     const numWorkgroups = Math.ceil(dims2 / workgroupSize);
@@ -5055,8 +5107,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
     const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
 
-    // Pack params: 6 u32s + 1 f32 + 1 u32
-    const paramsBuffer = new ArrayBuffer(48);
+    // Pack params: 17 u32s (9 base + 8 checkpoints)
+    const paramsBuffer = new ArrayBuffer(128);  // 17 u32s = 68 bytes, rounded to 128 for alignment
     const paramsU32 = new Uint32Array(paramsBuffer);
     const paramsF32 = new Float32Array(paramsBuffer);
     paramsU32[0] = this.config.dims;
@@ -5066,6 +5118,13 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     paramsF32[4] = pixelSize;  // f32 at offset 16
     paramsU32[5] = this.config.exponent || 2;  // u32 at offset 20
     paramsU32[6] = workgroupsX * workgroupSize;  // Total threads in X dimension
+    paramsU32[7] = bufferIter;  // Starting iteration (what's in the buffer before iter++)
+    paramsU32[8] = checkpointCount;  // Number of checkpoints in this batch
+
+    // Pack all 8 checkpoint offsets (fill unused slots with 0)
+    for (let i = 0; i < 8; i++) {
+      paramsU32[9 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
+    }
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
@@ -5099,6 +5158,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // First pass: check for diverged pixels and count converged
     let divergedCount = 0;
     let convergedCount = 0;
+
     for (let i = 0; i < dims2; i++) {
       const status = statusAndPeriodData[i * 2];  // First u32 in vec2
       const period = statusAndPeriodData[i * 2 + 1];  // Second u32 in vec2
