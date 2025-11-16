@@ -258,7 +258,9 @@ class View {
   // Static helper: lookup histogram fractions for a given iteration count
   static lookupHistogram(i, histogram) {
     let j = 0;
-    for (; i < histogram[j][0]; j += 1) {}
+    for (; j < histogram.length - 1 && i < histogram[j][0]; j += 1) {}
+    // Clamp to last valid index if iteration exceeds histogram range
+    j = Math.min(j, histogram.length - 1);
     return {
       fracK: 1 - histogram[j][1],  // Fraction known
       fracD: 1 - histogram[j][2],  // Fraction diverged
