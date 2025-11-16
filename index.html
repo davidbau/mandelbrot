@@ -1188,12 +1188,6 @@ class URLHandler {
           console.warn(`Invalid board type: ${boardType}. Valid types: ${validTypes.join(', ')}`);
         }
       }
-      // Legacy support: zhuoran=1 maps to board=zhuoran
-      if (null !== (m = opts[j].match(/zhuoran=(\d+)/))) {
-        if (parseInt(m[1]) !== 0) {
-          this.config.forceBoard = 'zhuoran';
-        }
-      }
       if (null !== (m = opts[j].match(/grid=(\d+)/))) {
         this.config.gridcols = Math.max(1, parseInt(m[1]));
       }
@@ -5405,7 +5399,6 @@ self.onmessage = async function(e) {
   switch (type) {
     case 'addBoard':
       workerNumber = data.workerNumber;
-      const useZhuoranApproach = data.config.forceZhuoran || false;  // Can override with zhuoran=1 URL flag
       const enableGPU = data.config.enableGPU;
       const webGPUAvailable = GpuBoard.isAvailable();
 
