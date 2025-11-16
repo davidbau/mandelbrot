@@ -4760,11 +4760,6 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         return vec3<f32>(thread_data.x, thread_data.y, thread_data.z);
       }
 
-      // Check if iteration is a power of 2 (for checkpointing)
-      fn is_power_of_2(n: u32) -> bool {
-        return n > 0u && (n & (n - 1u)) == 0u;
-      }
-
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // 2D dispatch: calculate linear index from 2D coordinates
