@@ -585,7 +585,7 @@ class View {
   debugStatus() {
     const debugGraph = this.renderHiGraph(600, 300);
     const maxPeriod = this.convergedData.values().map(
-        d => figurePeriod(d.p)).reduce((a, b) => Math.max(a, b), 0);
+        d => fibonacciPeriod(d.p)).reduce((a, b) => Math.max(a, b), 0);
     const maxEscape = this.nn.reduce((a, b) => Math.max(a, b), 0)
     this.nn.reduce((iMin, x, i, arr) => x < arr[iMin] ? i : iMin, 0);
     const boardName = this.boardType || 'Board';
@@ -2136,13 +2136,13 @@ class OrbitComputer {
         if (view.nn[j] > 0) {
           title += '\ndiverges in ' + view.nn[j];
         } else {
-          let period = figurePeriod(view.currentp(j));
+          let period = fibonacciPeriod(view.currentp(j));
           if (period == 1) {
             title += '\nconverges after ' + formatLargeInt(view.currentp(j));
           } else {
             title += '\nafter ' + formatLargeInt(view.currentp(j)) + ', period ' + formatLargeInt(period);
           }
-          let clen = figurePeriod(view.currentp(j));
+          let clen = fibonacciPeriod(view.currentp(j));
           cyc = z ? this.suborbit(z, c, clen) : [];
         }
       } else {
@@ -2648,8 +2648,8 @@ class CpuBoard extends Board {
     let changes = null;
     const results = [0, 0, 0];
     let s = this.ss;    // speedy list of active pixel indices to compute
-    // Update checkpoints at figurePeriod intervals (returns 1 at Fibonacci points)
-    if (figurePeriod(this.it) == 1) {
+    // Update checkpoints at fibonacciPeriod intervals (returns 1 at Fibonacci points)
+    if (fibonacciPeriod(this.it) == 1) {
       for (let t = 0; t < s.length; ++t) {
         let m = s[t];
         if (this.nn[m]) continue;
@@ -3586,9 +3586,9 @@ class ZhuoranBoard extends Board {
       return 1;  // Diverged
     }
 
-    // CONVERGENCE DETECTION: figurePeriod returns 1 at Fibonacci checkpoints
-    // Step 1: Update checkpoint at figurePeriod intervals
-    const justUpdatedCheckpoint = (figurePeriod(this.it) == 1);
+    // CONVERGENCE DETECTION: fibonacciPeriod returns 1 at Fibonacci checkpoints
+    // Step 1: Update checkpoint at fibonacciPeriod intervals
+    const justUpdatedCheckpoint = (fibonacciPeriod(this.it) == 1);
     if (justUpdatedCheckpoint) {
       // Store dz (perturbation) and which reference iteration we're at
       // This allows precise difference computation: (ref[current] - ref[checkpoint]) + (dz[current] - dz[checkpoint])
@@ -4490,11 +4490,6 @@ class GpuBoard extends GpuBaseBoard {
     }
   }
 
-  figurePeriod(iteration) {
-    // Delegate to global fibonacciPeriod function
-    return fibonacciPeriod(iteration);
-  }
-
   static fromSerialized(serialized) {
     return new GpuBoard(
       serialized.k,
@@ -5203,7 +5198,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Batch size already calculated above (before reference orbit extension)
     const pixelSize = this.size / this.config.dims;
 
-    // Step 4a: Precompute checkpoint offsets for this batch using figurePeriod
+    // Step 4a: Precompute checkpoint offsets for this batch using fibonacciPeriod
     const checkpointOffsets = [];
     // Note: iterations buffer contains LAST COMPLETED iteration, so next iteration is +1
     // In shader: iter++ happens first, so batch_iter=0 processes iteration (this.it-1)+1 = this.it
@@ -5213,7 +5208,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     for (let i = 0; i < iterationsPerBatch; i++) {
       // Shader does: iter++ then compute, so batch_iter=i processes iteration (bufferIter + i + 1)
       const globalIter = bufferIter + i + 1;
-      if (figurePeriod(globalIter) === 1) {
+      if (fibonacciPeriod(globalIter) === 1) {
         checkpointOffsets.push(i);  // Store batch-relative offset
       }
     }
@@ -5325,7 +5320,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           this.nn[i] = -iters;
 
           // period from shader is pp (iteration when first within epsilon2)
-          // Store pp - 1 because figurePeriod() adds 1 in its calculation
+          // Store pp - 1 because fibonacciPeriod() adds 1 in its calculation
           this.pp[i] = period - 1;
 
           // Get converged position: refOrbit[refIter+1] + dz
@@ -5344,7 +5339,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           convergedByIteration.get(iters).push({
             index: i,
             z: [refR + dzr, refI + dzi],
-            p: this.pp[i]  // Raw pp value (UI will call figurePeriod to calculate period)
+            p: this.pp[i]  // Raw pp value (UI will call fibonacciPeriod to calculate period)
           });
           this.un--;
         }
@@ -6105,10 +6100,6 @@ function fibonacciPeriod(iteration) {
   return iteration - a + 1;
 }
 
-// Legacy alias for compatibility
-function figurePeriod(iteration) {
-  return fibonacciPeriod(iteration);
-}
 </script>
 <script>
 // Start the application
