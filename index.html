@@ -4653,11 +4653,11 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       dzAndCheckpointData[i * 4 + 3] = 0;  // bb.y
     }
 
-    // Initialize refIterAndCheckpoint: [ref_iter, checkpoint_iter=0] per pixel
+    // Initialize refIterAndCheckpoint: [ref_iter, checkpoint_iter] per pixel
     const refIterAndCheckpointData = new Uint32Array(dims2 * 2);
     for (let i = 0; i < dims2; i++) {
       refIterAndCheckpointData[i * 2] = this.refIter[i];  // ref_iter
-      refIterAndCheckpointData[i * 2 + 1] = 0;  // checkpoint_iter starts at 0
+      refIterAndCheckpointData[i * 2 + 1] = 0xFFFFFFFF;  // checkpoint_iter: use sentinel for "no checkpoint yet"
     }
 
     // Initialize orbit buffer with initial reference orbit (iter 0 and 1)
@@ -4831,8 +4831,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         var ckpt_iter = refIterAndCheckpoint[index].y;  // ref_iter when checkpoint was saved
         var pp = statusAndPeriod[index].y;     // period = iter when convergence first detected
         // Convergence thresholds scale with pixel size for deep zooms
-        let epsilon = min(1e-12, params.pixel_size / 10.0);   // Final convergence threshold
-        let epsilon2 = min(1e-9, params.pixel_size * 10.0);  // Getting close threshold
+        // GPU uses float32 precision, so thresholds must be larger than CPU's float64
+        let epsilon = min(1e-7, params.pixel_size / 10.0);   // Final convergence threshold
+        let epsilon2 = min(1e-5, params.pixel_size * 10.0);  // Getting close threshold
 
         // Track next checkpoint using O(1) counter for adaptive checkpoints
         var next_checkpoint_idx = 0u;
@@ -4964,7 +4965,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             }
           }
           // Check convergence (if we have a checkpoint and didn't just update it)
-          if (ckpt_iter > 0u && !just_updated) {
+          // Use 0xFFFFFFFF as sentinel for "no checkpoint yet" (allows ckpt_iter=0)
+          if (ckpt_iter != 0xFFFFFFFFu && !just_updated) {
             let checkpoint_ref_iter = ckpt_iter;
             let checkpoint_dzr = bbr;
             let checkpoint_dzi = bbi;
