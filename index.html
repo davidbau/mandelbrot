@@ -3515,23 +3515,52 @@ class ZhuoranBoard extends Board {
     }
     const refR = ref[0] + ref[1];  // Convert quad to double
     const refI = ref[2] + ref[3];
-    // Perturbation iteration: dz = 2 * dz * z_ref + dz^2 + dc
+    // Perturbation iteration using binomial expansion (Horner's method)
+    // (z_ref+dz)^n - z_ref^n = sum(k=1 to n) C(n,k) * z_ref^(n-k) * dz^k
     const dr = this.dz[index2];
     const di = this.dz[index2 + 1];
     // Save the OLD z value (before this iteration) for checkpoint timing
     // This matches CpuBoard's behavior where bb is set BEFORE computing the new z
     const oldZR = refR + dr;
     const oldZI = refI + di;
+
     // TESTING: Use Math.fround to simulate float32 precision like GPU
-    // Compute dz^2
-    const dzSqR = Math.fround(Math.fround(dr * dr) - Math.fround(di * di));
-    const dzSqI = Math.fround(2 * Math.fround(dr * di));
-    // Compute 2 * dz * z_ref
-    const twoZrefDzR = Math.fround(2 * Math.fround(Math.fround(dr * refR) - Math.fround(di * refI)));
-    const twoZrefDzI = Math.fround(2 * Math.fround(Math.fround(dr * refI) + Math.fround(di * refR)));
-    // New dz = 2 * dz * z_ref + dz^2 + dc
-    const newDr = Math.fround(Math.fround(twoZrefDzR + dzSqR) + this.dc[index2]);
-    const newDi = Math.fround(Math.fround(twoZrefDzI + dzSqI) + this.dc[index2 + 1]);
+    const exponent = this.config.exponent || 2;
+
+    // Build binomial powers: coeff * z_ref^power for each term
+    let zPowR = refR;
+    let zPowI = refI;
+    let coeff = exponent;
+
+    // Start Horner's method with innermost term (just dz)
+    let resultR = dr;
+    let resultI = di;
+
+    // Horner's method: accumulate terms from highest to lowest power of z_ref
+    for (let k = 1; k < exponent; k++) {
+      // Add coeff * z_ref^power term
+      const termR = coeff * zPowR;
+      const termI = coeff * zPowI;
+      resultR = Math.fround(resultR + termR);
+      resultI = Math.fround(resultI + termI);
+
+      // Multiply by dz (complex multiplication)
+      const tempR = Math.fround(Math.fround(resultR * dr) - Math.fround(resultI * di));
+      resultI = Math.fround(Math.fround(resultR * di) + Math.fround(resultI * dr));
+      resultR = tempR;
+
+      // Update z_ref power: z_pow = z_pow * z_ref
+      const newZPowR = Math.fround(Math.fround(zPowR * refR) - Math.fround(zPowI * refI));
+      zPowI = Math.fround(Math.fround(zPowR * refI) + Math.fround(zPowI * refR));
+      zPowR = newZPowR;
+
+      // Update coefficient: coeff *= (n-k) / (k+1)
+      coeff *= (exponent - k) / (k + 1);
+    }
+
+    // Add perturbation in c
+    const newDr = Math.fround(resultR + this.dc[index2]);
+    const newDi = Math.fround(resultI + this.dc[index2 + 1]);
     // Update dz first before checking divergence
     this.dz[index2] = newDr;
     this.dz[index2 + 1] = newDi;
@@ -3597,15 +3626,15 @@ class ZhuoranBoard extends Board {
         }
       }
 
-      // THREAD-FOLLOWING & FALLBACK: Only when refIter has advanced far without cycling back
-      // This avoids expensive thread-following in well-behaved orbits that cycle naturally
-      if (refIter > checkpointRefIter + 6765) {
+      // THREAD-FOLLOWING & FALLBACK: Only after enough iterations
+      // Activate after 10946 iterations (Fibonacci number) to match GPU behavior
+      if (this.it > 10946) {
         // First try thread-following (more precise than absolute position comparison)
         if (checkpointRefIter < this.refOrbit.length) {
           let current = checkpointRefIter;
           let deltaRe = 0;
           let deltaIm = 0;
-          const maxSteps = 316;  // sqrt(100000) approx
+          const maxSteps = 100;  // Match GPU limit to reduce pause
           let steps = 0;
 
           // Follow threads forward from checkpoint
