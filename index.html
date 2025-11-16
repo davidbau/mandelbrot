@@ -4390,7 +4390,9 @@ class GpuBoard extends GpuBaseBoard {
           const zi = zValuesData[i * 2 + 1];
           const period = periodData[i];
 
-          this.pp[i] = period;
+          // Add 1 because GPU shader increments iter before setting checkpoint,
+          // so period value is 1 less than what CPU board would store
+          this.pp[i] = period + 1;
 
           if (!convergedByIteration.has(iters)) {
             convergedByIteration.set(iters, []);
@@ -4398,7 +4400,7 @@ class GpuBoard extends GpuBaseBoard {
           convergedByIteration.get(iters).push({
             index: i,
             z: [zr, 0, zi, 0],
-            p: period
+            p: this.pp[i]
           });
           this.lastReportedIters[i] = iters;
           newlyConverged++;
