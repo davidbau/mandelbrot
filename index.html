@@ -3556,7 +3556,7 @@ class ZhuoranBoard extends Board {
 
         if (db <= this.epsilon2) {
           if (!this.pp[index]) {
-            this.pp[index] = this.it;  // Record iter when convergence first detected
+            this.pp[index] = this.it - 1;  // ZhuoranBoard: -1 to account for checkpoint timing
           }
           if (db <= this.epsilon) {
             return -1;  // Converged! Return before incrementing refIter
@@ -3597,7 +3597,7 @@ class ZhuoranBoard extends Board {
 
               if (db <= this.epsilon2) {
                 if (!this.pp[index]) {
-                  this.pp[index] = this.it;
+                  this.pp[index] = this.it - 1;  // ZhuoranBoard: -1 to account for checkpoint timing
                 }
                 if (db <= this.epsilon) {
                   return -1;  // Converged via threading!
@@ -3625,7 +3625,7 @@ class ZhuoranBoard extends Board {
 
         if (db <= this.epsilon2) {
           if (!this.pp[index]) {
-            this.pp[index] = this.it;  // Record iter when convergence first detected
+            this.pp[index] = this.it - 1;  // ZhuoranBoard: -1 to account for checkpoint timing
           }
           if (db <= this.epsilon) {
             return -1;  // Converged! Return before incrementing refIter
