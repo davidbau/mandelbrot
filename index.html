@@ -4954,8 +4954,18 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const dims2 = this.config.dims * this.config.dims;
 
     try {
+    // Calculate batch size first (needed to determine reference orbit buffer)
+    const pixelsToIterate = this.un + this.ch;
+    const iterationsPerBatch = Math.max(7, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
+
     // Step 1: Extend reference orbit on CPU as needed
-    const targetRefIterations = Math.max(this.it + 100, this.refIterations + 100);
+    // Extend to what pixels need (this.it) plus enough buffer for next batch
+    const currentNeed = this.it + iterationsPerBatch;
+    // Also allow growth for thread-following, but cap to avoid waste
+    // Use proportional buffer (10%) for long periods, or fixed 10k for short periods
+    const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
+    const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
+    const targetRefIterations = Math.max(currentNeed, threadingBuffer);
     while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
       this.extendReferenceOrbit();
     }
@@ -5034,9 +5044,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     }
 
     // Step 4: Set up parameters
-    // Batch size based on total pixels needing iteration (unfinished + chaotic)
-    const pixelsToIterate = this.un + this.ch;
-    const iterationsPerBatch = Math.max(7, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
+    // Batch size already calculated above (before reference orbit extension)
     const pixelSize = this.size / this.config.dims;
 
     // Step 5: Dispatch GPU compute - process all pixels
