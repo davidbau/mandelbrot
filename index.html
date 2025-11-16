@@ -1221,6 +1221,15 @@ class URLHandler {
           this.config.theme = m[1];
         }
       }
+      if (null !== (m = opts[j].match(/unk=([^&]+)/))) {
+        // Allow any CSS color (e.g., 000, rgb(32,16,64), yellow, etc.)
+        let color = decodeURIComponent(m[1]);
+        // Auto-prepend # for hex colors (e.g., 888 -> #888)
+        if (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(color)) {
+          color = '#' + color;
+        }
+        this.config.unknowncolor = color;
+      }
     }
     if (startstate.sizes.length == 0) {
       startstate.sizes = this.config.firststate().sizes;
@@ -1262,6 +1271,11 @@ class URLHandler {
            (this.config.gridcols != this.config.dgc ? '&grid=' + this.config.gridcols : '') +
            (state.hidden.length ? '&h=' + state.hidden : '') +
            (this.config.theme != 'warm' ? '&theme=' + this.config.theme : '') +
+           (this.config.unknowncolor != '#000' ? '&unk=' + encodeURIComponent(
+             /^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$/.test(this.config.unknowncolor)
+               ? this.config.unknowncolor.substring(1)
+               : this.config.unknowncolor
+           ) : '') +
            (this.config.pixelRatio != 2 ? '&pixelratio=' + this.config.pixelRatio : '');
     return '?' + url.replace('&', '');
   }
@@ -2289,6 +2303,7 @@ class MandelbrotExplorer {
         canvas.parentElement.style.backgroundColor = this.config.unknowncolor;
       }
     }
+    this.urlHandler.updateurl();
   }
 
   cycleColorTheme(backward) {
