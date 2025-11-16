@@ -3770,6 +3770,7 @@ class GpuBaseBoard extends Board {
     this.isGPUReady = false;
     this.gpuInitPromise = null;
     this.isComputing = false;
+    this.computePromise = null;  // Track current async computation
     this.lastReportedIters = null;
     this.cpuStatus = null;
   }
@@ -3842,11 +3843,17 @@ class GpuBaseBoard extends Board {
     return this.isGPUReady;
   }
 
-  iterate() {
-    if (!this.isGPUReady || this.isComputing) {
+  async iterate() {
+    if (!this.isGPUReady) {
       return;
     }
-    this.compute();
+    // Block if already computing (prevents scheduler spin on GPU boards)
+    if (this.computePromise) {
+      await this.computePromise;
+      return;
+    }
+    this.computePromise = this.compute();
+    await this.computePromise;
   }
 
   async readBuffer(buffer, TypedArrayConstructor) {
@@ -4124,7 +4131,7 @@ class GpuBoard extends GpuBaseBoard {
     // Storage buffer for status flags (one u32 per pixel: 0=computing, 1=diverged)
     this.buffers.status = this.device.createBuffer({
       size: dims2 * 4,  // 4 bytes per u32
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'Status buffer'
     });
 
@@ -5546,7 +5553,7 @@ self.onmessage = async function(e) {
   }
 };
 
-function iterateBoards() {
+async function iterateBoards() {
   timer = null;
   if (computationPaused) {
     return;
@@ -5578,10 +5585,7 @@ function iterateBoards() {
     const board = pri[Math.min(p, pri.length) % pri.length];
     for (let workDone = 0; workDone < 17377 && board.unfinished(); ) {
       workDone += board.un * board.effort;
-      // Iterate the board and process any changes
-      // Note: updates the board's changeList and updateSize
-      board.iterate();
-      // Break if async GPU compute started (subsequent iterates would no-op)
+      await board.iterate();
       if (board.isComputing) break;
     }
     const now = (new Date()).getTime();
