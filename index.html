@@ -2853,14 +2853,12 @@ class PerturbationBoard extends Board {
 
   iterate() {
     let changes = null;
-    let i = this.it;
-    let head = i, tail = 1;
-    while ((head & 1) == 0) { head >>= 1; tail <<= 1; }
     let results = [0, 0, 0];
     // Precompute quad-precision point escape without updating z
-    // Update checkpoints at power-of-2-ish intervals (when head <= tail)
+    // Update checkpoints at Fibonacci intervals
+    const isCheckpoint = fibonacciPeriod(this.it) === 1;
     for (const index of this.quadIndexes) {
-      if (head <= tail && !this.nn[index]) {
+      if (isCheckpoint && !this.nn[index]) {
         AqdcCopy(this.bb, index*4, this.zz, index*4);  // bb = checkpoint z
         this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
       }
