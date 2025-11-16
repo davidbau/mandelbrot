@@ -424,17 +424,24 @@ class View {
         const sw = (childSize / parentSize) * this.config.dims;
         const sh = (childSize / parentSize) * this.config.dims;
 
-        // Create a temporary canvas at parent resolution for masking
+        // Create a temporary canvas at 3x parent resolution for finer inflation control
+        const upsample = 3;
+
+        // Calculate source dimensions in parent pixels (integer + 2px padding)
+        const srcW = Math.ceil(sw) + 2;
+        const srcH = Math.ceil(sh) + 2;
+
+        // Dest must be exactly 3x source for proper pixel alignment
         const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = Math.ceil(sw) + 2;  // Add padding for inflation
-        tempCanvas.height = Math.ceil(sh) + 2;
+        tempCanvas.width = srcW * upsample;
+        tempCanvas.height = srcH * upsample;
         const tempCtx = tempCanvas.getContext('2d');
 
-        // Draw parent region (with 1px padding)
+        // Draw parent region upsampled 3x (with 1px padding at parent resolution)
         tempCtx.drawImage(parentCanvas,
           Math.floor(sx) - 1, Math.floor(sy) - 1,
-          tempCanvas.width, tempCanvas.height,
-          0, 0, tempCanvas.width, tempCanvas.height);
+          srcW, srcH,
+          0, 0, srcW * upsample, srcH * upsample);
 
         // Inflate unknown parent pixels and diverged/converged boundaries
         const parentData = parent.nn;
@@ -472,11 +479,12 @@ class View {
               }
 
               if (shouldClear) {
-                // Clear pixel and neighbors from temp canvas
-                const tx = px - Math.floor(sx) + 1;
-                const ty = py - Math.floor(sy) + 1;
-                for (let dy = -1; dy <= 1; dy++) {
-                  for (let dx = -1; dx <= 1; dx++) {
+                // Clear pixel and 1-pixel margin at upsampled resolution
+                // Each parent pixel maps to a 3x3 block, plus 1px inflation = 5x5 area
+                const tx = (px - Math.floor(sx) + 1) * upsample;
+                const ty = (py - Math.floor(sy) + 1) * upsample;
+                for (let dy = -1; dy < upsample + 1; dy++) {
+                  for (let dx = -1; dx < upsample + 1; dx++) {
                     tempCtx.clearRect(tx + dx, ty + dy, 1, 1);
                   }
                 }
@@ -486,8 +494,18 @@ class View {
         }
 
         // Draw the masked parent pixels scaled to child canvas (faded)
+        // Account for fractional pixel offset within the temp canvas
+        // sx, sy may be fractional (e.g., 10.3), so child's edge isn't at an integer parent pixel
+        const fracX = sx - Math.floor(sx);  // Fractional part (e.g., 0.3)
+        const fracY = sy - Math.floor(sy);
+        const tempSrcX = upsample + fracX * upsample;  // e.g., 3 + 0.3*3 = 3.9
+        const tempSrcY = upsample + fracY * upsample;
+
         ctx.globalAlpha = 0.6;  // 60% opacity for parent pixels
-        ctx.drawImage(tempCanvas, 1, 1, Math.ceil(sw), Math.ceil(sh), 0, 0, this.config.dims, this.config.dims);
+        ctx.drawImage(tempCanvas,
+          tempSrcX, tempSrcY,
+          (srcW - 2) * upsample, (srcH - 2) * upsample,
+          0, 0, this.config.dims, this.config.dims);
         ctx.globalAlpha = 1.0;  // Restore full opacity
       }
     }
