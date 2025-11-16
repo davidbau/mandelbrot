@@ -3627,8 +3627,8 @@ class ZhuoranBoard extends Board {
       }
 
       // THREAD-FOLLOWING & FALLBACK: Only after enough iterations
-      // Activate after 10946 iterations (Fibonacci number) to match GPU behavior
-      if (this.it > 10946) {
+      // Activate after 2584 iterations (Fibonacci F(18)) to match GPU behavior
+      if (this.it > 2584) {
         // First try thread-following (more precise than absolute position comparison)
         if (checkpointRefIter < this.refOrbit.length) {
           let current = checkpointRefIter;
@@ -5018,9 +5018,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
                   break;
                 }
               }
-            } else if (iter > 10946u) {
+            } else if (iter > 2584u) {
               // Thread-following: detect cycles even when ref_iter doesn't match
-              // Activate after 10946 iterations (Fibonacci number for consistent checkpoint alignment)
+              // Activate after 2584 iterations (Fibonacci F(18) for consistent checkpoint alignment)
               if (checkpoint_ref_iter < params.ref_orbit_length) {
                 var current = checkpoint_ref_iter;
                 var delta_re = 0.0;
