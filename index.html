@@ -486,7 +486,7 @@ class View {
         }
 
         // Draw the masked parent pixels scaled to child canvas (faded)
-        ctx.globalAlpha = 0.7;  // 70% opacity for parent pixels
+        ctx.globalAlpha = 0.6;  // 60% opacity for parent pixels
         ctx.drawImage(tempCanvas, 1, 1, Math.ceil(sw), Math.ceil(sh), 0, 0, this.config.dims, this.config.dims);
         ctx.globalAlpha = 1.0;  // Restore full opacity
       }
