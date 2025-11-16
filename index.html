@@ -153,7 +153,7 @@ class Config {
     this.gridcols = this.dgc;
     this.exponent = 2;
     this.enableGPU = true;
-    this.forceZhuoran = false;
+    this.forceBoard = null;  // Explicit board type: 'cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'
     this.firstr = [-0.5, 0];
     this.firstj = [0.0, 0];
     this.firstsize = 3.0;
@@ -1159,8 +1159,20 @@ class URLHandler {
       if (null !== (m = opts[j].match(/gpu=(\d+)/))) {
         this.config.enableGPU = parseInt(m[1]) !== 0;
       }
+      if (null !== (m = opts[j].match(/board=([a-z]+)/))) {
+        const boardType = m[1].toLowerCase();
+        const validTypes = ['cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'];
+        if (validTypes.includes(boardType)) {
+          this.config.forceBoard = boardType;
+        } else {
+          console.warn(`Invalid board type: ${boardType}. Valid types: ${validTypes.join(', ')}`);
+        }
+      }
+      // Legacy support: zhuoran=1 maps to board=zhuoran
       if (null !== (m = opts[j].match(/zhuoran=(\d+)/))) {
-        this.config.forceZhuoran = parseInt(m[1]) !== 0;
+        if (parseInt(m[1]) !== 0) {
+          this.config.forceBoard = 'zhuoran';
+        }
       }
       if (null !== (m = opts[j].match(/grid=(\d+)/))) {
         this.config.gridcols = Math.max(1, parseInt(m[1]));
@@ -1227,7 +1239,7 @@ class URLHandler {
            (state.sizes[0][0] != 3.0 ? '&s=' + formatSize(this.grid.views[0].sizes[0]) : '') +
            (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
            (!this.config.enableGPU ? '&gpu=0' : '') +
-           (this.config.forceZhuoran ? '&zhuoran=1' : '') +
+           (this.config.forceBoard ? '&board=' + this.config.forceBoard : '') +
            (compactc.length ? '&c=' + compactc : '') +
            (this.config.gridcols != this.config.dgc ? '&grid=' + this.config.gridcols : '') +
            (state.hidden.length ? '&h=' + state.hidden : '') +
@@ -1819,7 +1831,7 @@ class Scheduler {
           dims2: config.dims2,
           exponent: config.exponent,
           enableGPU: config.enableGPU,
-          forceZhuoran: config.forceZhuoran
+          forceBoard: config.forceBoard
         },
         id,
         workerNumber
@@ -5332,13 +5344,49 @@ self.onmessage = async function(e) {
         gpuMaxBufferSize = await GpuBaseBoard.queryMaxBufferSize();
       }
 
+      const forcedBoardType = data.config.forceBoard;  // Explicit board selection via board= parameter
       let board;
       const pixelSize = data.size / data.config.dims;
       const GpuBoardClass = GpuBaseBoard.getBoardClass(pixelSize);
       const bytesPerPixel = GpuBoardClass.BYTES_PER_PIXEL;
       const gpuSafe = GpuBaseBoard.isSafeDims(data.config.dims, bytesPerPixel, gpuMaxBufferSize || 200 * 1024 * 1024);
 
-      if (enableGPU && webGPUAvailable && gpuSafe) {
+      // Explicit board type selection via board= parameter
+      if (forcedBoardType) {
+        console.log(`Board ${data.k}: Requested board type: ${forcedBoardType}`);
+
+        // Use switch to avoid referencing undefined classes
+        switch (forcedBoardType) {
+          case 'cpu':
+            board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            break;
+          case 'zhuoran':
+            board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            break;
+          case 'perturbation':
+            board = new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            break;
+          case 'gpu':
+            if (webGPUAvailable && gpuSafe) {
+              board = new GpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            } else {
+              console.warn('GpuBoard requested but not available, falling back to CpuBoard');
+              board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            }
+            break;
+          case 'gpuzhuoran':
+            if (webGPUAvailable && gpuSafe) {
+              board = new GpuZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            } else {
+              console.warn('GpuZhuoranBoard requested but not available, falling back to ZhuoranBoard');
+              board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            }
+            break;
+          default:
+            console.error(`Unknown board type: ${forcedBoardType}, falling back to CpuBoard`);
+            board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        }
+      } else if (enableGPU && webGPUAvailable && gpuSafe) {
         // Two-tier strategy with WebGPU:
         // - Shallow zooms: GpuBoard with simple float32 iteration
         // - Deep zooms: GpuZhuoranBoard with quad-double reference + float32 perturbations
@@ -5351,15 +5399,10 @@ self.onmessage = async function(e) {
           console.log(`Board ${data.k}: dims=${data.config.dims} too large for GPU (buffer size ${bufferSizeMB} MB > ${limitMB} MB), using CPU`);
         }
         // WebGPU disabled or unavailable - use CPU-based boards
-        if (useZhuoranApproach) {
-          // TESTING: Always use ZhuoranBoard to test convergence detection
-          board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        if (pixelSize > 1e-12) {
+          board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         } else {
-          if (pixelSize > 1e-12) {
-            board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
-          } else {
-            board = new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id);
-          }
+          board = new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         }
       }
 
