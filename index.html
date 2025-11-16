@@ -3853,7 +3853,11 @@ class GpuBaseBoard extends Board {
       return;
     }
     this.computePromise = this.compute();
-    await this.computePromise;
+    try {
+      await this.computePromise;
+    } finally {
+      this.computePromise = null;
+    }
   }
 
   async readBuffer(buffer, TypedArrayConstructor) {
