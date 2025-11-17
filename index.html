@@ -4012,7 +4012,6 @@ class GpuBoard extends GpuBaseBoard {
         var next_checkpoint_idx = 0u;
         // Iterate for this batch
         for (var i = 0u; i < params.iterations_per_batch; i++) {
-          iter++;
           // Check if this iteration is a Fibonacci checkpoint
           if (next_checkpoint_idx < params.checkpoint_count) {
             var checkpoint_offset = 0u;
@@ -4064,6 +4063,7 @@ class GpuBoard extends GpuBaseBoard {
               break;
             }
           }
+          iter++;
         }
         // Save state
         z_values[index * 2u] = zr;
@@ -4287,9 +4287,9 @@ class GpuBoard extends GpuBaseBoard {
 
     // Precompute Fibonacci checkpoint offsets for this batch
     const checkpointOffsets = [];
-    const bufferIter = this.it;  // Current iteration before increment
+    const bufferIter = this.it;
     for (let i = 0; i < iterationsPerBatch; i++) {
-      const globalIter = bufferIter + i + 1;  // iter++ happens first in shader
+      const globalIter = bufferIter + i;
       if (fibonacciPeriod(globalIter) === 1) {
         checkpointOffsets.push(i);
       }
@@ -4616,7 +4616,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Storage buffer for iteration counts
     this.buffers.iterations = this.device.createBuffer({
       size: dims2 * 4,  // 4 bytes per u32
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'Iterations buffer'
     });
 
@@ -4708,10 +4708,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.device.queue.writeBuffer(this.buffers.refOrbit, 0, initialOrbitData);
     this.device.queue.writeBuffer(this.buffers.threading, 0, initialThreadingData);
 
-    // Initialize iterations buffer to 0 (iter++ happens at start of batch loop)
-    const iterData = new Uint32Array(dims2).fill(0);
+    // Initialize iterations buffer to 1 (z=c is iteration 1, not 0)
+    const iterData = new Uint32Array(dims2).fill(1);
     this.device.queue.writeBuffer(this.buffers.iterations, 0, iterData);
-    // checkpointIter starts at 0 (no checkpoints), statusAndPeriod starts at 0 (unfinished)
 
     // Mark initial data as uploaded
     this.lastUploadedOrbitLength = 1;  // Uploaded iters 0 and 1
@@ -4850,6 +4849,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         if (status_val != 0u) { return; }
 
         let index2 = index * 2u;
+        // Load iteration counter (initialized to 1 to match CpuBoard semantics)
         var iter = iterations[index];
         // Unpack: dz = perturbation delta, bb = checkpoint dz for convergence test
         var dzr = dzAndCheckpoint[index].x;
@@ -4876,7 +4876,6 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             break;
           }
 
-          iter++;
           // BUG FIX: Check rebasing BEFORE loading reference orbit (matches CPU ZhuoranBoard)
           // The old code loaded refr/refi first, then rebased, then used stale refr/refi
           let dz_norm = max(abs(dzr), abs(dzi));
@@ -4909,6 +4908,16 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           }
           var refr = refOrbit[ref_offset];
           var refi = refOrbit[ref_offset + 1u];
+
+          // Check current z for divergence
+          let curr_total_r = refr + dzr;
+          let curr_total_i = refi + dzi;
+          let curr_mag_sq = curr_total_r * curr_total_r + curr_total_i * curr_total_i;
+          if (curr_mag_sq > 4.0) {
+            statusAndPeriod[index] = vec2<u32>(1u, pp);
+            break;
+          }
+
           // Save dz before iteration (for checkpoint timing)
           let old_dzr = dzr;
           let old_dzi = dzi;
@@ -4952,22 +4961,13 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           // Add perturbation in c
           dzr = result_r + dcr;
           dzi = result_i + dci;
-          // Get NEW reference orbit value (refIter+1) for total z
-          let next_ref_iter = ref_iter + 1u;
-          let next_ref_offset = next_ref_iter * 2u;
-          if (next_ref_offset + 1u >= params.ref_orbit_length * 2u) {
-            break;  // Reference orbit too short
-          }
-          let next_refr = refOrbit[next_ref_offset];
-          let next_refi = refOrbit[next_ref_offset + 1u];
-          let z_total_r = next_refr + dzr;
-          let z_total_i = next_refi + dzi;
-          // Check divergence: |z_total|² > 4 (escape radius 2)
-          let mag_sq = z_total_r * z_total_r + z_total_i * z_total_i;
-          if (mag_sq > 4.0) {
-            statusAndPeriod[index] = vec2<u32>(1u, pp);  // Diverged
+
+          // Check if reference orbit is long enough for next iteration
+          let next_ref_check = (ref_iter + 1u) * 2u;
+          if (next_ref_check + 1u >= params.ref_orbit_length * 2u) {
             break;
           }
+
           // CONVERGENCE DETECTION: Check if this iteration is a checkpoint
           var just_updated = false;
           if (next_checkpoint_idx < params.checkpoint_count) {
@@ -5066,6 +5066,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             }
           }
 
+          iter++;
           ref_iter++;
         }
         // Write back state - pack into combined buffers
@@ -5194,16 +5195,11 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Step 4a: Precompute checkpoint offsets for this batch using fibonacciPeriod
     const checkpointOffsets = [];
-    // Note: iterations buffer contains LAST COMPLETED iteration, so next iteration is +1
-    // In shader: iter++ happens first, so batch_iter=0 processes iteration (this.it-1)+1 = this.it
-    // But this.it is 1-indexed (starts at 1), while buffer is 0-indexed (starts at 0)
-    // So we need to compute based on what's actually in the buffer: this.it - 1
-    const bufferIter = this.it - 1;  // What's actually in the iterations buffer
+    const bufferIter = this.it;
     for (let i = 0; i < iterationsPerBatch; i++) {
-      // Shader does: iter++ then compute, so batch_iter=i processes iteration (bufferIter + i + 1)
-      const globalIter = bufferIter + i + 1;
+      const globalIter = bufferIter + i;
       if (fibonacciPeriod(globalIter) === 1) {
-        checkpointOffsets.push(i);  // Store batch-relative offset
+        checkpointOffsets.push(i);
       }
     }
 
@@ -5276,7 +5272,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       const status = statusAndPeriodData[i * 2];  // First u32 in vec2
       const period = statusAndPeriodData[i * 2 + 1];  // Second u32 in vec2
 
-      if (this.nn[i]) continue;  // Already finished
+      if (this.nn[i] !== 0) continue;  // Already finished
 
       if (status === 1) {
         // Newly diverged
