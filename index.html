@@ -503,7 +503,7 @@ class View {
         const tempSrcX = upsample + fracX * upsample;  // e.g., 3 + 0.3*3 = 3.9
         const tempSrcY = upsample + fracY * upsample;
 
-        ctx.globalAlpha = 0.6;  // 60% opacity for parent pixels
+        ctx.globalAlpha = 0.5;  // 50% opacity for parent pixels
         ctx.drawImage(tempCanvas,
           tempSrcX, tempSrcY,
           (srcW - 2) * upsample, (srcH - 2) * upsample,
