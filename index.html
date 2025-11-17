@@ -4276,6 +4276,9 @@ class GpuBoard extends GpuBaseBoard {
     // Clamp to reasonable bounds (min 7)
     iterationsPerBatch = Math.max(7, iterationsPerBatch);
 
+    // Update effort for scheduler (reflects actual iterations per call)
+    this.effort = iterationsPerBatch;
+
     // Upload active pixel list to GPU
     const activePixelsData = new Uint32Array(activePixels);
     this.device.queue.writeBuffer(this.buffers.activePixels, 0, activePixelsData);
@@ -5103,6 +5106,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Calculate batch size first (needed to determine reference orbit buffer)
     const pixelsToIterate = this.un + this.ch;
     const iterationsPerBatch = Math.max(7, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
+
+    // Update effort for scheduler (reflects actual iterations per call)
+    this.effort = iterationsPerBatch;
 
     // Step 1: Extend reference orbit on CPU as needed
     // Extend to what pixels need (this.it) plus enough buffer for next batch
