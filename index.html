@@ -3159,7 +3159,7 @@ class ReferenceOrbitThreading {
     // epsilon3: as large as possible while keeping single-precision ability to calculate at epsilon precision
     this.epsilon3 = epsilon * 1e7 / Math.sqrt(maxCycleLength);
     this.bucketSize = 2 * this.epsilon3;
-    this.threadingWindowSize = Math.floor(maxCycleLength);
+    this.threadingWindowSize = Math.min(1024, Math.floor(maxCycleLength));  // Small window to limit bucket growth
     this.refThreading = [];  // {next: index, deltaRe: f32, deltaIm: f32}
     this.spatialBuckets = new Map();
     this.minJump = 10;
@@ -4782,9 +4782,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.refIterations++;
 
     // Threading: add new orbit point
-    // PERFORMANCE: Only compute threading after settling period (first 2000 iterations)
-    // This avoids overhead during early orbit computation when threading is poor anyway
-    if (this.refIterations >= 2000) {
+    // Start threading at F(18) = 2584 and continue forever
+    if (this.refIterations >= 2584) {
       const re = newZ[0] + newZ[1];
       const im = newZ[2] + newZ[3];
       const getPoint = (i) => {
