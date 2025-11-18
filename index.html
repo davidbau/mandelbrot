@@ -4273,8 +4273,8 @@ class GpuBoard extends GpuBaseBoard {
     // Dynamic batch sizing: scale iterations inversely with active pixels
     const targetWork = 333337;  // Prime, reduced for better responsiveness
     let iterationsPerBatch = Math.floor(targetWork / Math.max(activeCount, 1));
-    // Clamp to reasonable bounds (min 7)
-    iterationsPerBatch = Math.max(7, iterationsPerBatch);
+    // Clamp to reasonable bounds (min 17)
+    iterationsPerBatch = Math.max(17, iterationsPerBatch);
 
     // Update effort for scheduler (reflects actual iterations per call)
     this.effort = iterationsPerBatch;
@@ -5105,7 +5105,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     try {
     // Calculate batch size first (needed to determine reference orbit buffer)
     const pixelsToIterate = this.un + this.ch;
-    const iterationsPerBatch = Math.max(7, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
+    const iterationsPerBatch = Math.max(17, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
 
     // Update effort for scheduler (reflects actual iterations per call)
     this.effort = iterationsPerBatch;
