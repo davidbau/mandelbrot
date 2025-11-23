@@ -4637,16 +4637,16 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       label: 'Delta C buffer'
     });
 
-    // Storage buffer for dz and checkpoint bb (packed: 4 f32 per pixel)
+    // Storage buffer for dz, checkpoint bb, and threading deltas (packed: 6 f32 per pixel)
     this.buffers.dzAndCheckpoint = this.device.createBuffer({
-      size: dims2 * 4 * 4,  // 4 f32 per pixel: dz.x, dz.y, bb.x, bb.y
+      size: dims2 * 6 * 4,  // 6 f32 per pixel: dz.x, dz.y, bb.x, bb.y, threaded_delta_re, threaded_delta_im
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'DZ and checkpoint buffer'
     });
 
-    // Storage buffer for refIter and checkpointIter (merged: 2 u32 per pixel)
+    // Storage buffer for refIter, checkpointIter, and next_threaded_ref_iter (3 u32 per pixel)
     this.buffers.refIterAndCheckpoint = this.device.createBuffer({
-      size: dims2 * 2 * 4,  // 2 u32 per pixel: [ref_iter, checkpoint_iter]
+      size: dims2 * 3 * 4,  // 3 u32 per pixel: [ref_iter, checkpoint_iter, next_threaded_ref_iter]
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'RefIter and checkpoint buffer'
     });
@@ -4660,8 +4660,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     });
 
     // Storage buffer for threading data (4 floats per iter: next, deltaRe, deltaIm, pad)
+    // Start with 1MB, will grow by doubling up to 128MB cap
     this.buffers.threading = this.device.createBuffer({
-      size: Math.max(this.maxRefIterations * 4 * 4, 1024),
+      size: 1 * 1024 * 1024,  // Start at 1MB
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       label: 'Threading buffer'
     });
@@ -4678,20 +4679,23 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     });
 
     // Initialize buffers with packed data
-    // dzAndCheckpoint: [dz.x, dz.y, bb.x=0, bb.y=0] per pixel
-    const dzAndCheckpointData = new Float32Array(dims2 * 4);
+    // dzAndCheckpoint: [dz.x, dz.y, bb.x=0, bb.y=0, threaded_delta_re=0, threaded_delta_im=0] per pixel
+    const dzAndCheckpointData = new Float32Array(dims2 * 6);
     for (let i = 0; i < dims2; i++) {
-      dzAndCheckpointData[i * 4] = this.dz[i * 2];      // dz.x
-      dzAndCheckpointData[i * 4 + 1] = this.dz[i * 2 + 1];  // dz.y
-      dzAndCheckpointData[i * 4 + 2] = 0;  // bb.x
-      dzAndCheckpointData[i * 4 + 3] = 0;  // bb.y
+      dzAndCheckpointData[i * 6] = this.dz[i * 2];      // dz.x
+      dzAndCheckpointData[i * 6 + 1] = this.dz[i * 2 + 1];  // dz.y
+      dzAndCheckpointData[i * 6 + 2] = 0;  // bb.x
+      dzAndCheckpointData[i * 6 + 3] = 0;  // bb.y
+      dzAndCheckpointData[i * 6 + 4] = 0;  // threaded_delta_re
+      dzAndCheckpointData[i * 6 + 5] = 0;  // threaded_delta_im
     }
 
-    // Initialize refIterAndCheckpoint: [ref_iter, checkpoint_iter] per pixel
-    const refIterAndCheckpointData = new Uint32Array(dims2 * 2);
+    // Initialize refIterAndCheckpoint: [ref_iter, checkpoint_iter, next_threaded_ref_iter] per pixel
+    const refIterAndCheckpointData = new Uint32Array(dims2 * 3);
     for (let i = 0; i < dims2; i++) {
-      refIterAndCheckpointData[i * 2] = this.refIter[i];  // ref_iter
-      refIterAndCheckpointData[i * 2 + 1] = 0xFFFFFFFF;  // checkpoint_iter: use sentinel for "no checkpoint yet"
+      refIterAndCheckpointData[i * 3] = this.refIter[i];  // ref_iter
+      refIterAndCheckpointData[i * 3 + 1] = 0xFFFFFFFF;  // checkpoint_iter: use sentinel for "no checkpoint yet"
+      refIterAndCheckpointData[i * 3 + 2] = 0xFFFFFFFF;  // next_threaded_ref_iter: sentinel for "no thread yet"
     }
 
     // Initialize orbit buffer with initial reference orbit (iter 0 and 1)
@@ -4703,7 +4707,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Initialize threading buffer with initial threading data (iter 0 and 1, no threads)
     const initialThreadingData = new Float32Array(8);  // 2 iters * 4 floats
-    // All zeros is fine: next=-1 (as float, becomes 0), deltaRe=0, deltaIm=0, pad=0
+    initialThreadingData[0] = -1;  // iter 0: next = -1 (no thread)
+    initialThreadingData[4] = -1;  // iter 1: next = -1 (no thread)
 
     this.device.queue.writeBuffer(this.buffers.dc, 0, this.dc);
     this.device.queue.writeBuffer(this.buffers.dzAndCheckpoint, 0, dzAndCheckpointData);
@@ -4826,8 +4831,11 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       @group(0) @binding(1) var<storage, read_write> iterations: array<u32>;
       @group(0) @binding(2) var<storage, read_write> statusAndPeriod: array<vec2<u32>>;  // [status, pp]
       @group(0) @binding(3) var<storage, read> dc: array<f32>;              // Delta c (constant)
-      @group(0) @binding(4) var<storage, read_write> dzAndCheckpoint: array<vec4<f32>>;  // [dz.x, dz.y, bb.x, bb.y]
-      @group(0) @binding(5) var<storage, read_write> refIterAndCheckpoint: array<vec2<u32>>;  // [ref_iter, checkpoint_iter]
+      // Note: Using array<f32> for 6-float structure to avoid padding issues
+      // Layout: [dz.x, dz.y, bb.x, bb.y, threaded_delta_re, threaded_delta_im] per pixel
+      @group(0) @binding(4) var<storage, read_write> dzAndCheckpoint: array<f32>;
+      // Layout: [ref_iter, checkpoint_iter, next_threaded_ref_iter] per pixel (stride 3)
+      @group(0) @binding(5) var<storage, read_write> refIterAndCheckpoint: array<u32>;
       @group(0) @binding(6) var<storage, read> refOrbit: array<f32>;  // Reference orbit [r,i pairs] only
       @group(0) @binding(7) var<storage, read> threading: array<vec4<f32>>;  // Threading [next, deltaR, deltaI, pad]
 
@@ -4851,17 +4859,23 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         if (status_val != 0u) { return; }
 
         let index2 = index * 2u;
+        let index6 = index * 6u;  // For dzAndCheckpoint (6 floats per pixel)
+        let index3 = index * 3u;  // For refIterAndCheckpoint (3 u32s per pixel)
+
         // Load iteration counter (initialized to 1 to match CpuBoard semantics)
         var iter = iterations[index];
-        // Unpack: dz = perturbation delta, bb = checkpoint dz for convergence test
-        var dzr = dzAndCheckpoint[index].x;
-        var dzi = dzAndCheckpoint[index].y;
-        var bbr = dzAndCheckpoint[index].z;  // checkpoint dz real
-        var bbi = dzAndCheckpoint[index].w;  // checkpoint dz imag
-        var ref_iter = refIterAndCheckpoint[index].x;
+        // Unpack: dz = perturbation delta, bb = checkpoint dz, threading deltas
+        var dzr = dzAndCheckpoint[index6];
+        var dzi = dzAndCheckpoint[index6 + 1u];
+        var bbr = dzAndCheckpoint[index6 + 2u];  // checkpoint dz real
+        var bbi = dzAndCheckpoint[index6 + 3u];  // checkpoint dz imag
+        var threaded_delta_re = dzAndCheckpoint[index6 + 4u];
+        var threaded_delta_im = dzAndCheckpoint[index6 + 5u];
+        var ref_iter = refIterAndCheckpoint[index3];
         let dcr = dc[index2];
         let dci = dc[index2 + 1u];
-        var ckpt_iter = refIterAndCheckpoint[index].y;  // ref_iter when checkpoint was saved
+        var ckpt_iter = refIterAndCheckpoint[index3 + 1u];  // ref_iter when checkpoint was saved
+        var next_threaded_ref_iter = refIterAndCheckpoint[index3 + 2u];  // Next threaded position
         var pp = statusAndPeriod[index].y;     // period = iter when convergence first detected
         // Convergence thresholds scale with pixel size for deep zooms
         // GPU uses float32 precision, so thresholds must be larger than CPU's float64
@@ -4995,25 +5009,37 @@ class GpuZhuoranBoard extends GpuBaseBoard {
               ckpt_iter = old_ref_iter;  // Store reference iteration
               pp = 0u;
               next_checkpoint_idx++;  // Move to next checkpoint
+
+              // Initialize threading: reset deltas at checkpoint and follow ONE thread
+              threaded_delta_re = 0.0;
+              threaded_delta_im = 0.0;
+              if (old_ref_iter >= 2584u && old_ref_iter < params.ref_orbit_length) {
+                let thread = getThread(old_ref_iter);
+                if (thread.x >= 0.0) {
+                  next_threaded_ref_iter = u32(thread.x);
+                  threaded_delta_re = thread.y;
+                  threaded_delta_im = thread.z;
+                } else {
+                  next_threaded_ref_iter = 0xFFFFFFFFu;
+                }
+              } else {
+                next_threaded_ref_iter = 0xFFFFFFFFu;
+              }
             }
           }
           // Check convergence (if we have a checkpoint and didn't just update it)
           // Use 0xFFFFFFFF as sentinel for "no checkpoint yet" (allows ckpt_iter=0)
           if (ckpt_iter != 0xFFFFFFFFu && !just_updated) {
-            let checkpoint_ref_iter = ckpt_iter;
-            let checkpoint_dzr = bbr;
-            let checkpoint_dzi = bbi;
-
-            // Check if we're at the same reference iteration (can compare dz directly)
-            if (ref_iter == checkpoint_ref_iter) {
-              // Compute Chebyshev distance between current dz and checkpoint dz
-              // Both are at the same ref_iter position, so we only compare perturbations
-              let dz_diff_r = old_dzr - checkpoint_dzr;
-              let dz_diff_i = old_dzi - checkpoint_dzi;
-              let db = max(abs(dz_diff_r), abs(dz_diff_i));
+            // Unified convergence test: always use threading deltas (0 at checkpoint)
+            // Check at checkpoint or at next threaded position
+            if (ref_iter == ckpt_iter || (next_threaded_ref_iter != 0xFFFFFFFFu && ref_iter == next_threaded_ref_iter)) {
+              let dz_diff_r = old_dzr - bbr;
+              let dz_diff_i = old_dzi - bbi;
+              let total_diff_r = threaded_delta_re + dz_diff_r;
+              let total_diff_i = threaded_delta_im + dz_diff_i;
+              let db = max(abs(total_diff_r), abs(total_diff_i));
 
               if (db <= epsilon2) {
-                // Set pp when FIRST within epsilon2 (captures orbital period without settling time)
                 if (pp == 0u) {
                   pp = iter;
                 }
@@ -5022,47 +5048,16 @@ class GpuZhuoranBoard extends GpuBaseBoard {
                   break;
                 }
               }
-            } else if (iter > 2584u) {
-              // Thread-following: detect cycles even when ref_iter doesn't match
-              // Activate after 2584 iterations (Fibonacci F(18) for consistent checkpoint alignment)
-              if (checkpoint_ref_iter < params.ref_orbit_length) {
-                var current = checkpoint_ref_iter;
-                var delta_re = 0.0;
-                var delta_im = 0.0;
-                let max_steps = 100u;  // Limit thread-following steps to reduce pause
-                var steps = 0u;
 
-                // Follow threads forward from checkpoint
-                while (steps < max_steps && current < params.ref_orbit_length) {
-                  let thread = getThread(current);
-                  if (thread.x < 0.0) { break; }  // No next thread (-1 stored as float)
-                  let next = u32(thread.x);
-
-                  delta_re += thread.y;  // deltaRe
-                  delta_im += thread.z;  // deltaIm
-                  current = next;
-                  steps++;
-
-                  // Check if close to current ref_iter
-                  if (abs(i32(current) - i32(ref_iter)) <= 10) {
-                    let dz_diff_r = old_dzr - checkpoint_dzr;
-                    let dz_diff_i = old_dzi - checkpoint_dzi;
-                    let total_diff_r = delta_re + dz_diff_r;
-                    let total_diff_i = delta_im + dz_diff_i;
-                    let db = max(abs(total_diff_r), abs(total_diff_i));
-
-                    if (db <= epsilon2) {
-                      // Set pp when FIRST within epsilon2 (captures orbital period)
-                      if (pp == 0u) {
-                        pp = iter;
-                      }
-                      if (db <= epsilon) {
-                        statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged via threading!
-                        break;
-                      }
-                    }
-                    break;  // Don't continue thread-following
-                  }
+              // If at threaded position, step forward to next thread
+              if (ref_iter == next_threaded_ref_iter && next_threaded_ref_iter < params.ref_orbit_length) {
+                let thread = getThread(next_threaded_ref_iter);
+                if (thread.x >= 0.0) {
+                  threaded_delta_re += thread.y;
+                  threaded_delta_im += thread.z;
+                  next_threaded_ref_iter = u32(thread.x);
+                } else {
+                  next_threaded_ref_iter = 0xFFFFFFFFu;
                 }
               }
             }
@@ -5073,8 +5068,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         }
         // Write back state - pack into combined buffers
         iterations[index] = iter;
-        dzAndCheckpoint[index] = vec4<f32>(dzr, dzi, bbr, bbi);
-        refIterAndCheckpoint[index] = vec2<u32>(ref_iter, ckpt_iter);
+        dzAndCheckpoint[index6] = dzr;
+        dzAndCheckpoint[index6 + 1u] = dzi;
+        dzAndCheckpoint[index6 + 2u] = bbr;
+        dzAndCheckpoint[index6 + 3u] = bbi;
+        dzAndCheckpoint[index6 + 4u] = threaded_delta_re;
+        dzAndCheckpoint[index6 + 5u] = threaded_delta_im;
+        refIterAndCheckpoint[index3] = ref_iter;
+        refIterAndCheckpoint[index3 + 1u] = ckpt_iter;
+        refIterAndCheckpoint[index3 + 2u] = next_threaded_ref_iter;
         // Write back pp even if not converged (so it persists across batches)
         if (statusAndPeriod[index].x == 0u) {
           statusAndPeriod[index] = vec2<u32>(0u, pp);
@@ -5123,10 +5125,13 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Step 2: Upload reference orbit and threading to GPU (INCREMENTAL UPLOADS)
     const totalIters = this.refIterations + 1;  // Include iteration 0
+    let orbitUploadTime = 0;
+    let orbitBufferResized = false;
 
     // Resize refOrbit buffer if needed (2 floats per iter)
     const requiredOrbitSize = totalIters * 2 * 4;
     if (this.buffers.refOrbit.size < requiredOrbitSize) {
+      orbitBufferResized = true;
       this.buffers.refOrbit.destroy();
       this.buffers.refOrbit = this.device.createBuffer({
         size: Math.max(requiredOrbitSize * 2, 1024),
@@ -5137,12 +5142,14 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       this.createBindGroup();
     }
 
-    // Resize threading buffer if needed (4 floats per iter)
+    // Resize threading buffer if needed (4 floats per iter), cap at 128MB
     const requiredThreadingSize = totalIters * 4 * 4;
+    const maxBufferSize = 128 * 1024 * 1024;  // 128MB cap
     if (this.buffers.threading.size < requiredThreadingSize) {
       this.buffers.threading.destroy();
+      const allocSize = Math.min(Math.max(requiredThreadingSize * 2, 1024), maxBufferSize);
       this.buffers.threading = this.device.createBuffer({
-        size: Math.max(requiredThreadingSize * 2, 1024),
+        size: allocSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         label: 'Threading buffer'
       });
@@ -5168,23 +5175,38 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       this.lastUploadedOrbitLength = this.refIterations;
     }
 
-    // INCREMENTAL UPLOAD: Only upload new threading data
+    // INCREMENTAL UPLOAD: Only upload new threading data (capped at buffer size)
     if (this.lastUploadedThreadingLength < this.refIterations) {
       const startIdx = Math.max(0, this.lastUploadedThreadingLength + 1);
-      const count = this.refIterations - startIdx + 1;
-      const threadF32 = new Float32Array(count * 4);
+      // Cap to buffer capacity (1M iterations in 16MB buffer)
+      const maxIters = this.buffers.threading.size / 16;
+      const endIdx = Math.min(this.refIterations, maxIters - 1);
+      const count = endIdx - startIdx + 1;
 
-      for (let i = 0; i < count; i++) {
-        const threadIdx = startIdx + i;
-        const thread = this.threading.refThreading[threadIdx] || {next: -1, deltaRe: 0, deltaIm: 0};
-        threadF32[i * 4] = thread.next;  // Store as f32 (will be cast to u32 in shader)
-        threadF32[i * 4 + 1] = thread.deltaRe;
-        threadF32[i * 4 + 2] = thread.deltaIm;
-        threadF32[i * 4 + 3] = 0;  // Padding
+      if (count > 0) {
+        const threadF32 = new Float32Array(count * 4);
+
+        for (let i = 0; i < count; i++) {
+          const threadIdx = startIdx + i;
+          const thread = this.threading.refThreading[threadIdx];
+          if (!thread) {
+            // No threading data yet (before iteration 2584) - use -1 sentinel
+            threadF32[i * 4] = -1;
+            threadF32[i * 4 + 1] = 0;
+            threadF32[i * 4 + 2] = 0;
+            threadF32[i * 4 + 3] = 0;
+          } else {
+            threadF32[i * 4] = thread.next;  // Store as f32 (will be cast to u32 in shader)
+            threadF32[i * 4 + 1] = thread.deltaRe;
+            threadF32[i * 4 + 2] = thread.deltaIm;
+            threadF32[i * 4 + 3] = 0;  // Padding
+          }
+        }
+
+        const byteOffset = startIdx * 4 * 4;
+        this.device.queue.writeBuffer(this.buffers.threading, byteOffset, threadF32);
       }
 
-      const byteOffset = startIdx * 4 * 4;
-      this.device.queue.writeBuffer(this.buffers.threading, byteOffset, threadF32);
       this.lastUploadedThreadingLength = this.refIterations;
     }
 
@@ -5319,10 +5341,11 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           this.pp[i] = period - 1;
 
           // Get converged position: refOrbit[refIter+1] + dz
-          const refIter = refIterData[i * 2];  // Read .x component of vec2
+          // dz corresponds to refIter+1 because we computed new dz but didn't increment ref_iter
+          const refIter = refIterData[i * 3];  // Read first u32 of 3-u32 structure
           const nextRefIter = refIter + 1;
-          const dzr = dzAndCheckpointData[i * 4];
-          const dzi = dzAndCheckpointData[i * 4 + 1];
+          const dzr = dzAndCheckpointData[i * 6];
+          const dzi = dzAndCheckpointData[i * 6 + 1];
 
           const ref = nextRefIter < this.refOrbit.length ? this.refOrbit[nextRefIter] : this.refOrbit[this.refOrbit.length - 1];
           const refR = ref ? (ref[0] + ref[1]) : 0;
