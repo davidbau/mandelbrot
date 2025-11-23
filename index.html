@@ -3805,7 +3805,19 @@ class GpuBaseBoard extends Board {
         return false;
       }
 
-      this.device = await adapter.requestDevice();
+      // Request device with higher buffer limits if supported
+      const requiredLimits = {};
+      if (adapter.limits.maxStorageBufferBindingSize > 134217728) {
+        // Request higher limit if adapter supports it (default is 128MB)
+        requiredLimits.maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
+      }
+      if (adapter.limits.maxBufferSize > 134217728) {
+        requiredLimits.maxBufferSize = adapter.limits.maxBufferSize;
+      }
+
+      this.device = await adapter.requestDevice({
+        requiredLimits: Object.keys(requiredLimits).length > 0 ? requiredLimits : undefined
+      });
       if (!this.device) {
         console.warn('Failed to get WebGPU device');
         return false;
@@ -3889,7 +3901,19 @@ class GpuBaseBoard extends Board {
     try {
       const adapter = await navigator.gpu.requestAdapter();
       if (!adapter) return 200 * 1024 * 1024;
-      const device = await adapter.requestDevice();
+
+      // Request device with higher limits if supported
+      const requiredLimits = {};
+      if (adapter.limits.maxStorageBufferBindingSize > 134217728) {
+        requiredLimits.maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
+      }
+      if (adapter.limits.maxBufferSize > 134217728) {
+        requiredLimits.maxBufferSize = adapter.limits.maxBufferSize;
+      }
+
+      const device = await adapter.requestDevice({
+        requiredLimits: Object.keys(requiredLimits).length > 0 ? requiredLimits : undefined
+      });
       const limit = Math.min(device.limits.maxBufferSize, device.limits.maxStorageBufferBindingSize);
       GpuBaseBoard.cachedMaxBufferSize = Math.floor(limit * 0.9);  // 90% for safety
       return GpuBaseBoard.cachedMaxBufferSize;
@@ -4240,6 +4264,10 @@ class GpuBoard extends GpuBaseBoard {
   }
 
   async compute() {
+    // Prevent concurrent compute() calls
+    if (this.isComputing) {
+      return;
+    }
     this.isComputing = true;
     try {
     const dims2 = this.config.dims * this.config.dims;
@@ -5100,6 +5128,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   }
 
   async compute() {
+    // Prevent concurrent compute() calls
+    if (this.isComputing) {
+      return;
+    }
     this.isComputing = true;
     const dims2 = this.config.dims * this.config.dims;
 
@@ -5131,6 +5163,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Resize refOrbit buffer if needed (2 floats per iter)
     const requiredOrbitSize = totalIters * 2 * 4;
     if (this.buffers.refOrbit.size < requiredOrbitSize) {
+      // Wait for GPU to finish before destroying buffer
+      await this.device.queue.onSubmittedWorkDone();
       orbitBufferResized = true;
       this.buffers.refOrbit.destroy();
       this.buffers.refOrbit = this.device.createBuffer({
@@ -5146,6 +5180,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const requiredThreadingSize = totalIters * 4 * 4;
     const maxBufferSize = 128 * 1024 * 1024;  // 128MB cap
     if (this.buffers.threading.size < requiredThreadingSize) {
+      // Wait for GPU to finish before destroying buffer
+      await this.device.queue.onSubmittedWorkDone();
       this.buffers.threading.destroy();
       const allocSize = Math.min(Math.max(requiredThreadingSize * 2, 1024), maxBufferSize);
       this.buffers.threading = this.device.createBuffer({
