@@ -1,6 +1,7 @@
 <!doctype html>
 <html>
 <head>
+<meta charset="UTF-8">
 <title>Mandelbrot Set Fractal Explorer</title>
 <meta name="description" content="Beautiful, fast, and precise exploration of the Mandelbrot Set online. Click to zoom. Hover to see orbits. M makes a smooth movie of your zoom path.">
 <meta name="viewport" content="width=device-width">
@@ -238,6 +239,58 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <b>F</b> 增加，<b>D</b> 减少像素比率；
 <b>M</b> 制作沿您路径的视频；
 <nobr><b>?</b> 显示此帮助。</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="zh-TW" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+曼德博集合碎形探索器
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="點擊">點擊</span>以縮放。</b>  <span mobile="">右鍵點擊以儲存圖像，按<b>M</b>鍵創建並儲存您的縮放路徑影片。</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+對每個<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複數</a> <em>c</em> 迭代 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>。顏色顯示到<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">發散的迭代次數</a>；黑色點<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">收斂或循環</a>。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>黃點顯示<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">軌道</a></b>。紅點顯示極限環。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>關於迭代。</b>隨著您的探索，此檢視器通過將迭代精細化至無窮來顯示更多碎形細節。等待時間越長，顯示的細節越多。
+經過數千或數百萬次迭代後，您可以解析碎形最複雜部分的最精細細節。
+通過<span mobile="點擊">懸停在</span>每個視窗下方的黃色縮放數字上，查看有關迭代、進度和座標的資訊。
+<span mobile="按住手指">移動滑鼠</span>到碎形內容上將動畫顯示每個位置 <em>c</em> 的 <em>z</em> 值軌道，揭示令數學家著迷的複雜邊界動力學。
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>探索縮放路徑。</b>
+碎形上的每次<span mobile="點擊">點擊</span>都會在所選位置開啟更高的縮放級別，如果可用，將在您的GPU上計算。
+當您放大超過兆倍後，我們使用四精度擾動演算法，可將精細細節解析到超過30位數字的精度。
+一旦您製作了一條顯示所需細節的有趣路徑，您可以<a class="moviemode">創建並下載自己的曼德博深度縮放影片</a>，或為您的URL加入書籤以儲存和分享您的探索。
+為了創建高品質的圖像和影片，此檢視器以<span class="pixelratio">2</span>:1的比例計算子像素<span mobile="">，並且可以增加該比例以創建更精確的顯示</span>。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>更多命令：</b>
+<b>I</b> 放大；
+<b mac="&#8984;">Ctrl</b>-點擊可原地放大；
+<b>H</b> 縮小，<b>G</b> 放大每個視窗；
+<b>R</b> 重新開啟中間視窗；
+<b>C</b> 重新置中所有視窗；
+<b>T</b> 更改顏色主題；
+<b>U</b> 突出顯示未完成的像素；
+<b mac="&#x23CE;">Enter</b> 切換全螢幕；
+<b>X</b> 增加，<b>Z</b> 減少 <em>z</em> 指數；
+<b>F</b> 增加，<b>D</b> 減少像素比率；
+<b>M</b> 製作沿您路徑的影片；
+<nobr><b>?</b> 顯示此幫助。</nobr></p>
 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
@@ -648,6 +701,17 @@ const Messages = {
     after_: '\n在 ',
     period_: ' 后发散，周期 '
   },
+  'zh-TW': {
+    center_at_: '中心位於 ',
+    percent_done_after_: '% 完成，已迭代 ',
+    iters: ' 次',
+    pre_rendering_movie: '正在預渲染影片...',
+    pre_rendering_: '正在預渲染 ',
+    diverges_in_: '\n在 ',
+    converges_after_: '\n在 ',
+    after_: '\n在 ',
+    period_: ' 後發散，週期 '
+  },
   ar: {
     center_at_: 'المركز في ',
     percent_done_after_: '% مكتمل بعد ',
@@ -739,15 +803,23 @@ let LANG_FROM_URL = false;
   // Get language from URL parameter or browser setting
   const urlParams = new URLSearchParams(window.location.search);
   const urlLang = urlParams.get('lang');
-  const browserLang = navigator.language.split('-')[0].toLowerCase();
+  const browserLang = navigator.language.toLowerCase();
   const userLang = urlLang || browserLang;
 
   // List of supported languages
-  const supportedLangs = ['en', 'es', 'zh', 'ar', 'id', 'pt', 'fr', 'ja', 'ru', 'de'];
-  const selectedLang = supportedLangs.includes(userLang) ? userLang : 'en';
+  const supportedLangs = ['en', 'es', 'zh', 'zh-tw', 'ar', 'id', 'pt', 'fr', 'ja', 'ru', 'de'];
+
+  // Try exact match first, then base language code (e.g., zh-TW -> zh-tw, then zh)
+  let selectedLang = 'en';
+  if (supportedLangs.includes(userLang)) {
+    selectedLang = userLang;
+  } else {
+    const baseLang = userLang.split('-')[0];
+    selectedLang = supportedLangs.includes(baseLang) ? baseLang : 'en';
+  }
 
   // Set globals
-  MSG = Messages[selectedLang];
+  MSG = Messages[selectedLang] || Messages['en'];
   SELECTED_LANG = selectedLang;
   LANG_FROM_URL = !!urlLang && supportedLangs.includes(urlLang);
 
@@ -761,7 +833,8 @@ let LANG_FROM_URL = false;
   function applyLanguage() {
     const langDivs = document.querySelectorAll('#text [lang]');
     langDivs.forEach(div => {
-      div.style.display = div.getAttribute('lang') === selectedLang ? '' : 'none';
+      const divLang = div.getAttribute('lang').toLowerCase();
+      div.style.display = divLang === selectedLang ? '' : 'none';
     });
   }
 })();
