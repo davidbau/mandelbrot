@@ -5058,14 +5058,21 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           // Check convergence (if we have a checkpoint and didn't just update it)
           // Use 0xFFFFFFFF as sentinel for "no checkpoint yet" (allows ckpt_iter=0)
           if (ckpt_iter != 0xFFFFFFFFu && !just_updated) {
-            // Unified convergence test: always use threading deltas (0 at checkpoint)
-            // Check at checkpoint or at next threaded position
-            if (ref_iter == ckpt_iter || (next_threaded_ref_iter != 0xFFFFFFFFu && ref_iter == next_threaded_ref_iter)) {
-              let dz_diff_r = old_dzr - bbr;
-              let dz_diff_i = old_dzi - bbi;
-              let total_diff_r = threaded_delta_re + dz_diff_r;
-              let total_diff_i = threaded_delta_im + dz_diff_i;
-              let db = max(abs(total_diff_r), abs(total_diff_i));
+            // Threading buffer capacity: 128MB / 16 bytes per iteration = 8,388,608
+            const THREADING_CAPACITY = 8388608u;
+
+            // Fallback: when ref_iter exceeds threading buffer, use absolute position comparison
+            if (ref_iter >= THREADING_CAPACITY) {
+              // Compute absolute positions (accepts float32 precision loss)
+              let z_total_r = refr + old_dzr;
+              let z_total_i = refi + old_dzi;
+              let checkpoint_ref_offset = ckpt_iter * 2u;
+              let z_checkpoint_r = refOrbit[checkpoint_ref_offset] + bbr;
+              let z_checkpoint_i = refOrbit[checkpoint_ref_offset + 1u] + bbi;
+
+              let diff_r = z_total_r - z_checkpoint_r;
+              let diff_i = z_total_i - z_checkpoint_i;
+              let db = max(abs(diff_r), abs(diff_i));
 
               if (db <= epsilon2) {
                 if (pp == 0u) {
@@ -5076,16 +5083,36 @@ class GpuZhuoranBoard extends GpuBaseBoard {
                   break;
                 }
               }
+            } else {
+              // Normal convergence check with threading (high precision)
+              // Check at checkpoint or at next threaded position
+              if (ref_iter == ckpt_iter || (next_threaded_ref_iter != 0xFFFFFFFFu && ref_iter == next_threaded_ref_iter)) {
+                let dz_diff_r = old_dzr - bbr;
+                let dz_diff_i = old_dzi - bbi;
+                let total_diff_r = threaded_delta_re + dz_diff_r;
+                let total_diff_i = threaded_delta_im + dz_diff_i;
+                let db = max(abs(total_diff_r), abs(total_diff_i));
 
-              // If at threaded position, step forward to next thread
-              if (ref_iter == next_threaded_ref_iter && next_threaded_ref_iter < params.ref_orbit_length) {
-                let thread = getThread(next_threaded_ref_iter);
-                if (thread.x >= 0.0) {
-                  threaded_delta_re += thread.y;
-                  threaded_delta_im += thread.z;
-                  next_threaded_ref_iter = u32(thread.x);
-                } else {
-                  next_threaded_ref_iter = 0xFFFFFFFFu;
+                if (db <= epsilon2) {
+                  if (pp == 0u) {
+                    pp = iter;
+                  }
+                  if (db <= epsilon) {
+                    statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
+                    break;
+                  }
+                }
+
+                // If at threaded position, step forward to next thread
+                if (ref_iter == next_threaded_ref_iter && next_threaded_ref_iter < params.ref_orbit_length) {
+                  let thread = getThread(next_threaded_ref_iter);
+                  if (thread.x >= 0.0) {
+                    threaded_delta_re += thread.y;
+                    threaded_delta_im += thread.z;
+                    next_threaded_ref_iter = u32(thread.x);
+                  } else {
+                    next_threaded_ref_iter = 0xFFFFFFFFu;
+                  }
                 }
               }
             }
@@ -5162,13 +5189,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Resize refOrbit buffer if needed (2 floats per iter)
     const requiredOrbitSize = totalIters * 2 * 4;
-    if (this.buffers.refOrbit.size < requiredOrbitSize) {
+    const allocOrbitSize = Math.max(requiredOrbitSize * 2, 1024);
+    if (this.buffers.refOrbit.size < requiredOrbitSize && this.buffers.refOrbit.size < allocOrbitSize) {
+      // Only resize if we can actually allocate a larger buffer
       // Wait for GPU to finish before destroying buffer
       await this.device.queue.onSubmittedWorkDone();
       orbitBufferResized = true;
       this.buffers.refOrbit.destroy();
       this.buffers.refOrbit = this.device.createBuffer({
-        size: Math.max(requiredOrbitSize * 2, 1024),
+        size: allocOrbitSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         label: 'Reference orbit buffer'
       });
@@ -5179,11 +5208,12 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Resize threading buffer if needed (4 floats per iter), cap at 128MB
     const requiredThreadingSize = totalIters * 4 * 4;
     const maxBufferSize = 128 * 1024 * 1024;  // 128MB cap
-    if (this.buffers.threading.size < requiredThreadingSize) {
+    const allocSize = Math.min(Math.max(requiredThreadingSize * 2, 1024), maxBufferSize);
+    if (this.buffers.threading.size < requiredThreadingSize && this.buffers.threading.size < allocSize) {
+      // Only resize if we can actually allocate a larger buffer (not already at max cap)
       // Wait for GPU to finish before destroying buffer
       await this.device.queue.onSubmittedWorkDone();
       this.buffers.threading.destroy();
-      const allocSize = Math.min(Math.max(requiredThreadingSize * 2, 1024), maxBufferSize);
       this.buffers.threading = this.device.createBuffer({
         size: allocSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
