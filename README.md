@@ -17,6 +17,7 @@ The popup shows details at a point.
 Written by David Bau as a Javascript example in 2009; updated in 2020
 to handle high device pixel ratios, show orbits, and calculate
 periodicity. Updated again in 2024 to add double-double quad precision.
+And updated in 2025 to add GPU support.
 
 URL parameter options: use `?grid=3` to select 3-column view,
                    `c=-0.14-0.65ii` to set center,
