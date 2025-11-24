@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+
+  <!-- English (default) -->
+  <url>
+    <loc>https://mandelbrot.page/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- English -->
+  <url>
+    <loc>https://mandelbrot.page/?lang=en</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Spanish -->
+  <url>
+    <loc>https://mandelbrot.page/?lang=es</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Chinese -->
+  <url>
+    <loc>https://mandelbrot.page/?lang=zh</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Arabic -->
+  <url>
+    <loc>https://mandelbrot.page/?lang=ar</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Indonesian -->
+  <url>
+    <loc>https://mandelbrot.page/?lang=id</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Portuguese -->
+  <url>
+    <loc>https://mandelbrot.page/?lang=pt</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- French -->
+  <url>
+    <loc>https://mandelbrot.page/?lang=fr</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Japanese -->
+  <url>
+    <loc>https://mandelbrot.page/?lang=ja</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Russian -->
+  <url>
+    <loc>https://mandelbrot.page/?lang=ru</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- German -->
+  <url>
+    <loc>https://mandelbrot.page/?lang=de</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mandelbrot.page/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://mandelbrot.page/?lang=es" />
+    <xhtml:link rel="alternate" hreflang="zh" href="https://mandelbrot.page/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="ar" href="https://mandelbrot.page/?lang=ar" />
+    <xhtml:link rel="alternate" hreflang="id" href="https://mandelbrot.page/?lang=id" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://mandelbrot.page/?lang=pt" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mandelbrot.page/?lang=fr" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mandelbrot.page/?lang=ja" />
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mandelbrot.page/?lang=ru" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://mandelbrot.page/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mandelbrot.page/" />
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+</urlset>
