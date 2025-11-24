@@ -3175,7 +3175,7 @@ class ReferenceOrbitThreading {
         const bucket = this.spatialBuckets.get(`${bx + dx},${by + dy}`);
         if (!bucket) continue;
         for (const j of bucket) {
-          if (j >= currentIndex || currentIndex - j < this.minJump) continue;
+          if (j >= currentIndex) continue;  // Only thread to past iterations
           const pt = getPoint(j);
           if (!pt) continue;
           const dist = Math.max(Math.abs(re - pt.re), Math.abs(im - pt.im));
@@ -4833,6 +4833,92 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     }
   }
 
+  setupReferenceOrbitLoop() {
+    // When reference orbit hits threading limit, find a close point to loop back to
+    const THREADING_CAPACITY = 4194304;  // 2^22
+    const SEARCH_WINDOW = 10000;
+
+    if (this.refIterations < THREADING_CAPACITY || this.refOrbitLoopConfigured) {
+      return; // Not at limit yet, or already configured
+    }
+
+    // Get endpoint (current position at threading limit)
+    const endpoint = this.refOrbit[THREADING_CAPACITY];
+    const endR = endpoint[0] + endpoint[1];
+    const endI = endpoint[2] + endpoint[3];
+
+    // Search back to find closest point
+    let closestIter = THREADING_CAPACITY - SEARCH_WINDOW;
+    let closestDist = Infinity;
+
+    for (let i = THREADING_CAPACITY - SEARCH_WINDOW; i < THREADING_CAPACITY; i++) {
+      const pt = this.refOrbit[i];
+      const ptR = pt[0] + pt[1];
+      const ptI = pt[2] + pt[3];
+      const dr = endR - ptR;
+      const di = endI - ptI;
+      const dist = Math.max(Math.abs(dr), Math.abs(di)); // Chebyshev distance
+
+      if (dist <= closestDist) {  // Use <= to take latest point when tied
+        closestDist = dist;
+        closestIter = i;
+      }
+    }
+
+    // Compute delta in quad-double precision
+    const closestPt = this.refOrbit[closestIter];
+    const tt = this.tt;
+    AqdAdd(tt, 0, endpoint[0], endpoint[1], -closestPt[0], -closestPt[1]); // real delta
+    AqdAdd(tt, 2, endpoint[2], endpoint[3], -closestPt[2], -closestPt[3]); // imag delta
+
+    // Store loop parameters
+    this.refOrbitLoop = {
+      enabled: true,
+      threshold: THREADING_CAPACITY,
+      jumpAmount: THREADING_CAPACITY - closestIter,
+      deltaR: tt[0] + tt[1], // Convert to float64
+      deltaI: tt[2] + tt[3]
+    };
+
+    this.refOrbitLoopConfigured = true;
+
+    // Update threading for loop segment to wrap around
+    const loopDeltaR = this.refOrbitLoop.deltaR;
+    const loopDeltaI = this.refOrbitLoop.deltaI;
+    const epsilon3 = this.threading.epsilon3;
+
+    // For each iteration in the loop segment, check if it can thread to another iteration
+    // considering the loop wrap (iterations will repeat with a delta offset)
+    for (let i = closestIter; i <= THREADING_CAPACITY; i++) {
+      const iPt = this.refOrbit[i];
+      const iR = iPt[0] + iPt[1];
+      const iI = iPt[2] + iPt[3];
+
+      // Check if we can thread to same or later iteration (considering it will wrap with delta)
+      // Allow j = i for self-threading within the loop (period-N orbits repeat with delta)
+      for (let j = i; j <= THREADING_CAPACITY; j++) {
+        const jPt = this.refOrbit[j];
+        // After loop, iteration j will be at position refOrbit[j] + loop_delta
+        const jR = jPt[0] + jPt[1] + loopDeltaR;
+        const jI = jPt[2] + jPt[3] + loopDeltaI;
+
+        const dr = iR - jR;
+        const di = iI - jI;
+        const dist = Math.max(Math.abs(dr), Math.abs(di));
+
+        if (dist <= epsilon3) {
+          // Thread i -> j (wrapping through the loop)
+          this.threading.refThreading[i] = {
+            next: j,
+            deltaRe: Math.fround(jR - iR),
+            deltaIm: Math.fround(jI - iI)
+          };
+          break;  // Take first match
+        }
+      }
+    }
+  }
+
   async createComputePipeline() {
     const shaderCode = `
       struct Params {
@@ -4853,6 +4939,12 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         ckpt5: u32,
         ckpt6: u32,
         ckpt7: u32,
+        loop_enabled: u32,      // 1 if loop enabled, 0 otherwise
+        loop_threshold: u32,    // ref_iter threshold to trigger loop
+        loop_jump: u32,         // Amount to subtract from ref_iter
+        _padding: u32,          // Alignment padding
+        loop_delta_r: f32,      // Delta to add to dzr
+        loop_delta_i: f32,      // Delta to add to dzi
       }
 
       @group(0) @binding(0) var<uniform> params: Params;
@@ -5058,8 +5150,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           // Check convergence (if we have a checkpoint and didn't just update it)
           // Use 0xFFFFFFFF as sentinel for "no checkpoint yet" (allows ckpt_iter=0)
           if (ckpt_iter != 0xFFFFFFFFu && !just_updated) {
-            // Threading buffer capacity: 128MB / 16 bytes per iteration = 8,388,608
-            const THREADING_CAPACITY = 8388608u;
+            // Threading buffer capacity: 64MB / 16 bytes per iteration = 4,194,304 (2^22)
+            const THREADING_CAPACITY = 4194304u;
 
             // Fallback: when ref_iter exceeds threading buffer, use absolute position comparison
             if (ref_iter >= THREADING_CAPACITY) {
@@ -5120,6 +5212,13 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
           iter++;
           ref_iter++;
+
+          // Reference orbit loop: when ref_iter hits threshold, apply delta and jump back
+          if (params.loop_enabled != 0u && ref_iter >= params.loop_threshold) {
+            dzr += params.loop_delta_r;
+            dzi += params.loop_delta_i;
+            ref_iter -= params.loop_jump;
+          }
         }
         // Write back state - pack into combined buffers
         iterations[index] = iter;
@@ -5172,14 +5271,21 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Step 1: Extend reference orbit on CPU as needed
     // Extend to what pixels need (this.it) plus enough buffer for next batch
+    const THREADING_CAPACITY = 4194304;  // 2^22
     const currentNeed = this.it + iterationsPerBatch;
     // Also allow growth for thread-following, but cap to avoid waste
     // Use proportional buffer (10%) for long periods, or fixed 10k for short periods
     const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
     const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
-    const targetRefIterations = Math.max(currentNeed, threadingBuffer);
+    // Cap at threading capacity - don't extend beyond this point
+    const targetRefIterations = Math.min(Math.max(currentNeed, threadingBuffer), THREADING_CAPACITY);
     while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
       this.extendReferenceOrbit();
+    }
+
+    // Setup reference orbit loop when we hit the threading capacity
+    if (this.refIterations >= THREADING_CAPACITY && !this.refOrbitLoopConfigured) {
+      this.setupReferenceOrbitLoop();
     }
 
     // Step 2: Upload reference orbit and threading to GPU (INCREMENTAL UPLOADS)
@@ -5309,8 +5415,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
     const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
 
-    // Pack params: 17 u32s (9 base + 8 checkpoints)
-    const paramsBuffer = new ArrayBuffer(128);  // 17 u32s = 68 bytes, rounded to 128 for alignment
+    // Pack params: 17 base u32s + 4 loop u32s + 2 loop f32s = 23 words
+    const paramsBuffer = new ArrayBuffer(128);  // 92 bytes minimum, rounded to 128 for alignment
     const paramsU32 = new Uint32Array(paramsBuffer);
     const paramsF32 = new Float32Array(paramsBuffer);
     paramsU32[0] = this.config.dims;
@@ -5327,6 +5433,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     for (let i = 0; i < 8; i++) {
       paramsU32[9 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
     }
+
+    // Pack reference orbit loop parameters
+    const loop = this.refOrbitLoop || { enabled: false };
+    paramsU32[17] = loop.enabled ? 1 : 0;
+    paramsU32[18] = loop.threshold || 0;
+    paramsU32[19] = loop.jumpAmount || 0;
+    paramsU32[20] = 0;  // padding
+    paramsF32[21] = loop.deltaR || 0;
+    paramsF32[22] = loop.deltaI || 0;
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
