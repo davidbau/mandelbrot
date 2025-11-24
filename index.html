@@ -89,6 +89,7 @@ body.starting div#b_0:after { display: flex; position: absolute;
 <div id=text style="max-width: 442px">
 <div class=closebox></div>
 
+<div lang="en">
 <h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
 Mandelbrot Set Fractal Explorer
 </h1>
@@ -137,12 +138,628 @@ To create high-quality images and videos, this viewer computes subpixels with a 
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a>
+>David Bau</a></p>
+</div>
+
+<div lang="es" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Explorador de Fractales del Conjunto de Mandelbrot
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Toca">Haz clic</span> para ampliar.</b>  <span mobile="">Haz clic derecho para guardar imágenes, <b>M</b> para crear y guardar un vídeo de tu recorrido de zoom.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> se itera para cada <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">número complejo</a> <em>c</em>.  Los colores muestran <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iteraciones</a> hasta la divergencia; los puntos negros <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergen o ciclan</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Los puntos amarillos muestran <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">órbitas</a></b>.  Los puntos rojos muestran ciclos límite.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Acerca de las iteraciones.</b> Este visor muestra más detalle fractal con el tiempo al refinar las iteraciones hacia el infinito mientras exploras. Cuanto más esperes, más detalle se mostrará.
+Después de miles o millones de iteraciones, puedes resolver los detalles más finos en las partes más complejas del fractal.
+Ve información sobre iteraciones, progreso y coordenadas <span mobile="tocando">pasando el cursor sobre</span> el número amarillo de zoom bajo cada ventana.
+<span mobile="Manteniendo tu dedo">Mover el ratón</span> sobre el contenido fractal animará la órbita de valores <em>z</em> para cada ubicación <em>c</em>, revelando la compleja dinámica de frontera que ha fascinado a los matemáticos.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Explorando una ruta de zoom.</b>
+Cada <span mobile="toque">clic</span> en el fractal abre un nivel de zoom más alto en la ubicación seleccionada, calculado en tu GPU si está disponible.
+Después de ampliar más allá de una magnificación de un billón de veces, usamos un algoritmo de perturbación de precisión cuádruple que resuelve detalles finos con más de 30 dígitos de precisión.
+Una vez que hayas creado una ruta interesante que muestre el detalle que deseas, puedes <a class="moviemode">crear y descargar tu propio vídeo de zoom profundo de Mandelbrot</a> o marcar tu URL para guardar y compartir tu exploración.
+Para crear imágenes y vídeos de alta calidad, este visor calcula subpíxeles con una proporción de <span class="pixelratio">2</span>:1<span mobile="">, y eso puede aumentarse para crear visualizaciones más precisas</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Más comandos:</b>
+<b>I</b> amplía;
+<b mac="&#8984;">Ctrl</b>-clic para ampliar en el lugar;
+<b>H</b> encoge y <b>G</b> agranda cada ventana;
+<b>R</b> reabre ventanas intermedias;
+<b>C</b> recentra todas;
+<b>T</b> cambia el tema de color;
+<b>U</b> resalta píxeles sin terminar;
+<b mac="&#x23CE;">Enter</b> alterna pantalla completa;
+<b>X</b> aumenta y <b>Z</b> disminuye el exponente de <em>z</em>;
+<b>F</b> aumenta y <b>D</b> disminuye la proporción de píxeles;
+<b>M</b> crea un vídeo que sigue tu ruta;
+<nobr><b>?</b> muestra esta ayuda.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="zh" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+曼德博集合分形探索器
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="点击">单击</span>以缩放。</b>  <span mobile="">右键单击以保存图像，按<b>M</b>键创建并保存您的缩放路径视频。</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+对每个<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">复数</a> <em>c</em> 迭代 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>。颜色显示到<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">发散的迭代次数</a>；黑色点<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">收敛或循环</a>。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>黄点显示<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">轨道</a></b>。红点显示极限环。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>关于迭代。</b>随着您的探索，此查看器通过将迭代精细化至无穷来显示更多分形细节。等待时间越长，显示的细节越多。
+经过数千或数百万次迭代后，您可以解析分形最复杂部分的最精细细节。
+通过<span mobile="点击">悬停在</span>每个窗口下方的黄色缩放数字上，查看有关迭代、进度和坐标的信息。
+<span mobile="按住手指">移动鼠标</span>到分形内容上将动画显示每个位置 <em>c</em> 的 <em>z</em> 值轨道，揭示令数学家着迷的复杂边界动力学。
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>探索缩放路径。</b>
+分形上的每次<span mobile="点击">单击</span>都会在所选位置打开更高的缩放级别，如果可用，将在您的GPU上计算。
+当您放大超过万亿倍后，我们使用四精度扰动算法，可将精细细节解析到超过30位数字的精度。
+一旦您制作了一条显示所需细节的有趣路径，您可以<a class="moviemode">创建并下载自己的曼德博深度缩放视频</a>，或为您的URL添加书签以保存和分享您的探索。
+为了创建高质量的图像和视频，此查看器以<span class="pixelratio">2</span>:1的比例计算子像素<span mobile="">，并且可以增加该比例以创建更精确的显示</span>。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>更多命令：</b>
+<b>I</b> 放大；
+<b mac="&#8984;">Ctrl</b>-单击可原地放大；
+<b>H</b> 缩小，<b>G</b> 放大每个窗口；
+<b>R</b> 重新打开中间窗口；
+<b>C</b> 重新居中所有窗口；
+<b>T</b> 更改颜色主题；
+<b>U</b> 突出显示未完成的像素；
+<b mac="&#x23CE;">Enter</b> 切换全屏；
+<b>X</b> 增加，<b>Z</b> 减少 <em>z</em> 指数；
+<b>F</b> 增加，<b>D</b> 减少像素比率；
+<b>M</b> 制作沿您路径的视频；
+<nobr><b>?</b> 显示此帮助。</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="ar" style="display:none;direction:rtl;text-align:right">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+مستكشف كسيريات مجموعة ماندلبروت
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="اضغط">انقر</span> للتكبير.</b>  <span mobile="">انقر بزر الماوس الأيمن لحفظ الصور، <b>M</b> لإنشاء وحفظ فيديو لمسار التكبير الخاص بك.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+يتم تكرار <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> لكل <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">عدد مركب</a> <em>c</em>.  تُظهر الألوان <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">التكرارات</a> حتى التباعد؛ النقاط السوداء <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">تتقارب أو تدور</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>النقاط الصفراء تُظهر <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">المدارات</a></b>.  النقاط الحمراء تُظهر الدورات الحدية.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>حول التكرارات.</b> يُظهر هذا العارض المزيد من تفاصيل الكسيريات بمرور الوقت من خلال تحسين التكرارات إلى ما لا نهاية أثناء استكشافك. كلما انتظرت أكثر، كلما ظهر المزيد من التفاصيل.
+بعد آلاف أو ملايين التكرارات، يمكنك حل أدق التفاصيل في الأجزاء الأكثر تعقيداً من الكسيرية.
+شاهد معلومات حول التكرارات والتقدم والإحداثيات عن طريق <span mobile="الضغط على">تمرير المؤشر فوق</span> رقم التكبير الأصفر أسفل كل نافذة.
+<span mobile="الاحتفاظ بإصبعك">تحريك الماوس</span> فوق محتوى الكسيرية سيُحرك مدار قيم <em>z</em> لكل موقع <em>c</em>، مما يكشف ديناميكيات الحدود المعقدة التي فتنت علماء الرياضيات.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>استكشاف مسار التكبير.</b>
+كل <span mobile="نقرة">نقرة</span> على الكسيرية تفتح مستوى تكبير أعلى في الموقع المحدد، محسوباً على GPU الخاص بك إن توفر.
+بعد التكبير إلى ما يتجاوز تكبير تريليون ضعف، نستخدم خوارزمية اضطراب رباعية الدقة تحل التفاصيل الدقيقة لأكثر من 30 رقماً من الدقة.
+بمجرد أن تصنع مساراً مثيراً يُظهر التفاصيل التي تريدها، يمكنك <a class="moviemode">إنشاء وتنزيل فيديو تكبير عميق لماندلبروت الخاص بك</a> أو وضع إشارة مرجعية على عنوان URL الخاص بك لحفظ ومشاركة استكشافك.
+لإنشاء صور ومقاطع فيديو عالية الجودة، يحسب هذا العارض البكسلات الفرعية بنسبة <span class="pixelratio">2</span>:1<span mobile="">، ويمكن زيادة ذلك لإنشاء عروض أكثر دقة</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>المزيد من الأوامر:</b>
+<b>I</b> يكبّر؛
+<b mac="&#8984;">Ctrl</b>-نقر للتكبير في المكان؛
+<b>H</b> يُصغّر و<b>G</b> يُكبّر كل نافذة؛
+<b>R</b> يُعيد فتح النوافذ المتوسطة؛
+<b>C</b> يُعيد توسيط الكل؛
+<b>T</b> يُغيّر موضوع الألوان؛
+<b>U</b> يُبرز البكسلات غير المكتملة؛
+<b mac="&#x23CE;">Enter</b> يُبدّل وضع ملء الشاشة؛
+<b>X</b> يزيد و<b>Z</b> ينقص أس <em>z</em>؛
+<b>F</b> يزيد و<b>D</b> ينقص نسبة البكسل؛
+<b>M</b> يصنع فيديو يتبع مسارك؛
+<nobr><b>?</b> يُظهر هذه المساعدة.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:left">
+<a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a> -</p>
+</div>
+
+<div lang="id" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Penjelajah Fraktal Himpunan Mandelbrot
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Ketuk">Klik</span> untuk memperbesar.</b>  <span mobile="">Klik kanan untuk menyimpan gambar, <b>M</b> untuk membuat dan menyimpan video jalur zoom Anda.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> diiterasi untuk setiap <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">bilangan kompleks</a> <em>c</em>.  Warna menunjukkan <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterasi</a> hingga divergensi; titik hitam <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">konvergen atau bersiklus</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Titik kuning menunjukkan <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbit</a></b>.  Titik merah menunjukkan siklus batas.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Tentang iterasi.</b> Penampil ini menunjukkan lebih banyak detail fraktal seiring waktu dengan menyempurnakan iterasi hingga tak terhingga saat Anda menjelajah. Semakin lama Anda menunggu, semakin banyak detail yang ditampilkan.
+Setelah ribuan atau jutaan iterasi, Anda dapat menyelesaikan detail terbaik di bagian paling kompleks dari fraktal.
+Lihat informasi tentang iterasi, kemajuan, dan koordinat dengan <span mobile="mengetuk">mengarahkan kursor ke</span> angka zoom kuning di bawah setiap jendela.
+<span mobile="Menahan jari Anda">Menggerakkan mouse</span> di atas konten fraktal akan menganimasi orbit nilai <em>z</em> untuk setiap lokasi <em>c</em>, mengungkapkan dinamika batas kompleks yang telah memukau para matematikawan.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Menjelajahi jalur zoom.</b>
+Setiap <span mobile="ketukan">klik</span> pada fraktal membuka level zoom yang lebih tinggi di lokasi yang dipilih, dihitung pada GPU Anda jika tersedia.
+Setelah Anda memperbesar melampaui pembesaran satu triliun kali, kami menggunakan algoritma perturbasi presisi ganda empat yang menyelesaikan detail halus hingga lebih dari 30 digit akurasi.
+Setelah Anda membuat jalur menarik yang menunjukkan detail yang Anda inginkan, Anda dapat <a class="moviemode">membuat dan mengunduh video zoom dalam Mandelbrot Anda sendiri</a> atau menandai URL Anda untuk menyimpan dan membagikan penjelajahan Anda.
+Untuk membuat gambar dan video berkualitas tinggi, penampil ini menghitung subpiksel dengan rasio <span class="pixelratio">2</span>:1<span mobile="">, dan itu dapat ditingkatkan untuk membuat tampilan yang lebih presisi</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Perintah lainnya:</b>
+<b>I</b> memperbesar;
+<b mac="&#8984;">Ctrl</b>-klik untuk memperbesar di tempat;
+<b>H</b> mengecilkan dan <b>G</b> memperbesar setiap jendela;
+<b>R</b> membuka kembali jendela tengah;
+<b>C</b> memusatkan kembali semua;
+<b>T</b> mengubah tema warna;
+<b>U</b> menyorot piksel yang belum selesai;
+<b mac="&#x23CE;">Enter</b> mengalihkan layar penuh;
+<b>X</b> meningkatkan dan <b>Z</b> menurunkan eksponen <em>z</em>;
+<b>F</b> meningkatkan dan <b>D</b> menurunkan rasio piksel;
+<b>M</b> membuat video yang mengikuti jalur Anda;
+<nobr><b>?</b> menampilkan bantuan ini.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="pt" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Explorador de Fractais do Conjunto de Mandelbrot
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Toque">Clique</span> para ampliar.</b>  <span mobile="">Clique com o botão direito para salvar imagens, <b>M</b> para criar e salvar um vídeo do seu caminho de zoom.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> é iterado para cada <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">número complexo</a> <em>c</em>.  As cores mostram <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterações</a> até a divergência; pontos pretos <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergem ou ciclam</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Pontos amarelos mostram <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">órbitas</a></b>.  Pontos vermelhos mostram ciclos limite.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Sobre iterações.</b> Este visualizador mostra mais detalhes fractais ao longo do tempo, refinando iterações ao infinito enquanto você explora. Quanto mais você espera, mais detalhes são mostrados.
+Após milhares ou milhões de iterações, você pode resolver os detalhes mais finos nas partes mais complexas do fractal.
+Veja informações sobre iterações, progresso e coordenadas <span mobile="tocando">passando o mouse sobre</span> o número amarelo de zoom sob cada janela.
+<span mobile="Mantendo seu dedo">Mover o mouse</span> sobre o conteúdo fractal animará a órbita dos valores <em>z</em> para cada localização <em>c</em>, revelando a complexa dinâmica de fronteira que fascinou matemáticos.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Explorando um caminho de zoom.</b>
+Cada <span mobile="toque">clique</span> no fractal abre um nível de zoom mais alto no local selecionado, calculado na sua GPU se disponível.
+Após ampliar além de uma magnificação de um trilhão de vezes, usamos um algoritmo de perturbação de precisão quádrupla que resolve detalhes finos com mais de 30 dígitos de precisão.
+Depois de criar um caminho interessante que mostra os detalhes que você deseja, você pode <a class="moviemode">criar e baixar seu próprio vídeo de zoom profundo de Mandelbrot</a> ou marcar sua URL para salvar e compartilhar sua exploração.
+Para criar imagens e vídeos de alta qualidade, este visualizador calcula subpixels com uma proporção de <span class="pixelratio">2</span>:1<span mobile="">, e isso pode ser aumentado para criar exibições mais precisas</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Mais comandos:</b>
+<b>I</b> amplia;
+<b mac="&#8984;">Ctrl</b>-clique para ampliar no local;
+<b>H</b> encolhe e <b>G</b> aumenta cada janela;
+<b>R</b> reabre janelas intermediárias;
+<b>C</b> recentraliza todas;
+<b>T</b> muda o tema de cores;
+<b>U</b> destaca pixels inacabados;
+<b mac="&#x23CE;">Enter</b> alterna tela cheia;
+<b>X</b> aumenta e <b>Z</b> diminui o expoente de <em>z</em>;
+<b>F</b> aumenta e <b>D</b> diminui a proporção de pixels;
+<b>M</b> cria um vídeo que segue seu caminho;
+<nobr><b>?</b> mostra esta ajuda.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="fr" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Explorateur de Fractales de l'Ensemble de Mandelbrot
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Appuyez">Cliquez</span> pour zoomer.</b>  <span mobile="">Cliquez avec le bouton droit pour enregistrer les images, <b>M</b> pour créer et enregistrer une vidéo de votre parcours de zoom.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> est itéré pour chaque <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">nombre complexe</a> <em>c</em>.  Les couleurs montrent les <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">itérations</a> jusqu'à la divergence ; les points noirs <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergent ou cyclent</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Les points jaunes montrent les <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbites</a></b>.  Les points rouges montrent les cycles limites.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>À propos des itérations.</b> Ce visualiseur montre plus de détails fractals au fil du temps en affinant les itérations vers l'infini pendant votre exploration. Plus vous attendez, plus de détails sont affichés.
+Après des milliers ou des millions d'itérations, vous pouvez résoudre les détails les plus fins dans les parties les plus complexes de la fractale.
+Consultez les informations sur les itérations, la progression et les coordonnées en <span mobile="appuyant sur">passant la souris sur</span> le numéro de zoom jaune sous chaque fenêtre.
+<span mobile="En maintenant votre doigt">Déplacer votre souris</span> sur le contenu fractal animera l'orbite des valeurs <em>z</em> pour chaque emplacement <em>c</em>, révélant la dynamique de frontière complexe qui a fasciné les mathématiciens.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Explorer un parcours de zoom.</b>
+Chaque <span mobile="appui">clic</span> sur la fractale ouvre un niveau de zoom supérieur à l'emplacement sélectionné, calculé sur votre GPU si disponible.
+Après avoir zoomé au-delà d'un grossissement de mille milliards de fois, nous utilisons un algorithme de perturbation en quadruple précision qui résout les détails fins avec plus de 30 chiffres de précision.
+Une fois que vous avez créé un parcours intéressant qui montre les détails que vous souhaitez, vous pouvez <a class="moviemode">créer et télécharger votre propre vidéo de zoom profond de Mandelbrot</a> ou mettre en signet votre URL pour sauvegarder et partager votre exploration.
+Pour créer des images et des vidéos de haute qualité, ce visualiseur calcule les sous-pixels avec un rapport de <span class="pixelratio">2</span>:1<span mobile="">, et cela peut être augmenté pour créer des affichages plus précis</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Plus de commandes :</b>
+<b>I</b> zoom avant ;
+<b mac="&#8984;">Ctrl</b>-clic pour zoomer sur place ;
+<b>H</b> rétrécit et <b>G</b> agrandit chaque fenêtre ;
+<b>R</b> rouvre les fenêtres intermédiaires ;
+<b>C</b> recentre toutes ;
+<b>T</b> change le thème de couleur ;
+<b>U</b> met en évidence les pixels inachevés ;
+<b mac="&#x23CE;">Entrée</b> bascule en plein écran ;
+<b>X</b> augmente et <b>Z</b> diminue l'exposant de <em>z</em> ;
+<b>F</b> augmente et <b>D</b> diminue le rapport de pixels ;
+<b>M</b> crée une vidéo qui suit votre parcours ;
+<nobr><b>?</b> affiche cette aide.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="ja" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+マンデルブロ集合フラクタル探索ツール
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="タップ">クリック</span>してズーム。</b>  <span mobile="">右クリックで画像を保存、<b>M</b>でズームパスの動画を作成・保存できます。</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+各<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複素数</a> <em>c</em> に対して <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> が反復されます。色は発散までの<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">反復回数</a>を示し、黒い点は<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">収束または周期的</a>です。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>黄色の点は<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">軌道</a>を示します</b>。赤い点は極限周期を示します。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>反復について。</b>このビューアは、探索中に反復を無限大まで精緻化することで、時間とともにより多くのフラクタルの詳細を表示します。待つほど、より多くの詳細が表示されます。
+数千または数百万回の反復の後、フラクタルの最も複雑な部分で最も細かい詳細を解像できます。
+各ウィンドウ下の黄色のズーム番号を<span mobile="タップ">マウスオーバー</span>することで、反復、進行状況、座標に関する情報を確認できます。
+フラクタルコンテンツ上で<span mobile="指を保持">マウスを移動</span>すると、各位置 <em>c</em> の <em>z</em> 値の軌道がアニメーション化され、数学者を魅了してきた複雑な境界ダイナミクスが明らかになります。
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>ズームパスの探索。</b>
+フラクタル上の各<span mobile="タップ">クリック</span>は、選択した場所でより高いズームレベルを開き、可能であればGPU上で計算されます。
+1兆倍を超える倍率までズームすると、30桁以上の精度で細かい詳細を解決する4倍精度摂動アルゴリズムを使用します。
+必要な詳細を示す興味深いパスを作成したら、<a class="moviemode">独自のマンデルブロディープズーム動画を作成してダウンロード</a>したり、URLをブックマークして探索を保存・共有したりできます。
+高品質の画像と動画を作成するために、このビューアは<span class="pixelratio">2</span>:1の比率でサブピクセルを計算し<span mobile="">、より正確な表示を作成するためにこれを増やすことができます</span>。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>その他のコマンド：</b>
+<b>I</b> ズームイン；
+<b mac="&#8984;">Ctrl</b>-クリックでその場でズーム；
+<b>H</b> で縮小、<b>G</b> で各ウィンドウを拡大；
+<b>R</b> 中間ウィンドウを再度開く；
+<b>C</b> すべてを再センタリング；
+<b>T</b> カラーテーマを変更；
+<b>U</b> 未完了のピクセルをハイライト；
+<b mac="&#x23CE;">Enter</b> フルスクリーンを切り替え；
+<b>X</b> で増加、<b>Z</b> で <em>z</em> 指数を減少；
+<b>F</b> で増加、<b>D</b> でピクセル比率を減少；
+<b>M</b> パスに従う動画を作成；
+<nobr><b>?</b> このヘルプを表示。</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="ru" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Исследователь фракталов множества Мандельброта
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Нажмите">Щелкните</span>, чтобы увеличить.</b>  <span mobile="">Щелкните правой кнопкой мыши, чтобы сохранить изображения, <b>M</b>, чтобы создать и сохранить видео вашего пути увеличения.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> итерируется для каждого <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">комплексного числа</a> <em>c</em>.  Цвета показывают <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">итерации</a> до расхождения; черные точки <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">сходятся или циклируются</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Желтые точки показывают <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">орбиты</a></b>.  Красные точки показывают предельные циклы.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Об итерациях.</b> Этот просмотрщик показывает больше деталей фракталов с течением времени, уточняя итерации до бесконечности по мере вашего исследования. Чем дольше вы ждете, тем больше деталей отображается.
+После тысяч или миллионов итераций вы можете разрешить мельчайшие детали в самых сложных частях фрактала.
+Просмотрите информацию об итерациях, прогрессе и координатах, <span mobile="нажав на">наведя курсор на</span> желтый номер увеличения под каждым окном.
+<span mobile="Удерживая палец">Перемещение мыши</span> над фрактальным содержимым анимирует орбиту значений <em>z</em> для каждого местоположения <em>c</em>, раскрывая сложную динамику границ, которая восхищала математиков.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Исследование пути увеличения.</b>
+Каждый <span mobile="нажатие">щелчок</span> на фрактале открывает более высокий уровень увеличения в выбранном месте, вычисляемый на вашем GPU, если доступно.
+После увеличения более чем в триллион раз мы используем алгоритм возмущения с четверной точностью, который разрешает мелкие детали с точностью более 30 цифр.
+Как только вы создадите интересный путь, показывающий нужные вам детали, вы можете <a class="moviemode">создать и загрузить собственное видео глубокого увеличения Мандельброта</a> или добавить закладку на ваш URL, чтобы сохранить и поделиться своим исследованием.
+Для создания высококачественных изображений и видео этот просмотрщик вычисляет субпиксели с соотношением <span class="pixelratio">2</span>:1<span mobile="">, и это может быть увеличено для создания более точных дисплеев</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Дополнительные команды:</b>
+<b>I</b> увеличивает;
+<b mac="&#8984;">Ctrl</b>-щелчок для увеличения на месте;
+<b>H</b> уменьшает, а <b>G</b> увеличивает каждое окно;
+<b>R</b> повторно открывает промежуточные окна;
+<b>C</b> перецентрирует все;
+<b>T</b> меняет цветовую тему;
+<b>U</b> выделяет незавершенные пиксели;
+<b mac="&#x23CE;">Enter</b> переключает полноэкранный режим;
+<b>X</b> увеличивает, а <b>Z</b> уменьшает показатель степени <em>z</em>;
+<b>F</b> увеличивает, а <b>D</b> уменьшает соотношение пикселей;
+<b>M</b> создает видео, следующее вашему пути;
+<nobr><b>?</b> показывает эту справку.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="de" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Mandelbrot-Menge Fraktal-Explorer
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Tippen">Klicken</span> Sie zum Vergrößern.</b>  <span mobile="">Rechtsklick zum Speichern von Bildern, <b>M</b> zum Erstellen und Speichern eines Videos Ihres Zoom-Pfads.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> wird für jede <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">komplexe Zahl</a> <em>c</em> iteriert.  Farben zeigen <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">Iterationen</a> bis zur Divergenz; schwarze Punkte <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">konvergieren oder zyklieren</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Gelbe Punkte zeigen <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">Bahnen</a></b>.  Rote Punkte zeigen Grenzzyklen.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Über Iterationen.</b> Dieser Viewer zeigt im Laufe der Zeit mehr fraktale Details, indem er die Iterationen während Ihrer Erkundung gegen unendlich verfeinert. Je länger Sie warten, desto mehr Details werden angezeigt.
+Nach Tausenden oder Millionen von Iterationen können Sie die feinsten Details in den komplexesten Teilen des Fraktals auflösen.
+Sehen Sie Informationen zu Iterationen, Fortschritt und Koordinaten, indem Sie <span mobile="tippen">mit der Maus über</span> die gelbe Zoom-Nummer unter jedem Fenster fahren.
+<span mobile="Halten Sie Ihren Finger">Bewegen Sie Ihre Maus</span> über fraktale Inhalte, um die Bahn der <em>z</em>-Werte für jeden Ort <em>c</em> zu animieren und die komplexe Randdynamik zu enthüllen, die Mathematiker fasziniert hat.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Einen Zoom-Pfad erkunden.</b>
+Jeder <span mobile="Tipp">Klick</span> auf das Fraktal öffnet eine höhere Zoomstufe an der ausgewählten Stelle, berechnet auf Ihrer GPU, falls verfügbar.
+Nachdem Sie über eine billionenfache Vergrößerung hinaus gezoomt haben, verwenden wir einen Störungsalgorithmus mit vierfacher Genauigkeit, der feine Details mit mehr als 30 Ziffern Genauigkeit auflöst.
+Sobald Sie einen interessanten Pfad erstellt haben, der die gewünschten Details zeigt, können Sie <a class="moviemode">Ihr eigenes Mandelbrot-Deep-Zoom-Video erstellen und herunterladen</a> oder Ihre URL als Lesezeichen setzen, um Ihre Erkundung zu speichern und zu teilen.
+Um qualitativ hochwertige Bilder und Videos zu erstellen, berechnet dieser Viewer Subpixel mit einem Verhältnis von <span class="pixelratio">2</span>:1<span mobile="">, und dies kann erhöht werden, um präzisere Anzeigen zu erstellen</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Weitere Befehle:</b>
+<b>I</b> zoomt hinein;
+<b mac="&#8984;">Strg</b>-Klick zum direkten Zoomen;
+<b>H</b> verkleinert und <b>G</b> vergrößert jedes Fenster;
+<b>R</b> öffnet Zwischenfenster erneut;
+<b>C</b> zentriert alle neu;
+<b>T</b> ändert das Farbschema;
+<b>U</b> hebt unfertige Pixel hervor;
+<b mac="&#x23CE;">Enter</b> schaltet Vollbild um;
+<b>X</b> erhöht und <b>Z</b> verringert den <em>z</em>-Exponenten;
+<b>F</b> erhöht und <b>D</b> verringert das Pixelverhältnis;
+<b>M</b> erstellt ein Video, das Ihrem Pfad folgt;
+<nobr><b>?</b> zeigt diese Hilfe.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
 </div>
 
 </center>
 
 <script>
+// Internationalization Messages
+const Messages = {
+  en: {
+    center_at_: 'center at ',
+    percent_done_after_: '% done after ',
+    iters: ' iters',
+    pre_rendering_movie: 'Pre-rendering movie...',
+    pre_rendering_: 'Pre-rendering ',
+    diverges_in_: '\ndiverges in ',
+    converges_after_: '\nconverges after ',
+    after_: '\nafter ',
+    period_: ', period '
+  },
+  es: {
+    center_at_: 'centro en ',
+    percent_done_after_: '% completado después de ',
+    iters: ' iteraciones',
+    pre_rendering_movie: 'Pre-renderizando video...',
+    pre_rendering_: 'Pre-renderizando ',
+    diverges_in_: '\ndiverge en ',
+    converges_after_: '\nconverge después de ',
+    after_: '\ndespués de ',
+    period_: ', período '
+  },
+  zh: {
+    center_at_: '中心位于 ',
+    percent_done_after_: '% 完成，已迭代 ',
+    iters: ' 次',
+    pre_rendering_movie: '正在预渲染视频...',
+    pre_rendering_: '正在预渲染 ',
+    diverges_in_: '\n在 ',
+    converges_after_: '\n在 ',
+    after_: '\n在 ',
+    period_: ' 后发散，周期 '
+  },
+  ar: {
+    center_at_: 'المركز في ',
+    percent_done_after_: '% مكتمل بعد ',
+    iters: ' تكرار',
+    pre_rendering_movie: 'جارٍ العرض المسبق للفيديو...',
+    pre_rendering_: 'جارٍ العرض المسبق ',
+    diverges_in_: '\nيتباعد في ',
+    converges_after_: '\nيتقارب بعد ',
+    after_: '\nبعد ',
+    period_: '، الفترة '
+  },
+  id: {
+    center_at_: 'pusat di ',
+    percent_done_after_: '% selesai setelah ',
+    iters: ' iterasi',
+    pre_rendering_movie: 'Pra-rendering video...',
+    pre_rendering_: 'Pra-rendering ',
+    diverges_in_: '\ndivergen dalam ',
+    converges_after_: '\nkonvergen setelah ',
+    after_: '\nsetelah ',
+    period_: ', periode '
+  },
+  pt: {
+    center_at_: 'centro em ',
+    percent_done_after_: '% concluído após ',
+    iters: ' iterações',
+    pre_rendering_movie: 'Pré-renderizando vídeo...',
+    pre_rendering_: 'Pré-renderizando ',
+    diverges_in_: '\ndiverge em ',
+    converges_after_: '\nconverge após ',
+    after_: '\napós ',
+    period_: ', período '
+  },
+  fr: {
+    center_at_: 'centre à ',
+    percent_done_after_: '% terminé après ',
+    iters: ' itérations',
+    pre_rendering_movie: 'Pré-rendu de la vidéo...',
+    pre_rendering_: 'Pré-rendu ',
+    diverges_in_: '\ndiverge en ',
+    converges_after_: '\nconverge après ',
+    after_: '\naprès ',
+    period_: ', période '
+  },
+  ja: {
+    center_at_: '中心: ',
+    percent_done_after_: '% 完了、',
+    iters: ' 回反復',
+    pre_rendering_movie: '動画をプレレンダリング中...',
+    pre_rendering_: 'プレレンダリング中 ',
+    diverges_in_: '\n',
+    converges_after_: '\n',
+    after_: '\n',
+    period_: ' 回反復後に発散、周期 '
+  },
+  ru: {
+    center_at_: 'центр в ',
+    percent_done_after_: '% завершено после ',
+    iters: ' итераций',
+    pre_rendering_movie: 'Предварительный рендеринг видео...',
+    pre_rendering_: 'Предварительный рендеринг ',
+    diverges_in_: '\nрасходится за ',
+    converges_after_: '\nсходится после ',
+    after_: '\nпосле ',
+    period_: ', период '
+  },
+  de: {
+    center_at_: 'Zentrum bei ',
+    percent_done_after_: '% abgeschlossen nach ',
+    iters: ' Iterationen',
+    pre_rendering_movie: 'Video wird vorgerendert...',
+    pre_rendering_: 'Vorrendering ',
+    diverges_in_: '\ndivergiert in ',
+    converges_after_: '\nkonvergiert nach ',
+    after_: '\nnach ',
+    period_: ', Periode '
+  }
+};
+
+// Global MSG object for current language
+let MSG = Messages.en;
+
+// Detect and display the appropriate language
+(function() {
+  // Get language from URL parameter or browser setting
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlLang = urlParams.get('lang');
+  const browserLang = navigator.language.split('-')[0].toLowerCase();
+  const userLang = urlLang || browserLang;
+
+  // List of supported languages
+  const supportedLangs = ['en', 'es', 'zh', 'ar', 'id', 'pt', 'fr', 'ja', 'ru', 'de'];
+  const selectedLang = supportedLangs.includes(userLang) ? userLang : 'en';
+
+  // Set global MSG object
+  MSG = Messages[selectedLang];
+
+  // Wait for DOM to be ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyLanguage);
+  } else {
+    applyLanguage();
+  }
+
+  function applyLanguage() {
+    const langDivs = document.querySelectorAll('#text [lang]');
+    langDivs.forEach(div => {
+      div.style.display = div.getAttribute('lang') === selectedLang ? '' : 'none';
+    });
+  }
+})();
+
 class Config {
   constructor() {
     document.body.style.overflowY = 'scroll';
@@ -925,10 +1542,10 @@ class Grid {
       if (this.views[k].un > 0 && percentDone >= 99.9) {
         percentDone = 99.9;
       }
-      let regularStatus = 'center at ' +
+      let regularStatus = MSG.center_at_ +
         formatcomplex(k, this.views[k].sizes[1], this.views[k].sizes[2])
           .replaceAll('-', '\u2212') + '\n' +
-        percentDone + '% done after ' + formatLargeInt(this.views[k].it) + ' iters';
+        percentDone + MSG.percent_done_after_ + formatLargeInt(this.views[k].it) + MSG.iters;
       statusDiv.textContent = regularStatus;
 
       // Debug status
@@ -1545,7 +2162,7 @@ class MovieMode {
       `<canvas width=${this.explorer.config.dims} height=${this.explorer.config.dims} ` +
       `style="width:${this.explorer.config.cssDims}px;` +
       `height:${this.explorer.config.cssDims}px"></canvas>` +
-      `<a id="moviescale" class="zoomnum">Pre-rendering movie...</a></div>`;
+      `<a id="moviescale" class="zoomnum">${MSG.pre_rendering_movie}</a></div>`;
     this.movieCanvas = this.explorer.movieContainer.firstElementChild.firstElementChild;
     this.movieCtx = this.movieCanvas.getContext('2d');
     this.movieCtx.drawImage(this.explorer.grid.canvas(0), 0, 0);
@@ -1566,7 +2183,7 @@ class MovieMode {
         let status = document.getElementById('moviescale');
         if (status) {
           status.textContent =
-            `Pre-rendering ${formatScale(3.0 / this.explorer.grid.views[k].sizes[0])}`;
+            `${MSG.pre_rendering_}${formatScale(3.0 / this.explorer.grid.views[k].sizes[0])}`;
         }
         let canvas1 = null;
         let canvas2 = null;
@@ -2128,13 +2745,13 @@ class OrbitComputer {
       title = 'c=' + formatcomplex(k, [c[0], c[1]], [c[2], c[3]]).replaceAll('-', '\u2212');
       if (view.nn[j]) {
         if (view.nn[j] > 0) {
-          title += '\ndiverges in ' + view.nn[j];
+          title += MSG.diverges_in_ + view.nn[j];
         } else {
           let period = fibonacciPeriod(view.currentp(j));
           if (period == 1) {
-            title += '\nconverges after ' + formatLargeInt(view.currentp(j));
+            title += MSG.converges_after_ + formatLargeInt(view.currentp(j));
           } else {
-            title += '\nafter ' + formatLargeInt(view.currentp(j)) + ', period ' + formatLargeInt(period);
+            title += MSG.after_ + formatLargeInt(view.currentp(j)) + MSG.period_ + formatLargeInt(period);
           }
           let clen = fibonacciPeriod(view.currentp(j));
           cyc = z ? this.suborbit(z, c, clen) : [];
