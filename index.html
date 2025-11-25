@@ -6441,6 +6441,7 @@ let startTime = 0;
 let endTime = -1;
 let timer = null;
 let gpuMaxBufferSize = null;
+let webGPUWarningShown = false;
 
 self.onmessage = async function(e) {
   const { type, data } = e.data;
@@ -6450,8 +6451,9 @@ self.onmessage = async function(e) {
       const enableGPU = data.config.enableGPU;
       const webGPUAvailable = GpuBoard.isAvailable();
 
-      if (enableGPU && !webGPUAvailable) {
+      if (enableGPU && !webGPUAvailable && !webGPUWarningShown) {
         console.log('WebGPU not available in this browser, falling back to CPU boards');
+        webGPUWarningShown = true;
       }
 
       // Query GPU limits once on first use
