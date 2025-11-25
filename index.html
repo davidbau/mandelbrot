@@ -2304,9 +2304,9 @@ class MovieMode {
 
   startMovieAnimation() {
     let frame = 0;
-    let framesteps = 300;
-    let endpause = 180;
-    let endrecord = 60;
+    let framesteps = 400;  // 60 FPS: 400 frames = 6.67 seconds (50% faster than 10 sec)
+    let endpause = 120;    // Scaled for 60 FPS (was 180 for 30 FPS = 6 sec)
+    let endrecord = 60;    // Keep 1 second end recording
     const totalFrames = (this.explorer.grid.views.length - 1) * framesteps;
 
     const scaleElement = document.getElementById('moviescale');
@@ -2325,15 +2325,15 @@ class MovieMode {
       // Capture frame for encoding (only during recording period)
       if (frame <= totalFrames + endrecord) {
         try {
-          // Create VideoFrame from canvas with duration for 30 FPS
+          // Create VideoFrame from canvas with duration for 60 FPS
           const videoFrame = new VideoFrame(this.movieCanvas, {
-            timestamp: this.capturedFrames.length * 33333,  // 30 FPS in microseconds
-            duration: 33333  // Frame duration: 1/30 second = 33333 microseconds
+            timestamp: this.capturedFrames.length * 16667,  // 60 FPS in microseconds
+            duration: 16667  // Frame duration: 1/60 second = 16667 microseconds
           });
           this.capturedFrames.push(videoFrame);
 
           // Update status
-          if (this.capturedFrames.length % 30 === 0) {
+          if (this.capturedFrames.length % 60 === 0) {
             statusElement.textContent = `Captured ${this.capturedFrames.length} frames...`;
           }
         } catch (e) {
@@ -2464,7 +2464,7 @@ class MovieMode {
           }
           this.muxer.addVideoChunk(chunk, metadata);
           encodedCount++;
-          if (encodedCount % 30 === 0) {
+          if (encodedCount % 60 === 0) {
             statusElement.textContent = `Encoding: ${Math.round(100 * encodedCount / totalFrames)}%`;
           }
         },
@@ -2480,7 +2480,7 @@ class MovieMode {
         width: encodingWidth,
         height: encodingHeight,
         bitrate: 10_000_000,
-        framerate: 30,
+        framerate: 60,
         // Provide colorSpace to ensure Safari includes it in metadata
         colorSpace: {
           primaries: 'bt709',
@@ -2502,7 +2502,7 @@ class MovieMode {
       // Encode all frames
       for (let i = 0; i < this.capturedFrames.length; i++) {
         const frame = this.capturedFrames[i];
-        const keyFrame = i % 150 === 0;  // Keyframe every 5 seconds
+        const keyFrame = i % 300 === 0;  // Keyframe every 5 seconds (300 frames at 60 FPS)
 
         if (downscaled) {
           // Scale frame to tempCanvas, then create new VideoFrame
