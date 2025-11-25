@@ -1765,7 +1765,7 @@ class ZoomManager {
     }
     this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
     const canvas = this.grid.canvas(k + 1);
-    canvas.parentElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    canvas.parentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     // Force browser to render stage 1 before continuing
     canvas.offsetHeight; // Trigger reflow
@@ -1812,7 +1812,7 @@ class ZoomManager {
     }
     this.grid.canvas(k + 1).parentElement.className = 'hidemarks';
     const canvas = this.grid.canvas(k + 1);
-    canvas.parentElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    canvas.parentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     // Force browser to render stage 1 before continuing
     canvas.offsetHeight; // Trigger reflow
