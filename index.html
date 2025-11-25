@@ -2655,9 +2655,17 @@ class Scheduler {
     this.balanceInterval = 5000; // Move jobs to load-balance every 5 seconds
     this.reportInterval = 60000; // Report no more than once every 1 minute
     this.workerCount = Math.max(1, Math.ceil(navigator.hardwareConcurrency * 0.75) || 1);
+    this.webGPUWarningShown = false;
   }
 
   addWorker() {
+    // Show WebGPU warning once when first worker is created
+    if (this.workers.length === 0 && this.grid.config.enableGPU &&
+        typeof navigator.gpu === 'undefined' && !this.webGPUWarningShown) {
+      console.log('WebGPU not available in this browser, falling back to CPU boards');
+      this.webGPUWarningShown = true;
+    }
+
     try {
       const workerCode = this.assembleWorkerCode();
       const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
@@ -6458,7 +6466,6 @@ let startTime = 0;
 let endTime = -1;
 let timer = null;
 let gpuMaxBufferSize = null;
-let webGPUWarningShown = false;
 
 self.onmessage = async function(e) {
   const { type, data } = e.data;
@@ -6467,11 +6474,6 @@ self.onmessage = async function(e) {
       workerNumber = data.workerNumber;
       const enableGPU = data.config.enableGPU;
       const webGPUAvailable = GpuBoard.isAvailable();
-
-      if (enableGPU && !webGPUAvailable && !webGPUWarningShown) {
-        console.log('WebGPU not available in this browser, falling back to CPU boards');
-        webGPUWarningShown = true;
-      }
 
       // Query GPU limits once on first use
       if (enableGPU && webGPUAvailable && gpuMaxBufferSize === null) {
