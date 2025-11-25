@@ -2194,6 +2194,7 @@ class MovieMode {
     this.preRenderTimer = null;
     this.frameCanvases = [];
     this.mediaRecorder = null;
+    this.videoTrack = null;
     this.recordedChunks = [];
     this.isRecording = false;
     this.recordedBlob = null;
@@ -2316,6 +2317,12 @@ class MovieMode {
     const animate = () => {
       const kk = Math.min(frame, totalFrames) / framesteps;
       this.drawMovieFrame(kk);
+
+      // Manually capture frame when recording
+      if (this.isRecording && this.videoTrack && frame <= totalFrames + endrecord) {
+        this.videoTrack.requestFrame();
+      }
+
       frame = (frame + 1) % (totalFrames + endpause);
 
       if (this.isRecording && frame > totalFrames + endrecord) {
@@ -2341,7 +2348,8 @@ class MovieMode {
   }
 
   startRecording() {
-    const stream = this.movieCanvas.captureStream(30); // 30 FPS
+    const stream = this.movieCanvas.captureStream(0); // Manual frame capture mode
+    this.videoTrack = stream.getVideoTracks()[0];
 
     this.recordingMimeType = null;
     this.recordedChunks = [];
@@ -2423,8 +2431,8 @@ class MovieMode {
         this.explorer.grid.views[k+2].sizes[2]] : targetCenter;
     const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
 
-    // Clear the movie canvas
-    this.movieCtx.fillStyle = this.explorer.grid.views[k].makecolor(1);
+    // Clear the movie canvas with black (so unfinished pixels appear black)
+    this.movieCtx.fillStyle = 'black';
     this.movieCtx.fillRect(0, 0, this.explorer.config.dims, this.explorer.config.dims);
 
     // Draw the current frame
