@@ -2325,9 +2325,10 @@ class MovieMode {
       // Capture frame for encoding (only during recording period)
       if (frame <= totalFrames + endrecord) {
         try {
-          // Create VideoFrame from canvas
+          // Create VideoFrame from canvas with duration for 30 FPS
           const videoFrame = new VideoFrame(this.movieCanvas, {
-            timestamp: this.capturedFrames.length * 33333  // 30 FPS in microseconds
+            timestamp: this.capturedFrames.length * 33333,  // 30 FPS in microseconds
+            duration: 33333  // Frame duration: 1/30 second = 33333 microseconds
           });
           this.capturedFrames.push(videoFrame);
 
@@ -2452,6 +2453,15 @@ class MovieMode {
       // Initialize video encoder
       this.videoEncoder = new VideoEncoder({
         output: (chunk, metadata) => {
+          // Ensure metadata has decoderConfig with colorSpace for Safari compatibility
+          if (metadata?.decoderConfig && !metadata.decoderConfig.colorSpace) {
+            metadata.decoderConfig.colorSpace = {
+              primaries: 'bt709',
+              transfer: 'bt709',
+              matrix: 'bt709',
+              fullRange: false
+            };
+          }
           this.muxer.addVideoChunk(chunk, metadata);
           encodedCount++;
           if (encodedCount % 30 === 0) {
@@ -2470,7 +2480,14 @@ class MovieMode {
         width: encodingWidth,
         height: encodingHeight,
         bitrate: 10_000_000,
-        framerate: 30
+        framerate: 30,
+        // Provide colorSpace to ensure Safari includes it in metadata
+        colorSpace: {
+          primaries: 'bt709',
+          transfer: 'bt709',
+          matrix: 'bt709',
+          fullRange: false
+        }
       });
 
       // Create a temporary canvas for downscaling if needed
