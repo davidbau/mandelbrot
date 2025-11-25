@@ -1,0 +1,13 @@
+{
+  "name": "mandelbrot-build",
+  "version": "1.0.0",
+  "description": "Build process for Mandelbrot explorer",
+  "private": true,
+  "scripts": {
+    "build": "./build.sh"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "mp4-muxer": "^5.1.3"
+  }
+}
