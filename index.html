@@ -2358,6 +2358,9 @@ class MovieMode {
   }
 
   createMovieCanvas() {
+    // Recalculate dimensions in case fullscreen state has changed
+    this.explorer.config.initSizes();
+
     this.explorer.movieContainer.innerHTML = '<div>' +
       `<canvas width=${this.explorer.config.dimsWidth} height=${this.explorer.config.dimsHeight} ` +
       `style="width:${this.explorer.config.cssDimsWidth}px;` +
@@ -3388,6 +3391,11 @@ class MandelbrotExplorer {
   }
 
   onFullscreenChange() {
+    // Exit movie mode if active
+    if (this.movieMode.active) {
+      this.movieMode.toggle();
+    }
+
     if (document.fullscreenElement) {
       // Entering fullscreen
       // Only process if grid has views
