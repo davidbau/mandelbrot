@@ -82,6 +82,11 @@ body.starting div#b_0:after { display: flex; position: absolute;
   justify-content: center; content:"Starting..."; color: white;
   z-index: -1; background: rgb(32,16,64); }
 #moviestatus { position: absolute; left: 0; bottom: -11pt; font-size: 11pt; color: yellow; }
+#fullscreen-button { position: fixed; bottom: 20px; right: 20px; font-size: 36px;
+  cursor: pointer; user-select: none; opacity: 0.7; transition: opacity 0.3s;
+  color: white; font-weight: bold; z-index: 10; display: none; }
+#fullscreen-button:hover { opacity: 1; }
+:fullscreen #fullscreen-button { display: none !important; }
 /* Fullscreen mode adjustments */
 :fullscreen { margin: 0; padding: 0; scroll-snap-type: y proximity; overflow-y: scroll; }
 :fullscreen body { margin: 0; padding: 0; }
@@ -110,6 +115,7 @@ If you want to offset all timestamps of a track such that the first one is zero,
 <center>
 <div id=movie></div>
 <div id=grid></div>
+<div id=fullscreen-button title="Enter fullscreen (Enter)">⛶</div>
 <div id=text style="max-width: 442px">
 <div class=closebox></div>
 
@@ -1558,6 +1564,7 @@ class Grid {
       }
       this.views[k].draw(this.canvas(k).getContext('2d'));
       if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
+      this.updateFullscreenButton();
       currentIndex++;
       setTimeout(processNext, 200);
     };
@@ -1762,6 +1769,16 @@ class Grid {
       cb();
     }
   }
+
+  updateFullscreenButton() {
+    const button = document.getElementById('fullscreen-button');
+    if (button && !document.fullscreenElement) {
+      const gridElement = document.getElementById('grid');
+      const visibleCanvases = gridElement ?
+        Array.from(gridElement.children).filter(child => child.style.display !== 'none').length : 0;
+      button.style.display = (visibleCanvases === 1) ? 'block' : 'none';
+    }
+  }
 }
 
 class ZoomManager {
@@ -1877,6 +1894,7 @@ class ZoomManager {
 
     // Stage 1: Create DOM and scroll immediately (instant visual feedback)
     this.grid.makecanvas(k + 1);
+    this.grid.updateFullscreenButton();
     if (hideCurrent) {
       this.grid.canvas(k).parentElement.style.display = 'none';
       this.updateZoomRectangles();
@@ -2105,6 +2123,7 @@ class EventHandler {
         this.explorer.grid.truncatehiddenviews();
         this.explorer.zoomManager.updateZoomRectangles();
         this.explorer.grid.updateHiddenViews();
+        this.explorer.grid.updateFullscreenButton();
         this.explorer.urlHandler.updateurl();
       }
     };
@@ -3509,6 +3528,13 @@ class MandelbrotExplorer {
         }
         return true;
       });
+    }
+    // Set up fullscreen button
+    const fullscreenButton = document.getElementById('fullscreen-button');
+    if (fullscreenButton) {
+      fullscreenButton.onclick = () => {
+        this.toggleFullscreen();
+      };
     }
   }
 }
