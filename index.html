@@ -81,14 +81,17 @@ body.starting div#b_0:after { display: flex; position: absolute;
   top: 0; left: 0; width: 100%; height: 100%; align-items: center;
   justify-content: center; content:"Starting..."; color: white;
   z-index: -1; background: rgb(32,16,64); }
+#moviestatus { position: absolute; left: 0; bottom: -11pt; font-size: 11pt; color: yellow; }
 /* Fullscreen mode adjustments */
 :fullscreen { margin: 0; padding: 0; scroll-snap-type: y proximity; overflow-y: scroll; }
 :fullscreen body { margin: 0; padding: 0; }
 :fullscreen #grid { margin: 0; padding: 0; }
 :fullscreen #grid > div { margin: 0; padding: 0; background: transparent; scroll-snap-align: start; scroll-snap-stop: normal; }
+:fullscreen #movie > div { margin: 0; padding: 0; background: transparent; scroll-snap-align: start; }
 :fullscreen #text { scroll-snap-align: start; }
 :fullscreen canvas { display: block; }
 :fullscreen .zoomnum { bottom: 0; }
+:fullscreen #moviestatus { bottom: 0; }
 :fullscreen div a div.status { top: auto; bottom: 100%; }
 </style>
 <!-- BEGIN_MP4MUXER_LIBRARY -->
@@ -2360,7 +2363,7 @@ class MovieMode {
       `<canvas width=${this.explorer.config.dimsWidth} height=${this.explorer.config.dimsHeight} ` +
       `style="width:${this.explorer.config.cssDimsWidth}px;` +
       `height:${this.explorer.config.cssDimsHeight}px"></canvas>` +
-      `<span id="moviestatus" style="position:absolute;left:0;bottom:-11pt;font-size:11pt;color:yellow;"></span>` +
+      `<span id="moviestatus"></span>` +
       `<a id="moviescale" class="zoomnum">${MSG.pre_rendering_movie}</a></div>`;
     this.movieCanvas = this.explorer.movieContainer.firstElementChild.firstElementChild;
     this.movieCtx = this.movieCanvas.getContext('2d');
