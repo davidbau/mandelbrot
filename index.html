@@ -1607,7 +1607,7 @@ class Grid {
            `<canvas class=overlay width=${this.config.dimsWidth} height="${this.config.dimsHeight}"` +
            ` style="height:${this.config.cssDimsHeight}px;width:${this.config.cssDimsWidth}px;">` +
            '</canvas>' +
-           `<a class="zoomnum" target="_blank" href="?grid=2">${factor}` +
+           `<a class="zoomnum" target="_blank" href="?">${factor}` +
            '<div class="status"></div></a>';
   }
 
@@ -1732,8 +1732,7 @@ class Grid {
     return '?z=' + formatSize(zoomFactor) +
            (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
            '&c=' + formatcomplex(k, ore, oim) +
-           (this.config.theme != 'warm' ? '&theme=' + this.config.theme : '') +
-           (debug ? '' : '&grid=2');
+           (this.config.theme != 'warm' ? '&theme=' + this.config.theme : '');
   }
 
   clearseq(k) {
