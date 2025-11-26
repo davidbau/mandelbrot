@@ -81,6 +81,15 @@ body.starting div#b_0:after { display: flex; position: absolute;
   top: 0; left: 0; width: 100%; height: 100%; align-items: center;
   justify-content: center; content:"Starting..."; color: white;
   z-index: -1; background: rgb(32,16,64); }
+/* Fullscreen mode adjustments */
+:fullscreen { margin: 0; padding: 0; scroll-snap-type: y proximity; overflow-y: scroll; }
+:fullscreen body { margin: 0; padding: 0; }
+:fullscreen #grid { margin: 0; padding: 0; }
+:fullscreen #grid > div { margin: 0; padding: 0; background: transparent; scroll-snap-align: start; scroll-snap-stop: normal; }
+:fullscreen #text { scroll-snap-align: start; }
+:fullscreen canvas { display: block; }
+:fullscreen .zoomnum { bottom: 0; }
+:fullscreen div a div.status { top: auto; bottom: 100%; }
 </style>
 <!-- BEGIN_MP4MUXER_LIBRARY -->
 <!-- mp4-muxer library (tree-shaken, 31151 bytes) -->
@@ -930,17 +939,28 @@ class Config {
   }
 
   initSizes() {
-    this.cssDims = Math.max(32, Math.floor((this.vw - 28) / this.gridcols) - 20);
+    // In fullscreen, use full window dimensions with no margins
+    if (document.fullscreenElement) {
+      const availWidth = window.innerWidth;
+      const availHeight = window.innerHeight;
 
-    // Calculate width and height based on aspect ratio
-    if (this.aspectRatio >= 1.0) {
-      // Wider than tall
-      this.cssDimsWidth = this.cssDims;
-      this.cssDimsHeight = Math.floor(this.cssDims / this.aspectRatio);
+      // Directly set width and height to fill the viewport
+      this.cssDimsWidth = availWidth;
+      this.cssDimsHeight = availHeight;
+      this.cssDims = this.cssDimsWidth;  // For compatibility
     } else {
-      // Taller than wide
-      this.cssDimsHeight = this.cssDims;
-      this.cssDimsWidth = Math.floor(this.cssDims * this.aspectRatio);
+      this.cssDims = Math.max(32, Math.floor((this.vw - 28) / this.gridcols) - 20);
+
+      // Calculate width and height based on aspect ratio
+      if (this.aspectRatio >= 1.0) {
+        // Wider than tall
+        this.cssDimsWidth = this.cssDims;
+        this.cssDimsHeight = Math.floor(this.cssDims / this.aspectRatio);
+      } else {
+        // Taller than wide
+        this.cssDimsHeight = this.cssDims;
+        this.cssDimsWidth = Math.floor(this.cssDims * this.aspectRatio);
+      }
     }
 
     this.dimsWidth = Math.floor(this.cssDimsWidth * this.pixelRatio);
@@ -1482,14 +1502,16 @@ class Grid {
     return state;
   }
 
-  updateLayout(state = null) {
+  updateLayout(state = null, skipInitSizes = false) {
     if (this.currentUpdateProcess) {
       this.currentUpdateProcess.abort();
     }
     if (state === null) {
       state = this.currentGridState();
     }
-    this.config.initSizes();
+    if (!skipInitSizes) {
+      this.config.initSizes();
+    }
 
     // Recreate the grid
     let gridElement = document.getElementById('grid');
@@ -2040,7 +2062,7 @@ class URLHandler {
     }
 
     let url =
-           (zoomFactor != 1.0 ? '&z=' + formatSize(zoomFactor) : '') +
+           (Math.abs(zoomFactor - 1.0) > 0.01 ? '&z=' + formatSize(zoomFactor) : '') +
            aspectRatioParam +
            (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
            (!this.config.enableGPU ? '&gpu=0' : '') +
@@ -3143,7 +3165,12 @@ class OrbitComputer {
   }
 
   displayOrbit(k, orb, cyc, target, title, preserve) {
-    target.setAttribute('title', title);
+    // Don't set title if the zoom number's custom tooltip is showing
+    const zoomnum = target.querySelector('.zoomnum');
+    const isZoomnumHovered = zoomnum && zoomnum.matches(':hover');
+    if (!isZoomnumHovered) {
+      target.setAttribute('title', title);
+    }
     if (!preserve) {
       this.explorer.grid.clearseq(k);
     }
@@ -3258,6 +3285,20 @@ class MandelbrotExplorer {
     this.redrawProcess = new RedrawProcess(this);
     this.movieContainer = document.getElementById('movie');
     this.allViewsCompleted = false;
+
+    // Listen for fullscreen changes
+    document.addEventListener('fullscreenchange', () => this.onFullscreenChange());
+
+    // Clear native tooltip when hovering over zoom numbers to show custom tooltip
+    document.addEventListener('mouseover', (e) => {
+      if (e.target.classList.contains('zoomnum') || e.target.closest('.zoomnum')) {
+        const zoomnum = e.target.classList.contains('zoomnum') ? e.target : e.target.closest('.zoomnum');
+        const gridDiv = zoomnum.closest('#grid > div');
+        if (gridDiv) {
+          gridDiv.setAttribute('title', '');
+        }
+      }
+    });
   }
 
   start() {
@@ -3330,12 +3371,89 @@ class MandelbrotExplorer {
 
   toggleFullscreen() {
     if (!document.fullscreenElement) {
+      // Save pre-fullscreen settings
+      this.preFullscreenGridcols = this.config.gridcols;
+      this.preFullscreenAspectRatio = this.config.aspectRatio;
+
       document.documentElement.requestFullscreen().catch(err => {
         console.log(`Error attempting to enable fullscreen: ${err.message}`);
       });
     } else {
       if (document.exitFullscreen) {
         document.exitFullscreen();
+      }
+    }
+  }
+
+  onFullscreenChange() {
+    if (document.fullscreenElement) {
+      // Entering fullscreen
+      // Only process if grid has views
+      if (!this.grid.views || this.grid.views.length === 0) {
+        return;
+      }
+
+      // Delay to allow browser to fully transition to fullscreen
+      setTimeout(() => {
+        // Calculate fullscreen aspect ratio from actual window dimensions
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const viewportAspectRatio = viewportWidth / viewportHeight;
+
+        const oldFirstsize = this.config.firstsize;
+
+        // Set grid to 1 column and aspect ratio to match viewport
+        this.config.gridcols = 1;
+        this.config.aspectRatio = viewportAspectRatio;
+
+        // Get current state before recalculating sizes
+        const state = this.grid.currentGridState();
+
+        // Call initSizes to recalculate dimensions for fullscreen
+        this.config.initSizes();
+        const newFirstsize = this.config.firstsize;
+
+        // Scale all existing view sizes proportionally
+        const scaleFactor = newFirstsize / oldFirstsize;
+        for (let i = 0; i < state.sizes.length; i++) {
+          state.sizes[i][0] *= scaleFactor;
+        }
+
+        // Skip initSizes in updateLayout since we already called it
+        this.grid.updateLayout(state, true);
+
+        // Only update URL if we have views
+        if (this.grid.views && this.grid.views.length > 0) {
+          this.urlHandler.updateurl();
+        }
+
+        // Scroll to top immediately
+        window.scrollTo(0, 0);
+      }, 100);  // 100ms delay to allow fullscreen transition
+    } else {
+      // Exiting fullscreen - restore pre-fullscreen settings
+      if (this.preFullscreenGridcols !== undefined && this.grid.views && this.grid.views.length > 0) {
+        const oldFirstsize = this.config.firstsize;
+
+        this.config.gridcols = this.preFullscreenGridcols;
+        this.config.aspectRatio = this.preFullscreenAspectRatio;
+
+        // Get current state before recalculating sizes
+        const state = this.grid.currentGridState();
+
+        // Call initSizes to recalculate dimensions
+        this.config.initSizes();
+        const newFirstsize = this.config.firstsize;
+
+        // Scale all existing view sizes proportionally
+        const scaleFactor = newFirstsize / oldFirstsize;
+        for (let i = 0; i < state.sizes.length; i++) {
+          state.sizes[i][0] *= scaleFactor;
+        }
+
+        // Skip initSizes in updateLayout since we already called it
+        this.grid.updateLayout(state, true);
+        this.urlHandler.updateurl();
       }
     }
   }
