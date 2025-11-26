@@ -2382,12 +2382,17 @@ class MovieMode {
 
   preRenderFrames(after) {
     this.frameCanvases = [];
+    this.isPreRendering = true;
     let queueOneFrame = (k, after) => {
       return () => {
+        // Abort if movie mode was stopped
+        if (!this.isPreRendering) {
+          return;
+        }
         let status = document.getElementById('moviescale');
         if (status) {
-          status.textContent =
-            `${MSG.pre_rendering_}${formatScale(3.0 / this.explorer.grid.views[k].sizes[0])}`;
+          const scale = this.explorer.config.firstsize / this.explorer.grid.views[k].sizes[0];
+          status.textContent = `${MSG.pre_rendering_}${formatScale(scale)}`;
         }
         let canvas1 = null;
         let canvas2 = null;
@@ -2440,6 +2445,11 @@ class MovieMode {
     this.isRecording = true;
 
     const animate = () => {
+      // Abort if movie mode was stopped
+      if (!this.isRecording) {
+        return;
+      }
+
       const kk = Math.min(frame, totalFrames) / framesteps;
       this.drawMovieFrame(kk);
 
@@ -2480,13 +2490,26 @@ class MovieMode {
   }
 
   stopMovieAnimation() {
+    this.isPreRendering = false;
+    this.isRecording = false;
     if (this.preRenderTimer) {
       clearTimeout(this.preRenderTimer);
       this.preRenderTimer = null;
     }
     if (this.animationTimer) {
-      clearTimeout(this.animationTimer);
+      cancelAnimationFrame(this.animationTimer);
       this.animationTimer = null;
+    }
+    // Clean up prerendered frame canvases
+    if (this.frameCanvases) {
+      this.frameCanvases = [];
+    }
+    // Clean up captured frames
+    if (this.capturedFrames) {
+      for (let frame of this.capturedFrames) {
+        frame.close();
+      }
+      this.capturedFrames = [];
     }
     this.recordedBlob = null;
   }
@@ -2788,8 +2811,7 @@ class MovieMode {
 
     // Update scale text
     if (!this.recordedBlob) {
-      const currentScale = (3.0 / this.explorer.config.firstsize) *
-          (Math.pow(this.explorer.config.zoomfactor, kk));
+      const currentScale = Math.pow(this.explorer.config.zoomfactor, kk);
       document.getElementById('moviescale').textContent = formatScale(currentScale);
     }
   }
