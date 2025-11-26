@@ -2538,10 +2538,36 @@ class MovieMode {
       statusElement.textContent = '';  // Clear status
       this.updateDownloadLink();
 
+      // Start looping animation
+      this.startLoopAnimation();
+
     } catch (e) {
       console.error('Error encoding video:', e);
       statusElement.textContent = 'Encoding failed: ' + e.message;
     }
+  }
+
+  startLoopAnimation() {
+    const framesteps = 400;  // Same as recording
+    const totalFrames = (this.explorer.grid.views.length - 1) * framesteps;
+    let frame = 0;
+
+    const animate = () => {
+      const kk = Math.min(frame, totalFrames) / framesteps;
+      this.drawMovieFrame(kk);
+
+      frame++;
+
+      // Loop back to start
+      if (frame > totalFrames) {
+        frame = 0;
+      }
+
+      // Continue animation indefinitely
+      this.animationTimer = requestAnimationFrame(() => animate());
+    };
+
+    animate();
   }
 
   updateDownloadLink() {
