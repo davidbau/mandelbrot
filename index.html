@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <title>Mandelbrot Set Fractal Explorer</title>
-<meta name="description" content="Beautiful, fast, and precise exploration of the Mandelbrot Set online. Click to zoom. Hover to see orbits. M makes a smooth movie of your zoom path.">
+<meta name="description" content="Beautiful, fast, and precise exploration of the
+Mandelbrot Set online. Click to zoom. Hover to see orbits. M makes a smooth movie of
+your zoom path.">
 <meta name="viewport" content="width=device-width">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="shortcut icon" type="image/png" href="favicon-128x128.png">
@@ -99,7 +101,9 @@ body.starting div#b_0:after { display: flex; position: absolute;
 :fullscreen { margin: 0; padding: 0; scroll-snap-type: y proximity; overflow-y: scroll; }
 :fullscreen body { margin: 0; padding: 0; }
 :fullscreen #grid { margin: 0; padding: 0; }
-:fullscreen #grid > div { margin: 0; padding: 0; background: transparent; scroll-snap-align: start; scroll-snap-stop: normal; }
+:fullscreen #grid > div {
+  margin: 0; padding: 0; background: transparent;
+  scroll-snap-align: start; scroll-snap-stop: normal; }
 :fullscreen #movie > div { margin: 0; padding: 0; background: black; scroll-snap-align: start; }
 :fullscreen #text { scroll-snap-align: start; }
 :fullscreen canvas { display: block; }
@@ -121,29 +125,51 @@ Mandelbrot Set Fractal Explorer
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Tap">Click</span> to zoom.</b>  <span mobile="">Right-click to save images, <b>M</b> to make and save a movie of your zoom path.</span>
+<b><span mobile="Tap">Click</span> to zoom.</b>
+<span mobile="">Right-click to save images, <b>M</b> to make and save a movie
+of your zoom path.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">complex number</a> <em>c</em>.  Colors show <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterations</a> to divergence; black points <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">converge or cycle</a>.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each
+<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">complex number</a>
+<em>c</em>.  Colors show
+<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterations</a>
+to divergence; black points
+<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">converge or cycle</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Yellow dots show <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbits</a></b>.  Red dots show limit cycles.
+<b>Yellow dots show
+<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbits</a></b>.
+Red dots show limit cycles.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>About iterations.</b> This viewer shows more fractal detail over time by refining iterations to infinity as you explore. The longer you wait, the more detail is shown.
-After thousands or millions of iterations, you can resolve the finest details in the most complex parts of the fractal.
-See information on iterations, progress, and coordinates by <span mobile="tapping">hovering over</a> the yellow zoom number under each window.
-<span mobile="Holding your fingertip">Moving your mouse</span> over fractal content will animate the orbit of <em>z</em> values for each location <em>c</em>, revealing the complex boundary dynamics that have fascinated mathematicians.
+<b>About iterations.</b> This viewer shows more fractal detail over time by
+refining iterations to infinity as you explore. The longer you wait, the more
+detail is shown.
+After thousands or millions of iterations, you can resolve the finest details
+in the most complex parts of the fractal.
+See information on iterations, progress, and coordinates by
+<span mobile="tapping">hovering over</a> the yellow zoom number under each window.
+<span mobile="Holding your fingertip">Moving your mouse</span> over fractal
+content will animate the orbit of <em>z</em> values for each location <em>c</em>,
+revealing the complex boundary dynamics that have fascinated mathematicians.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Exploring a zoom path.</b>
-Each <span mobile="tap">click</span> on the fractal opens a higher zoom level at the selected location, computed on your GPU if available.
-After you zoom beyond trillion-fold magnification, we use a quad-precision perturbation algorithm that resolves fine details to more than 30 digits of accuracy.
-Once you have crafted an interesting path that shows the detail you want, you can <a class="moviemode">create and download your own Mandelbrot deep zoom video</a> or bookmark your URL to save and share your exploration.
-To create high-quality images and videos, this viewer computes subpixels with a <span class="pixelratio">2</span>:1 ratio<span mobile="">, and that can be increased to create more precise displays</span>.
+Each <span mobile="tap">click</span> on the fractal opens a higher zoom level at
+the selected location, computed on your GPU if available.
+After you zoom beyond trillion-fold magnification, we use a quad-precision
+perturbation algorithm that resolves fine details to more than 30 digits of
+accuracy.
+Once you have crafted an interesting path that shows the detail you want, you can
+<a class="moviemode">create and download your own Mandelbrot deep zoom video</a>
+or bookmark your URL to save and share your exploration.
+To create high-quality images and videos, this viewer computes subpixels with a
+<span class="pixelratio">2</span>:1 ratio<span mobile="">, and that can be increased
+to create more precise displays</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -169,418 +195,6 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </div>
 
 <script>
-class Config {
-  // Constants for iteration and convergence
-  static MAX_CHAOTIC_ITERATIONS = 100000;
-
-  // Constants for display and zoom
-  static DEFAULT_ZOOM_FACTOR = 5;
-  static DEFAULT_ASPECT_RATIO = 1.0;
-  static WIDESCREEN_ASPECT_RATIO = 16 / 9;
-  static CENTER_COORDINATE = 0.5;
-
-  // Feigenbaum / Myreberg point (quad-precision real number [high, low])
-  static FEIGENBAUM_POINT = [-1.4011551890920506, 1.196330130384937e-17];
-
-  constructor(stateManager = null) {
-    this.stateManager = stateManager;
-
-    // Initialize viewport width
-    document.body.style.overflowY = 'scroll';
-    const vw = document.documentElement.clientWidth || (window.innerWidth - 20);
-    document.body.style.overflowY = '';
-
-    // Calculate initial values
-    const dgc = Math.min(2, Math.ceil(vw / 501));
-    const pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
-    const mobile = ('ontouchstart' in document.documentElement);
-    const mac = (navigator.platform.indexOf('Mac') === 0);
-
-    // Initialize state if we have a state manager
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({
-        vw,
-        gridcols: dgc,
-        exponent: 2,
-        enableGPU: true,
-        forceBoard: null,
-        firstr: [-0.5, 0],
-        firstj: [0.0, 0],
-        firstsize: 3.0,
-        pixelRatio,
-        zoomfactor: Config.DEFAULT_ZOOM_FACTOR,
-        aspectRatio: Config.DEFAULT_ASPECT_RATIO,
-        theme: 'warm',
-        unknowncolor: '#000',
-        mobile,
-        mac
-      }));
-    }
-
-    // Legacy properties for backward compatibility
-    this.ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
-    this.defineColorThemes();
-  }
-
-  // Property getters/setters that delegate to state
-  get vw() {
-    return this.stateManager ? this.stateManager.getState().config.vw : this._vw || 0;
-  }
-  set vw(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ vw: value }));
-    } else {
-      this._vw = value;
-    }
-  }
-
-  get gridcols() {
-    return this.stateManager ? this.stateManager.getState().config.gridcols : this._gridcols || 1;
-  }
-  set gridcols(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ gridcols: value }));
-    } else {
-      this._gridcols = value;
-    }
-  }
-
-  get exponent() {
-    return this.stateManager ? this.stateManager.getState().config.exponent : this._exponent || 2;
-  }
-  set exponent(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setExponent(value));
-    } else {
-      this._exponent = value;
-    }
-  }
-
-  get enableGPU() {
-    return this.stateManager ? this.stateManager.getState().config.enableGPU : this._enableGPU !== undefined ? this._enableGPU : true;
-  }
-  set enableGPU(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setGPU(value));
-    } else {
-      this._enableGPU = value;
-    }
-  }
-
-  get forceBoard() {
-    return this.stateManager ? this.stateManager.getState().config.forceBoard : this._forceBoard || null;
-  }
-  set forceBoard(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setForceBoard(value));
-    } else {
-      this._forceBoard = value;
-    }
-  }
-
-  get firstr() {
-    return this.stateManager ? this.stateManager.getState().config.firstr : this._firstr || [-0.5, 0];
-  }
-  set firstr(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstr: value }));
-    } else {
-      this._firstr = value;
-    }
-  }
-
-  get firstj() {
-    return this.stateManager ? this.stateManager.getState().config.firstj : this._firstj || [0.0, 0];
-  }
-  set firstj(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstj: value }));
-    } else {
-      this._firstj = value;
-    }
-  }
-
-  get firstsize() {
-    return this.stateManager ? this.stateManager.getState().config.firstsize : this._firstsize || 3.0;
-  }
-  set firstsize(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstsize: value }));
-    } else {
-      this._firstsize = value;
-    }
-  }
-
-  get pixelRatio() {
-    return this.stateManager ? this.stateManager.getState().config.pixelRatio : this._pixelRatio || 2;
-  }
-  set pixelRatio(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setPixelRatio(value));
-    } else {
-      this._pixelRatio = value;
-    }
-  }
-
-  get zoomfactor() {
-    return this.stateManager ? this.stateManager.getState().config.zoomfactor : this._zoomfactor || Config.DEFAULT_ZOOM_FACTOR;
-  }
-  set zoomfactor(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setZoomFactor(value));
-    } else {
-      this._zoomfactor = value;
-    }
-  }
-
-  get aspectRatio() {
-    return this.stateManager ? this.stateManager.getState().config.aspectRatio : this._aspectRatio || Config.DEFAULT_ASPECT_RATIO;
-  }
-  set aspectRatio(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setAspectRatio(value));
-    } else {
-      this._aspectRatio = value;
-    }
-  }
-
-  get theme() {
-    return this.stateManager ? this.stateManager.getState().config.theme : this._theme || 'warm';
-  }
-  set theme(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setTheme(value));
-    } else {
-      this._theme = value;
-    }
-  }
-
-  get unknowncolor() {
-    return this.stateManager ? this.stateManager.getState().config.unknowncolor : this._unknowncolor || '#000';
-  }
-  set unknowncolor(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setUnknownColor(value));
-    } else {
-      this._unknowncolor = value;
-    }
-  }
-
-  get mobile() {
-    return this.stateManager ? this.stateManager.getState().config.mobile : this._mobile || false;
-  }
-  set mobile(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ mobile: value }));
-    } else {
-      this._mobile = value;
-    }
-  }
-
-  get mac() {
-    return this.stateManager ? this.stateManager.getState().config.mac : this._mac || false;
-  }
-  set mac(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ mac: value }));
-    } else {
-      this._mac = value;
-    }
-  }
-
-  // Derived/computed properties
-  get cssDims() {
-    return this.stateManager ? this.stateManager.getState().config.cssDims : this._cssDims || 0;
-  }
-  set cssDims(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDims: value }));
-    } else {
-      this._cssDims = value;
-    }
-  }
-
-  get cssDimsWidth() {
-    return this.stateManager ? this.stateManager.getState().config.cssDimsWidth : this._cssDimsWidth || 0;
-  }
-  set cssDimsWidth(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDimsWidth: value }));
-    } else {
-      this._cssDimsWidth = value;
-    }
-  }
-
-  get cssDimsHeight() {
-    return this.stateManager ? this.stateManager.getState().config.cssDimsHeight : this._cssDimsHeight || 0;
-  }
-  set cssDimsHeight(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDimsHeight: value }));
-    } else {
-      this._cssDimsHeight = value;
-    }
-  }
-
-  get dimsWidth() {
-    return this.stateManager ? this.stateManager.getState().config.dimsWidth : this._dimsWidth || 0;
-  }
-  set dimsWidth(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ dimsWidth: value }));
-    } else {
-      this._dimsWidth = value;
-    }
-  }
-
-  get dimsHeight() {
-    return this.stateManager ? this.stateManager.getState().config.dimsHeight : this._dimsHeight || 0;
-  }
-  set dimsHeight(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ dimsHeight: value }));
-    } else {
-      this._dimsHeight = value;
-    }
-  }
-
-  // Backward compatibility
-  get dims() {
-    return this.dimsWidth;
-  }
-  set dims(value) {
-    this.dimsWidth = value;
-  }
-
-  get dims2() {
-    return this.dimsWidth * this.dimsHeight;
-  }
-  set dims2(value) {
-    // Ignore sets, this is computed
-  }
-
-  defineColorThemes() {
-    this.colorThemes = {
-      warm: (i, frac, fracD, fracL, s) => {
-        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
-        let hue = (Math.log(i + 20) * 200) % 360;
-        let chroma = 100;
-        let light = 15 * frac + 85 * frac ** 5;
-        return hclColor(hue, chroma, light);
-      },
-      iceblue: (i, frac, fracD, fracL, s) => {
-        // Current implementation
-        let ff = Math.pow(frac, 2);
-        let fr = Math.pow(frac, 0.333);
-        let fg = Math.pow(frac, 3);
-        let g = intcolor(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
-        let r = intcolor(Math.min(fr, i * Math.pow(s, 0.22) / 64));
-        let b = intcolor(ff / 3 + 0.667);
-        return `rgb(${r},${g},${b})`;
-      },
-      tiedye: (i, frac, fracD, fracL, s) => {
-        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
-        let hue = (Math.log(i + 20) * 1000) % 360;
-        let chroma = 100;
-        let light = 25 * frac + 75 * frac ** 5;
-        return hclColor(hue, chroma, light);
-      },
-      gray: (i, frac, fracD, fracL, s) => {
-        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
-        let value = intcolor(0.15 + 0.85 * frac ** 5);
-        return `rgb(${value},${value},${value})`;
-      },
-      // Add more color themes here
-    };
-    this.colorThemes.all = Object.keys(this.colorThemes);
-  }
-
-  initSizes() {
-    let cssDims, cssDimsWidth, cssDimsHeight;
-
-    // In fullscreen, use full window dimensions with no margins
-    if (document.fullscreenElement) {
-      const availWidth = window.innerWidth;
-      const availHeight = window.innerHeight;
-
-      // Directly set width and height to fill the viewport
-      cssDimsWidth = availWidth;
-      cssDimsHeight = availHeight;
-      cssDims = cssDimsWidth;  // For compatibility
-    } else {
-      cssDims = Math.max(32, Math.floor((this.vw - 28) / this.gridcols) - 20);
-
-      // Calculate width and height based on aspect ratio
-      if (this.aspectRatio >= 1.0) {
-        // Wider than tall
-        cssDimsWidth = cssDims;
-        cssDimsHeight = Math.floor(cssDims / this.aspectRatio);
-      } else {
-        // Taller than wide
-        cssDimsHeight = cssDims;
-        cssDimsWidth = Math.floor(cssDims * this.aspectRatio);
-      }
-    }
-
-    const dimsWidth = Math.floor(cssDimsWidth * this.pixelRatio);
-    const dimsHeight = Math.floor(cssDimsHeight * this.pixelRatio);
-
-    // Calculate firstsize to ensure we fit width extent of 3 and height extent of 2.5
-    // Width constraint: size must be at least 3.0
-    // Height constraint: size / aspectRatio must be at least 2.5, so size >= 2.5 * aspectRatio
-    const firstsize = Math.max(3.0, 2.5 * this.aspectRatio);
-
-    // Dispatch all updates at once if using state manager
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.initSizes({
-        vw: this.vw,
-        gridcols: this.gridcols,
-        cssDims,
-        cssDimsWidth,
-        cssDimsHeight,
-        dimsWidth,
-        dimsHeight,
-        pixelRatio: this.pixelRatio,
-        firstsize
-      }));
-    } else {
-      // Fallback to direct assignment
-      this._cssDims = cssDims;
-      this._cssDimsWidth = cssDimsWidth;
-      this._cssDimsHeight = cssDimsHeight;
-      this._dimsWidth = dimsWidth;
-      this._dimsHeight = dimsHeight;
-      this._firstsize = firstsize;
-    }
-
-    // Update DOM elements
-    for (const el of document.querySelectorAll('.pixelratio')) {
-      el.innerText = this.pixelRatio;
-    }
-    for (const el of document.querySelectorAll('#text')) {
-      const minHelpWidth = 390;
-      const helpColumns = Math.ceil((minHelpWidth + 36) / (cssDims + 20));
-      // Columns plus margin minus padding
-      el.style.maxWidth = `${(cssDims + 20) * helpColumns - 20 - 16}px`;
-    }
-  }
-
-  updateExponent(newExponent) {
-    if (newExponent < 2) { return; }
-    this.exponent = newExponent;
-    for (const el of document.querySelectorAll('.exponent')) {
-      el.innerText = this.exponent;
-    }
-    // Update default center based on exponent
-    this.firstr = [this.exponent > 2 ? 0.0 : -0.5, 0];
-    this.firstj = [0.0, 0];
-  }
-
-  firststate() {
-    return {sizes:[[this.firstsize, this.firstr, this.firstj]], hidden:[]};
-  }
-}
-
 // Unified State Management System
 // Implements unidirectional data flow: Action → Reducer → State → Observers
 class StateManager {
@@ -613,8 +227,8 @@ class StateManager {
         // Display parameters
         theme: 'warm',            // Color theme
         unknowncolor: '#000',     // Color for uncomputed pixels
-        zoomfactor: Config.DEFAULT_ZOOM_FACTOR,
-        aspectRatio: Config.DEFAULT_ASPECT_RATIO,
+        zoomfactor: 5,            // Default zoom factor
+        aspectRatio: 1.0,         // Default aspect ratio
 
         // Initial view parameters
         firstr: [-0.5, 0],        // Initial center real (quad-double)
@@ -1046,6 +660,442 @@ class StateManager {
     setComputing: (isComputing) => ({ type: 'COMPUTATION_SET_COMPUTING', isComputing }),
     setAllCompleted: (allCompleted) => ({ type: 'COMPUTATION_SET_ALL_COMPLETED', allCompleted })
   };
+}
+
+class Config {
+  // Constants for iteration and convergence
+  static MAX_CHAOTIC_ITERATIONS = 100000;
+
+  // Constants for display and zoom
+  static DEFAULT_ZOOM_FACTOR = 5;
+  static DEFAULT_ASPECT_RATIO = 1.0;
+  static WIDESCREEN_ASPECT_RATIO = 16 / 9;
+  static CENTER_COORDINATE = 0.5;
+
+  // Feigenbaum / Myreberg point (quad-precision real number [high, low])
+  static FEIGENBAUM_POINT = [-1.4011551890920506, 1.196330130384937e-17];
+
+  constructor(stateManager = null) {
+    this.stateManager = stateManager;
+
+    // Initialize viewport width
+    document.body.style.overflowY = 'scroll';
+    const vw = document.documentElement.clientWidth || (window.innerWidth - 20);
+    document.body.style.overflowY = '';
+
+    // Calculate initial values
+    const dgc = Math.min(2, Math.ceil(vw / 501));
+    const pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
+    const mobile = ('ontouchstart' in document.documentElement);
+    const mac = (navigator.platform.indexOf('Mac') === 0);
+
+    // Initialize state if we have a state manager
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({
+        vw,
+        gridcols: dgc,
+        exponent: 2,
+        enableGPU: true,
+        forceBoard: null,
+        firstr: [-0.5, 0],
+        firstj: [0.0, 0],
+        firstsize: 3.0,
+        pixelRatio,
+        zoomfactor: Config.DEFAULT_ZOOM_FACTOR,
+        aspectRatio: Config.DEFAULT_ASPECT_RATIO,
+        theme: 'warm',
+        unknowncolor: '#000',
+        mobile,
+        mac
+      }));
+    }
+
+    // Legacy properties for backward compatibility
+    this.ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
+    this.defineColorThemes();
+  }
+
+  // Property getters/setters that delegate to state
+  get vw() {
+    return this.stateManager ? this.stateManager.getState().config.vw : this._vw || 0;
+  }
+  set vw(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ vw: value }));
+    } else {
+      this._vw = value;
+    }
+  }
+
+  get gridcols() {
+    return this.stateManager ? this.stateManager.getState().config.gridcols : this._gridcols || 1;
+  }
+  set gridcols(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ gridcols: value }));
+    } else {
+      this._gridcols = value;
+    }
+  }
+
+  get exponent() {
+    return this.stateManager ? this.stateManager.getState().config.exponent : this._exponent || 2;
+  }
+  set exponent(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setExponent(value));
+    } else {
+      this._exponent = value;
+    }
+  }
+
+  get enableGPU() {
+    return this.stateManager
+      ? this.stateManager.getState().config.enableGPU
+      : this._enableGPU !== undefined ? this._enableGPU : true;
+  }
+  set enableGPU(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setGPU(value));
+    } else {
+      this._enableGPU = value;
+    }
+  }
+
+  get forceBoard() {
+    return this.stateManager
+      ? this.stateManager.getState().config.forceBoard
+      : this._forceBoard || null;
+  }
+  set forceBoard(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setForceBoard(value));
+    } else {
+      this._forceBoard = value;
+    }
+  }
+
+  get firstr() {
+    return this.stateManager
+      ? this.stateManager.getState().config.firstr
+      : this._firstr || [-0.5, 0];
+  }
+  set firstr(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstr: value }));
+    } else {
+      this._firstr = value;
+    }
+  }
+
+  get firstj() {
+    return this.stateManager
+      ? this.stateManager.getState().config.firstj
+      : this._firstj || [0.0, 0];
+  }
+  set firstj(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstj: value }));
+    } else {
+      this._firstj = value;
+    }
+  }
+
+  get firstsize() {
+    return this.stateManager
+      ? this.stateManager.getState().config.firstsize
+      : this._firstsize || 3.0;
+  }
+  set firstsize(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstsize: value }));
+    } else {
+      this._firstsize = value;
+    }
+  }
+
+  get pixelRatio() {
+    return this.stateManager
+      ? this.stateManager.getState().config.pixelRatio
+      : this._pixelRatio || 2;
+  }
+  set pixelRatio(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setPixelRatio(value));
+    } else {
+      this._pixelRatio = value;
+    }
+  }
+
+  get zoomfactor() {
+    return this.stateManager
+      ? this.stateManager.getState().config.zoomfactor
+      : this._zoomfactor || Config.DEFAULT_ZOOM_FACTOR;
+  }
+  set zoomfactor(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setZoomFactor(value));
+    } else {
+      this._zoomfactor = value;
+    }
+  }
+
+  get aspectRatio() {
+    return this.stateManager
+      ? this.stateManager.getState().config.aspectRatio
+      : this._aspectRatio || Config.DEFAULT_ASPECT_RATIO;
+  }
+  set aspectRatio(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setAspectRatio(value));
+    } else {
+      this._aspectRatio = value;
+    }
+  }
+
+  get theme() {
+    return this.stateManager ? this.stateManager.getState().config.theme : this._theme || 'warm';
+  }
+  set theme(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setTheme(value));
+    } else {
+      this._theme = value;
+    }
+  }
+
+  get unknowncolor() {
+    return this.stateManager
+      ? this.stateManager.getState().config.unknowncolor
+      : this._unknowncolor || '#000';
+  }
+  set unknowncolor(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setUnknownColor(value));
+    } else {
+      this._unknowncolor = value;
+    }
+  }
+
+  get mobile() {
+    return this.stateManager ? this.stateManager.getState().config.mobile : this._mobile || false;
+  }
+  set mobile(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ mobile: value }));
+    } else {
+      this._mobile = value;
+    }
+  }
+
+  get mac() {
+    return this.stateManager ? this.stateManager.getState().config.mac : this._mac || false;
+  }
+  set mac(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ mac: value }));
+    } else {
+      this._mac = value;
+    }
+  }
+
+  // Derived/computed properties
+  get cssDims() {
+    return this.stateManager ? this.stateManager.getState().config.cssDims : this._cssDims || 0;
+  }
+  set cssDims(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDims: value }));
+    } else {
+      this._cssDims = value;
+    }
+  }
+
+  get cssDimsWidth() {
+    return this.stateManager
+      ? this.stateManager.getState().config.cssDimsWidth
+      : this._cssDimsWidth || 0;
+  }
+  set cssDimsWidth(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDimsWidth: value }));
+    } else {
+      this._cssDimsWidth = value;
+    }
+  }
+
+  get cssDimsHeight() {
+    return this.stateManager
+      ? this.stateManager.getState().config.cssDimsHeight
+      : this._cssDimsHeight || 0;
+  }
+  set cssDimsHeight(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDimsHeight: value }));
+    } else {
+      this._cssDimsHeight = value;
+    }
+  }
+
+  get dimsWidth() {
+    return this.stateManager ? this.stateManager.getState().config.dimsWidth : this._dimsWidth || 0;
+  }
+  set dimsWidth(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ dimsWidth: value }));
+    } else {
+      this._dimsWidth = value;
+    }
+  }
+
+  get dimsHeight() {
+    return this.stateManager
+      ? this.stateManager.getState().config.dimsHeight
+      : this._dimsHeight || 0;
+  }
+  set dimsHeight(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ dimsHeight: value }));
+    } else {
+      this._dimsHeight = value;
+    }
+  }
+
+  // Backward compatibility
+  get dims() {
+    return this.dimsWidth;
+  }
+  set dims(value) {
+    this.dimsWidth = value;
+  }
+
+  get dims2() {
+    return this.dimsWidth * this.dimsHeight;
+  }
+  set dims2(value) {
+    // Ignore sets, this is computed
+  }
+
+  defineColorThemes() {
+    this.colorThemes = {
+      warm: (i, frac, fracD, fracL, s) => {
+        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
+        let hue = (Math.log(i + 20) * 200) % 360;
+        let chroma = 100;
+        let light = 15 * frac + 85 * frac ** 5;
+        return hclColor(hue, chroma, light);
+      },
+      iceblue: (i, frac, fracD, fracL, s) => {
+        // Current implementation
+        let ff = Math.pow(frac, 2);
+        let fr = Math.pow(frac, 0.333);
+        let fg = Math.pow(frac, 3);
+        let g = intcolor(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
+        let r = intcolor(Math.min(fr, i * Math.pow(s, 0.22) / 64));
+        let b = intcolor(ff / 3 + 0.667);
+        return `rgb(${r},${g},${b})`;
+      },
+      tiedye: (i, frac, fracD, fracL, s) => {
+        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
+        let hue = (Math.log(i + 20) * 1000) % 360;
+        let chroma = 100;
+        let light = 25 * frac + 75 * frac ** 5;
+        return hclColor(hue, chroma, light);
+      },
+      gray: (i, frac, fracD, fracL, s) => {
+        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
+        let value = intcolor(0.15 + 0.85 * frac ** 5);
+        return `rgb(${value},${value},${value})`;
+      },
+      // Add more color themes here
+    };
+    this.colorThemes.all = Object.keys(this.colorThemes);
+  }
+
+  initSizes() {
+    let cssDims, cssDimsWidth, cssDimsHeight;
+
+    // In fullscreen, use full window dimensions with no margins
+    if (document.fullscreenElement) {
+      const availWidth = window.innerWidth;
+      const availHeight = window.innerHeight;
+
+      // Directly set width and height to fill the viewport
+      cssDimsWidth = availWidth;
+      cssDimsHeight = availHeight;
+      cssDims = cssDimsWidth;  // For compatibility
+    } else {
+      cssDims = Math.max(32, Math.floor((this.vw - 28) / this.gridcols) - 20);
+
+      // Calculate width and height based on aspect ratio
+      if (this.aspectRatio >= 1.0) {
+        // Wider than tall
+        cssDimsWidth = cssDims;
+        cssDimsHeight = Math.floor(cssDims / this.aspectRatio);
+      } else {
+        // Taller than wide
+        cssDimsHeight = cssDims;
+        cssDimsWidth = Math.floor(cssDims * this.aspectRatio);
+      }
+    }
+
+    const dimsWidth = Math.floor(cssDimsWidth * this.pixelRatio);
+    const dimsHeight = Math.floor(cssDimsHeight * this.pixelRatio);
+
+    // Calculate firstsize to ensure we fit width extent of 3 and height extent of 2.5
+    // Width constraint: size must be at least 3.0
+    // Height constraint: size / aspectRatio must be at least 2.5, so size >= 2.5 * aspectRatio
+    const firstsize = Math.max(3.0, 2.5 * this.aspectRatio);
+
+    // Dispatch all updates at once if using state manager
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.initSizes({
+        vw: this.vw,
+        gridcols: this.gridcols,
+        cssDims,
+        cssDimsWidth,
+        cssDimsHeight,
+        dimsWidth,
+        dimsHeight,
+        pixelRatio: this.pixelRatio,
+        firstsize
+      }));
+    } else {
+      // Fallback to direct assignment
+      this._cssDims = cssDims;
+      this._cssDimsWidth = cssDimsWidth;
+      this._cssDimsHeight = cssDimsHeight;
+      this._dimsWidth = dimsWidth;
+      this._dimsHeight = dimsHeight;
+      this._firstsize = firstsize;
+    }
+
+    // Update DOM elements
+    for (const el of document.querySelectorAll('.pixelratio')) {
+      el.innerText = this.pixelRatio;
+    }
+    for (const el of document.querySelectorAll('#text')) {
+      const minHelpWidth = 390;
+      const helpColumns = Math.ceil((minHelpWidth + 36) / (cssDims + 20));
+      // Columns plus margin minus padding
+      el.style.maxWidth = `${(cssDims + 20) * helpColumns - 20 - 16}px`;
+    }
+  }
+
+  updateExponent(newExponent) {
+    if (newExponent < 2) { return; }
+    this.exponent = newExponent;
+    for (const el of document.querySelectorAll('.exponent')) {
+      el.innerText = this.exponent;
+    }
+    // Update default center based on exponent
+    this.firstr = [this.exponent > 2 ? 0.0 : -0.5, 0];
+    this.firstj = [0.0, 0];
+  }
+
+  firststate() {
+    return {sizes:[[this.firstsize, this.firstr, this.firstj]], hidden:[]};
+  }
 }
 
 class View {
@@ -2233,7 +2283,8 @@ class URLHandler {
            (!this.config.enableGPU ? '&gpu=0' : '') +
            (this.config.forceBoard ? `&board=${this.config.forceBoard}` : '') +
            (compactc.length ? `&c=${compactc}` : '') +
-           (this.config.gridcols !== Math.min(2, Math.ceil(this.config.vw / 501)) ? `&grid=${this.config.gridcols}` : '') +
+           (this.config.gridcols !== Math.min(2, Math.ceil(this.config.vw / 501))
+             ? `&grid=${this.config.gridcols}` : '') +
            (state.hidden.length ? `&h=${state.hidden}` : '') +
            (this.config.theme !== 'warm' ? `&theme=${this.config.theme}` : '') +
            (this.config.unknowncolor !== '#000' ? `&unk=${encodeURIComponent(
@@ -2395,7 +2446,6 @@ class EventHandler {
             state.sizes[i][0] *= scaleFactor;
           }
           grid.updateLayout(state);
-          urlHandler.updateurl();
         }
       }],
       ['t', {
@@ -3774,7 +3824,8 @@ class MandelbrotExplorer {
       }, 100);  // 100ms delay to allow fullscreen transition
     } else {
       // Exiting fullscreen - restore pre-fullscreen settings
-      if (this.preFullscreenGridcols !== undefined && this.grid.views && this.grid.views.length > 0) {
+      if (this.preFullscreenGridcols !== undefined && this.grid.views &&
+          this.grid.views.length > 0) {
         const oldFirstsize = this.config.firstsize;
 
         this.config.gridcols = this.preFullscreenGridcols;
@@ -4028,8 +4079,10 @@ class Board {
     this.cc = [];
     this.zz = [];
     this.bb = [];
-    this.hasCheckpoint = new Array(this.config.dims2).fill(false);  // Track if bb checkpoint is valid
-    this.checkpointIter = new Array(this.config.dims2).fill(0);  // Iteration when checkpoint was saved
+    // Track if bb checkpoint is valid
+    this.hasCheckpoint = new Array(this.config.dims2).fill(false);
+    // Iteration when checkpoint was saved
+    this.checkpointIter = new Array(this.config.dims2).fill(0);
   }
 
   serialize() {
@@ -4213,12 +4266,16 @@ class CpuBoard extends Board {
         // Additional checks
         const uniqueSS = new Set(this.ss);
         if (uniqueSS.size !== this.ss.length) {
-          console.warn(`Duplicate entries in ss detected. ss length: ${this.ss.length}, unique entries: ${uniqueSS.size}`);
+          console.warn(
+            `Duplicate entries in ss detected. ss length: ${this.ss.length}, ` +
+            `unique entries: ${uniqueSS.size}`);
         }
 
         const invalidIndexes = this.ss.filter(i => this.nn[i]);
         if (invalidIndexes.length > 0) {
-          console.warn(`Found ${invalidIndexes.length} indexes in ss that are already marked as finished in nn`);
+          console.warn(
+            `Found ${invalidIndexes.length} indexes in ss that are ` +
+            `already marked as finished in nn`);
         }
 
         if (this.ss.length !== this.un + this.ch) {
@@ -4409,8 +4466,10 @@ class PerturbationBoard extends Board {
       ...super.serialize(),
       quadIndexes: this.quadIndexes,
       pertIndexes: this.pertIndexes,
-      zz: this.quadIndexes.flatMap(i => [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2], this.zz[i*4+3]]),
-      bb: this.quadIndexes.flatMap(i => [this.bb[i*4], this.bb[i*4+1], this.bb[i*4+2], this.bb[i*4+3]]),
+      zz: this.quadIndexes.flatMap(i =>
+        [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2], this.zz[i*4+3]]),
+      bb: this.quadIndexes.flatMap(i =>
+        [this.bb[i*4], this.bb[i*4+1], this.bb[i*4+2], this.bb[i*4+3]]),
       pp: this.quadIndexes.map(index => this.pp[index]),
       pertZZ: this.pertIndexes.flatMap(i => [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2]]),
     };
@@ -4680,10 +4739,12 @@ class ReferenceOrbitThreading {
   constructor(epsilon) {
     const floatPrecision = 1e-7;
     const maxCycleLength = 1e5;
-    // epsilon3: as large as possible while keeping single-precision ability to calculate at epsilon precision
+    // epsilon3: as large as possible while keeping single-precision
+    // ability to calculate at epsilon precision
     this.epsilon3 = epsilon * 1e7 / Math.sqrt(maxCycleLength);
     this.bucketSize = 2 * this.epsilon3;
-    this.threadingWindowSize = Math.min(1024, Math.floor(maxCycleLength));  // Small window to limit bucket growth
+    // Small window to limit bucket growth
+    this.threadingWindowSize = Math.min(1024, Math.floor(maxCycleLength));
     this.refThreading = [];  // {next: index, deltaRe: f32, deltaIm: f32}
     this.spatialBuckets = new Map();
     this.minJump = 10;
@@ -4729,7 +4790,9 @@ class ReferenceOrbitThreading {
       const oldIdx = currentIndex - this.threadingWindowSize;
       const oldPt = getPoint(oldIdx);
       if (oldPt) {
-        const oldKey = `${Math.floor(oldPt.re / this.bucketSize)},${Math.floor(oldPt.im / this.bucketSize)}`;
+        const oldKey =
+          `${Math.floor(oldPt.re / this.bucketSize)},` +
+          `${Math.floor(oldPt.im / this.bucketSize)}`;
         const bucket = this.spatialBuckets.get(oldKey);
         if (bucket) {
           const pos = bucket.indexOf(oldIdx);
@@ -4742,7 +4805,8 @@ class ReferenceOrbitThreading {
 }
 
 // Single reference orbit perturbation method.
-// Based on Zhuoran Li's 2021 approach: https://mathr.co.uk/blog/2021-05-14_stretching_deep_zoom.html
+// Based on Zhuoran Li's 2021 approach:
+// https://mathr.co.uk/blog/2021-05-14_stretching_deep_zoom.html
 // Rebasing implementation follows Imagina: https://github.com/ImaginaFractal/Imagina
 class ZhuoranBoard extends Board {
   constructor(k, size, re, im, config, id) {
@@ -4881,7 +4945,9 @@ class ZhuoranBoard extends Board {
           // Note: refIter was NOT incremented (returned before increment)
           // dz corresponds to refIter+1
           const nextRefIter = this.refIter[index] + 1;
-          const ref = nextRefIter < this.refOrbit.length ? this.refOrbit[nextRefIter] : this.refOrbit[this.refOrbit.length - 1];
+          const ref = nextRefIter < this.refOrbit.length
+            ? this.refOrbit[nextRefIter]
+            : this.refOrbit[this.refOrbit.length - 1];
           const refR = ref ? (ref[0] + ref[1]) : 0;
           const refI = ref ? (ref[2] + ref[3]) : 0;
           changes.vv.push({
@@ -5004,7 +5070,9 @@ class ZhuoranBoard extends Board {
         // (don't return, fall through to normal iteration code below)
       } else {
         // This shouldn't happen with proper reference orbit extension
-        console.warn(`Pixel ${index} needs refIter ${refIter} but orbit length is ${this.refOrbit.length}`);
+        console.warn(
+          `Pixel ${index} needs refIter ${refIter} but orbit length ` +
+          `is ${this.refOrbit.length}`);
         return 1;  // Mark as diverged only if unexpected
       }
     }
@@ -5087,8 +5155,10 @@ class ZhuoranBoard extends Board {
     this.dz[index2] = newDr;
     this.dz[index2 + 1] = newDi;
     // Now check for divergence with the updated values
-    // IMPORTANT: The new z value is refOrbit[refIter+1] + newDz, not refOrbit[refIter] + newDz!
-    // We used refOrbit[refIter] to COMPUTE newDz, but the result corresponds to the NEXT reference iteration
+    // IMPORTANT: The new z value is refOrbit[refIter+1] + newDz,
+    // not refOrbit[refIter] + newDz!
+    // We used refOrbit[refIter] to COMPUTE newDz, but the result
+    // corresponds to the NEXT reference iteration
     const nextRefIter = refIter + 1;
     if (nextRefIter >= this.refOrbit.length) {
       // This shouldn't happen because we extend the reference orbit beforehand
@@ -5111,7 +5181,8 @@ class ZhuoranBoard extends Board {
     const justUpdatedCheckpoint = (fibonacciPeriod(this.it) == 1);
     if (justUpdatedCheckpoint) {
       // Store dz (perturbation) and which reference iteration we're at
-      // This allows precise difference computation: (ref[current] - ref[checkpoint]) + (dz[current] - dz[checkpoint])
+      // This allows precise difference computation:
+      // (ref[current] - ref[checkpoint]) + (dz[current] - dz[checkpoint])
       // TESTING: Use Math.fround to simulate float32 precision like GPU
       this.bb[index2] = Math.fround(dr);  // dz real at checkpoint (BEFORE iteration)
       this.bb[index2 + 1] = Math.fround(di);  // dz imag at checkpoint
@@ -5131,8 +5202,10 @@ class ZhuoranBoard extends Board {
         const checkpoint_dr = this.bb[index2];
         const checkpoint_di = this.bb[index2 + 1];
 
-        // Compute Chebyshev distance (L-infinity norm) between current INPUT dz and checkpoint dz
-        // Both are at the same refIter position, so we're comparing the same point in the orbit cycle
+        // Compute Chebyshev distance (L-infinity norm) between current
+        // INPUT dz and checkpoint dz
+        // Both are at the same refIter position, so we're comparing
+        // the same point in the orbit cycle
         // TESTING: Use Math.fround to simulate float32 precision like GPU
         const dzDiffR = Math.fround(Math.fround(dr) - Math.fround(checkpoint_dr));
         const dzDiffI = Math.fround(Math.fround(di) - Math.fround(checkpoint_di));
@@ -5181,7 +5254,8 @@ class ZhuoranBoard extends Board {
 
               if (db <= this.epsilon2) {
                 if (!this.pp[index]) {
-                  this.pp[index] = this.it - 1;  // ZhuoranBoard: -1 to account for checkpoint timing
+                  // ZhuoranBoard: -1 to account for checkpoint timing
+                  this.pp[index] = this.it - 1;
                 }
                 if (db <= this.epsilon) {
                   return -1;  // Converged via threading!
@@ -5192,8 +5266,10 @@ class ZhuoranBoard extends Board {
           }
         }
 
-        // FALLBACK: If thread-following didn't help, use absolute position comparison
-        // This handles orbits that never rebase (staying close to reference but never triggering rebase)
+        // FALLBACK: If thread-following didn't help, use absolute
+        // position comparison
+        // This handles orbits that never rebase (staying close to
+        // reference but never triggering rebase)
         const checkpoint_dr = this.bb[index2];
         const checkpoint_di = this.bb[index2 + 1];
 
@@ -5364,7 +5440,10 @@ class GpuBaseBoard extends Board {
       console.error(`Board ${this.id}: WebGPU initialization failed:`, error.message || error);
       // Check if this is a buffer size error
       if (error.message && error.message.includes('exceeds WebGPU safe limit')) {
-        console.warn(`Board ${this.id}: Dimensions too large for GPU (${this.config.dimsWidth}x${this.config.dimsHeight}). This board will NOT compute any pixels!`);
+        console.warn(
+          `Board ${this.id}: Dimensions too large for GPU ` +
+          `(${this.config.dimsWidth}x${this.config.dimsHeight}). ` +
+          `This board will NOT compute any pixels!`);
       }
       return false;
     }
@@ -5443,7 +5522,9 @@ class GpuBaseBoard extends Board {
       const device = await adapter.requestDevice({
         requiredLimits: Object.keys(requiredLimits).length > 0 ? requiredLimits : undefined
       });
-      const limit = Math.min(device.limits.maxBufferSize, device.limits.maxStorageBufferBindingSize);
+      const limit = Math.min(
+        device.limits.maxBufferSize,
+        device.limits.maxStorageBufferBindingSize);
       GpuBaseBoard.cachedMaxBufferSize = Math.floor(limit * 0.9);  // 90% for safety
       return GpuBaseBoard.cachedMaxBufferSize;
     } catch (e) {
@@ -5531,11 +5612,16 @@ class GpuBoard extends GpuBaseBoard {
 
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> iterations: array<u32>;
-      @group(0) @binding(2) var<storage, read_write> z_values: array<f32>;  // [zr0, zi0, zr1, zi1, ...]
-      @group(0) @binding(3) var<storage, read_write> status: array<u32>;    // 0=computing, 1=diverged, 2=converged
-      @group(0) @binding(4) var<storage, read> active_pixels: array<u32>;   // Sparse list of active pixel indices
-      @group(0) @binding(5) var<storage, read_write> base_values: array<f32>;  // base = checkpoint z for period detection
-      @group(0) @binding(6) var<storage, read_write> period: array<u32>;   // p = iter when convergence first detected
+      // [zr0, zi0, zr1, zi1, ...]
+      @group(0) @binding(2) var<storage, read_write> z_values: array<f32>;
+      // 0=computing, 1=diverged, 2=converged
+      @group(0) @binding(3) var<storage, read_write> status: array<u32>;
+      // Sparse list of active pixel indices
+      @group(0) @binding(4) var<storage, read> active_pixels: array<u32>;
+      // base = checkpoint z for period detection
+      @group(0) @binding(5) var<storage, read_write> base_values: array<f32>;
+      // p = iter when convergence first detected
+      @group(0) @binding(6) var<storage, read_write> period: array<u32>;
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // 2D dispatch: calculate linear index from 2D coordinates
@@ -5657,11 +5743,16 @@ class GpuBoard extends GpuBaseBoard {
     const largestBufferSize = dims2 * 2 * 4;  // zValues or baseValues buffer (8 bytes/pixel)
 
     if (largestBufferSize > maxBufferSize) {
-      throw new Error(`Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) exceeds WebGPU limit (${(maxBufferSize / (1024 * 1024)).toFixed(1)} MB). Board ${this.config.dimsWidth}x${this.config.dimsHeight} is too large for GPU acceleration.`);
+      throw new Error(
+        `Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) ` +
+        `exceeds WebGPU limit (${(maxBufferSize / (1024 * 1024)).toFixed(1)} MB). ` +
+        `Board ${this.config.dimsWidth}x${this.config.dimsHeight} is too large ` +
+        `for GPU acceleration.`);
     }
 
     // Uniform buffer for shader parameters
-    // struct Params { 12 base fields + 8 checkpoint offsets } = 20 u32s = 80 bytes, rounded to 128 for alignment
+    // struct Params { 12 base fields + 8 checkpoint offsets } = 20 u32s =
+    // 80 bytes, rounded to 128 for alignment
     this.buffers.params = this.device.createBuffer({
       size: 128,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -5902,8 +5993,10 @@ class GpuBoard extends GpuBaseBoard {
     passEncoder.end();
 
     // Batch all buffer copies into single command encoder for efficiency
-    commandEncoder.copyBufferToBuffer(this.buffers.iterations, 0, this.buffers.stagingIterations, 0, dims2 * 4);
-    commandEncoder.copyBufferToBuffer(this.buffers.status, 0, this.buffers.stagingStatus, 0, dims2 * 4);
+    commandEncoder.copyBufferToBuffer(
+      this.buffers.iterations, 0, this.buffers.stagingIterations, 0, dims2 * 4);
+    commandEncoder.copyBufferToBuffer(
+      this.buffers.status, 0, this.buffers.stagingStatus, 0, dims2 * 4);
 
     // Submit compute + buffer copies in single batch
     this.device.queue.submit([commandEncoder.finish()]);
@@ -5965,8 +6058,10 @@ class GpuBoard extends GpuBaseBoard {
     if (hasConverged) {
       // Create a new command encoder for heavy buffer readback
       const heavyEncoder = this.device.createCommandEncoder();
-      heavyEncoder.copyBufferToBuffer(this.buffers.zValues, 0, this.buffers.stagingZValues, 0, dims2 * 2 * 4);
-      heavyEncoder.copyBufferToBuffer(this.buffers.period, 0, this.buffers.stagingPeriod, 0, dims2 * 4);
+      heavyEncoder.copyBufferToBuffer(
+        this.buffers.zValues, 0, this.buffers.stagingZValues, 0, dims2 * 2 * 4);
+      heavyEncoder.copyBufferToBuffer(
+        this.buffers.period, 0, this.buffers.stagingPeriod, 0, dims2 * 4);
       this.device.queue.submit([heavyEncoder.finish()]);
       await this.device.queue.onSubmittedWorkDone();
 
@@ -6177,7 +6272,11 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const largestBufferSize = dims2 * 4 * 4;  // dzAndCheckpoint buffer (16 bytes/pixel)
 
     if (largestBufferSize > maxBufferSize) {
-      throw new Error(`Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) exceeds WebGPU limit (${(maxBufferSize / (1024 * 1024)).toFixed(1)} MB). Board ${this.config.dimsWidth}x${this.config.dimsHeight} is too large for GPU acceleration.`);
+      throw new Error(
+        `Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) ` +
+        `exceeds WebGPU limit (${(maxBufferSize / (1024 * 1024)).toFixed(1)} MB). ` +
+        `Board ${this.config.dimsWidth}x${this.config.dimsHeight} is too large ` +
+        `for GPU acceleration.`);
     }
 
     // Storage buffer for iteration counts
@@ -6201,14 +6300,18 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       label: 'Delta C buffer'
     });
 
-    // Storage buffer for dz, checkpoint bb, and threading deltas (packed: 6 f32 per pixel)
+    // Storage buffer for dz, checkpoint bb, and threading deltas
+    // (packed: 6 f32 per pixel)
     this.buffers.dzAndCheckpoint = this.device.createBuffer({
-      size: dims2 * 6 * 4,  // 6 f32 per pixel: dz.x, dz.y, bb.x, bb.y, threaded_delta_re, threaded_delta_im
+      // 6 f32 per pixel: dz.x, dz.y, bb.x, bb.y,
+      // threaded_delta_re, threaded_delta_im
+      size: dims2 * 6 * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'DZ and checkpoint buffer'
     });
 
-    // Storage buffer for refIter, checkpointIter, and next_threaded_ref_iter (3 u32 per pixel)
+    // Storage buffer for refIter, checkpointIter,
+    // and next_threaded_ref_iter (3 u32 per pixel)
     this.buffers.refIterAndCheckpoint = this.device.createBuffer({
       size: dims2 * 3 * 4,  // 3 u32 per pixel: [ref_iter, checkpoint_iter, next_threaded_ref_iter]
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
@@ -6243,7 +6346,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     });
 
     // Initialize buffers with packed data
-    // dzAndCheckpoint: [dz.x, dz.y, bb.x=0, bb.y=0, threaded_delta_re=0, threaded_delta_im=0] per pixel
+    // dzAndCheckpoint: [dz.x, dz.y, bb.x=0, bb.y=0,
+    // threaded_delta_re=0, threaded_delta_im=0] per pixel
     const dzAndCheckpointData = new Float32Array(dims2 * 6);
     for (let i = 0; i < dims2; i++) {
       dzAndCheckpointData[i * 6] = this.dz[i * 2];      // dz.x
@@ -6254,12 +6358,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       dzAndCheckpointData[i * 6 + 5] = 0;  // threaded_delta_im
     }
 
-    // Initialize refIterAndCheckpoint: [ref_iter, checkpoint_iter, next_threaded_ref_iter] per pixel
+    // Initialize refIterAndCheckpoint:
+    // [ref_iter, checkpoint_iter, next_threaded_ref_iter] per pixel
     const refIterAndCheckpointData = new Uint32Array(dims2 * 3);
     for (let i = 0; i < dims2; i++) {
       refIterAndCheckpointData[i * 3] = this.refIter[i];  // ref_iter
-      refIterAndCheckpointData[i * 3 + 1] = 0xFFFFFFFF;  // checkpoint_iter: use sentinel for "no checkpoint yet"
-      refIterAndCheckpointData[i * 3 + 2] = 0xFFFFFFFF;  // next_threaded_ref_iter: sentinel for "no thread yet"
+      // checkpoint_iter: use sentinel for "no checkpoint yet"
+      refIterAndCheckpointData[i * 3 + 1] = 0xFFFFFFFF;
+      // next_threaded_ref_iter: sentinel for "no thread yet"
+      refIterAndCheckpointData[i * 3 + 2] = 0xFFFFFFFF;
     }
 
     // Initialize orbit buffer with initial reference orbit (iter 0 and 1)
@@ -6487,15 +6594,22 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> iterations: array<u32>;
-      @group(0) @binding(2) var<storage, read_write> statusAndPeriod: array<vec2<u32>>;  // [status, pp]
-      @group(0) @binding(3) var<storage, read> dc: array<f32>;              // Delta c (constant)
-      // Note: Using array<f32> for 6-float structure to avoid padding issues
-      // Layout: [dz.x, dz.y, bb.x, bb.y, threaded_delta_re, threaded_delta_im] per pixel
+      // [status, pp]
+      @group(0) @binding(2) var<storage, read_write> statusAndPeriod: array<vec2<u32>>;
+      // Delta c (constant)
+      @group(0) @binding(3) var<storage, read> dc: array<f32>;
+      // Note: Using array<f32> for 6-float structure to avoid
+      // padding issues
+      // Layout: [dz.x, dz.y, bb.x, bb.y, threaded_delta_re,
+      // threaded_delta_im] per pixel
       @group(0) @binding(4) var<storage, read_write> dzAndCheckpoint: array<f32>;
-      // Layout: [ref_iter, checkpoint_iter, next_threaded_ref_iter] per pixel (stride 3)
+      // Layout: [ref_iter, checkpoint_iter, next_threaded_ref_iter]
+      // per pixel (stride 3)
       @group(0) @binding(5) var<storage, read_write> refIterAndCheckpoint: array<u32>;
-      @group(0) @binding(6) var<storage, read> refOrbit: array<f32>;  // Reference orbit [r,i pairs] only
-      @group(0) @binding(7) var<storage, read> threading: array<vec4<f32>>;  // Threading [next, deltaR, deltaI, pad]
+      // Reference orbit [r,i pairs] only
+      @group(0) @binding(6) var<storage, read> refOrbit: array<f32>;
+      // Threading [next, deltaR, deltaI, pad]
+      @group(0) @binding(7) var<storage, read> threading: array<vec4<f32>>;
 
       // Get threading data from separate threading buffer
       // Returns vec3: [next_index_as_f32, deltaRe, deltaIm]
@@ -6716,7 +6830,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             } else {
               // Normal convergence check with threading (high precision)
               // Check at checkpoint or at next threaded position
-              if (ref_iter == ckpt_iter || (next_threaded_ref_iter != 0xFFFFFFFFu && ref_iter == next_threaded_ref_iter)) {
+              if (ref_iter == ckpt_iter ||
+                  (next_threaded_ref_iter != 0xFFFFFFFFu &&
+                   ref_iter == next_threaded_ref_iter)) {
                 let dz_diff_r = old_dzr - bbr;
                 let dz_diff_i = old_dzi - bbi;
                 let total_diff_r = threaded_delta_re + dz_diff_r;
@@ -6734,7 +6850,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
                 }
 
                 // If at threaded position, step forward to next thread
-                if (ref_iter == next_threaded_ref_iter && next_threaded_ref_iter < params.ref_orbit_length) {
+                if (ref_iter == next_threaded_ref_iter &&
+                    next_threaded_ref_iter < params.ref_orbit_length) {
                   let thread = getThread(next_threaded_ref_iter);
                   if (thread.x >= 0.0) {
                     threaded_delta_re += thread.y;
@@ -6816,7 +6933,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
     const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
     // Cap at threading capacity - don't extend beyond this point
-    const targetRefIterations = Math.min(Math.max(currentNeed, threadingBuffer), THREADING_CAPACITY);
+    const targetRefIterations = Math.min(
+      Math.max(currentNeed, threadingBuffer),
+      THREADING_CAPACITY
+    );
     while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
       this.extendReferenceOrbit();
     }
@@ -6834,7 +6954,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Resize refOrbit buffer if needed (2 floats per iter)
     const requiredOrbitSize = totalIters * 2 * 4;
     const allocOrbitSize = Math.max(requiredOrbitSize * 2, 1024);
-    if (this.buffers.refOrbit.size < requiredOrbitSize && this.buffers.refOrbit.size < allocOrbitSize) {
+    if (this.buffers.refOrbit.size < requiredOrbitSize &&
+        this.buffers.refOrbit.size < allocOrbitSize) {
       // Only resize if we can actually allocate a larger buffer
       // Wait for GPU to finish before destroying buffer
       await this.device.queue.onSubmittedWorkDone();
@@ -6853,7 +6974,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const requiredThreadingSize = totalIters * 4 * 4;
     const maxBufferSize = 128 * 1024 * 1024;
     const allocSize = Math.min(Math.max(requiredThreadingSize * 2, 1024), maxBufferSize);
-    if (this.buffers.threading.size < requiredThreadingSize && this.buffers.threading.size < allocSize) {
+    if (this.buffers.threading.size < requiredThreadingSize &&
+        this.buffers.threading.size < allocSize) {
       // Only resize if we can actually allocate a larger buffer (not already at max cap)
       // Wait for GPU to finish before destroying buffer
       await this.device.queue.onSubmittedWorkDone();
@@ -6953,7 +7075,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
     const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
 
-    // Pack params: dims_width, dims_height, iterations_per_batch, active_count, ref_orbit_length, exponent, workgroups_x, start_iter, checkpoint_count, ckpt0-7, loop params, pixel_size, aspect_ratio, loop deltas
+    // Pack params: dims_width, dims_height, iterations_per_batch, active_count,
+    // ref_orbit_length, exponent, workgroups_x, start_iter, checkpoint_count,
+    // ckpt0-7, loop params, pixel_size, aspect_ratio, loop deltas
     const paramsBuffer = new ArrayBuffer(128);  // Extended for new layout
     const paramsU32 = new Uint32Array(paramsBuffer);
     const paramsF32 = new Float32Array(paramsBuffer);
@@ -6964,7 +7088,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     paramsU32[4] = this.refIterations + 1;  // ref_orbit_length: includes iteration 0
     paramsU32[5] = this.config.exponent || 2;
     paramsU32[6] = workgroupsX * workgroupSize;  // Total threads in X dimension
-    paramsU32[7] = bufferIter;  // start_iter: Starting iteration (what's in the buffer before iter++)
+    // start_iter: Starting iteration (what's in the buffer before iter++)
+    paramsU32[7] = bufferIter;
     paramsU32[8] = checkpointCount;  // Number of checkpoints in this batch
 
     // Pack all 8 checkpoint offsets (fill unused slots with 0)
@@ -7068,7 +7193,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           const dzr = dzAndCheckpointData[i * 6];
           const dzi = dzAndCheckpointData[i * 6 + 1];
 
-          const ref = nextRefIter < this.refOrbit.length ? this.refOrbit[nextRefIter] : this.refOrbit[this.refOrbit.length - 1];
+          const ref = nextRefIter < this.refOrbit.length ?
+            this.refOrbit[nextRefIter] : this.refOrbit[this.refOrbit.length - 1];
           const refR = ref ? (ref[0] + ref[1]) : 0;
           const refI = ref ? (ref[2] + ref[3]) : 0;
 
@@ -7152,14 +7278,17 @@ self.onmessage = async function(e) {
         gpuMaxBufferSize = await GpuBaseBoard.queryMaxBufferSize();
       }
 
-      const forcedBoardType = data.config.forceBoard;  // Explicit board selection via board= parameter
+      // Explicit board selection via board= parameter
+      const forcedBoardType = data.config.forceBoard;
       let board;
       const pixelSize = data.size / data.config.dimsWidth;
       const GpuBoardClass = GpuBaseBoard.getBoardClass(pixelSize);
       const bytesPerPixel = GpuBoardClass.BYTES_PER_PIXEL;
-      const gpuSafe = GpuBaseBoard.isSafeDims(data.config.dimsWidth, data.config.dimsHeight,
-                                              bytesPerPixel,
-                                              gpuMaxBufferSize || GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER);
+      const gpuSafe = GpuBaseBoard.isSafeDims(
+        data.config.dimsWidth, data.config.dimsHeight,
+        bytesPerPixel,
+        gpuMaxBufferSize || GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER
+      );
 
       // Explicit board type selection via board= parameter
       if (forcedBoardType) {
@@ -7174,7 +7303,9 @@ self.onmessage = async function(e) {
             board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
             break;
           case 'perturbation':
-            board = new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            board = new PerturbationBoard(
+              data.k, data.size, data.re, data.im, data.config, data.id
+            );
             break;
           case 'gpu':
             if (webGPUAvailable && gpuSafe) {
@@ -7186,10 +7317,16 @@ self.onmessage = async function(e) {
             break;
           case 'gpuzhuoran':
             if (webGPUAvailable && gpuSafe) {
-              board = new GpuZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+              board = new GpuZhuoranBoard(
+                data.k, data.size, data.re, data.im, data.config, data.id
+              );
             } else {
-              console.warn('GpuZhuoranBoard requested but not available, falling back to ZhuoranBoard');
-              board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+              console.warn(
+                'GpuZhuoranBoard requested but not available, falling back to ZhuoranBoard'
+              );
+              board = new ZhuoranBoard(
+                data.k, data.size, data.re, data.im, data.config, data.id
+              );
             }
             break;
           default:
@@ -7205,8 +7342,13 @@ self.onmessage = async function(e) {
         if (enableGPU && webGPUAvailable && !gpuSafe) {
           const dims2 = data.config.dims2;
           const bufferSizeMB = (dims2 * bytesPerPixel / (1024*1024)).toFixed(0);
-          const limitMB = ((gpuMaxBufferSize || GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER) / (1024*1024)).toFixed(0);
-          console.log(`Board ${data.k}: dims=${data.config.dimsWidth}x${data.config.dimsHeight} too large for GPU (buffer size ${bufferSizeMB} MB > ${limitMB} MB), using CPU`);
+          const limitMB = (
+            (gpuMaxBufferSize || GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER) / (1024*1024)
+          ).toFixed(0);
+          console.log(
+            `Board ${data.k}: dims=${data.config.dimsWidth}x${data.config.dimsHeight} ` +
+            `too large for GPU (buffer size ${bufferSizeMB} MB > ${limitMB} MB), using CPU`
+          );
         }
         // WebGPU disabled or unavailable - use CPU-based boards
         if (pixelSize > 1e-12) {
@@ -7221,7 +7363,12 @@ self.onmessage = async function(e) {
       const re_val = Array.isArray(data.re) ? (data.re[0] + data.re[1]) : data.re;
       const im_val = Array.isArray(data.im) ? (data.im[0] + data.im[1]) : data.im;
       const precision = Math.max(3, Math.min(15, Math.ceil(-Math.log10(pixelSize)) + 2));
-      console.log(`Board ${data.k}: ${board.constructor.name} @ (${re_val.toExponential(precision)}, ${im_val.toExponential(precision)}), dims=${data.config.dimsWidth}x${data.config.dimsHeight}, pixel=${pixelSize.toExponential(3)}`);
+      console.log(
+        `Board ${data.k}: ${board.constructor.name} @ ` +
+        `(${re_val.toExponential(precision)}, ${im_val.toExponential(precision)}), ` +
+        `dims=${data.config.dimsWidth}x${data.config.dimsHeight}, ` +
+        `pixel=${pixelSize.toExponential(3)}`
+      );
 
       // Send board type info once on creation
       self.postMessage({
@@ -7844,29 +7991,52 @@ Explorador de Fractales del Conjunto de Mandelbrot
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Toca">Haz clic</span> para ampliar.</b>  <span mobile="">Haz clic derecho para guardar imágenes, <b>M</b> para crear y guardar un vídeo de tu recorrido de zoom.</span>
+<b><span mobile="Toca">Haz clic</span> para ampliar.</b>
+<span mobile="">Haz clic derecho para guardar imágenes, <b>M</b> para crear y
+guardar un vídeo de tu recorrido de zoom.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> se itera para cada <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">número complejo</a> <em>c</em>.  Los colores muestran <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iteraciones</a> hasta la divergencia; los puntos negros <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergen o ciclan</a>.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> se itera para cada
+<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">número complejo</a>
+<em>c</em>.  Los colores muestran
+<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iteraciones</a> hasta
+la divergencia; los puntos negros
+<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergen o ciclan</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Los puntos amarillos muestran <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">órbitas</a></b>.  Los puntos rojos muestran ciclos límite.
+<b>Los puntos amarillos muestran
+<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">órbitas</a></b>.
+Los puntos rojos muestran ciclos límite.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Acerca de las iteraciones.</b> Este visor muestra más detalle fractal con el tiempo al refinar las iteraciones hacia el infinito mientras exploras. Cuanto más esperes, más detalle se mostrará.
-Después de miles o millones de iteraciones, puedes resolver los detalles más finos en las partes más complejas del fractal.
-Ve información sobre iteraciones, progreso y coordenadas <span mobile="tocando">pasando el cursor sobre</span> el número amarillo de zoom bajo cada ventana.
-<span mobile="Manteniendo tu dedo">Mover el ratón</span> sobre el contenido fractal animará la órbita de valores <em>z</em> para cada ubicación <em>c</em>, revelando la compleja dinámica de frontera que ha fascinado a los matemáticos.
+<b>Acerca de las iteraciones.</b> Este visor muestra más detalle fractal con el
+tiempo al refinar las iteraciones hacia el infinito mientras exploras. Cuanto más
+esperes, más detalle se mostrará.
+Después de miles o millones de iteraciones, puedes resolver los detalles más finos
+en las partes más complejas del fractal.
+Ve información sobre iteraciones, progreso y coordenadas
+<span mobile="tocando">pasando el cursor sobre</span> el número amarillo de zoom
+bajo cada ventana.
+<span mobile="Manteniendo tu dedo">Mover el ratón</span> sobre el contenido fractal
+animará la órbita de valores <em>z</em> para cada ubicación <em>c</em>, revelando
+la compleja dinámica de frontera que ha fascinado a los matemáticos.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Explorando una ruta de zoom.</b>
-Cada <span mobile="toque">clic</span> en el fractal abre un nivel de zoom más alto en la ubicación seleccionada, calculado en tu GPU si está disponible.
-Después de ampliar más allá de una magnificación de un billón de veces, usamos un algoritmo de perturbación de precisión cuádruple que resuelve detalles finos con más de 30 dígitos de precisión.
-Una vez que hayas creado una ruta interesante que muestre el detalle que deseas, puedes <a class="moviemode">crear y descargar tu propio vídeo de zoom profundo de Mandelbrot</a> o marcar tu URL para guardar y compartir tu exploración.
-Para crear imágenes y vídeos de alta calidad, este visor calcula subpíxeles con una proporción de <span class="pixelratio">2</span>:1<span mobile="">, y eso puede aumentarse para crear visualizaciones más precisas</span>.
+Cada <span mobile="toque">clic</span> en el fractal abre un nivel de zoom más alto
+en la ubicación seleccionada, calculado en tu GPU si está disponible.
+Después de ampliar más allá de una magnificación de un billón de veces, usamos un
+algoritmo de perturbación de precisión cuádruple que resuelve detalles finos con
+más de 30 dígitos de precisión.
+Una vez que hayas creado una ruta interesante que muestre el detalle que deseas,
+puedes <a class="moviemode">crear y descargar tu propio vídeo de zoom profundo de
+Mandelbrot</a> o marcar tu URL para guardar y compartir tu exploración.
+Para crear imágenes y vídeos de alta calidad, este visor calcula subpíxeles con
+una proporción de <span class="pixelratio">2</span>:1<span mobile="">, y eso puede
+aumentarse para crear visualizaciones más precisas</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -7897,11 +8067,17 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="点击">单击</span>以缩放。</b>  <span mobile="">右键单击以保存图像，按<b>M</b>键创建并保存您的缩放路径视频。</span>
+<b><span mobile="点击">单击</span>以缩放。</b>
+<span mobile="">右键单击以保存图像，按<b>M</b>键创建并保存您的缩放路径
+视频。</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-对每个<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">复数</a> <em>c</em> 迭代 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>。颜色显示到<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">发散的迭代次数</a>；黑色点<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">收敛或循环</a>。
+对每个<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">复数</a>
+<em>c</em> 迭代 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>。
+颜色显示到<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">发散的
+迭代次数</a>；
+黑色点<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">收敛或循环</a>。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -7909,17 +8085,27 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>关于迭代。</b>随着您的探索，此查看器通过将迭代精细化至无穷来显示更多分形细节。等待时间越长，显示的细节越多。
-经过数千或数百万次迭代后，您可以解析分形最复杂部分的最精细细节。
-通过<span mobile="点击">悬停在</span>每个窗口下方的黄色缩放数字上，查看有关迭代、进度和坐标的信息。
-<span mobile="按住手指">移动鼠标</span>到分形内容上将动画显示每个位置 <em>c</em> 的 <em>z</em> 值轨道，揭示令数学家着迷的复杂边界动力学。
+<b>关于迭代。</b>随着您的探索，此查看器通过将迭代精细化至无穷来显示更多
+分形细节。
+等待时间越长，显示的细节越多。
+经过数千或数百万次迭代后，您可以解析分形最复杂部分的最精细
+细节。
+通过<span mobile="点击">悬停在</span>每个窗口下方的黄色缩放数字上，
+查看有关迭代、进度和坐标的信息。
+<span mobile="按住手指">移动鼠标</span>到分形内容上将动画显示每个
+位置 <em>c</em> 的 <em>z</em> 值轨道，揭示令数学家着迷的复杂边界动力学。
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>探索缩放路径。</b>
-分形上的每次<span mobile="点击">单击</span>都会在所选位置打开更高的缩放级别，如果可用，将在您的GPU上计算。
-当您放大超过万亿倍后，我们使用四精度扰动算法，可将精细细节解析到超过30位数字的精度。
-一旦您制作了一条显示所需细节的有趣路径，您可以<a class="moviemode">创建并下载自己的曼德博深度缩放视频</a>，或为您的URL添加书签以保存和分享您的探索。
-为了创建高质量的图像和视频，此查看器以<span class="pixelratio">2</span>:1的比例计算子像素<span mobile="">，并且可以增加该比例以创建更精确的显示</span>。
+分形上的每次<span mobile="点击">单击</span>都会在所选位置打开更高的
+缩放级别，
+如果可用，将在您的GPU上计算。
+当您放大超过万亿倍后，我们使用四精度扰动算法，可将精细细节解析到
+超过30位数字的精度。
+一旦您制作了一条显示所需细节的有趣路径，您可以<a class="moviemode">创建并
+下载自己的曼德博深度缩放视频</a>，或为您的URL添加书签以保存和分享您的探索。
+为了创建高质量的图像和视频，此查看器以<span class="pixelratio">2</span>:1的
+比例计算子像素<span mobile="">，并且可以增加该比例以创建更精确的显示</span>。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -7950,11 +8136,17 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="點擊">點擊</span>以縮放。</b>  <span mobile="">右鍵點擊以儲存圖像，按<b>M</b>鍵創建並儲存您的縮放路徑影片。</span>
+<b><span mobile="點擊">點擊</span>以縮放。</b>
+<span mobile="">右鍵點擊以儲存圖像，按<b>M</b>鍵創建並儲存您的縮放路徑
+影片。</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-對每個<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複數</a> <em>c</em> 迭代 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>。顏色顯示到<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">發散的迭代次數</a>；黑色點<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">收斂或循環</a>。
+對每個<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複數</a>
+<em>c</em> 迭代 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>。
+顏色顯示到<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">發散的
+迭代次數</a>；
+黑色點<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">收斂或循環</a>。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -7962,17 +8154,27 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>關於迭代。</b>隨著您的探索，此檢視器通過將迭代精細化至無窮來顯示更多碎形細節。等待時間越長，顯示的細節越多。
-經過數千或數百萬次迭代後，您可以解析碎形最複雜部分的最精細細節。
-通過<span mobile="點擊">懸停在</span>每個視窗下方的黃色縮放數字上，查看有關迭代、進度和座標的資訊。
-<span mobile="按住手指">移動滑鼠</span>到碎形內容上將動畫顯示每個位置 <em>c</em> 的 <em>z</em> 值軌道，揭示令數學家著迷的複雜邊界動力學。
+<b>關於迭代。</b>隨著您的探索，此檢視器通過將迭代精細化至無窮來顯示
+更多碎形細節。
+等待時間越長，顯示的細節越多。
+經過數千或數百萬次迭代後，您可以解析碎形最複雜部分的最精細
+細節。
+通過<span mobile="點擊">懸停在</span>每個視窗下方的黃色縮放數字上，
+查看有關迭代、進度和座標的資訊。
+<span mobile="按住手指">移動滑鼠</span>到碎形內容上將動畫顯示每個
+位置 <em>c</em> 的 <em>z</em> 值軌道，揭示令數學家著迷的複雜邊界動力學。
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>探索縮放路徑。</b>
-碎形上的每次<span mobile="點擊">點擊</span>都會在所選位置開啟更高的縮放級別，如果可用，將在您的GPU上計算。
-當您放大超過兆倍後，我們使用四精度擾動演算法，可將精細細節解析到超過30位數字的精度。
-一旦您製作了一條顯示所需細節的有趣路徑，您可以<a class="moviemode">創建並下載自己的曼德博深度縮放影片</a>，或為您的URL加入書籤以儲存和分享您的探索。
-為了創建高品質的圖像和影片，此檢視器以<span class="pixelratio">2</span>:1的比例計算子像素<span mobile="">，並且可以增加該比例以創建更精確的顯示</span>。
+碎形上的每次<span mobile="點擊">點擊</span>都會在所選位置開啟更高的
+縮放級別，
+如果可用，將在您的GPU上計算。
+當您放大超過兆倍後，我們使用四精度擾動演算法，可將精細細節解析到
+超過30位數字的精度。
+一旦您製作了一條顯示所需細節的有趣路徑，您可以<a class="moviemode">創建並
+下載自己的曼德博深度縮放影片</a>，或為您的URL加入書籤以儲存和分享您的探索。
+為了創建高品質的圖像和影片，此檢視器以<span class="pixelratio">2</span>:1的
+比例計算子像素<span mobile="">，並且可以增加該比例以創建更精確的顯示</span>。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -8003,29 +8205,51 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="اضغط">انقر</span> للتكبير.</b>  <span mobile="">انقر بزر الماوس الأيمن لحفظ الصور، <b>M</b> لإنشاء وحفظ فيديو لمسار التكبير الخاص بك.</span>
+<b><span mobile="اضغط">انقر</span> للتكبير.</b>
+<span mobile="">انقر بزر الماوس الأيمن لحفظ الصور، <b>M</b> لإنشاء وحفظ
+فيديو لمسار التكبير الخاص بك.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-يتم تكرار <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> لكل <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">عدد مركب</a> <em>c</em>.  تُظهر الألوان <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">التكرارات</a> حتى التباعد؛ النقاط السوداء <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">تتقارب أو تدور</a>.
+يتم تكرار <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> لكل
+<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">عدد مركب</a>
+<em>c</em>.  تُظهر الألوان
+<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">التكرارات</a> حتى
+التباعد؛ النقاط السوداء
+<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">تتقارب أو تدور</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>النقاط الصفراء تُظهر <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">المدارات</a></b>.  النقاط الحمراء تُظهر الدورات الحدية.
+<b>النقاط الصفراء تُظهر
+<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">المدارات</a></b>.
+النقاط الحمراء تُظهر الدورات الحدية.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>حول التكرارات.</b> يُظهر هذا العارض المزيد من تفاصيل الكسيريات بمرور الوقت من خلال تحسين التكرارات إلى ما لا نهاية أثناء استكشافك. كلما انتظرت أكثر، كلما ظهر المزيد من التفاصيل.
-بعد آلاف أو ملايين التكرارات، يمكنك حل أدق التفاصيل في الأجزاء الأكثر تعقيداً من الكسيرية.
-شاهد معلومات حول التكرارات والتقدم والإحداثيات عن طريق <span mobile="الضغط على">تمرير المؤشر فوق</span> رقم التكبير الأصفر أسفل كل نافذة.
-<span mobile="الاحتفاظ بإصبعك">تحريك الماوس</span> فوق محتوى الكسيرية سيُحرك مدار قيم <em>z</em> لكل موقع <em>c</em>، مما يكشف ديناميكيات الحدود المعقدة التي فتنت علماء الرياضيات.
+<b>حول التكرارات.</b> يُظهر هذا العارض المزيد من تفاصيل الكسيريات بمرور
+الوقت من خلال تحسين التكرارات إلى ما لا نهاية أثناء استكشافك. كلما انتظرت
+أكثر، كلما ظهر المزيد من التفاصيل.
+بعد آلاف أو ملايين التكرارات، يمكنك حل أدق التفاصيل في الأجزاء الأكثر
+تعقيداً من الكسيرية.
+شاهد معلومات حول التكرارات والتقدم والإحداثيات عن طريق
+<span mobile="الضغط على">تمرير المؤشر فوق</span> رقم التكبير الأصفر أسفل
+كل نافذة.
+<span mobile="الاحتفاظ بإصبعك">تحريك الماوس</span> فوق محتوى الكسيرية
+سيُحرك مدار قيم <em>z</em> لكل موقع <em>c</em>، مما يكشف ديناميكيات الحدود
+المعقدة التي فتنت علماء الرياضيات.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>استكشاف مسار التكبير.</b>
-كل <span mobile="نقرة">نقرة</span> على الكسيرية تفتح مستوى تكبير أعلى في الموقع المحدد، محسوباً على GPU الخاص بك إن توفر.
-بعد التكبير إلى ما يتجاوز تكبير تريليون ضعف، نستخدم خوارزمية اضطراب رباعية الدقة تحل التفاصيل الدقيقة لأكثر من 30 رقماً من الدقة.
-بمجرد أن تصنع مساراً مثيراً يُظهر التفاصيل التي تريدها، يمكنك <a class="moviemode">إنشاء وتنزيل فيديو تكبير عميق لماندلبروت الخاص بك</a> أو وضع إشارة مرجعية على عنوان URL الخاص بك لحفظ ومشاركة استكشافك.
-لإنشاء صور ومقاطع فيديو عالية الجودة، يحسب هذا العارض البكسلات الفرعية بنسبة <span class="pixelratio">2</span>:1<span mobile="">، ويمكن زيادة ذلك لإنشاء عروض أكثر دقة</span>.
+كل <span mobile="نقرة">نقرة</span> على الكسيرية تفتح مستوى تكبير أعلى في
+الموقع المحدد، محسوباً على GPU الخاص بك إن توفر.
+بعد التكبير إلى ما يتجاوز تكبير تريليون ضعف، نستخدم خوارزمية اضطراب
+رباعية الدقة تحل التفاصيل الدقيقة لأكثر من 30 رقماً من الدقة.
+بمجرد أن تصنع مساراً مثيراً يُظهر التفاصيل التي تريدها، يمكنك
+<a class="moviemode">إنشاء وتنزيل فيديو تكبير عميق لماندلبروت الخاص بك</a>
+أو وضع إشارة مرجعية على عنوان URL الخاص بك لحفظ ومشاركة استكشافك.
+لإنشاء صور ومقاطع فيديو عالية الجودة، يحسب هذا العارض البكسلات الفرعية
+بنسبة <span class="pixelratio">2</span>:1<span mobile="">، ويمكن زيادة ذلك لإنشاء
+عروض أكثر دقة</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -8056,29 +8280,52 @@ Penjelajah Fraktal Himpunan Mandelbrot
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Ketuk">Klik</span> untuk memperbesar.</b>  <span mobile="">Klik kanan untuk menyimpan gambar, <b>M</b> untuk membuat dan menyimpan video jalur zoom Anda.</span>
+<b><span mobile="Ketuk">Klik</span> untuk memperbesar.</b>
+<span mobile="">Klik kanan untuk menyimpan gambar, <b>M</b> untuk membuat dan menyimpan
+video jalur zoom Anda.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> diiterasi untuk setiap <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">bilangan kompleks</a> <em>c</em>.  Warna menunjukkan <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterasi</a> hingga divergensi; titik hitam <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">konvergen atau bersiklus</a>.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> diiterasi untuk setiap
+<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">bilangan kompleks</a>
+<em>c</em>.  Warna menunjukkan
+<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterasi</a> hingga
+divergensi; titik hitam
+<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">konvergen atau bersiklus</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Titik kuning menunjukkan <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbit</a></b>.  Titik merah menunjukkan siklus batas.
+<b>Titik kuning menunjukkan
+<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbit</a></b>.
+Titik merah menunjukkan siklus batas.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Tentang iterasi.</b> Penampil ini menunjukkan lebih banyak detail fraktal seiring waktu dengan menyempurnakan iterasi hingga tak terhingga saat Anda menjelajah. Semakin lama Anda menunggu, semakin banyak detail yang ditampilkan.
-Setelah ribuan atau jutaan iterasi, Anda dapat menyelesaikan detail terbaik di bagian paling kompleks dari fraktal.
-Lihat informasi tentang iterasi, kemajuan, dan koordinat dengan <span mobile="mengetuk">mengarahkan kursor ke</span> angka zoom kuning di bawah setiap jendela.
-<span mobile="Menahan jari Anda">Menggerakkan mouse</span> di atas konten fraktal akan menganimasi orbit nilai <em>z</em> untuk setiap lokasi <em>c</em>, mengungkapkan dinamika batas kompleks yang telah memukau para matematikawan.
+<b>Tentang iterasi.</b> Penampil ini menunjukkan lebih banyak detail fraktal seiring
+waktu dengan menyempurnakan iterasi hingga tak terhingga saat Anda menjelajah.
+Semakin lama Anda menunggu, semakin banyak detail yang ditampilkan.
+Setelah ribuan atau jutaan iterasi, Anda dapat menyelesaikan detail terbaik di bagian
+paling kompleks dari fraktal.
+Lihat informasi tentang iterasi, kemajuan, dan koordinat dengan
+<span mobile="mengetuk">mengarahkan kursor ke</span> angka zoom kuning di bawah
+setiap jendela.
+<span mobile="Menahan jari Anda">Menggerakkan mouse</span> di atas konten fraktal akan
+menganimasi orbit nilai <em>z</em> untuk setiap lokasi <em>c</em>, mengungkapkan
+dinamika batas kompleks yang telah memukau para matematikawan.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Menjelajahi jalur zoom.</b>
-Setiap <span mobile="ketukan">klik</span> pada fraktal membuka level zoom yang lebih tinggi di lokasi yang dipilih, dihitung pada GPU Anda jika tersedia.
-Setelah Anda memperbesar melampaui pembesaran satu triliun kali, kami menggunakan algoritma perturbasi presisi ganda empat yang menyelesaikan detail halus hingga lebih dari 30 digit akurasi.
-Setelah Anda membuat jalur menarik yang menunjukkan detail yang Anda inginkan, Anda dapat <a class="moviemode">membuat dan mengunduh video zoom dalam Mandelbrot Anda sendiri</a> atau menandai URL Anda untuk menyimpan dan membagikan penjelajahan Anda.
-Untuk membuat gambar dan video berkualitas tinggi, penampil ini menghitung subpiksel dengan rasio <span class="pixelratio">2</span>:1<span mobile="">, dan itu dapat ditingkatkan untuk membuat tampilan yang lebih presisi</span>.
+Setiap <span mobile="ketukan">klik</span> pada fraktal membuka level zoom yang lebih
+tinggi di lokasi yang dipilih, dihitung pada GPU Anda jika tersedia.
+Setelah Anda memperbesar melampaui pembesaran satu triliun kali, kami menggunakan
+algoritma perturbasi presisi ganda empat yang menyelesaikan detail halus hingga lebih
+dari 30 digit akurasi.
+Setelah Anda membuat jalur menarik yang menunjukkan detail yang Anda inginkan, Anda
+dapat <a class="moviemode">membuat dan mengunduh video zoom dalam Mandelbrot Anda
+sendiri</a> atau menandai URL Anda untuk menyimpan dan membagikan penjelajahan Anda.
+Untuk membuat gambar dan video berkualitas tinggi, penampil ini menghitung subpiksel
+dengan rasio <span class="pixelratio">2</span>:1<span mobile="">, dan itu dapat
+ditingkatkan untuk membuat tampilan yang lebih presisi</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -8109,29 +8356,52 @@ Explorador de Fractais do Conjunto de Mandelbrot
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Toque">Clique</span> para ampliar.</b>  <span mobile="">Clique com o botão direito para salvar imagens, <b>M</b> para criar e salvar um vídeo do seu caminho de zoom.</span>
+<b><span mobile="Toque">Clique</span> para ampliar.</b>
+<span mobile="">Clique com o botão direito para salvar imagens, <b>M</b> para criar e
+salvar um vídeo do seu caminho de zoom.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> é iterado para cada <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">número complexo</a> <em>c</em>.  As cores mostram <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterações</a> até a divergência; pontos pretos <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergem ou ciclam</a>.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> é iterado para cada
+<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">número complexo</a>
+<em>c</em>.  As cores mostram
+<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterações</a> até a
+divergência; pontos pretos
+<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergem ou ciclam</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Pontos amarelos mostram <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">órbitas</a></b>.  Pontos vermelhos mostram ciclos limite.
+<b>Pontos amarelos mostram
+<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">órbitas</a></b>.
+Pontos vermelhos mostram ciclos limite.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Sobre iterações.</b> Este visualizador mostra mais detalhes fractais ao longo do tempo, refinando iterações ao infinito enquanto você explora. Quanto mais você espera, mais detalhes são mostrados.
-Após milhares ou milhões de iterações, você pode resolver os detalhes mais finos nas partes mais complexas do fractal.
-Veja informações sobre iterações, progresso e coordenadas <span mobile="tocando">passando o mouse sobre</span> o número amarelo de zoom sob cada janela.
-<span mobile="Mantendo seu dedo">Mover o mouse</span> sobre o conteúdo fractal animará a órbita dos valores <em>z</em> para cada localização <em>c</em>, revelando a complexa dinâmica de fronteira que fascinou matemáticos.
+<b>Sobre iterações.</b> Este visualizador mostra mais detalhes fractais ao longo do
+tempo, refinando iterações ao infinito enquanto você explora. Quanto mais você espera,
+mais detalhes são mostrados.
+Após milhares ou milhões de iterações, você pode resolver os detalhes mais finos nas
+partes mais complexas do fractal.
+Veja informações sobre iterações, progresso e coordenadas
+<span mobile="tocando">passando o mouse sobre</span> o número amarelo de zoom sob
+cada janela.
+<span mobile="Mantendo seu dedo">Mover o mouse</span> sobre o conteúdo fractal animará
+a órbita dos valores <em>z</em> para cada localização <em>c</em>, revelando a complexa
+dinâmica de fronteira que fascinou matemáticos.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Explorando um caminho de zoom.</b>
-Cada <span mobile="toque">clique</span> no fractal abre um nível de zoom mais alto no local selecionado, calculado na sua GPU se disponível.
-Após ampliar além de uma magnificação de um trilhão de vezes, usamos um algoritmo de perturbação de precisão quádrupla que resolve detalhes finos com mais de 30 dígitos de precisão.
-Depois de criar um caminho interessante que mostra os detalhes que você deseja, você pode <a class="moviemode">criar e baixar seu próprio vídeo de zoom profundo de Mandelbrot</a> ou marcar sua URL para salvar e compartilhar sua exploração.
-Para criar imagens e vídeos de alta qualidade, este visualizador calcula subpixels com uma proporção de <span class="pixelratio">2</span>:1<span mobile="">, e isso pode ser aumentado para criar exibições mais precisas</span>.
+Cada <span mobile="toque">clique</span> no fractal abre um nível de zoom mais alto no
+local selecionado, calculado na sua GPU se disponível.
+Após ampliar além de uma magnificação de um trilhão de vezes, usamos um algoritmo de
+perturbação de precisão quádrupla que resolve detalhes finos com mais de 30 dígitos
+de precisão.
+Depois de criar um caminho interessante que mostra os detalhes que você deseja, você
+pode <a class="moviemode">criar e baixar seu próprio vídeo de zoom profundo de
+Mandelbrot</a> ou marcar sua URL para salvar e compartilhar sua exploração.
+Para criar imagens e vídeos de alta qualidade, este visualizador calcula subpixels
+com uma proporção de <span class="pixelratio">2</span>:1<span mobile="">, e isso pode
+ser aumentado para criar exibições mais precisas</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -8162,29 +8432,53 @@ Explorateur de Fractales de l'Ensemble de Mandelbrot
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Appuyez">Cliquez</span> pour zoomer.</b>  <span mobile="">Cliquez avec le bouton droit pour enregistrer les images, <b>M</b> pour créer et enregistrer une vidéo de votre parcours de zoom.</span>
+<b><span mobile="Appuyez">Cliquez</span> pour zoomer.</b>
+<span mobile="">Cliquez avec le bouton droit pour enregistrer les images, <b>M</b> pour
+créer et enregistrer une vidéo de votre parcours de zoom.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> est itéré pour chaque <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">nombre complexe</a> <em>c</em>.  Les couleurs montrent les <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">itérations</a> jusqu'à la divergence ; les points noirs <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergent ou cyclent</a>.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> est itéré pour chaque
+<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">nombre complexe</a>
+<em>c</em>.  Les couleurs montrent les
+<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">itérations</a> jusqu'à
+la divergence ; les points noirs
+<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergent ou cyclent</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Les points jaunes montrent les <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbites</a></b>.  Les points rouges montrent les cycles limites.
+<b>Les points jaunes montrent les
+<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbites</a></b>.
+Les points rouges montrent les cycles limites.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>À propos des itérations.</b> Ce visualiseur montre plus de détails fractals au fil du temps en affinant les itérations vers l'infini pendant votre exploration. Plus vous attendez, plus de détails sont affichés.
-Après des milliers ou des millions d'itérations, vous pouvez résoudre les détails les plus fins dans les parties les plus complexes de la fractale.
-Consultez les informations sur les itérations, la progression et les coordonnées en <span mobile="appuyant sur">passant la souris sur</span> le numéro de zoom jaune sous chaque fenêtre.
-<span mobile="En maintenant votre doigt">Déplacer votre souris</span> sur le contenu fractal animera l'orbite des valeurs <em>z</em> pour chaque emplacement <em>c</em>, révélant la dynamique de frontière complexe qui a fasciné les mathématiciens.
+<b>À propos des itérations.</b> Ce visualiseur montre plus de détails fractals au fil
+du temps en affinant les itérations vers l'infini pendant votre exploration. Plus vous
+attendez, plus de détails sont affichés.
+Après des milliers ou des millions d'itérations, vous pouvez résoudre les détails les
+plus fins dans les parties les plus complexes de la fractale.
+Consultez les informations sur les itérations, la progression et les coordonnées en
+<span mobile="appuyant sur">passant la souris sur</span> le numéro de zoom jaune sous
+chaque fenêtre.
+<span mobile="En maintenant votre doigt">Déplacer votre souris</span> sur le contenu
+fractal animera l'orbite des valeurs <em>z</em> pour chaque emplacement <em>c</em>,
+révélant la dynamique de frontière complexe qui a fasciné les mathématiciens.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Explorer un parcours de zoom.</b>
-Chaque <span mobile="appui">clic</span> sur la fractale ouvre un niveau de zoom supérieur à l'emplacement sélectionné, calculé sur votre GPU si disponible.
-Après avoir zoomé au-delà d'un grossissement de mille milliards de fois, nous utilisons un algorithme de perturbation en quadruple précision qui résout les détails fins avec plus de 30 chiffres de précision.
-Une fois que vous avez créé un parcours intéressant qui montre les détails que vous souhaitez, vous pouvez <a class="moviemode">créer et télécharger votre propre vidéo de zoom profond de Mandelbrot</a> ou mettre en signet votre URL pour sauvegarder et partager votre exploration.
-Pour créer des images et des vidéos de haute qualité, ce visualiseur calcule les sous-pixels avec un rapport de <span class="pixelratio">2</span>:1<span mobile="">, et cela peut être augmenté pour créer des affichages plus précis</span>.
+Chaque <span mobile="appui">clic</span> sur la fractale ouvre un niveau de zoom
+supérieur à l'emplacement sélectionné, calculé sur votre GPU si disponible.
+Après avoir zoomé au-delà d'un grossissement de mille milliards de fois, nous utilisons
+un algorithme de perturbation en quadruple précision qui résout les détails fins avec
+plus de 30 chiffres de précision.
+Une fois que vous avez créé un parcours intéressant qui montre les détails que vous
+souhaitez, vous pouvez <a class="moviemode">créer et télécharger votre propre vidéo de
+zoom profond de Mandelbrot</a> ou mettre en signet votre URL pour sauvegarder et
+partager votre exploration.
+Pour créer des images et des vidéos de haute qualité, ce visualiseur calcule les
+sous-pixels avec un rapport de <span class="pixelratio">2</span>:1<span mobile="">, et
+cela peut être augmenté pour créer des affichages plus précis</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -8215,11 +8509,17 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="タップ">クリック</span>してズーム。</b>  <span mobile="">右クリックで画像を保存、<b>M</b>でズームパスの動画を作成・保存できます。</span>
+<b><span mobile="タップ">クリック</span>してズーム。</b>
+<span mobile="">右クリックで画像を保存、<b>M</b>でズームパスの動画を作成・保存
+できます。</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-各<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複素数</a> <em>c</em> に対して <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> が反復されます。色は発散までの<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">反復回数</a>を示し、黒い点は<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">収束または周期的</a>です。
+各<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複素数</a>
+<em>c</em> に対して <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>
+が反復されます。色は発散までの<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">反復回数</a>を
+示し、
+黒い点は<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">収束または周期的</a>です。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -8227,17 +8527,29 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>反復について。</b>このビューアは、探索中に反復を無限大まで精緻化することで、時間とともにより多くのフラクタルの詳細を表示します。待つほど、より多くの詳細が表示されます。
-数千または数百万回の反復の後、フラクタルの最も複雑な部分で最も細かい詳細を解像できます。
-各ウィンドウ下の黄色のズーム番号を<span mobile="タップ">マウスオーバー</span>することで、反復、進行状況、座標に関する情報を確認できます。
-フラクタルコンテンツ上で<span mobile="指を保持">マウスを移動</span>すると、各位置 <em>c</em> の <em>z</em> 値の軌道がアニメーション化され、数学者を魅了してきた複雑な境界ダイナミクスが明らかになります。
+<b>反復について。</b>このビューアは、探索中に反復を無限大まで精緻化することで、
+時間とともにより多くのフラクタルの詳細を表示します。待つほど、より多くの
+詳細が表示されます。
+数千または数百万回の反復の後、フラクタルの最も複雑な部分で最も細かい
+詳細を解像できます。
+各ウィンドウ下の黄色のズーム番号を<span mobile="タップ">マウスオーバー</span>
+することで、反復、進行状況、座標に関する情報を確認できます。
+フラクタルコンテンツ上で<span mobile="指を保持">マウスを移動</span>すると、
+各位置 <em>c</em> の <em>z</em> 値の軌道がアニメーション化され、数学者を
+魅了してきた複雑な境界ダイナミクスが明らかになります。
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>ズームパスの探索。</b>
-フラクタル上の各<span mobile="タップ">クリック</span>は、選択した場所でより高いズームレベルを開き、可能であればGPU上で計算されます。
-1兆倍を超える倍率までズームすると、30桁以上の精度で細かい詳細を解決する4倍精度摂動アルゴリズムを使用します。
-必要な詳細を示す興味深いパスを作成したら、<a class="moviemode">独自のマンデルブロディープズーム動画を作成してダウンロード</a>したり、URLをブックマークして探索を保存・共有したりできます。
-高品質の画像と動画を作成するために、このビューアは<span class="pixelratio">2</span>:1の比率でサブピクセルを計算し<span mobile="">、より正確な表示を作成するためにこれを増やすことができます</span>。
+フラクタル上の各<span mobile="タップ">クリック</span>は、選択した場所で
+より高いズームレベルを開き、可能であればGPU上で計算されます。
+1兆倍を超える倍率までズームすると、30桁以上の精度で細かい詳細を解決する
+4倍精度摂動アルゴリズムを使用します。
+必要な詳細を示す興味深いパスを作成したら、<a class="moviemode">独自の
+マンデルブロディープズーム動画を作成してダウンロード</a>したり、URLを
+ブックマークして探索を保存・共有したりできます。
+高品質の画像と動画を作成するために、このビューアは
+<span class="pixelratio">2</span>:1の比率でサブピクセルを計算し<span mobile="">、
+より正確な表示を作成するためにこれを増やすことができます</span>。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -8268,29 +8580,52 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Нажмите">Щелкните</span>, чтобы увеличить.</b>  <span mobile="">Щелкните правой кнопкой мыши, чтобы сохранить изображения, <b>M</b>, чтобы создать и сохранить видео вашего пути увеличения.</span>
+<b><span mobile="Нажмите">Щелкните</span>, чтобы увеличить.</b>
+<span mobile="">Щелкните правой кнопкой мыши, чтобы сохранить изображения,
+<b>M</b>, чтобы создать и сохранить видео вашего пути увеличения.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> итерируется для каждого <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">комплексного числа</a> <em>c</em>.  Цвета показывают <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">итерации</a> до расхождения; черные точки <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">сходятся или циклируются</a>.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> итерируется для
+каждого <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">комплексного числа</a> <em>c</em>.  Цвета показывают
+<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">итерации</a> до
+расхождения; черные точки
+<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">сходятся или циклируются</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Желтые точки показывают <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">орбиты</a></b>.  Красные точки показывают предельные циклы.
+<b>Желтые точки показывают
+<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">орбиты</a></b>. Красные точки показывают предельные циклы.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Об итерациях.</b> Этот просмотрщик показывает больше деталей фракталов с течением времени, уточняя итерации до бесконечности по мере вашего исследования. Чем дольше вы ждете, тем больше деталей отображается.
-После тысяч или миллионов итераций вы можете разрешить мельчайшие детали в самых сложных частях фрактала.
-Просмотрите информацию об итерациях, прогрессе и координатах, <span mobile="нажав на">наведя курсор на</span> желтый номер увеличения под каждым окном.
-<span mobile="Удерживая палец">Перемещение мыши</span> над фрактальным содержимым анимирует орбиту значений <em>z</em> для каждого местоположения <em>c</em>, раскрывая сложную динамику границ, которая восхищала математиков.
+<b>Об итерациях.</b> Этот просмотрщик показывает больше деталей фракталов с
+течением времени, уточняя итерации до бесконечности по мере вашего исследования.
+Чем дольше вы ждете, тем больше деталей отображается.
+После тысяч или миллионов итераций вы можете разрешить мельчайшие детали в
+самых сложных частях фрактала.
+Просмотрите информацию об итерациях, прогрессе и координатах,
+<span mobile="нажав на">наведя курсор на</span> желтый номер увеличения под
+каждым окном.
+<span mobile="Удерживая палец">Перемещение мыши</span> над фрактальным
+содержимым анимирует орбиту значений <em>z</em> для каждого местоположения
+<em>c</em>, раскрывая сложную динамику границ, которая восхищала математиков.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Исследование пути увеличения.</b>
-Каждый <span mobile="нажатие">щелчок</span> на фрактале открывает более высокий уровень увеличения в выбранном месте, вычисляемый на вашем GPU, если доступно.
-После увеличения более чем в триллион раз мы используем алгоритм возмущения с четверной точностью, который разрешает мелкие детали с точностью более 30 цифр.
-Как только вы создадите интересный путь, показывающий нужные вам детали, вы можете <a class="moviemode">создать и загрузить собственное видео глубокого увеличения Мандельброта</a> или добавить закладку на ваш URL, чтобы сохранить и поделиться своим исследованием.
-Для создания высококачественных изображений и видео этот просмотрщик вычисляет субпиксели с соотношением <span class="pixelratio">2</span>:1<span mobile="">, и это может быть увеличено для создания более точных дисплеев</span>.
+Каждый <span mobile="нажатие">щелчок</span> на фрактале открывает более
+высокий уровень увеличения в выбранном месте, вычисляемый на вашем GPU, если
+доступно.
+После увеличения более чем в триллион раз мы используем алгоритм возмущения
+с четверной точностью, который разрешает мелкие детали с точностью более
+30 цифр.
+Как только вы создадите интересный путь, показывающий нужные вам детали, вы
+можете <a class="moviemode">создать и загрузить собственное видео глубокого
+увеличения Мандельброта</a> или добавить закладку на ваш URL, чтобы сохранить
+и поделиться своим исследованием.
+Для создания высококачественных изображений и видео этот просмотрщик
+вычисляет субпиксели с соотношением <span class="pixelratio">2</span>:1<span mobile="">, и это может быть увеличено для создания более точных
+дисплеев</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -8303,8 +8638,10 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <b>T</b> меняет цветовую тему;
 <b>U</b> выделяет незавершенные пиксели;
 <b mac="&#x23CE;">Enter</b> переключает полноэкранный режим;
-<b>X</b> увеличивает, а <b>Z</b> уменьшает показатель степени <em>z</em>;
-<b>F</b> увеличивает, а <b>D</b> уменьшает соотношение пикселей;
+<b>X</b> увеличивает, а <b>Z</b> уменьшает показатель
+степени <em>z</em>;
+<b>F</b> увеличивает, а <b>D</b> уменьшает соотношение
+пикселей;
 <b>A</b> переключает соотношение сторон;
 <b>M</b> создает видео, следующее вашему пути;
 <nobr><b>?</b> показывает эту справку.</nobr></p>
@@ -8321,29 +8658,53 @@ Mandelbrot-Menge Fraktal-Explorer
 </h1>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Tippen">Klicken</span> Sie zum Vergrößern.</b>  <span mobile="">Rechtsklick zum Speichern von Bildern, <b>M</b> zum Erstellen und Speichern eines Videos Ihres Zoom-Pfads.</span>
+<b><span mobile="Tippen">Klicken</span> Sie zum Vergrößern.</b>
+<span mobile="">Rechtsklick zum Speichern von Bildern, <b>M</b> zum Erstellen und
+Speichern eines Videos Ihres Zoom-Pfads.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> wird für jede <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">komplexe Zahl</a> <em>c</em> iteriert.  Farben zeigen <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">Iterationen</a> bis zur Divergenz; schwarze Punkte <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">konvergieren oder zyklieren</a>.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> wird für jede
+<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">komplexe Zahl</a>
+<em>c</em> iteriert.  Farben zeigen
+<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">Iterationen</a> bis zur
+Divergenz; schwarze Punkte
+<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">konvergieren oder zyklieren</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Gelbe Punkte zeigen <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">Bahnen</a></b>.  Rote Punkte zeigen Grenzzyklen.
+<b>Gelbe Punkte zeigen
+<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">Bahnen</a></b>.
+Rote Punkte zeigen Grenzzyklen.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Über Iterationen.</b> Dieser Viewer zeigt im Laufe der Zeit mehr fraktale Details, indem er die Iterationen während Ihrer Erkundung gegen unendlich verfeinert. Je länger Sie warten, desto mehr Details werden angezeigt.
-Nach Tausenden oder Millionen von Iterationen können Sie die feinsten Details in den komplexesten Teilen des Fraktals auflösen.
-Sehen Sie Informationen zu Iterationen, Fortschritt und Koordinaten, indem Sie <span mobile="tippen">mit der Maus über</span> die gelbe Zoom-Nummer unter jedem Fenster fahren.
-<span mobile="Halten Sie Ihren Finger">Bewegen Sie Ihre Maus</span> über fraktale Inhalte, um die Bahn der <em>z</em>-Werte für jeden Ort <em>c</em> zu animieren und die komplexe Randdynamik zu enthüllen, die Mathematiker fasziniert hat.
+<b>Über Iterationen.</b> Dieser Viewer zeigt im Laufe der Zeit mehr fraktale Details,
+indem er die Iterationen während Ihrer Erkundung gegen unendlich verfeinert. Je länger
+Sie warten, desto mehr Details werden angezeigt.
+Nach Tausenden oder Millionen von Iterationen können Sie die feinsten Details in den
+komplexesten Teilen des Fraktals auflösen.
+Sehen Sie Informationen zu Iterationen, Fortschritt und Koordinaten, indem Sie
+<span mobile="tippen">mit der Maus über</span> die gelbe Zoom-Nummer unter jedem
+Fenster fahren.
+<span mobile="Halten Sie Ihren Finger">Bewegen Sie Ihre Maus</span> über fraktale
+Inhalte, um die Bahn der <em>z</em>-Werte für jeden Ort <em>c</em> zu animieren und
+die komplexe Randdynamik zu enthüllen, die Mathematiker fasziniert hat.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Einen Zoom-Pfad erkunden.</b>
-Jeder <span mobile="Tipp">Klick</span> auf das Fraktal öffnet eine höhere Zoomstufe an der ausgewählten Stelle, berechnet auf Ihrer GPU, falls verfügbar.
-Nachdem Sie über eine billionenfache Vergrößerung hinaus gezoomt haben, verwenden wir einen Störungsalgorithmus mit vierfacher Genauigkeit, der feine Details mit mehr als 30 Ziffern Genauigkeit auflöst.
-Sobald Sie einen interessanten Pfad erstellt haben, der die gewünschten Details zeigt, können Sie <a class="moviemode">Ihr eigenes Mandelbrot-Deep-Zoom-Video erstellen und herunterladen</a> oder Ihre URL als Lesezeichen setzen, um Ihre Erkundung zu speichern und zu teilen.
-Um qualitativ hochwertige Bilder und Videos zu erstellen, berechnet dieser Viewer Subpixel mit einem Verhältnis von <span class="pixelratio">2</span>:1<span mobile="">, und dies kann erhöht werden, um präzisere Anzeigen zu erstellen</span>.
+Jeder <span mobile="Tipp">Klick</span> auf das Fraktal öffnet eine höhere Zoomstufe
+an der ausgewählten Stelle, berechnet auf Ihrer GPU, falls verfügbar.
+Nachdem Sie über eine billionenfache Vergrößerung hinaus gezoomt haben, verwenden wir
+einen Störungsalgorithmus mit vierfacher Genauigkeit, der feine Details mit mehr als
+30 Ziffern Genauigkeit auflöst.
+Sobald Sie einen interessanten Pfad erstellt haben, der die gewünschten Details zeigt,
+können Sie <a class="moviemode">Ihr eigenes Mandelbrot-Deep-Zoom-Video erstellen und
+herunterladen</a> oder Ihre URL als Lesezeichen setzen, um Ihre Erkundung zu speichern
+und zu teilen.
+Um qualitativ hochwertige Bilder und Videos zu erstellen, berechnet dieser Viewer
+Subpixel mit einem Verhältnis von <span class="pixelratio">2</span>:1<span mobile="">,
+und dies kann erhöht werden, um präzisere Anzeigen zu erstellen</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
