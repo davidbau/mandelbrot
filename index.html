@@ -179,7 +179,8 @@ class Config {
     this.gridcols = this.dgc;
     this.exponent = 2;
     this.enableGPU = true;
-    this.forceBoard = null;  // Explicit board type: 'cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'
+    // Explicit board type: 'cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'
+    this.forceBoard = null;
     this.firstr = [-0.5, 0];
     this.firstj = [0.0, 0];
     this.firstsize = 3.0;
@@ -197,7 +198,7 @@ class Config {
     this.theme = 'warm';
     this.unknowncolor = "#000";
     this.mobile = ('ontouchstart' in document.documentElement);
-    this.mac = (navigator.platform.indexOf('Mac') == 0);
+    this.mac = (navigator.platform.indexOf('Mac') === 0);
     this.defineColorThemes();
   }
 
@@ -271,21 +272,21 @@ class Config {
     // Width constraint: size must be at least 3.0
     // Height constraint: size / aspectRatio must be at least 2.5, so size >= 2.5 * aspectRatio
     this.firstsize = Math.max(3.0, 2.5 * this.aspectRatio);
-    for (let el of document.getElementsByClassName('pixelratio')) {
+    for (const el of document.querySelectorAll('.pixelratio')) {
       el.innerText = this.pixelRatio;
     }
-    for (let el of document.querySelectorAll('#text')) {
+    for (const el of document.querySelectorAll('#text')) {
       const minHelpWidth = 390;
       const helpColumns = Math.ceil((minHelpWidth + 36) / (this.cssDims + 20));
       // Columns plus margin minus padding
-      el.style.maxWidth = ((this.cssDims + 20) * helpColumns - 20 - 16) + 'px';
+      el.style.maxWidth = `${(this.cssDims + 20) * helpColumns - 20 - 16}px`;
     }
   }
 
   updateExponent(newExponent) {
     if (newExponent < 2) { return; }
     this.exponent = newExponent;
-    for (let el of document.getElementsByClassName('exponent')) {
+    for (const el of document.querySelectorAll('.exponent')) {
       el.innerText = this.exponent;
     }
     // Update default center based on exponent
@@ -484,7 +485,8 @@ class View {
         const parentTop = parentCenter[1][0] + (parentSize / this.config.aspectRatio) / 2;
 
         const sx = ((childLeft - parentLeft) / parentSize) * this.config.dimsWidth;
-        const sy = ((parentTop - childTop) / (parentSize / this.config.aspectRatio)) * this.config.dimsHeight;
+        const parentHeight = parentSize / this.config.aspectRatio;
+        const sy = ((parentTop - childTop) / parentHeight) * this.config.dimsHeight;
         const sw = (childSize / parentSize) * this.config.dimsWidth;
         const sh = (childSize / parentSize) * this.config.dimsHeight;
 
@@ -525,11 +527,13 @@ class View {
                 const isConverged = val < 0;
 
                 // Check 4-connected neighbors for opposite type
+                const w = this.config.dimsWidth;
+                const h = this.config.dimsHeight;
                 const neighbors = [
-                  py > 0 ? parentData[(py - 1) * this.config.dimsWidth + px] : null,
-                  py < this.config.dimsHeight - 1 ? parentData[(py + 1) * this.config.dimsWidth + px] : null,
-                  px > 0 ? parentData[py * this.config.dimsWidth + (px - 1)] : null,
-                  px < this.config.dimsWidth - 1 ? parentData[py * this.config.dimsWidth + (px + 1)] : null,
+                  py > 0 ? parentData[(py - 1) * w + px] : null,
+                  py < h - 1 ? parentData[(py + 1) * w + px] : null,
+                  px > 0 ? parentData[py * w + (px - 1)] : null,
+                  px < w - 1 ? parentData[py * w + (px + 1)] : null,
                 ];
 
                 for (const n of neighbors) {
@@ -612,7 +616,7 @@ class View {
     let converged = this.makecolor(-i);
     let n = this.nn;
     for (let m = 0; m < this.config.dims2; ++m) {
-      if (n[m] == i || n[m] == -i) {
+      if (n[m] === i || n[m] === -i) {
         let x = m % this.config.dimsWidth;
         let y = (m - x) / this.config.dimsWidth;
         ctx.fillStyle = n[m] > 0 ? color : converged;
@@ -622,7 +626,7 @@ class View {
   }
 
   makecolor(i, histogram = null, scale = null, unknownColor = 'transparent') {
-    if (i == 0) return unknownColor;  // Color for uncomputed pixels
+    if (i === 0) return unknownColor;  // Color for uncomputed pixels
     if (i < 0) return 'black';
     // Use own histogram for consistent palette at this resolution
     const hi = histogram || this.hi;
@@ -634,7 +638,7 @@ class View {
 
   uninteresting() {
     // Boring: nothing computed, or done with less than 5 colors
-    return this.di <= 0 || (this.un == 0 && this.hi.length <= 5);
+    return this.di <= 0 || (this.un === 0 && this.hi.length <= 5);
   }
 
   unfinished() {
@@ -741,7 +745,8 @@ class Grid {
     // Start computation for a view (stage 3)
     const view = this.views[k];
     if (!view) return;
-    this.scheduler.assignBoardToWorker(k, view.sizes[0], view.sizes[1], view.sizes[2], this.config, view.id);
+    this.scheduler.assignBoardToWorker(
+      k, view.sizes[0], view.sizes[1], view.sizes[2], this.config, view.id);
   }
 
   removeView(k) {
@@ -755,7 +760,7 @@ class Grid {
   }
 
   setFocusedView(k) {
-    if (k != this.focusk) {
+    if (k !== this.focusk) {
       this.focusk = k;
       this.scheduler.setFocusedBoard(k);
     }
@@ -772,7 +777,7 @@ class Grid {
 
   updateViewFromWorkerResult(k, data, workerIndex) {
     if (this.views[k]) {
-      if (this.views[k].id != data.id) {
+      if (this.views[k].id !== data.id) {
         return;
       }
       this.views[k].updateFromWorkerResult(data);
@@ -823,7 +828,8 @@ class Grid {
       this.makecanvas(k, state.sizes[k]);
       if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
     }
-    // Update workers with hidden boards BEFORE creating boards to prevent hidden boards from computing
+    // Update workers with hidden boards BEFORE creating boards
+    // to prevent hidden boards from computing
     this.updateHiddenViews();
     this.currentUpdateProcess = this.createUpdateProcess(state);
     this.currentUpdateProcess.start();
@@ -849,8 +855,9 @@ class Grid {
       } else {
         // View exists - generate new ID and assign new board with new dimensions
         this.views[k].id = k + Math.random();
-        this.views[k].initview(state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
-        this.scheduler.assignBoardToWorker(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2], this.config, this.views[k].id);
+        const [size, re, im] = state.sizes[k];
+        this.views[k].initview(size, re, im);
+        this.scheduler.assignBoardToWorker(k, size, re, im, this.config, this.views[k].id);
       }
       this.views[k].draw(this.canvas(k).getContext('2d'));
       if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
@@ -861,7 +868,7 @@ class Grid {
 
     return {
       start: () => {
-        if (this.config.gridcols == 1) {
+        if (this.config.gridcols === 1) {
           setTimeout(processNext, 100);
         } else {
           processNext();
@@ -875,7 +882,7 @@ class Grid {
     let gd = document.getElementById('grid');
     while (this.canvascount <= k) {
       let dd = document.createElement('div');
-      dd.id = 'b_' + this.canvascount;
+      dd.id = `b_${this.canvascount}`;
       dd.innerHTML = this.canvasstring(this.canvascount, sizeInfo);
       dd.className = 'hidemarks';
       dd.style.backgroundColor = this.config.unknowncolor;
@@ -896,16 +903,17 @@ class Grid {
     }
     let factor = this.config.firstsize / viewSize;
     factor = formatScale(factor);
-    return `<canvas width="${this.config.dimsWidth}" height="${this.config.dimsHeight}"` +
-           ` style="height:${this.config.cssDimsHeight}px;width:${this.config.cssDimsWidth}px;">` +
-           '</canvas>' +
-           '<div class="closebox"></div>' +
-           '<div class="rect"></div>' +
-           `<canvas class=overlay width=${this.config.dimsWidth} height="${this.config.dimsHeight}"` +
-           ` style="height:${this.config.cssDimsHeight}px;width:${this.config.cssDimsWidth}px;">` +
-           '</canvas>' +
-           `<a class="zoomnum" target="_blank" href="?">${factor}` +
-           '<div class="status"></div></a>';
+    const w = this.config.dimsWidth;
+    const h = this.config.dimsHeight;
+    const cssW = this.config.cssDimsWidth;
+    const cssH = this.config.cssDimsHeight;
+    return `<canvas width="${w}" height="${h}" ` +
+           `style="height:${cssH}px;width:${cssW}px;">` +
+           `</canvas><div class="closebox"></div><div class="rect"></div>` +
+           `<canvas class=overlay width=${w} height="${h}" ` +
+           `style="height:${cssH}px;width:${cssW}px;">` +
+           `</canvas><a class="zoomnum" target="_blank" href="?">${factor}` +
+           `<div class="status"></div></a>`;
   }
 
   hidecanvas(k) {
@@ -918,7 +926,7 @@ class Grid {
 
   hiddencanvas(k) {
     let b = this.canvas(k);
-    return b && b.parentElement.style.display == 'none';
+    return b?.parentElement.style.display === 'none';
   }
 
   grid() {
@@ -926,23 +934,20 @@ class Grid {
   }
 
   canvas(k) {
-    let b = document.getElementById("b_" + k);
-    return b && b.firstElementChild;
+    const b = document.getElementById(`b_${k}`);
+    return b?.firstElementChild;
   }
 
   closebutton(k) {
-      const view = this.canvas(k);
-      return view && view.nextElementSibling;
+      return this.canvas(k)?.nextElementSibling;
   }
 
   rect(k) {
-      const closeBtn = this.closebutton(k);
-      return closeBtn && closeBtn.nextElementSibling;
+      return this.closebutton(k)?.nextElementSibling;
   }
 
   overlay(k) {
-      const rect = this.rect(k);
-      return rect && rect.nextElementSibling;
+      return this.rect(k)?.nextElementSibling;
   }
 
   truncateviews(k) {
@@ -972,13 +977,13 @@ class Grid {
       }
     }
     this.truncateviews(j + 1);
-    if (j == 0) {
+    if (j === 0) {
       this.showcanvas(j);
     }
   }
 
   updateProgress(overtarget, k) {
-    if (overtarget.tagName == 'A' && overtarget.classList.contains('zoomnum')) {
+    if (overtarget.tagName === 'A' && overtarget.classList.contains('zoomnum')) {
       if (this.config.mobile) {
         overtarget.removeAttribute('href');
       } else {
@@ -1001,15 +1006,16 @@ class Grid {
       if (this.views[k].un > 0 && percentDone >= 99.9) {
         percentDone = 99.9;
       }
-      let regularStatus = MSG.center_at_ +
-        formatcomplex(k, this.views[k].sizes[1], this.views[k].sizes[2])
-          .replaceAll('-', '\u2212') + '\n' +
-        percentDone + MSG.percent_done_after_ + formatLargeInt(this.views[k].it) + MSG.iters;
+      const coords = formatcomplex(k, this.views[k].sizes[1], this.views[k].sizes[2])
+        .replaceAll('-', '\u2212');
+      const iters = formatLargeInt(this.views[k].it);
+      const regularStatus = `${MSG.center_at_}${coords}\n${percentDone}` +
+                             `${MSG.percent_done_after_}${iters}${MSG.iters}`;
       statusDiv.textContent = regularStatus;
 
       // Debug status
       if (overtarget.showDebug) {
-        statusDiv.innerHTML += '\n' + this.views[k].debugStatus();
+        statusDiv.innerHTML += `\n${this.views[k].debugStatus()}`;
       }
 
       setTimeout(() => this.updateProgress(overtarget, k), 100);
@@ -1018,18 +1024,14 @@ class Grid {
 
   bigurl(k, debug) {
     if (k >= this.views.length) return;
-    let osize = this.views[k].sizes[0];
-    let zoomFactor = this.config.firstsize / osize;  // Zoom factor (1.0 = default)
-    let oexp = '';
-    if (this.config.exponent != 2) {
-      oexp = '&exponent=' + this.config.exponent;
-    }
-    let ore = this.views[k].sizes[1];
-    let oim = this.views[k].sizes[2];
-    return '?z=' + formatSize(zoomFactor) +
-           (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
-           '&c=' + formatcomplex(k, ore, oim) +
-           (this.config.theme != 'warm' ? '&theme=' + this.config.theme : '');
+    const osize = this.views[k].sizes[0];
+    const zoomFactor = this.config.firstsize / osize;  // Zoom factor (1.0 = default)
+    const ore = this.views[k].sizes[1];
+    const oim = this.views[k].sizes[2];
+    const exponentParam = this.config.exponent !== 2 ? `&exponent=${this.config.exponent}` : '';
+    const themeParam = this.config.theme !== 'warm' ? `&theme=${this.config.theme}` : '';
+    const coords = formatcomplex(k, ore, oim);
+    return `?z=${formatSize(zoomFactor)}${exponentParam}&c=${coords}${themeParam}`;
   }
 
   clearseq(k) {
@@ -1079,8 +1081,8 @@ class ZoomManager {
   }
 
   showZoomRect(k, x, y, zf) {
-    let s = this.grid.rect(k).style;
-    let border = 1;
+    const s = this.grid.rect(k).style;
+    const border = 1;
     let cssClass = '';
     if (zf > 50) {
       // Switch from rectangle to circle if the zoom area is tiny.
@@ -1088,10 +1090,10 @@ class ZoomManager {
       cssClass = 'circle';
     }
     this.grid.rect(k).parentElement.className = cssClass;
-    s.top = (y * this.config.cssDimsHeight - this.config.cssDimsHeight / 2 / zf - border) + 'px';
-    s.left = (x * this.config.cssDimsWidth - this.config.cssDimsWidth / 2 / zf - border) + 'px';
-    s.width = (this.config.cssDimsWidth / zf + 2 * border) + 'px';
-    s.height = (this.config.cssDimsHeight / zf + 2 * border) + 'px';
+    s.top = `${y * this.config.cssDimsHeight - this.config.cssDimsHeight / 2 / zf - border}px`;
+    s.left = `${x * this.config.cssDimsWidth - this.config.cssDimsWidth / 2 / zf - border}px`;
+    s.width = `${this.config.cssDimsWidth / zf + 2 * border}px`;
+    s.height = `${this.config.cssDimsHeight / zf + 2 * border}px`;
   }
 
   removeZoomRect(k) {
@@ -1106,7 +1108,7 @@ class ZoomManager {
     for (let k = 0; k < this.grid.views.length; k++) {
       if (this.grid.hiddencanvas(k)) { continue; }
       let currView = this.grid.views[k].sizes;
-      if (prevView != null) {
+      if (prevView !== null) {
         let x = qdSub(currView[1], prevView[1])[0] / prevView[0] + 0.5;
         let y = 0.5 - qdSub(currView[2], prevView[2])[0] / prevView[0];
         let zf = prevView[0] / currView[0];
@@ -1127,7 +1129,7 @@ class ZoomManager {
     let ore = this.grid.views[k].sizes[1];
     let oim = this.grid.views[k].sizes[2];
     let rre = 0.5;
-    if (k == 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
+    if (k === 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
       // Myreberg / Feigenbaum point
       ore = [-1.4011551890920506, 1.196330130384937e-17];
       rre = (ore[0] - this.grid.views[0].sizes[1][0]) / this.grid.views[0].sizes[0] + 0.5;
@@ -1176,11 +1178,14 @@ class ZoomManager {
     let oim = this.grid.views[k].sizes[2];
     let cx = m % this.config.dimsWidth;
     let cy = (m - cx) / this.config.dimsWidth;
-    this.showZoomRect(k, cx / this.config.dimsWidth, cy / this.config.dimsHeight, this.config.zoomfactor);
+    const rectX = cx / this.config.dimsWidth;
+    const rectY = cy / this.config.dimsHeight;
+    this.showZoomRect(k, rectX, rectY, this.config.zoomfactor);
     this.grid.truncateviews(k + 1);
     let nsize = osize / this.config.zoomfactor;
     let nre = qdAdd(ore, [((cx / this.config.dimsWidth) - 0.5) * osize, 0]);
-    let nim = qdAdd(oim, [(0.5 - (cy / this.config.dimsHeight)) * (osize / this.config.aspectRatio), 0]);
+    const offsetY = (0.5 - rectY) * (osize / this.config.aspectRatio);
+    let nim = qdAdd(oim, [offsetY, 0]);
 
     // Stage 1: Create DOM and scroll immediately (instant visual feedback)
     this.grid.makecanvas(k + 1);
@@ -1252,84 +1257,118 @@ class URLHandler {
   }
 
   parseUrl() {
-    let startstate = { hidden: [], sizes: [] };
-    let opts = document.location.search.split('&');
-    for (let j in opts) {
-      let m;
-      if (null !== (m = opts[j].match(/exponent=(\d+)/))) {
-        this.config.exponent = Math.max(2, parseInt(m[1]));
-        if (this.config.exponent > 2) { this.config.firstr = [0.0, 0]; }
-        for (let el of document.getElementsByClassName('exponent')) {
-          el.innerText = this.config.exponent;
-        }
+    const startstate = { hidden: [], sizes: [] };
+    const params = new URLSearchParams(document.location.search);
+
+    // Parse exponent parameter
+    const exponent = params.get('exponent');
+    if (exponent) {
+      this.config.exponent = Math.max(2, parseInt(exponent));
+      if (this.config.exponent > 2) { this.config.firstr = [0.0, 0]; }
+      for (const el of document.querySelectorAll('.exponent')) {
+        el.innerText = this.config.exponent;
       }
-      if (null !== (m = opts[j].match(/gpu=(\d+)/))) {
-        this.config.enableGPU = parseInt(m[1]) !== 0;
+    }
+
+    // Parse GPU parameter
+    const gpu = params.get('gpu');
+    if (gpu) {
+      this.config.enableGPU = parseInt(gpu) !== 0;
+    }
+
+    // Parse board parameter
+    const board = params.get('board');
+    if (board) {
+      const boardType = board.toLowerCase();
+      const validTypes = ['cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'];
+      if (validTypes.includes(boardType)) {
+        this.config.forceBoard = boardType;
+      } else {
+        console.warn(`Invalid board type: ${boardType}. Valid types: ${validTypes.join(', ')}`);
       }
-      if (null !== (m = opts[j].match(/board=([a-z]+)/))) {
-        const boardType = m[1].toLowerCase();
-        const validTypes = ['cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'];
-        if (validTypes.includes(boardType)) {
-          this.config.forceBoard = boardType;
-        } else {
-          console.warn(`Invalid board type: ${boardType}. Valid types: ${validTypes.join(', ')}`);
-        }
-      }
-      if (null !== (m = opts[j].match(/grid=(\d+)/))) {
-        this.config.gridcols = Math.max(1, parseInt(m[1]));
-      }
-      if (null !== (m = opts[j].match(/a=(\d+):(\d+)/))) {
-        // Parse aspect ratio from URL (e.g., a=16:9, a=3:2)
+    }
+
+    // Parse grid parameter
+    const grid = params.get('grid');
+    if (grid) {
+      this.config.gridcols = Math.max(1, parseInt(grid));
+    }
+
+    // Parse aspect ratio parameter
+    const aspect = params.get('a');
+    if (aspect) {
+      const m = aspect.match(/(\d+):(\d+)/);
+      if (m) {
         const width = parseInt(m[1]);
         const height = parseInt(m[2]);
         if (width > 0 && height > 0) {
           this.config.aspectRatio = width / height;
         }
       }
-      if (null !== (m = opts[j].match(/z=([-+]?\d?\.?\d+(?:e[-+]\d+)?)/))) {
-        // z is the zoom factor (1.0 = default zoom)
-        // Store the zoom factor temporarily; will convert to absolute size after initSizes()
-        this.config.zoomFromUrl = parseFloat(m[1]);
-      }
-      if (null !== (m = opts[j].match(/s=([-+]?\d?\.?\d+(?:e[-+]\d+)?)/))) {
-        // Legacy parameter: s is the actual size in complex plane
-        // Convert to zoom factor: z = 3.0 / s
-        this.config.zoomFromUrl = 3.0 / parseFloat(m[1]);
-      }
-      if (null !== (m = opts[j].match(/pixelratio=(\d+)/))) {
-        this.config.pixelRatio = Math.max(1, parseInt(m[1]));
-      }
-      if (null !== (m = opts[j].match(/c=([-+\d\.ei,]+)/))) {
-        for (let coords of m[1].split(',')) {
-          m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/);
-          // Store coordinates; size will be calculated later after relativeScale is applied
-          startstate.sizes.push([
-            null,  // Placeholder - will be filled in after initSizes()
-            m != null && m[1] ? qdParse(m[1]) : (startstate.sizes.length > 0 ?
-                startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstr),
-            m != null && m[2] ? qdParse(m[2]) : (startstate.sizes.length > 0 ?
-                startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstj)
-          ]);
-        }
-      }
-      if (null !== (m = opts[j].match(/h=([\d,]+)/))) {
-        startstate.hidden = m[1].split(',').map(x=>parseInt(x));
-      }
-      if (null !== (m = opts[j].match(/theme=(\w+)/))) {
-        if (this.config.colorThemes.all.includes(m[1])) {
-          this.config.theme = m[1];
-        }
-      }
-      if (null !== (m = opts[j].match(/unk=([^&]+)/))) {
-        // Allow any CSS color (e.g., 000, rgb(32,16,64), yellow, etc.)
-        let color = decodeURIComponent(m[1]);
-        // Auto-prepend # for hex colors (e.g., 888 -> #888)
-        if (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(color)) {
-          color = '#' + color;
-        }
-        this.config.unknowncolor = color;
+    }
+
+    // Parse zoom factor parameter
+    const z = params.get('z');
+    if (z) {
+      this.config.zoomFromUrl = parseFloat(z);
+    }
+
+    // Parse legacy size parameter
+    const s = params.get('s');
+    if (s) {
+      // Legacy parameter: s is the actual size in complex plane
+      // Convert to zoom factor: z = 3.0 / s
+      this.config.zoomFromUrl = 3.0 / parseFloat(s);
+    }
+
+    // Parse pixel ratio parameter
+    const pixelratio = params.get('pixelratio');
+    if (pixelratio) {
+      this.config.pixelRatio = Math.max(1, parseInt(pixelratio));
+    }
+
+    // Parse coordinates parameter
+    // Note: URLSearchParams decodes '+' as space, so we convert spaces back to '+'
+    let c = params.get('c');
+    if (c) {
+      c = c.replace(/ /g, '+');
+      for (const coords of c.split(',')) {
+        const m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/);
+        // Store coordinates; size will be calculated later after relativeScale is applied
+        startstate.sizes.push([
+          null,  // Placeholder - will be filled in after initSizes()
+          m && m[1] ? qdParse(m[1]) : (startstate.sizes.length > 0 ?
+              startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstr),
+          m && m[2] ? qdParse(m[2]) : (startstate.sizes.length > 0 ?
+              startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstj)
+        ]);
       }
     }
+
+    // Parse hidden views parameter
+    const h = params.get('h');
+    if (h) {
+      startstate.hidden = h.split(',').map(x => parseInt(x));
+    }
+
+    // Parse theme parameter
+    const theme = params.get('theme');
+    if (theme && this.config.colorThemes.all.includes(theme)) {
+      this.config.theme = theme;
+    }
+
+    // Parse unknown color parameter
+    const unk = params.get('unk');
+    if (unk) {
+      // Allow any CSS color (e.g., 000, rgb(32,16,64), yellow, etc.)
+      let color = decodeURIComponent(unk);
+      // Auto-prepend # for hex colors (e.g., 888 -> #888)
+      if (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(color)) {
+        color = `#${color}`;
+      }
+      this.config.unknowncolor = color;
+    }
+
     // Don't fill in default sizes yet - wait until after initSizes()
     // so that firstsize accounts for aspect ratio
     return startstate;
@@ -1348,7 +1387,7 @@ class URLHandler {
         commas += ',';
       } else {
         if (prevj >= 0) {
-          compactc += formatcomplex(j - 1, state.sizes[prevj][1], state.sizes[prevj][2]) + ',';
+          compactc += `${formatcomplex(j - 1, state.sizes[prevj][1], state.sizes[prevj][2])},`;
         }
         compactc += commas;
         if (j < state.sizes.length) {
@@ -1369,24 +1408,24 @@ class URLHandler {
       aspectRatioParam = `&a=${num}:${den}`;
     }
 
-    let url =
-           (Math.abs(zoomFactor - 1.0) > 0.01 ? '&z=' + formatSize(zoomFactor) : '') +
+    const url =
+           (Math.abs(zoomFactor - 1.0) > 0.01 ? `&z=${formatSize(zoomFactor)}` : '') +
            aspectRatioParam +
-           (this.config.exponent != 2 ? '&exponent=' + this.config.exponent : '') +
+           (this.config.exponent !== 2 ? `&exponent=${this.config.exponent}` : '') +
            (!this.config.enableGPU ? '&gpu=0' : '') +
-           (this.config.forceBoard ? '&board=' + this.config.forceBoard : '') +
-           (compactc.length ? '&c=' + compactc : '') +
-           (this.config.gridcols != this.config.dgc ? '&grid=' + this.config.gridcols : '') +
-           (state.hidden.length ? '&h=' + state.hidden : '') +
-           (this.config.theme != 'warm' ? '&theme=' + this.config.theme : '') +
-           (this.config.unknowncolor != '#000' ? '&unk=' + encodeURIComponent(
+           (this.config.forceBoard ? `&board=${this.config.forceBoard}` : '') +
+           (compactc.length ? `&c=${compactc}` : '') +
+           (this.config.gridcols !== this.config.dgc ? `&grid=${this.config.gridcols}` : '') +
+           (state.hidden.length ? `&h=${state.hidden}` : '') +
+           (this.config.theme !== 'warm' ? `&theme=${this.config.theme}` : '') +
+           (this.config.unknowncolor !== '#000' ? `&unk=${encodeURIComponent(
              /^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$/.test(this.config.unknowncolor)
                ? this.config.unknowncolor.substring(1)
                : this.config.unknowncolor
-           ) : '') +
-           (this.config.pixelRatio != 2 ? '&pixelratio=' + this.config.pixelRatio : '') +
-           (LANG_FROM_URL ? '&lang=' + SELECTED_LANG : '');
-    return '?' + url.replace('&', '');
+           )}` : '') +
+           (this.config.pixelRatio !== 2 ? `&pixelratio=${this.config.pixelRatio}` : '') +
+           (LANG_FROM_URL ? `&lang=${SELECTED_LANG}` : '');
+    return `?${url.replace('&', '')}`;
   }
 }
 
@@ -1401,12 +1440,12 @@ class EventHandler {
     document.body.onkeydown = this.onkeydown.bind(this);
     document.body.onmouseover = this.onmouseover.bind(this);
     document.body.onmousedown = (e) => {
-      if (e.target.className == 'closebox') {
+      if (e.target.className === 'closebox') {
         e.stopPropagation();
       }
     };
     document.body.onclick = (e) => {
-      if (e.target.className == 'closebox' && !explorer.grid.currentUpdateProcess) {
+      if (e.target.className === 'closebox' && !explorer.grid.currentUpdateProcess) {
         e.target.parentElement.style.display = 'none';
         this.explorer.grid.truncatehiddenviews();
         this.explorer.zoomManager.updateZoomRectangles();
@@ -1419,13 +1458,13 @@ class EventHandler {
 
   onmousedown(e) {
     let target = this.eventtarget(e);
-    if (this.explorer.movieMode.active && (!target || target.id != 'moviescale')) {
+    if (this.explorer.movieMode.active && (!target || target.id !== 'moviescale')) {
       this.explorer.movieMode.toggle();
     }
-    if (e.button != 0) { return true; }
+    if (e.button !== 0) { return true; }
     if (target) {
       let m = target.id.match(/b_(\d+)/);
-      if (e.target.tagName == 'A') {
+      if (e.target.tagName === 'A') {
         if (m && !this.explorer.config.mobile) {
           e.target.href = this.explorer.grid.bigurl(m[1], e.metaKey || e.ctrlKey);
         }
@@ -1458,13 +1497,14 @@ class EventHandler {
   }
 
   onkeydown(e) {
+    const key = e.key.toLowerCase();
     if (this.explorer.movieMode.active &&
-        ['Shift', 'Alt', 'Control', 'Meta', 'CapsLock'].indexOf(e.key) == -1) {
+        !['shift', 'alt', 'control', 'meta', 'capslock'].includes(key)) {
       this.explorer.movieMode.toggle();
       return;
     }
     // Pressing backspace will delete the last zoom.
-    if (e.key == 'Backspace' && this.explorer.grid.views.length > 1 &&
+    if (key === 'backspace' && this.explorer.grid.views.length > 1 &&
         !this.explorer.grid.currentUpdateProcess) {
       let k = this.explorer.grid.views.length - 1;
       this.explorer.grid.truncateviews(k);
@@ -1472,11 +1512,11 @@ class EventHandler {
       this.explorer.urlHandler.updateurl();
     }
     // Pressing C will center all the zoom positions.
-    if (e.key == 'c' && this.explorer.grid.views.length > 1) {
+    if (key === 'c' && this.explorer.grid.views.length > 1) {
       this.explorer.zoomManager.centerViews(e.metaKey || e.ctrlKey);
     }
     // Pressing A will toggle aspect ratio between square and 16:9
-    if (e.key.toLowerCase() == 'a' && !this.explorer.grid.currentUpdateProcess) {
+    if (key === 'a' && !this.explorer.grid.currentUpdateProcess) {
       const oldFirstsize = this.explorer.config.firstsize;
       this.explorer.config.aspectRatio = this.explorer.config.aspectRatio === 1.0 ? 16/9 : 1.0;
       this.explorer.config.initSizes();  // Recalculate sizes including firstsize
@@ -1493,65 +1533,65 @@ class EventHandler {
       this.explorer.urlHandler.updateurl();
     }
     // Pressing T will cycle through the color themes.
-    if (e.key.toLowerCase() == 't') {
+    if (key === 't') {
       this.explorer.cycleColorTheme(e.shiftKey);
     }
     // Pressing U will cycle through the uncomputed colors.
-    if (e.key.toLowerCase() == 'u') {
+    if (key === 'u') {
       this.explorer.cycleUnknownColor(e.shiftKey);
     }
     // Pressing I will zoom in at the same position.
-    if (e.key == 'i') {
+    if (key === 'i') {
       this.explorer.zoomManager.zoomInAtCurrentPosition(e.metaKey || e.ctrlKey);
     }
     // Pressing ? will show the help window
-    if (e.key == '?') {
+    if (e.key === '?') {
       document.getElementById('text').style.display = 'block';
       document.getElementById('text').scrollIntoView({ behavior: 'smooth' });
     }
     // G reduces the grid column count
-    if (e.key === 'g' && this.explorer.config.gridcols > 1 &&
+    if (key === 'g' && this.explorer.config.gridcols > 1 &&
         !this.explorer.grid.currentUpdateProcess) {
       this.explorer.config.gridcols -= 1;
       this.explorer.grid.updateLayout();
     }
     // H increases the grid column count
-    if (e.key === 'h' && !this.explorer.grid.currentUpdateProcess) {
+    if (key === 'h' && !this.explorer.grid.currentUpdateProcess) {
       this.explorer.config.gridcols += 1;
       this.explorer.grid.updateLayout();
     }
     // R will restore any hidden views
-    if (e.key === 'r' && !this.explorer.grid.currentUpdateProcess) {
+    if (key === 'r' && !this.explorer.grid.currentUpdateProcess) {
       this.explorer.grid.showAllViews();
       this.explorer.urlHandler.updateurl();
       this.explorer.grid.updateHiddenViews();
     }
     // Increase the exponent
-    if (e.key === 'x') {
+    if (key === 'x') {
       this.explorer.config.updateExponent(this.explorer.config.exponent + 1);
       this.explorer.grid.updateLayout(this.explorer.config.firststate());
     }
     // Decrease the exponent
-    if (e.key === 'z' && this.explorer.config.exponent > 2) {
+    if (key === 'z' && this.explorer.config.exponent > 2) {
       this.explorer.config.updateExponent(this.explorer.config.exponent - 1);
       this.explorer.grid.updateLayout(this.explorer.config.firststate());
     }
     // Increase the pixel ratio
-    if (e.key === 'f') {
+    if (key === 'f') {
       this.explorer.config.pixelRatio += 1;
       this.explorer.grid.updateLayout();
     }
     // Decrease the pixel ratio
-    if (e.key === 'd' && this.explorer.config.pixelRatio > 1) {
+    if (key === 'd' && this.explorer.config.pixelRatio > 1) {
       this.explorer.config.pixelRatio -= 1;
       this.explorer.grid.updateLayout();
     }
     // Toggle movie mode
-    if (e.key === 'm' && this.explorer.grid.views.length > 1) {
+    if (key === 'm' && this.explorer.grid.views.length > 1) {
       this.explorer.movieMode.toggle();
     }
     // Toggle fullscreen mode
-    if (e.key === 'Enter' || document.fullscreenElement && e.key === 'Escape') {
+    if (key === 'enter' || document.fullscreenElement && key === 'escape') {
       e.preventDefault(); // Prevent default action of the Enter key
       this.explorer.toggleFullscreen();
     }
@@ -1715,7 +1755,9 @@ class MovieMode {
           if (this.explorer.config.unknowncolor != '#000') {
             ctxPrev.strokeStyle = 'yellow';
             ctxPrev.lineWidth = this.explorer.config.pixelRatio * this.explorer.config.zoomfactor;
-            ctxPrev.strokeRect(0, 0, this.explorer.config.dimsWidth, this.explorer.config.dimsHeight);
+            const w = this.explorer.config.dimsWidth;
+            const h = this.explorer.config.dimsHeight;
+            ctxPrev.strokeRect(0, 0, w, h);
           }
         }
 
@@ -1785,7 +1827,7 @@ class MovieMode {
           }
         } catch (e) {
           console.error('Error capturing frame:', e);
-          statusElement.textContent = 'Error: ' + e.message;
+          statusElement.textContent = `Error: ${e.message}`;
         }
       }
 
@@ -1877,7 +1919,8 @@ class MovieMode {
         codedHeight = Math.ceil(encodingHeight / 16) * 16;
         codedArea = codedWidth * codedHeight;
         downscaled = true;
-        const msg = `Resolution ${width}x${height} exceeds H.264 limit, downscaling to ${encodingWidth}x${encodingHeight}`;
+        const msg = `Resolution ${width}x${height} exceeds H.264 limit, ` +
+                    `downscaling to ${encodingWidth}x${encodingHeight}`;
         console.warn(msg);
         statusElement.textContent = msg;
       }
@@ -1894,7 +1937,9 @@ class MovieMode {
       }
 
       const codecString = `avc1.42E0${levelCode}`;
-      console.log(`Video resolution: ${encodingWidth}x${encodingHeight}, coded: ${codedWidth}x${codedHeight} (${codedArea} pixels), using H.264 level ${levelName}`);
+      console.log(`Video resolution: ${encodingWidth}x${encodingHeight}, ` +
+                  `coded: ${codedWidth}x${codedHeight} (${codedArea} pixels), ` +
+                  `using H.264 level ${levelName}`);
 
       // Initialize MP4 muxer
       this.muxer = new window.Mp4Muxer.Muxer({
@@ -1925,12 +1970,13 @@ class MovieMode {
           this.muxer.addVideoChunk(chunk, metadata);
           encodedCount++;
           if (encodedCount % 60 === 0) {
-            statusElement.textContent = `Encoding: ${Math.round(100 * encodedCount / totalFrames)}%`;
+            const percent = Math.round(100 * encodedCount / totalFrames);
+            statusElement.textContent = `Encoding: ${percent}%`;
           }
         },
         error: (e) => {
           console.error('Encoding error:', e);
-          statusElement.textContent = 'Encoding error: ' + e.message;
+          statusElement.textContent = `Encoding error: ${e.message}`;
         }
       });
 
@@ -2003,7 +2049,7 @@ class MovieMode {
 
     } catch (e) {
       console.error('Error encoding video:', e);
-      statusElement.textContent = 'Encoding failed: ' + e.message;
+      statusElement.textContent = `Encoding failed: ${e.message}`;
     }
   }
 
@@ -2041,9 +2087,8 @@ class MovieMode {
     scaleElement.href = URL.createObjectURL(this.recordedBlob);
     const k = this.explorer.grid.views.length - 1;
     const view = this.explorer.grid.views[k];
-    scaleElement.download = 'mandelbrot' +
-              formatcomplex(k, view.sizes[1], view.sizes[2]) +
-              '-' + view.it + '.mp4';
+    const coords = formatcomplex(k, view.sizes[1], view.sizes[2]);
+    scaleElement.download = `mandelbrot${coords}-${view.it}.mp4`;
   }
 
   drawMovieFrame(kk) {
@@ -2085,12 +2130,15 @@ class MovieMode {
     const scale = sourceSize / interpolatedSize;
     const offsetX = qdMul(qdSub(interpolatedCenter[0], sourceCenter[0]),
                           [this.explorer.config.dimsWidth / sourceSize, 0])[0];
+    const sourceHeight = sourceSize / this.explorer.config.aspectRatio;
     const offsetY = qdMul(qdSub(sourceCenter[1], interpolatedCenter[1]),
-                          [this.explorer.config.dimsHeight / (sourceSize / this.explorer.config.aspectRatio), 0])[0];
+                          [this.explorer.config.dimsHeight / sourceHeight, 0])[0];
     this.movieCtx.save();
     this.movieCtx.imageSmoothingEnabled = true;
     this.movieCtx.imageSmoothingQuality = 'high';
-    this.movieCtx.translate(this.explorer.config.dimsWidth / 2, this.explorer.config.dimsHeight / 2);
+    const centerX = this.explorer.config.dimsWidth / 2;
+    const centerY = this.explorer.config.dimsHeight / 2;
+    this.movieCtx.translate(centerX, centerY);
     this.movieCtx.scale(scale, scale);
     this.movieCtx.translate(-this.explorer.config.dimsWidth / 2 - offsetX,
                             -this.explorer.config.dimsHeight / 2 - offsetY);
@@ -2110,12 +2158,15 @@ class MovieMode {
       const targetScale = targetSize / interpolatedSize;
       const targetOffsetX = qdMul(qdSub(interpolatedCenter[0], targetCenter[0]),
                                   [this.explorer.config.dimsWidth / targetSize, 0])[0];
+      const targetHeight = targetSize / this.explorer.config.aspectRatio;
       const targetOffsetY = qdMul(qdSub(targetCenter[1], interpolatedCenter[1]),
-                                  [this.explorer.config.dimsHeight / (targetSize / this.explorer.config.aspectRatio), 0])[0];
+                                  [this.explorer.config.dimsHeight / targetHeight, 0])[0];
       this.movieCtx.save();
       this.movieCtx.imageSmoothingEnabled = true;
       this.movieCtx.imageSmoothingQuality = 'high';
-      this.movieCtx.translate(this.explorer.config.dimsWidth / 2, this.explorer.config.dimsHeight / 2);
+      const targetCenterX = this.explorer.config.dimsWidth / 2;
+      const targetCenterY = this.explorer.config.dimsHeight / 2;
+      this.movieCtx.translate(targetCenterX, targetCenterY);
       this.movieCtx.scale(targetScale, targetScale);
       this.movieCtx.translate(-this.explorer.config.dimsWidth / 2 - targetOffsetX,
                               -this.explorer.config.dimsHeight / 2 - targetOffsetY);
@@ -2303,7 +2354,9 @@ class Scheduler {
 
     if (lowEffort * 2 < highEffort) {
       const transferCandidates = [];
-      const sortedLoad = workerLoads.map((load, index) => [index, load]).sort((a, b) => b[1] - a[1]);
+      const sortedLoad = workerLoads
+        .map((load, index) => [index, load])
+        .sort((a, b) => b[1] - a[1]);
       for (let [workerIndex, load] of sortedLoad) {
         if (load > 2 * lowEffort) {
           const workerBoards = this.getWorkerBoards(workerIndex);
@@ -2498,7 +2551,9 @@ class OrbitComputer {
           if (period == 1) {
             title += MSG.converges_after_ + formatLargeInt(view.currentp(j));
           } else {
-            title += MSG.after_ + formatLargeInt(view.currentp(j)) + MSG.period_ + formatLargeInt(period);
+            const iters = formatLargeInt(view.currentp(j));
+            const periodStr = formatLargeInt(period);
+            title += MSG.after_ + iters + MSG.period_ + periodStr;
           }
           let clen = fibonacciPeriod(view.currentp(j));
           cyc = z ? this.suborbit(z, c, clen) : [];
@@ -2572,8 +2627,11 @@ class OrbitComputer {
       let r = [seq[i], seq[i+1]];
       let j = [seq[i+2], seq[i+3]];
       let x = (qdSub(r, cr)[0] / s + 0.5) * this.explorer.config.dimsWidth;
-      let y = (qdSub(cj, j)[0] / (s / this.explorer.config.aspectRatio) + 0.5) * this.explorer.config.dimsHeight;
-      if (x >= 0 && y >= 0 && x < this.explorer.config.dimsWidth && y < this.explorer.config.dimsHeight) {
+      const sHeight = s / this.explorer.config.aspectRatio;
+      let y = (qdSub(cj, j)[0] / sHeight + 0.5) * this.explorer.config.dimsHeight;
+      const w = this.explorer.config.dimsWidth;
+      const h = this.explorer.config.dimsHeight;
+      if (x >= 0 && y >= 0 && x < w && y < h) {
         ctx.beginPath();
         ctx.arc(x, y, 1 * this.explorer.config.pixelRatio, 0, 2 * Math.PI, false);
         ctx.fill();
@@ -2638,7 +2696,8 @@ class MandelbrotExplorer {
     // Clear native tooltip when hovering over zoom numbers to show custom tooltip
     document.addEventListener('mouseover', (e) => {
       if (e.target.classList.contains('zoomnum') || e.target.closest('.zoomnum')) {
-        const zoomnum = e.target.classList.contains('zoomnum') ? e.target : e.target.closest('.zoomnum');
+        const isZoomnum = e.target.classList.contains('zoomnum');
+        const zoomnum = isZoomnum ? e.target : e.target.closest('.zoomnum');
         const gridDiv = zoomnum.closest('#grid > div');
         if (gridDiv) {
           gridDiv.setAttribute('title', '');
@@ -2698,7 +2757,8 @@ class MandelbrotExplorer {
 
   cycleUnknownColor(backward) {
     const inc = backward ? this.config.ukcs.length - 1 : 1;
-    const ind = (this.config.ukcs.indexOf(this.config.unknowncolor) + inc) % this.config.ukcs.length;
+    const currentIndex = this.config.ukcs.indexOf(this.config.unknowncolor);
+    const ind = (currentIndex + inc) % this.config.ukcs.length;
     this.config.unknowncolor = this.config.ukcs[ind];
     // Update div backgrounds instead of redrawing canvases
     for (let k = 0; k < this.grid.views.length; ++k) {
