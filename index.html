@@ -199,15 +199,15 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 // APPLICATION ARCHITECTURE
 // =============================================================================
 //
-// This Mandelbrot explorer uses a centralized state management pattern with
-// unidirectional data flow: User Actions → Dispatch → Reducer → New State
+// This Mandelbrot explorer uses a centralized state store for tracking
+// application state. Components update state via actions and dispatch.
 //
 // MAJOR COMPONENTS:
 //
 // 1. StateStore - Centralized state container (this class)
 //    - Holds all application state in a single immutable tree
 //    - Provides dispatch() to modify state via actions
-//    - Notifies observers when state changes
+//    - Maintains action log for debugging
 //
 // 2. Config - Configuration facade
 //    - Provides property getters/setters that delegate to store
@@ -280,16 +280,13 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 //     ↓
 //   Reducer creates new state with updated theme
 //     ↓
-//   Store notifies observers of state change
-//     ↓
-//   (Future) Observers re-render affected components
+//   Component methods called directly to update display
 //
 // =============================================================================
 
 class StateStore {
   constructor() {
     this.state = this.createInitialState();
-    this.observers = new Set();
     this.actionLog = [];  // For debugging
     this.enableLogging = false;  // Set to true for debugging
   }
@@ -362,12 +359,6 @@ class StateStore {
     return this.state;
   }
 
-  // Subscribe to state changes
-  subscribe(observer) {
-    this.observers.add(observer);
-    return () => this.observers.delete(observer);  // Return unsubscribe function
-  }
-
   // Dispatch an action to update state
   dispatch(action) {
     if (this.enableLogging) {
@@ -381,20 +372,6 @@ class StateStore {
     if (this.enableLogging) {
       console.log('New state:', JSON.parse(JSON.stringify(this.state)));
       this.actionLog.push({ action, oldState, newState: this.state, timestamp: Date.now() });
-    }
-
-    // Notify all observers of the state change
-    this.notify(oldState, this.state, action);
-  }
-
-  // Notify observers of state change
-  notify(oldState, newState, action) {
-    for (const observer of this.observers) {
-      try {
-        observer(newState, oldState, action);
-      } catch (e) {
-        console.error('Observer error:', e);
-      }
     }
   }
 
@@ -3740,13 +3717,6 @@ class MandelbrotExplorer {
     this.redrawProcess = new RedrawProcess(this);
     this.movieContainer = document.getElementById('movie');
     this.allViewsCompleted = false;
-
-    // Subscribe to state changes for debugging (can be disabled)
-    if (this.store.enableLogging) {
-      this.store.subscribe((newState, oldState, action) => {
-        console.log('[State Change]', action.type);
-      });
-    }
 
     // Listen for fullscreen changes
     document.addEventListener('fullscreenchange', () => this.onFullscreenChange());

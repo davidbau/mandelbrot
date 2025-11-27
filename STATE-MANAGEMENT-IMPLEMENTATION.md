@@ -13,7 +13,6 @@ A comprehensive state management system with:
 **Core Features:**
 - Centralized state container with immutable updates
 - Reducer pattern for predictable state transitions
-- Observer/subscriber pattern for reactive updates
 - Action creators for type-safe state modifications
 - Optional action logging for debugging
 
@@ -148,7 +147,7 @@ assert(newState.config.theme === 'iceblue');
 ### Unidirectional Data Flow
 
 ```
-User Action → dispatch(action) → reducer(state, action) → new state → notify observers → UI updates
+User Action → dispatch(action) → reducer(state, action) → new state → Component methods update UI
      ↑                                                                                         |
      └─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -157,14 +156,14 @@ User Action → dispatch(action) → reducer(state, action) → new state → no
 1. **Actions** describe what happened
 2. **Reducers** specify how state changes
 3. **State** is read-only (immutable)
-4. **Observers** react to state changes
+4. **Components** are updated via direct method calls
 
 ### Example Flow
 
 ```javascript
 // 1. User presses 'a' to toggle aspect ratio
-// 2. EventHandler dispatches action (future implementation)
-store.dispatch({ type: 'CONFIG_SET_ASPECT_RATIO', aspectRatio: 16/9 });
+// 2. EventHandler updates config
+config.aspectRatio = 16/9;  // This dispatches action internally
 
 // 3. Reducer creates new state
 const newState = {
@@ -172,12 +171,9 @@ const newState = {
   config: { ...oldState.config, aspectRatio: 16/9 }
 };
 
-// 4. Observers notified
-Grid.onStateChange(oldState, newState) {
-  if (oldState.config !== newState.config) {
-    this.render(newState);
-  }
-}
+// 4. Component methods called directly
+grid.updateLayout();
+urlHandler.updateurl();
 ```
 
 ## What's Still Using Old Pattern
@@ -293,7 +289,6 @@ assert(newState.views[0].sizes[0] === 3.0);
 ### Memory Usage
 - State object: ~1-2 KB (negligible)
 - Action log: ~100 bytes per action (disable in production)
-- Observers: Weak references, auto-cleanup on component destruction
 
 ## Testing the Implementation
 
