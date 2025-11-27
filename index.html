@@ -32,8 +32,10 @@ already-known points.
 <style>
 body { font-family: Arial; background: #888; margin: 14px;}
 canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
-#grid > div, #text, #movie > div { display: inline-block; margin: 10px;
+#grid > div, #text { display: inline-block; margin: 10px;
   position: relative; vertical-align: top; background: rgba(90, 90, 90, 0.5); }
+#movie > div { display: inline-block; margin: 10px;
+  position: relative; vertical-align: top; background: black; }
 #grid { color: yellow }
 #grid > div:only-child .closebox { display: none; }
 #grid:empty ~ #text { display: none; }
@@ -92,7 +94,7 @@ body.starting div#b_0:after { display: flex; position: absolute;
 :fullscreen body { margin: 0; padding: 0; }
 :fullscreen #grid { margin: 0; padding: 0; }
 :fullscreen #grid > div { margin: 0; padding: 0; background: transparent; scroll-snap-align: start; scroll-snap-stop: normal; }
-:fullscreen #movie > div { margin: 0; padding: 0; background: transparent; scroll-snap-align: start; }
+:fullscreen #movie > div { margin: 0; padding: 0; background: black; scroll-snap-align: start; }
 :fullscreen #text { scroll-snap-align: start; }
 :fullscreen canvas { display: block; }
 :fullscreen .zoomnum { bottom: 0; }
@@ -2040,10 +2042,8 @@ class URLHandler {
         this.config.unknowncolor = color;
       }
     }
-    if (startstate.sizes.length == 0) {
-      startstate.sizes = this.config.firststate().sizes;
-    }
-
+    // Don't fill in default sizes yet - wait until after initSizes()
+    // so that firstsize accounts for aspect ratio
     return startstate;
   }
 
@@ -2789,7 +2789,7 @@ class MovieMode {
     const offsetX = qdMul(qdSub(interpolatedCenter[0], sourceCenter[0]),
                           [this.explorer.config.dimsWidth / sourceSize, 0])[0];
     const offsetY = qdMul(qdSub(sourceCenter[1], interpolatedCenter[1]),
-                          [this.explorer.config.dimsWidth / sourceSize, 0])[0];
+                          [this.explorer.config.dimsHeight / (sourceSize / this.explorer.config.aspectRatio), 0])[0];
     this.movieCtx.save();
     this.movieCtx.imageSmoothingEnabled = true;
     this.movieCtx.imageSmoothingQuality = 'high';
@@ -2813,7 +2813,7 @@ class MovieMode {
       const targetOffsetX = qdMul(qdSub(interpolatedCenter[0], targetCenter[0]),
                                   [this.explorer.config.dimsWidth / targetSize, 0])[0];
       const targetOffsetY = qdMul(qdSub(targetCenter[1], interpolatedCenter[1]),
-                                  [this.explorer.config.dimsWidth / targetSize, 0])[0];
+                                  [this.explorer.config.dimsHeight / (targetSize / this.explorer.config.aspectRatio), 0])[0];
       this.movieCtx.save();
       this.movieCtx.imageSmoothingEnabled = true;
       this.movieCtx.imageSmoothingQuality = 'high';
@@ -3352,6 +3352,11 @@ class MandelbrotExplorer {
     console.log(new Date);
     let startState = this.urlHandler.parseUrl();
     this.config.initSizes();
+
+    // Fill in default sizes if none were specified in URL
+    if (startState.sizes.length === 0) {
+      startState.sizes = this.config.firststate().sizes;
+    }
 
     // Convert zoom factor from URL to absolute size
     if (this.config.zoomFromUrl !== undefined) {
@@ -5807,13 +5812,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   }
 
   initPixels(size, re, im) {
-    const dims = this.config.dimsWidth;
+    const dimsWidth = this.config.dimsWidth;
+    const dimsHeight = this.config.dimsHeight;
     const dims2 = this.config.dims2;
 
     // Convert re/im to quad-double if needed
     const re_qd = Array.isArray(re) ? re : toQd(re);
     const im_qd = Array.isArray(im) ? im : toQd(im);
     const size_qd = toQd(size);
+    const sizeY_qd = toQd(size / this.config.aspectRatio);
 
     // Per-pixel data arrays
     this.dc = new Float32Array(dims2 * 2);  // Delta c from reference [real, imag] pairs
@@ -5828,18 +5835,18 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const temp = new Array(4);
 
     // Initialize all pixels as perturbations from the reference point
-    for (let y = 0; y < dims; y++) {
-      const yFrac = (0.5 - y / dims);
+    for (let y = 0; y < dimsHeight; y++) {
+      const yFrac = (0.5 - y / dimsHeight);
 
-      // ci_qd = im_qd + yFrac * size_qd (in quad-double)
-      AqdMul(temp, 0, toQd(yFrac)[0], toQd(yFrac)[1], size_qd[0], size_qd[1]);
+      // ci_qd = im_qd + yFrac * sizeY_qd (in quad-double)
+      AqdMul(temp, 0, toQd(yFrac)[0], toQd(yFrac)[1], sizeY_qd[0], sizeY_qd[1]);
       AqdAdd(ci_qd, 0, im_qd[0], im_qd[1], temp[0], temp[1]);
 
       // dci_qd = ci_qd - refC_imag
       AqdAdd(dci_qd, 0, ci_qd[0], ci_qd[1], -this.refC[2], -this.refC[3]);
 
-      for (let x = 0; x < dims; x++) {
-        const xFrac = (x / dims - 0.5);
+      for (let x = 0; x < dimsWidth; x++) {
+        const xFrac = (x / dimsWidth - 0.5);
 
         // cr_qd = re_qd + xFrac * size_qd (in quad-double)
         AqdMul(temp, 0, toQd(xFrac)[0], toQd(xFrac)[1], size_qd[0], size_qd[1]);
@@ -5848,7 +5855,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         // dcr_qd = cr_qd - refC_real
         AqdAdd(dcr_qd, 0, cr_qd[0], cr_qd[1], -this.refC[0], -this.refC[1]);
 
-        const index = y * dims + x;
+        const index = y * dimsWidth + x;
         const index2 = index * 2;
 
         // Convert quad-double deltas to float32
