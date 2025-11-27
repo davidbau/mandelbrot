@@ -182,36 +182,281 @@ class Config {
   // Feigenbaum / Myreberg point (quad-precision real number [high, low])
   static FEIGENBAUM_POINT = [-1.4011551890920506, 1.196330130384937e-17];
 
-  constructor() {
+  constructor(stateManager = null) {
+    this.stateManager = stateManager;
+
+    // Initialize viewport width
     document.body.style.overflowY = 'scroll';
-    this.vw = document.documentElement.clientWidth || (
-       window.innerWidth - 20);
+    const vw = document.documentElement.clientWidth || (window.innerWidth - 20);
     document.body.style.overflowY = '';
-    this.dgc = Math.min(2, Math.ceil(this.vw / 501));
-    this.gridcols = this.dgc;
-    this.exponent = 2;
-    this.enableGPU = true;
-    // Explicit board type: 'cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'
-    this.forceBoard = null;
-    this.firstr = [-0.5, 0];
-    this.firstj = [0.0, 0];
-    this.firstsize = 3.0;
-    this.pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
-    this.zoomfactor = Config.DEFAULT_ZOOM_FACTOR;
-    this.aspectRatio = Config.DEFAULT_ASPECT_RATIO;
-    this.cssDims = 0;
-    this.cssDimsWidth = 0;
-    this.cssDimsHeight = 0;
-    this.dims = 0;  // Deprecated: use dimsWidth
-    this.dimsWidth = 0;
-    this.dimsHeight = 0;
-    this.dims2 = 0;
+
+    // Calculate initial values
+    const dgc = Math.min(2, Math.ceil(vw / 501));
+    const pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
+    const mobile = ('ontouchstart' in document.documentElement);
+    const mac = (navigator.platform.indexOf('Mac') === 0);
+
+    // Initialize state if we have a state manager
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({
+        vw,
+        gridcols: dgc,
+        exponent: 2,
+        enableGPU: true,
+        forceBoard: null,
+        firstr: [-0.5, 0],
+        firstj: [0.0, 0],
+        firstsize: 3.0,
+        pixelRatio,
+        zoomfactor: Config.DEFAULT_ZOOM_FACTOR,
+        aspectRatio: Config.DEFAULT_ASPECT_RATIO,
+        theme: 'warm',
+        unknowncolor: '#000',
+        mobile,
+        mac
+      }));
+    }
+
+    // Legacy properties for backward compatibility
     this.ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
-    this.theme = 'warm';
-    this.unknowncolor = "#000";
-    this.mobile = ('ontouchstart' in document.documentElement);
-    this.mac = (navigator.platform.indexOf('Mac') === 0);
     this.defineColorThemes();
+  }
+
+  // Property getters/setters that delegate to state
+  get vw() {
+    return this.stateManager ? this.stateManager.getState().config.vw : this._vw || 0;
+  }
+  set vw(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ vw: value }));
+    } else {
+      this._vw = value;
+    }
+  }
+
+  get gridcols() {
+    return this.stateManager ? this.stateManager.getState().config.gridcols : this._gridcols || 1;
+  }
+  set gridcols(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ gridcols: value }));
+    } else {
+      this._gridcols = value;
+    }
+  }
+
+  get exponent() {
+    return this.stateManager ? this.stateManager.getState().config.exponent : this._exponent || 2;
+  }
+  set exponent(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setExponent(value));
+    } else {
+      this._exponent = value;
+    }
+  }
+
+  get enableGPU() {
+    return this.stateManager ? this.stateManager.getState().config.enableGPU : this._enableGPU !== undefined ? this._enableGPU : true;
+  }
+  set enableGPU(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setGPU(value));
+    } else {
+      this._enableGPU = value;
+    }
+  }
+
+  get forceBoard() {
+    return this.stateManager ? this.stateManager.getState().config.forceBoard : this._forceBoard || null;
+  }
+  set forceBoard(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setForceBoard(value));
+    } else {
+      this._forceBoard = value;
+    }
+  }
+
+  get firstr() {
+    return this.stateManager ? this.stateManager.getState().config.firstr : this._firstr || [-0.5, 0];
+  }
+  set firstr(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstr: value }));
+    } else {
+      this._firstr = value;
+    }
+  }
+
+  get firstj() {
+    return this.stateManager ? this.stateManager.getState().config.firstj : this._firstj || [0.0, 0];
+  }
+  set firstj(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstj: value }));
+    } else {
+      this._firstj = value;
+    }
+  }
+
+  get firstsize() {
+    return this.stateManager ? this.stateManager.getState().config.firstsize : this._firstsize || 3.0;
+  }
+  set firstsize(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstsize: value }));
+    } else {
+      this._firstsize = value;
+    }
+  }
+
+  get pixelRatio() {
+    return this.stateManager ? this.stateManager.getState().config.pixelRatio : this._pixelRatio || 2;
+  }
+  set pixelRatio(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setPixelRatio(value));
+    } else {
+      this._pixelRatio = value;
+    }
+  }
+
+  get zoomfactor() {
+    return this.stateManager ? this.stateManager.getState().config.zoomfactor : this._zoomfactor || Config.DEFAULT_ZOOM_FACTOR;
+  }
+  set zoomfactor(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setZoomFactor(value));
+    } else {
+      this._zoomfactor = value;
+    }
+  }
+
+  get aspectRatio() {
+    return this.stateManager ? this.stateManager.getState().config.aspectRatio : this._aspectRatio || Config.DEFAULT_ASPECT_RATIO;
+  }
+  set aspectRatio(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setAspectRatio(value));
+    } else {
+      this._aspectRatio = value;
+    }
+  }
+
+  get theme() {
+    return this.stateManager ? this.stateManager.getState().config.theme : this._theme || 'warm';
+  }
+  set theme(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setTheme(value));
+    } else {
+      this._theme = value;
+    }
+  }
+
+  get unknowncolor() {
+    return this.stateManager ? this.stateManager.getState().config.unknowncolor : this._unknowncolor || '#000';
+  }
+  set unknowncolor(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.setUnknownColor(value));
+    } else {
+      this._unknowncolor = value;
+    }
+  }
+
+  get mobile() {
+    return this.stateManager ? this.stateManager.getState().config.mobile : this._mobile || false;
+  }
+  set mobile(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ mobile: value }));
+    } else {
+      this._mobile = value;
+    }
+  }
+
+  get mac() {
+    return this.stateManager ? this.stateManager.getState().config.mac : this._mac || false;
+  }
+  set mac(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ mac: value }));
+    } else {
+      this._mac = value;
+    }
+  }
+
+  // Derived/computed properties
+  get cssDims() {
+    return this.stateManager ? this.stateManager.getState().config.cssDims : this._cssDims || 0;
+  }
+  set cssDims(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDims: value }));
+    } else {
+      this._cssDims = value;
+    }
+  }
+
+  get cssDimsWidth() {
+    return this.stateManager ? this.stateManager.getState().config.cssDimsWidth : this._cssDimsWidth || 0;
+  }
+  set cssDimsWidth(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDimsWidth: value }));
+    } else {
+      this._cssDimsWidth = value;
+    }
+  }
+
+  get cssDimsHeight() {
+    return this.stateManager ? this.stateManager.getState().config.cssDimsHeight : this._cssDimsHeight || 0;
+  }
+  set cssDimsHeight(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDimsHeight: value }));
+    } else {
+      this._cssDimsHeight = value;
+    }
+  }
+
+  get dimsWidth() {
+    return this.stateManager ? this.stateManager.getState().config.dimsWidth : this._dimsWidth || 0;
+  }
+  set dimsWidth(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ dimsWidth: value }));
+    } else {
+      this._dimsWidth = value;
+    }
+  }
+
+  get dimsHeight() {
+    return this.stateManager ? this.stateManager.getState().config.dimsHeight : this._dimsHeight || 0;
+  }
+  set dimsHeight(value) {
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ dimsHeight: value }));
+    } else {
+      this._dimsHeight = value;
+    }
+  }
+
+  // Backward compatibility
+  get dims() {
+    return this.dimsWidth;
+  }
+  set dims(value) {
+    this.dimsWidth = value;
+  }
+
+  get dims2() {
+    return this.dimsWidth * this.dimsHeight;
+  }
+  set dims2(value) {
+    // Ignore sets, this is computed
   }
 
   defineColorThemes() {
@@ -251,47 +496,72 @@ class Config {
   }
 
   initSizes() {
+    let cssDims, cssDimsWidth, cssDimsHeight;
+
     // In fullscreen, use full window dimensions with no margins
     if (document.fullscreenElement) {
       const availWidth = window.innerWidth;
       const availHeight = window.innerHeight;
 
       // Directly set width and height to fill the viewport
-      this.cssDimsWidth = availWidth;
-      this.cssDimsHeight = availHeight;
-      this.cssDims = this.cssDimsWidth;  // For compatibility
+      cssDimsWidth = availWidth;
+      cssDimsHeight = availHeight;
+      cssDims = cssDimsWidth;  // For compatibility
     } else {
-      this.cssDims = Math.max(32, Math.floor((this.vw - 28) / this.gridcols) - 20);
+      cssDims = Math.max(32, Math.floor((this.vw - 28) / this.gridcols) - 20);
 
       // Calculate width and height based on aspect ratio
       if (this.aspectRatio >= 1.0) {
         // Wider than tall
-        this.cssDimsWidth = this.cssDims;
-        this.cssDimsHeight = Math.floor(this.cssDims / this.aspectRatio);
+        cssDimsWidth = cssDims;
+        cssDimsHeight = Math.floor(cssDims / this.aspectRatio);
       } else {
         // Taller than wide
-        this.cssDimsHeight = this.cssDims;
-        this.cssDimsWidth = Math.floor(this.cssDims * this.aspectRatio);
+        cssDimsHeight = cssDims;
+        cssDimsWidth = Math.floor(cssDims * this.aspectRatio);
       }
     }
 
-    this.dimsWidth = Math.floor(this.cssDimsWidth * this.pixelRatio);
-    this.dimsHeight = Math.floor(this.cssDimsHeight * this.pixelRatio);
-    this.dims = this.dimsWidth;  // Deprecated: for backward compatibility
-    this.dims2 = this.dimsWidth * this.dimsHeight;
+    const dimsWidth = Math.floor(cssDimsWidth * this.pixelRatio);
+    const dimsHeight = Math.floor(cssDimsHeight * this.pixelRatio);
 
     // Calculate firstsize to ensure we fit width extent of 3 and height extent of 2.5
     // Width constraint: size must be at least 3.0
     // Height constraint: size / aspectRatio must be at least 2.5, so size >= 2.5 * aspectRatio
-    this.firstsize = Math.max(3.0, 2.5 * this.aspectRatio);
+    const firstsize = Math.max(3.0, 2.5 * this.aspectRatio);
+
+    // Dispatch all updates at once if using state manager
+    if (this.stateManager) {
+      this.stateManager.dispatch(this.stateManager.actions.initSizes({
+        vw: this.vw,
+        gridcols: this.gridcols,
+        cssDims,
+        cssDimsWidth,
+        cssDimsHeight,
+        dimsWidth,
+        dimsHeight,
+        pixelRatio: this.pixelRatio,
+        firstsize
+      }));
+    } else {
+      // Fallback to direct assignment
+      this._cssDims = cssDims;
+      this._cssDimsWidth = cssDimsWidth;
+      this._cssDimsHeight = cssDimsHeight;
+      this._dimsWidth = dimsWidth;
+      this._dimsHeight = dimsHeight;
+      this._firstsize = firstsize;
+    }
+
+    // Update DOM elements
     for (const el of document.querySelectorAll('.pixelratio')) {
       el.innerText = this.pixelRatio;
     }
     for (const el of document.querySelectorAll('#text')) {
       const minHelpWidth = 390;
-      const helpColumns = Math.ceil((minHelpWidth + 36) / (this.cssDims + 20));
+      const helpColumns = Math.ceil((minHelpWidth + 36) / (cssDims + 20));
       // Columns plus margin minus padding
-      el.style.maxWidth = `${(this.cssDims + 20) * helpColumns - 20 - 16}px`;
+      el.style.maxWidth = `${(cssDims + 20) * helpColumns - 20 - 16}px`;
     }
   }
 
@@ -309,6 +579,473 @@ class Config {
   firststate() {
     return {sizes:[[this.firstsize, this.firstr, this.firstj]], hidden:[]};
   }
+}
+
+// Unified State Management System
+// Implements unidirectional data flow: Action → Reducer → State → Observers
+class StateManager {
+  constructor() {
+    this.state = this.createInitialState();
+    this.observers = new Set();
+    this.actionLog = [];  // For debugging
+    this.enableLogging = false;  // Set to true for debugging
+  }
+
+  createInitialState() {
+    return {
+      // Viewport and rendering configuration
+      config: {
+        // Canvas dimensions
+        vw: 0,                    // Viewport width
+        gridcols: 1,              // Number of grid columns
+        cssDims: 0,               // CSS pixel size
+        cssDimsWidth: 0,          // CSS width
+        cssDimsHeight: 0,         // CSS height
+        dimsWidth: 0,             // Canvas pixel width
+        dimsHeight: 0,            // Canvas pixel height
+        pixelRatio: 2,            // Device pixel ratio
+
+        // Computation parameters
+        exponent: 2,              // Mandelbrot exponent (z^n + c)
+        enableGPU: true,          // Allow WebGPU acceleration
+        forceBoard: null,         // Force specific board type
+
+        // Display parameters
+        theme: 'warm',            // Color theme
+        unknowncolor: '#000',     // Color for uncomputed pixels
+        zoomfactor: Config.DEFAULT_ZOOM_FACTOR,
+        aspectRatio: Config.DEFAULT_ASPECT_RATIO,
+
+        // Initial view parameters
+        firstr: [-0.5, 0],        // Initial center real (quad-double)
+        firstj: [0.0, 0],         // Initial center imaginary (quad-double)
+        firstsize: 3.0,           // Initial view size
+
+        // Platform detection
+        mobile: false,
+        mac: false
+      },
+
+      // Views (zoom levels)
+      views: [],  // Array of { k, sizes: [size, re, im], hidden, parentK }
+
+      // UI state
+      ui: {
+        mouseDown: false,
+        mouseButton: null,
+        mousePosition: { x: 0, y: 0 },
+        focusedView: null,        // Currently focused view index
+        zoomRectangle: null,      // { k, x, y, width, height }
+        orbitPoint: null,         // { k, x, y, orbit: [...] }
+        movieMode: {
+          active: false,
+          progress: 0,
+          rendering: false
+        },
+        fullscreen: false
+      },
+
+      // Computation status (updated from workers)
+      computation: {
+        views: {},                // k -> { un, di, ch, it, workerInfo, boardType }
+        isComputing: false,
+        allCompleted: false
+      }
+    };
+  }
+
+  // Get current state (immutable)
+  getState() {
+    return this.state;
+  }
+
+  // Subscribe to state changes
+  subscribe(observer) {
+    this.observers.add(observer);
+    return () => this.observers.delete(observer);  // Return unsubscribe function
+  }
+
+  // Dispatch an action to update state
+  dispatch(action) {
+    if (this.enableLogging) {
+      console.log('Action:', action.type, action);
+      console.log('Old state:', JSON.parse(JSON.stringify(this.state)));
+    }
+
+    const oldState = this.state;
+    this.state = this.reducer(this.state, action);
+
+    if (this.enableLogging) {
+      console.log('New state:', JSON.parse(JSON.stringify(this.state)));
+      this.actionLog.push({ action, oldState, newState: this.state, timestamp: Date.now() });
+    }
+
+    // Notify all observers of the state change
+    this.notify(oldState, this.state, action);
+  }
+
+  // Notify observers of state change
+  notify(oldState, newState, action) {
+    for (const observer of this.observers) {
+      try {
+        observer(newState, oldState, action);
+      } catch (e) {
+        console.error('Observer error:', e);
+      }
+    }
+  }
+
+  // Reducer: pure function that computes new state from old state + action
+  reducer(state, action) {
+    switch (action.type) {
+      // Configuration updates
+      case 'CONFIG_INIT_SIZES': {
+        const { vw, gridcols, cssDims, cssDimsWidth, cssDimsHeight,
+                dimsWidth, dimsHeight, pixelRatio, firstsize } = action;
+        return {
+          ...state,
+          config: {
+            ...state.config,
+            vw,
+            gridcols,
+            cssDims,
+            cssDimsWidth,
+            cssDimsHeight,
+            dimsWidth,
+            dimsHeight,
+            pixelRatio,
+            firstsize
+          }
+        };
+      }
+
+      case 'CONFIG_SET_EXPONENT': {
+        const newFireR = action.exponent > 2 ? [0.0, 0] : [-0.5, 0];
+        return {
+          ...state,
+          config: {
+            ...state.config,
+            exponent: action.exponent,
+            firstr: newFireR,
+            firstj: [0.0, 0]
+          }
+        };
+      }
+
+      case 'CONFIG_SET_ASPECT_RATIO':
+        return {
+          ...state,
+          config: { ...state.config, aspectRatio: action.aspectRatio }
+        };
+
+      case 'CONFIG_SET_THEME':
+        return {
+          ...state,
+          config: { ...state.config, theme: action.theme }
+        };
+
+      case 'CONFIG_SET_ZOOM_FACTOR':
+        return {
+          ...state,
+          config: { ...state.config, zoomfactor: action.zoomfactor }
+        };
+
+      case 'CONFIG_SET_GPU':
+        return {
+          ...state,
+          config: { ...state.config, enableGPU: action.enableGPU }
+        };
+
+      case 'CONFIG_SET_FORCE_BOARD':
+        return {
+          ...state,
+          config: { ...state.config, forceBoard: action.forceBoard }
+        };
+
+      case 'CONFIG_SET_PIXEL_RATIO':
+        return {
+          ...state,
+          config: { ...state.config, pixelRatio: action.pixelRatio }
+        };
+
+      case 'CONFIG_SET_UNKNOWN_COLOR':
+        return {
+          ...state,
+          config: { ...state.config, unknowncolor: action.unknowncolor }
+        };
+
+      case 'CONFIG_UPDATE':
+        return {
+          ...state,
+          config: { ...state.config, ...action.config }
+        };
+
+      // View management
+      case 'VIEWS_SET': {
+        return {
+          ...state,
+          views: action.views.map((v, k) => ({
+            k,
+            sizes: v.sizes,
+            hidden: v.hidden || false,
+            parentK: k > 0 ? k - 1 : null
+          }))
+        };
+      }
+
+      case 'VIEW_ADD': {
+        const k = state.views.length;
+        return {
+          ...state,
+          views: [
+            ...state.views,
+            {
+              k,
+              sizes: action.sizes,
+              hidden: action.hidden || false,
+              parentK: k > 0 ? k - 1 : null
+            }
+          ]
+        };
+      }
+
+      case 'VIEW_UPDATE': {
+        const { k, sizes } = action;
+        return {
+          ...state,
+          views: state.views.map((v, index) =>
+            index === k ? { ...v, sizes } : v
+          )
+        };
+      }
+
+      case 'VIEW_SET_HIDDEN': {
+        const { k, hidden } = action;
+        return {
+          ...state,
+          views: state.views.map((v, index) =>
+            index === k ? { ...v, hidden } : v
+          )
+        };
+      }
+
+      case 'VIEW_REMOVE': {
+        const { k } = action;
+        // Remove view and clean up trailing nulls
+        const newViews = [...state.views];
+        newViews[k] = null;
+        while (newViews.length > 0 && newViews[newViews.length - 1] === null) {
+          newViews.pop();
+        }
+        return {
+          ...state,
+          views: newViews.filter(v => v !== null).map((v, index) => ({
+            ...v,
+            k: index,
+            parentK: index > 0 ? index - 1 : null
+          }))
+        };
+      }
+
+      case 'VIEWS_TRUNCATE': {
+        const { k } = action;
+        return {
+          ...state,
+          views: state.views.slice(0, k)
+        };
+      }
+
+      // UI state updates
+      case 'UI_MOUSE_DOWN':
+        return {
+          ...state,
+          ui: {
+            ...state.ui,
+            mouseDown: true,
+            mouseButton: action.button,
+            mousePosition: action.position
+          }
+        };
+
+      case 'UI_MOUSE_UP':
+        return {
+          ...state,
+          ui: {
+            ...state.ui,
+            mouseDown: false,
+            mouseButton: null
+          }
+        };
+
+      case 'UI_MOUSE_MOVE':
+        return {
+          ...state,
+          ui: {
+            ...state.ui,
+            mousePosition: action.position
+          }
+        };
+
+      case 'UI_SET_FOCUSED_VIEW':
+        return {
+          ...state,
+          ui: { ...state.ui, focusedView: action.k }
+        };
+
+      case 'UI_SET_ZOOM_RECTANGLE':
+        return {
+          ...state,
+          ui: { ...state.ui, zoomRectangle: action.rectangle }
+        };
+
+      case 'UI_CLEAR_ZOOM_RECTANGLE':
+        return {
+          ...state,
+          ui: { ...state.ui, zoomRectangle: null }
+        };
+
+      case 'UI_SET_ORBIT_POINT':
+        return {
+          ...state,
+          ui: { ...state.ui, orbitPoint: action.point }
+        };
+
+      case 'UI_CLEAR_ORBIT_POINT':
+        return {
+          ...state,
+          ui: { ...state.ui, orbitPoint: null }
+        };
+
+      case 'UI_MOVIE_MODE_TOGGLE':
+        return {
+          ...state,
+          ui: {
+            ...state.ui,
+            movieMode: {
+              ...state.ui.movieMode,
+              active: !state.ui.movieMode.active
+            }
+          }
+        };
+
+      case 'UI_MOVIE_MODE_SET_PROGRESS':
+        return {
+          ...state,
+          ui: {
+            ...state.ui,
+            movieMode: {
+              ...state.ui.movieMode,
+              progress: action.progress
+            }
+          }
+        };
+
+      case 'UI_MOVIE_MODE_SET_RENDERING':
+        return {
+          ...state,
+          ui: {
+            ...state.ui,
+            movieMode: {
+              ...state.ui.movieMode,
+              rendering: action.rendering
+            }
+          }
+        };
+
+      case 'UI_SET_FULLSCREEN':
+        return {
+          ...state,
+          ui: { ...state.ui, fullscreen: action.fullscreen }
+        };
+
+      // Computation status updates
+      case 'COMPUTATION_UPDATE_VIEW': {
+        const { k, un, di, ch, it, workerInfo, boardType } = action;
+        return {
+          ...state,
+          computation: {
+            ...state.computation,
+            views: {
+              ...state.computation.views,
+              [k]: { un, di, ch, it, workerInfo, boardType }
+            }
+          }
+        };
+      }
+
+      case 'COMPUTATION_SET_COMPUTING':
+        return {
+          ...state,
+          computation: {
+            ...state.computation,
+            isComputing: action.isComputing
+          }
+        };
+
+      case 'COMPUTATION_SET_ALL_COMPLETED':
+        return {
+          ...state,
+          computation: {
+            ...state.computation,
+            allCompleted: action.allCompleted
+          }
+        };
+
+      default:
+        return state;
+    }
+  }
+
+  // Action creators (convenience methods)
+  actions = {
+    // Config actions
+    initSizes: (sizes) => ({ type: 'CONFIG_INIT_SIZES', ...sizes }),
+    setExponent: (exponent) => ({ type: 'CONFIG_SET_EXPONENT', exponent }),
+    setAspectRatio: (aspectRatio) => ({ type: 'CONFIG_SET_ASPECT_RATIO', aspectRatio }),
+    setTheme: (theme) => ({ type: 'CONFIG_SET_THEME', theme }),
+    setZoomFactor: (zoomfactor) => ({ type: 'CONFIG_SET_ZOOM_FACTOR', zoomfactor }),
+    setGPU: (enableGPU) => ({ type: 'CONFIG_SET_GPU', enableGPU }),
+    setForceBoard: (forceBoard) => ({ type: 'CONFIG_SET_FORCE_BOARD', forceBoard }),
+    setPixelRatio: (pixelRatio) => ({ type: 'CONFIG_SET_PIXEL_RATIO', pixelRatio }),
+    setUnknownColor: (unknowncolor) => ({ type: 'CONFIG_SET_UNKNOWN_COLOR', unknowncolor }),
+    updateConfig: (config) => ({ type: 'CONFIG_UPDATE', config }),
+
+    // View actions
+    setViews: (views) => ({ type: 'VIEWS_SET', views }),
+    addView: (sizes, hidden = false) => ({ type: 'VIEW_ADD', sizes, hidden }),
+    updateView: (k, sizes) => ({ type: 'VIEW_UPDATE', k, sizes }),
+    setViewHidden: (k, hidden) => ({ type: 'VIEW_SET_HIDDEN', k, hidden }),
+    removeView: (k) => ({ type: 'VIEW_REMOVE', k }),
+    truncateViews: (k) => ({ type: 'VIEWS_TRUNCATE', k }),
+
+    // UI actions
+    mouseDown: (button, position) => ({ type: 'UI_MOUSE_DOWN', button, position }),
+    mouseUp: () => ({ type: 'UI_MOUSE_UP' }),
+    mouseMove: (position) => ({ type: 'UI_MOUSE_MOVE', position }),
+    setFocusedView: (k) => ({ type: 'UI_SET_FOCUSED_VIEW', k }),
+    setZoomRectangle: (rectangle) => ({ type: 'UI_SET_ZOOM_RECTANGLE', rectangle }),
+    clearZoomRectangle: () => ({ type: 'UI_CLEAR_ZOOM_RECTANGLE' }),
+    setOrbitPoint: (point) => ({ type: 'UI_SET_ORBIT_POINT', point }),
+    clearOrbitPoint: () => ({ type: 'UI_CLEAR_ORBIT_POINT' }),
+    toggleMovieMode: () => ({ type: 'UI_MOVIE_MODE_TOGGLE' }),
+    setMovieModeProgress: (progress) => ({ type: 'UI_MOVIE_MODE_SET_PROGRESS', progress }),
+    setMovieModeRendering: (rendering) => ({ type: 'UI_MOVIE_MODE_SET_RENDERING', rendering }),
+    setFullscreen: (fullscreen) => ({ type: 'UI_SET_FULLSCREEN', fullscreen }),
+
+    // Computation actions
+    updateComputationView: (k, data) => ({
+      type: 'COMPUTATION_UPDATE_VIEW',
+      k,
+      un: data.un,
+      di: data.di,
+      ch: data.ch,
+      it: data.it,
+      workerInfo: data.workerInfo,
+      boardType: data.boardType
+    }),
+    setComputing: (isComputing) => ({ type: 'COMPUTATION_SET_COMPUTING', isComputing }),
+    setAllCompleted: (allCompleted) => ({ type: 'COMPUTATION_SET_ALL_COMPLETED', allCompleted })
+  };
 }
 
 class View {
@@ -740,8 +1477,9 @@ class View {
 }
 
 class Grid {
-  constructor(config) {
+  constructor(config, stateManager = null) {
     this.config = config;
+    this.stateManager = stateManager;
     this.views = [];
     this.canvascount = 0;
     this.focusk = null;
@@ -1290,9 +2028,10 @@ class ZoomManager {
 }
 
 class URLHandler {
-  constructor(config, grid) {
+  constructor(config, grid, stateManager = null) {
     this.config = config;
     this.grid = grid;
+    this.stateManager = stateManager;
     this.grid.onurlchange(x => this.updateurl());
   }
 
@@ -2786,16 +3525,27 @@ class RedrawProcess {
 
 class MandelbrotExplorer {
   constructor() {
-    this.config = new Config();
-    this.grid = new Grid(this.config);
+    // Create unified state manager
+    this.stateManager = new StateManager();
+
+    // Create subsystems with state manager integration
+    this.config = new Config(this.stateManager);
+    this.grid = new Grid(this.config, this.stateManager);
     this.zoomManager = new ZoomManager(this.config, this.grid);
-    this.urlHandler = new URLHandler(this.config, this.grid);
+    this.urlHandler = new URLHandler(this.config, this.grid, this.stateManager);
     this.eventHandler = new EventHandler(this);
     this.movieMode = new MovieMode(this);
     this.orbitComputer = new OrbitComputer(this);
     this.redrawProcess = new RedrawProcess(this);
     this.movieContainer = document.getElementById('movie');
     this.allViewsCompleted = false;
+
+    // Subscribe to state changes for debugging (can be disabled)
+    if (this.stateManager.enableLogging) {
+      this.stateManager.subscribe((newState, oldState, action) => {
+        console.log('[State Change]', action.type);
+      });
+    }
 
     // Listen for fullscreen changes
     document.addEventListener('fullscreenchange', () => this.onFullscreenChange());
@@ -2904,6 +3654,13 @@ class MandelbrotExplorer {
   }
 
   onFullscreenChange() {
+    // Update state
+    if (this.stateManager) {
+      this.stateManager.dispatch(
+        this.stateManager.actions.setFullscreen(!!document.fullscreenElement)
+      );
+    }
+
     // Exit movie mode if active
     if (this.movieMode.active) {
       this.movieMode.toggle();
