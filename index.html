@@ -1545,6 +1545,20 @@ class Grid {
       }
       this.views[k].updateFromWorkerResult(data);
       this.updateCanvas(k, data);
+
+      // Update state with computation status
+      if (this.stateManager) {
+        this.stateManager.dispatch(
+          this.stateManager.actions.updateComputationView(k, {
+            un: data.un,
+            di: data.di,
+            ch: data.ch,
+            it: data.it,
+            workerInfo: data.workerInfo,
+            boardType: data.boardType
+          })
+        );
+      }
     }
   }
 
