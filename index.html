@@ -195,9 +195,98 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </div>
 
 <script>
-// Unified State Management System
-// Implements unidirectional data flow: Action → Reducer → State → Observers
-class StateManager {
+// =============================================================================
+// APPLICATION ARCHITECTURE
+// =============================================================================
+//
+// This Mandelbrot explorer uses a centralized state management pattern with
+// unidirectional data flow: User Actions → Dispatch → Reducer → New State
+//
+// MAJOR COMPONENTS:
+//
+// 1. StateStore - Centralized state container (this class)
+//    - Holds all application state in a single immutable tree
+//    - Provides dispatch() to modify state via actions
+//    - Notifies observers when state changes
+//
+// 2. Config - Configuration facade
+//    - Provides property getters/setters that delegate to store
+//    - Maintains backward compatibility with legacy code
+//    - Handles viewport sizing, color themes, GPU settings
+//
+// 3. Grid - View manager
+//    - Creates and manages multiple zoom level canvases
+//    - Coordinates worker threads for fractal computation
+//    - Updates computation progress in store
+//
+// 4. View - Individual zoom level
+//    - Stores pixel iteration data for one zoom level
+//    - Handles rendering to canvas
+//    - Manages convergence tracking
+//
+// 5. Board (CPU/GPU variants) - Computation engine
+//    - Executes Mandelbrot iteration algorithms
+//    - Reports progress back to Grid/Store
+//    - Supports perturbation theory for deep zooms
+//
+// STATE STRUCTURE:
+//
+// store.state = {
+//   config: {
+//     // Viewport: vw, gridcols, cssDims, dimsWidth, dimsHeight, pixelRatio
+//     // Computation: exponent, enableGPU, forceBoard
+//     // Display: theme, unknowncolor, zoomfactor, aspectRatio
+//     // Initial view: firstr, firstj, firstsize
+//     // Platform: mobile, mac
+//   },
+//   views: [
+//     // Array of {k, sizes: [size, re, im], hidden, parentK}
+//   ],
+//   ui: {
+//     // Mouse: mouseDown, mouseButton, mousePosition, focusedView
+//     // Features: zoomRectangle, orbitPoint, movieMode, fullscreen
+//   },
+//   computation: {
+//     // Per-view progress: views[k] = {un, di, ch, it, workerInfo, boardType}
+//     // Overall status: isComputing, allCompleted
+//   }
+// }
+//
+// ACTION CATEGORIES:
+//
+// 1. CONFIG_* - Configuration changes
+//    - CONFIG_INIT_SIZES, CONFIG_SET_EXPONENT, CONFIG_SET_THEME, etc.
+//    - Triggered by: User keyboard commands, window resize, URL params
+//
+// 2. VIEW_* / VIEWS_* - Zoom level management
+//    - VIEWS_SET, VIEW_ADD, VIEW_UPDATE, VIEW_SET_HIDDEN, VIEW_REMOVE
+//    - Triggered by: User clicks (zoom), keyboard navigation
+//
+// 3. UI_* - User interface state
+//    - UI_MOUSE_*, UI_SET_FOCUSED_VIEW, UI_MOVIE_MODE_*, UI_SET_FULLSCREEN
+//    - Triggered by: Mouse/touch events, keyboard shortcuts
+//
+// 4. COMPUTATION_* - Fractal computation progress
+//    - COMPUTATION_UPDATE_VIEW, COMPUTATION_SET_COMPUTING
+//    - Triggered by: Worker thread progress reports
+//
+// DATA FLOW EXAMPLE:
+//
+//   User presses 't' key
+//     ↓
+//   EventHandler calls config.theme = 'iceblue'
+//     ↓
+//   Config setter calls store.dispatch(setTheme('iceblue'))
+//     ↓
+//   Reducer creates new state with updated theme
+//     ↓
+//   Store notifies observers of state change
+//     ↓
+//   (Future) Observers re-render affected components
+//
+// =============================================================================
+
+class StateStore {
   constructor() {
     this.state = this.createInitialState();
     this.observers = new Set();
@@ -675,8 +764,8 @@ class Config {
   // Feigenbaum / Myreberg point (quad-precision real number [high, low])
   static FEIGENBAUM_POINT = [-1.4011551890920506, 1.196330130384937e-17];
 
-  constructor(stateManager = null) {
-    this.stateManager = stateManager;
+  constructor(store = null) {
+    this.store = store;
 
     // Initialize viewport width
     document.body.style.overflowY = 'scroll';
@@ -689,9 +778,9 @@ class Config {
     const mobile = ('ontouchstart' in document.documentElement);
     const mac = (navigator.platform.indexOf('Mac') === 0);
 
-    // Initialize state if we have a state manager
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({
+    // Initialize state if we have a state store
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({
         vw,
         gridcols: dgc,
         exponent: 2,
@@ -717,183 +806,183 @@ class Config {
 
   // Property getters/setters that delegate to state
   get vw() {
-    return this.stateManager ? this.stateManager.getState().config.vw : this._vw || 0;
+    return this.store ? this.store.getState().config.vw : this._vw || 0;
   }
   set vw(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ vw: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ vw: value }));
     } else {
       this._vw = value;
     }
   }
 
   get gridcols() {
-    return this.stateManager ? this.stateManager.getState().config.gridcols : this._gridcols || 1;
+    return this.store ? this.store.getState().config.gridcols : this._gridcols || 1;
   }
   set gridcols(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ gridcols: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ gridcols: value }));
     } else {
       this._gridcols = value;
     }
   }
 
   get exponent() {
-    return this.stateManager ? this.stateManager.getState().config.exponent : this._exponent || 2;
+    return this.store ? this.store.getState().config.exponent : this._exponent || 2;
   }
   set exponent(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setExponent(value));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.setExponent(value));
     } else {
       this._exponent = value;
     }
   }
 
   get enableGPU() {
-    return this.stateManager
-      ? this.stateManager.getState().config.enableGPU
+    return this.store
+      ? this.store.getState().config.enableGPU
       : this._enableGPU !== undefined ? this._enableGPU : true;
   }
   set enableGPU(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setGPU(value));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.setGPU(value));
     } else {
       this._enableGPU = value;
     }
   }
 
   get forceBoard() {
-    return this.stateManager
-      ? this.stateManager.getState().config.forceBoard
+    return this.store
+      ? this.store.getState().config.forceBoard
       : this._forceBoard || null;
   }
   set forceBoard(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setForceBoard(value));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.setForceBoard(value));
     } else {
       this._forceBoard = value;
     }
   }
 
   get firstr() {
-    return this.stateManager
-      ? this.stateManager.getState().config.firstr
+    return this.store
+      ? this.store.getState().config.firstr
       : this._firstr || [-0.5, 0];
   }
   set firstr(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstr: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ firstr: value }));
     } else {
       this._firstr = value;
     }
   }
 
   get firstj() {
-    return this.stateManager
-      ? this.stateManager.getState().config.firstj
+    return this.store
+      ? this.store.getState().config.firstj
       : this._firstj || [0.0, 0];
   }
   set firstj(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstj: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ firstj: value }));
     } else {
       this._firstj = value;
     }
   }
 
   get firstsize() {
-    return this.stateManager
-      ? this.stateManager.getState().config.firstsize
+    return this.store
+      ? this.store.getState().config.firstsize
       : this._firstsize || 3.0;
   }
   set firstsize(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ firstsize: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ firstsize: value }));
     } else {
       this._firstsize = value;
     }
   }
 
   get pixelRatio() {
-    return this.stateManager
-      ? this.stateManager.getState().config.pixelRatio
+    return this.store
+      ? this.store.getState().config.pixelRatio
       : this._pixelRatio || 2;
   }
   set pixelRatio(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setPixelRatio(value));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.setPixelRatio(value));
     } else {
       this._pixelRatio = value;
     }
   }
 
   get zoomfactor() {
-    return this.stateManager
-      ? this.stateManager.getState().config.zoomfactor
+    return this.store
+      ? this.store.getState().config.zoomfactor
       : this._zoomfactor || Config.DEFAULT_ZOOM_FACTOR;
   }
   set zoomfactor(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setZoomFactor(value));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.setZoomFactor(value));
     } else {
       this._zoomfactor = value;
     }
   }
 
   get aspectRatio() {
-    return this.stateManager
-      ? this.stateManager.getState().config.aspectRatio
+    return this.store
+      ? this.store.getState().config.aspectRatio
       : this._aspectRatio || Config.DEFAULT_ASPECT_RATIO;
   }
   set aspectRatio(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setAspectRatio(value));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.setAspectRatio(value));
     } else {
       this._aspectRatio = value;
     }
   }
 
   get theme() {
-    return this.stateManager ? this.stateManager.getState().config.theme : this._theme || 'warm';
+    return this.store ? this.store.getState().config.theme : this._theme || 'warm';
   }
   set theme(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setTheme(value));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.setTheme(value));
     } else {
       this._theme = value;
     }
   }
 
   get unknowncolor() {
-    return this.stateManager
-      ? this.stateManager.getState().config.unknowncolor
+    return this.store
+      ? this.store.getState().config.unknowncolor
       : this._unknowncolor || '#000';
   }
   set unknowncolor(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.setUnknownColor(value));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.setUnknownColor(value));
     } else {
       this._unknowncolor = value;
     }
   }
 
   get mobile() {
-    return this.stateManager ? this.stateManager.getState().config.mobile : this._mobile || false;
+    return this.store ? this.store.getState().config.mobile : this._mobile || false;
   }
   set mobile(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ mobile: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ mobile: value }));
     } else {
       this._mobile = value;
     }
   }
 
   get mac() {
-    return this.stateManager ? this.stateManager.getState().config.mac : this._mac || false;
+    return this.store ? this.store.getState().config.mac : this._mac || false;
   }
   set mac(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ mac: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ mac: value }));
     } else {
       this._mac = value;
     }
@@ -901,61 +990,61 @@ class Config {
 
   // Derived/computed properties
   get cssDims() {
-    return this.stateManager ? this.stateManager.getState().config.cssDims : this._cssDims || 0;
+    return this.store ? this.store.getState().config.cssDims : this._cssDims || 0;
   }
   set cssDims(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDims: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ cssDims: value }));
     } else {
       this._cssDims = value;
     }
   }
 
   get cssDimsWidth() {
-    return this.stateManager
-      ? this.stateManager.getState().config.cssDimsWidth
+    return this.store
+      ? this.store.getState().config.cssDimsWidth
       : this._cssDimsWidth || 0;
   }
   set cssDimsWidth(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDimsWidth: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ cssDimsWidth: value }));
     } else {
       this._cssDimsWidth = value;
     }
   }
 
   get cssDimsHeight() {
-    return this.stateManager
-      ? this.stateManager.getState().config.cssDimsHeight
+    return this.store
+      ? this.store.getState().config.cssDimsHeight
       : this._cssDimsHeight || 0;
   }
   set cssDimsHeight(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ cssDimsHeight: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ cssDimsHeight: value }));
     } else {
       this._cssDimsHeight = value;
     }
   }
 
   get dimsWidth() {
-    return this.stateManager ? this.stateManager.getState().config.dimsWidth : this._dimsWidth || 0;
+    return this.store ? this.store.getState().config.dimsWidth : this._dimsWidth || 0;
   }
   set dimsWidth(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ dimsWidth: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ dimsWidth: value }));
     } else {
       this._dimsWidth = value;
     }
   }
 
   get dimsHeight() {
-    return this.stateManager
-      ? this.stateManager.getState().config.dimsHeight
+    return this.store
+      ? this.store.getState().config.dimsHeight
       : this._dimsHeight || 0;
   }
   set dimsHeight(value) {
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.updateConfig({ dimsHeight: value }));
+    if (this.store) {
+      this.store.dispatch(this.store.actions.updateConfig({ dimsHeight: value }));
     } else {
       this._dimsHeight = value;
     }
@@ -1047,9 +1136,9 @@ class Config {
     // Height constraint: size / aspectRatio must be at least 2.5, so size >= 2.5 * aspectRatio
     const firstsize = Math.max(3.0, 2.5 * this.aspectRatio);
 
-    // Dispatch all updates at once if using state manager
-    if (this.stateManager) {
-      this.stateManager.dispatch(this.stateManager.actions.initSizes({
+    // Dispatch all updates at once if using state store
+    if (this.store) {
+      this.store.dispatch(this.store.actions.initSizes({
         vw: this.vw,
         gridcols: this.gridcols,
         cssDims,
@@ -1527,9 +1616,9 @@ class View {
 }
 
 class Grid {
-  constructor(config, stateManager = null) {
+  constructor(config, store = null) {
     this.config = config;
-    this.stateManager = stateManager;
+    this.store = store;
     this.views = [];
     this.canvascount = 0;
     this.focusk = null;
@@ -1597,9 +1686,9 @@ class Grid {
       this.updateCanvas(k, data);
 
       // Update state with computation status
-      if (this.stateManager) {
-        this.stateManager.dispatch(
-          this.stateManager.actions.updateComputationView(k, {
+      if (this.store) {
+        this.store.dispatch(
+          this.store.actions.updateComputationView(k, {
             un: data.un,
             di: data.di,
             ch: data.ch,
@@ -2092,10 +2181,10 @@ class ZoomManager {
 }
 
 class URLHandler {
-  constructor(config, grid, stateManager = null) {
+  constructor(config, grid, store = null) {
     this.config = config;
     this.grid = grid;
-    this.stateManager = stateManager;
+    this.store = store;
     this.grid.onurlchange(x => this.updateurl());
   }
 
@@ -2340,9 +2429,9 @@ class EventHandler {
     let target = this.eventtarget(e);
 
     // Dispatch mouse down state
-    if (this.explorer.stateManager) {
-      this.explorer.stateManager.dispatch(
-        this.explorer.stateManager.actions.mouseDown(e.button, {
+    if (this.explorer.store) {
+      this.explorer.store.dispatch(
+        this.explorer.store.actions.mouseDown(e.button, {
           x: e.clientX,
           y: e.clientY
         })
@@ -2366,9 +2455,9 @@ class EventHandler {
         let k = parseInt(m[1]);
 
         // Dispatch focused view change
-        if (this.explorer.stateManager) {
-          this.explorer.stateManager.dispatch(
-            this.explorer.stateManager.actions.setFocusedView(k)
+        if (this.explorer.store) {
+          this.explorer.store.dispatch(
+            this.explorer.store.actions.setFocusedView(k)
           );
         }
 
@@ -2386,9 +2475,9 @@ class EventHandler {
     let target = this.eventtarget(e);
 
     // Dispatch mouse move state
-    if (this.explorer.stateManager) {
-      this.explorer.stateManager.dispatch(
-        this.explorer.stateManager.actions.mouseMove({
+    if (this.explorer.store) {
+      this.explorer.store.dispatch(
+        this.explorer.store.actions.mouseMove({
           x: e.clientX,
           y: e.clientY
         })
@@ -2408,9 +2497,9 @@ class EventHandler {
 
   onmouseup(e) {
     // Dispatch mouse up state
-    if (this.explorer.stateManager) {
-      this.explorer.stateManager.dispatch(
-        this.explorer.stateManager.actions.mouseUp()
+    if (this.explorer.store) {
+      this.explorer.store.dispatch(
+        this.explorer.store.actions.mouseUp()
       );
     }
   }
@@ -2628,9 +2717,9 @@ class MovieMode {
     this.active = !this.active;
 
     // Dispatch movie mode toggle to state
-    if (this.explorer.stateManager) {
-      this.explorer.stateManager.dispatch(
-        this.explorer.stateManager.actions.toggleMovieMode()
+    if (this.explorer.store) {
+      this.explorer.store.dispatch(
+        this.explorer.store.actions.toggleMovieMode()
       );
     }
 
@@ -3637,14 +3726,14 @@ class RedrawProcess {
 
 class MandelbrotExplorer {
   constructor() {
-    // Create unified state manager
-    this.stateManager = new StateManager();
+    // Create unified state store
+    this.store = new StateStore();
 
-    // Create subsystems with state manager integration
-    this.config = new Config(this.stateManager);
-    this.grid = new Grid(this.config, this.stateManager);
+    // Create subsystems with state store integration
+    this.config = new Config(this.store);
+    this.grid = new Grid(this.config, this.store);
     this.zoomManager = new ZoomManager(this.config, this.grid);
-    this.urlHandler = new URLHandler(this.config, this.grid, this.stateManager);
+    this.urlHandler = new URLHandler(this.config, this.grid, this.store);
     this.eventHandler = new EventHandler(this);
     this.movieMode = new MovieMode(this);
     this.orbitComputer = new OrbitComputer(this);
@@ -3653,8 +3742,8 @@ class MandelbrotExplorer {
     this.allViewsCompleted = false;
 
     // Subscribe to state changes for debugging (can be disabled)
-    if (this.stateManager.enableLogging) {
-      this.stateManager.subscribe((newState, oldState, action) => {
+    if (this.store.enableLogging) {
+      this.store.subscribe((newState, oldState, action) => {
         console.log('[State Change]', action.type);
       });
     }
@@ -3767,9 +3856,9 @@ class MandelbrotExplorer {
 
   onFullscreenChange() {
     // Update state
-    if (this.stateManager) {
-      this.stateManager.dispatch(
-        this.stateManager.actions.setFullscreen(!!document.fullscreenElement)
+    if (this.store) {
+      this.store.dispatch(
+        this.store.actions.setFullscreen(!!document.fullscreenElement)
       );
     }
 

@@ -7,7 +7,7 @@ The unified state management system has been successfully implemented and integr
 ## What Was Accomplished
 
 ### Phase 1: Foundation (Commit f03e52e)
-- ✅ Implemented StateManager class with reducer pattern (467 lines)
+- ✅ Implemented StateStore class with reducer pattern (467 lines)
 - ✅ Created comprehensive state structure covering config, views, UI, and computation
 - ✅ Implemented observer/subscriber pattern for reactive updates
 - ✅ Created 40+ action types and action creators
@@ -15,15 +15,15 @@ The unified state management system has been successfully implemented and integr
 
 ### Phase 2: Config Integration (Commit f03e52e)
 - ✅ Refactored Config class with property getters/setters (370 lines)
-- ✅ All properties delegate to StateManager
+- ✅ All properties delegate to StateStore
 - ✅ Maintained 100% backward compatibility
 - ✅ initSizes() dispatches single CONFIG_INIT_SIZES action
 
 ### Phase 3: Runtime Integration (Commit 15c0884)
-- ✅ Connected StateManager to MandelbrotExplorer
+- ✅ Connected StateStore to MandelbrotExplorer
 - ✅ Updated Grid to dispatch computation status updates
 - ✅ Added fullscreen state tracking
-- ✅ Wired up Grid, URLHandler with StateManager
+- ✅ Wired up Grid, URLHandler with StateStore
 
 ### Phase 4: Event Integration (Commit ffd39e9)
 - ✅ Updated mouse handlers to dispatch UI actions
@@ -48,7 +48,7 @@ User Interaction
 dispatch(action)
        ↓
 ┌──────────────────────────────────────────────────────────┐
-│  StateManager.reducer()                                  │
+│  StateStore.reducer()                                  │
 │  - Pure function                                         │
 │  - Creates new immutable state                           │
 │  - No side effects                                       │
@@ -115,7 +115,7 @@ newState
 
 ### MandelbrotExplorer Class
 **What:** Application root
-**Integration:** Manages StateManager instance, dispatches fullscreen state
+**Integration:** Manages StateStore instance, dispatches fullscreen state
 **Actions Dispatched:**
 - `UI_SET_FULLSCREEN` - When fullscreen mode changes
 
@@ -272,10 +272,10 @@ newState
 - Worker communication intact
 
 ### ✅ Transparent Integration
-- StateManager operates "under the hood"
+- StateStore operates "under the hood"
 - Existing code doesn't need to know about state
 - Gradual migration possible
-- Can enable/disable StateManager per component
+- Can enable/disable StateStore per component
 
 ## Performance Impact
 
@@ -297,34 +297,34 @@ newState
 ### Enable Logging
 ```javascript
 // In MandelbrotExplorer constructor
-this.stateManager.enableLogging = true;
+this.store.enableLogging = true;
 
 // Or at runtime in console:
-explorer.stateManager.enableLogging = true;
+explorer.store.enableLogging = true;
 ```
 
 ### View Current State
 ```javascript
 // Complete state snapshot
-explorer.stateManager.getState()
+explorer.store.getState()
 
 // Specific parts
-explorer.stateManager.getState().config.theme
-explorer.stateManager.getState().views
-explorer.stateManager.getState().ui.mousePosition
-explorer.stateManager.getState().computation.views[0]
+explorer.store.getState().config.theme
+explorer.store.getState().views
+explorer.store.getState().ui.mousePosition
+explorer.store.getState().computation.views[0]
 ```
 
 ### Action History
 ```javascript
 // All actions ever dispatched
-explorer.stateManager.actionLog
+explorer.store.actionLog
 
 // Last 10 actions
-explorer.stateManager.actionLog.slice(-10)
+explorer.store.actionLog.slice(-10)
 
 // Filter by type
-explorer.stateManager.actionLog.filter(a => a.action.type.startsWith('CONFIG_'))
+explorer.store.actionLog.filter(a => a.action.type.startsWith('CONFIG_'))
 ```
 
 ## Future Development Opportunities
@@ -332,14 +332,14 @@ explorer.stateManager.actionLog.filter(a => a.action.type.startsWith('CONFIG_'))
 ### Phase 5: Observer-Based Rendering (Future)
 ```javascript
 // Grid observes state changes
-stateManager.subscribe((newState, oldState) => {
+store.subscribe((newState, oldState) => {
   if (newState.config !== oldState.config) {
     grid.updateLayout();
   }
 });
 
 // URL observes view changes
-stateManager.subscribe((newState, oldState) => {
+store.subscribe((newState, oldState) => {
   if (newState.views !== oldState.views) {
     urlHandler.updateurl();
   }
@@ -370,8 +370,8 @@ urlHandler.deserializeState(url) {
 ### Phase 7: Undo/Redo (Future)
 ```javascript
 class UndoManager {
-  constructor(stateManager) {
-    this.stateManager = stateManager;
+  constructor(store) {
+    this.store = store;
     this.history = [];
     this.currentIndex = -1;
   }
@@ -380,8 +380,8 @@ class UndoManager {
     if (this.currentIndex > 0) {
       this.currentIndex--;
       const prevState = this.history[this.currentIndex];
-      this.stateManager.state = prevState;
-      this.stateManager.notify();
+      this.store.state = prevState;
+      this.store.notify();
     }
   }
 
@@ -389,8 +389,8 @@ class UndoManager {
     if (this.currentIndex < this.history.length - 1) {
       this.currentIndex++;
       const nextState = this.history[this.currentIndex];
-      this.stateManager.state = nextState;
-      this.stateManager.notify();
+      this.store.state = nextState;
+      this.store.notify();
     }
   }
 }
@@ -400,16 +400,16 @@ class UndoManager {
 ```javascript
 // Replay all actions from beginning
 function replayActions(actions) {
-  const state = stateManager.createInitialState();
+  const state = store.createInitialState();
   for (const action of actions) {
-    state = stateManager.reducer(state, action);
+    state = store.reducer(state, action);
   }
   return state;
 }
 
 // Replay up to specific action
 function replayUntil(actionIndex) {
-  return replayActions(stateManager.actionLog.slice(0, actionIndex + 1));
+  return replayActions(store.actionLog.slice(0, actionIndex + 1));
 }
 ```
 
@@ -417,22 +417,22 @@ function replayUntil(actionIndex) {
 
 ### Unit Tests (Future)
 ```javascript
-describe('StateManager', () => {
+describe('StateStore', () => {
   it('should set aspect ratio', () => {
-    const sm = new StateManager();
+    const sm = new StateStore();
     sm.dispatch(sm.actions.setAspectRatio(16/9));
     expect(sm.getState().config.aspectRatio).toBe(16/9);
   });
 
   it('should add view', () => {
-    const sm = new StateManager();
+    const sm = new StateStore();
     sm.dispatch(sm.actions.addView([[3.0, [-0.5, 0], [0, 0]]]));
     expect(sm.getState().views.length).toBe(1);
     expect(sm.getState().views[0].k).toBe(0);
   });
 
   it('should track mouse state', () => {
-    const sm = new StateManager();
+    const sm = new StateStore();
     sm.dispatch(sm.actions.mouseDown(0, { x: 100, y: 200 }));
     expect(sm.getState().ui.mouseDown).toBe(true);
     expect(sm.getState().ui.mousePosition).toEqual({ x: 100, y: 200 });
@@ -452,19 +452,19 @@ describe('Event Integration', () => {
     canvas.dispatchEvent(event);
 
     // Check state updated
-    expect(explorer.stateManager.getState().ui.mouseDown).toBe(true);
+    expect(explorer.store.getState().ui.mouseDown).toBe(true);
   });
 
   it('should update state on keyboard command', () => {
     const explorer = new MandelbrotExplorer();
-    const initialRatio = explorer.stateManager.getState().config.aspectRatio;
+    const initialRatio = explorer.store.getState().config.aspectRatio;
 
     // Press 'a' key
     const event = new KeyboardEvent('keydown', { key: 'a' });
     document.body.dispatchEvent(event);
 
     // Check aspect ratio changed
-    expect(explorer.stateManager.getState().config.aspectRatio).not.toBe(initialRatio);
+    expect(explorer.store.getState().config.aspectRatio).not.toBe(initialRatio);
   });
 });
 ```
@@ -472,7 +472,7 @@ describe('Event Integration', () => {
 ## Code Statistics
 
 ### Additions
-- StateManager class: 467 lines
+- StateStore class: 467 lines
 - Config refactoring: +370 lines, -46 lines = +324 lines net
 - Event handler updates: ~50 lines
 - Total new code: ~840 lines

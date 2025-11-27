@@ -6,7 +6,7 @@ Successfully implemented a unified state management system for the Mandelbrot fr
 
 ## What Was Implemented
 
-### 1. StateManager Class (Lines 314-779)
+### 1. StateStore Class (Lines 314-779)
 
 A comprehensive state management system with:
 
@@ -58,13 +58,13 @@ A comprehensive state management system with:
 
 ### 2. Config Class Integration (Lines 172-577)
 
-Refactored Config class to use StateManager while maintaining backward compatibility:
+Refactored Config class to use StateStore while maintaining backward compatibility:
 
 **Approach:**
-- Added optional `stateManager` parameter to constructor
+- Added optional `store` parameter to constructor
 - Converted all properties to getters/setters that delegate to state
 - Properties read from/write to `state.config`
-- Falls back to private properties (`_propName`) when no StateManager
+- Falls back to private properties (`_propName`) when no StateStore
 - `initSizes()` method dispatches single `CONFIG_INIT_SIZES` action with all computed values
 
 **Backward Compatibility:**
@@ -73,7 +73,7 @@ All existing code like `config.exponent = 3` continues to work - it now dispatch
 ### 3. Grid Class Integration
 
 **Changes:**
-- Added `stateManager` parameter to constructor
+- Added `store` parameter to constructor
 - Updated `updateViewFromWorkerResult()` to dispatch `COMPUTATION_UPDATE_VIEW` action
 - Maintains existing `views` array for pixel data (not in state)
 
@@ -85,7 +85,7 @@ All existing code like `config.exponent = 3` continues to work - it now dispatch
 ### 4. MandelbrotExplorer Integration
 
 **Changes:**
-- Creates StateManager instance
+- Creates StateStore instance
 - Passes to Config, Grid, URLHandler constructors
 - Subscribes to state changes for debugging (when logging enabled)
 - Updates fullscreen state on fullscreen change events
@@ -93,7 +93,7 @@ All existing code like `config.exponent = 3` continues to work - it now dispatch
 ### 5. URLHandler Integration
 
 **Changes:**
-- Added `stateManager` parameter to constructor
+- Added `store` parameter to constructor
 - Ready for future migration to state-based URL serialization
 
 ## Benefits Achieved
@@ -101,7 +101,7 @@ All existing code like `config.exponent = 3` continues to work - it now dispatch
 ### 1. Single Source of Truth
 - All configuration and view state centralized in one place
 - No more scattered state across multiple classes
-- Easy to inspect entire application state: `stateManager.getState()`
+- Easy to inspect entire application state: `store.getState()`
 
 ### 2. Predictable State Updates
 - State only changes through actions
@@ -111,7 +111,7 @@ All existing code like `config.exponent = 3` continues to work - it now dispatch
 ### 3. Debugging Capabilities
 ```javascript
 // Enable logging
-stateManager.enableLogging = true;
+store.enableLogging = true;
 
 // Every action logged:
 // Action: CONFIG_SET_EXPONENT { exponent: 3 }
@@ -119,7 +119,7 @@ stateManager.enableLogging = true;
 // New state: { config: { exponent: 3 }, ... }
 
 // Access action history
-stateManager.actionLog // Array of all actions with timestamps
+store.actionLog // Array of all actions with timestamps
 ```
 
 ### 4. Time-Travel Debugging (Future)
@@ -133,7 +133,7 @@ Action history enables:
 // Pure reducer function - easy to test
 const state = { config: { theme: 'warm' } };
 const action = { type: 'CONFIG_SET_THEME', theme: 'iceblue' };
-const newState = stateManager.reducer(state, action);
+const newState = store.reducer(state, action);
 assert(newState.config.theme === 'iceblue');
 ```
 
@@ -141,7 +141,7 @@ assert(newState.config.theme === 'iceblue');
 - Zero breaking changes
 - Existing code works unchanged
 - Gradual migration path
-- Can enable/disable StateManager per component
+- Can enable/disable StateStore per component
 
 ## Architecture Pattern
 
@@ -164,7 +164,7 @@ User Action → dispatch(action) → reducer(state, action) → new state → no
 ```javascript
 // 1. User presses 'a' to toggle aspect ratio
 // 2. EventHandler dispatches action (future implementation)
-stateManager.dispatch({ type: 'CONFIG_SET_ASPECT_RATIO', aspectRatio: 16/9 });
+store.dispatch({ type: 'CONFIG_SET_ASPECT_RATIO', aspectRatio: 16/9 });
 
 // 3. Reducer creates new state
 const newState = {
@@ -203,7 +203,7 @@ The following still use direct property access (not yet migrated to actions):
 ## Migration Path for Future Work
 
 ### Phase 1 (Completed)
-- ✅ Implement StateManager
+- ✅ Implement StateStore
 - ✅ Integrate with Config
 - ✅ Integrate with Grid
 - ✅ Wire up in MandelbrotExplorer
@@ -230,12 +230,12 @@ The following still use direct property access (not yet migrated to actions):
 ### Enabling Debug Logging
 ```javascript
 // In MandelbrotExplorer constructor
-this.stateManager.enableLogging = true;
+this.store.enableLogging = true;
 ```
 
 ### Reading State
 ```javascript
-const state = this.stateManager.getState();
+const state = this.store.getState();
 console.log('Current theme:', state.config.theme);
 console.log('All views:', state.views);
 console.log('Mouse position:', state.ui.mousePosition);
@@ -243,7 +243,7 @@ console.log('Mouse position:', state.ui.mousePosition);
 
 ### Subscribing to Changes
 ```javascript
-const unsubscribe = this.stateManager.subscribe((newState, oldState, action) => {
+const unsubscribe = this.store.subscribe((newState, oldState, action) => {
   if (action.type === 'CONFIG_SET_THEME') {
     console.log('Theme changed to:', newState.config.theme);
   }
@@ -255,12 +255,12 @@ const unsubscribe = this.stateManager.subscribe((newState, oldState, action) => 
 ### Dispatching Actions
 ```javascript
 // Via action creators (recommended)
-this.stateManager.dispatch(
-  this.stateManager.actions.setTheme('iceblue')
+this.store.dispatch(
+  this.store.actions.setTheme('iceblue')
 );
 
 // Or directly
-this.stateManager.dispatch({
+this.store.dispatch({
   type: 'CONFIG_SET_THEME',
   theme: 'iceblue'
 });
@@ -268,9 +268,9 @@ this.stateManager.dispatch({
 
 ### Testing Reducers
 ```javascript
-const state = stateManager.createInitialState();
+const state = store.createInitialState();
 const action = { type: 'VIEW_ADD', sizes: [[3.0, [-0.5, 0], [0, 0]]] };
-const newState = stateManager.reducer(state, action);
+const newState = store.reducer(state, action);
 
 assert(newState.views.length === 1);
 assert(newState.views[0].k === 0);
@@ -308,15 +308,15 @@ assert(newState.views[0].sizes[0] === 3.0);
 ### How to Verify State Updates
 ```javascript
 // In browser console:
-explorer.stateManager.enableLogging = true;
+explorer.store.enableLogging = true;
 
 // Now interact with the app - see all state changes logged
 
 // Check current state:
-explorer.stateManager.getState()
+explorer.store.getState()
 
 // Check action history:
-explorer.stateManager.actionLog
+explorer.store.actionLog
 ```
 
 ## Known Limitations
@@ -346,7 +346,7 @@ The implementation follows industry best practices (Redux/Flux pattern) adapted 
 
 ## Files Modified
 
-- `index.html`: Added StateManager class (467 lines), refactored Config class (370 lines), updated Grid/URLHandler/MandelbrotExplorer
+- `index.html`: Added StateStore class (467 lines), refactored Config class (370 lines), updated Grid/URLHandler/MandelbrotExplorer
 - Total additions: ~840 lines
 - Zero breaking changes
 
