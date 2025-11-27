@@ -2233,7 +2233,7 @@ class URLHandler {
            (!this.config.enableGPU ? '&gpu=0' : '') +
            (this.config.forceBoard ? `&board=${this.config.forceBoard}` : '') +
            (compactc.length ? `&c=${compactc}` : '') +
-           (this.config.gridcols !== this.config.dgc ? `&grid=${this.config.gridcols}` : '') +
+           (this.config.gridcols !== 2 ? `&grid=${this.config.gridcols}` : '') +
            (state.hidden.length ? `&h=${state.hidden}` : '') +
            (this.config.theme !== 'warm' ? `&theme=${this.config.theme}` : '') +
            (this.config.unknowncolor !== '#000' ? `&unk=${encodeURIComponent(
