@@ -173,10 +173,6 @@ class Config {
   // Constants for iteration and convergence
   static MAX_CHAOTIC_ITERATIONS = 100000;
 
-  // Constants for GPU buffers
-  static GPU_DEFAULT_MAX_BUFFER = 200 * 1024 * 1024;  // 200MB
-  static GPU_BYTES_PER_PIXEL = 16;
-
   // Constants for display and zoom
   static DEFAULT_ZOOM_FACTOR = 5;
   static DEFAULT_ASPECT_RATIO = 1.0;
@@ -4460,6 +4456,8 @@ class ZhuoranBoard extends Board {
 // Base class for WebGPU-accelerated boards
 // Provides shared GPU infrastructure for different computation strategies
 class GpuBaseBoard extends Board {
+  static GPU_DEFAULT_MAX_BUFFER = 200 * 1024 * 1024;  // 200MB
+
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
@@ -4612,7 +4610,7 @@ class GpuBaseBoard extends Board {
     }
     try {
       const adapter = await navigator.gpu.requestAdapter();
-      if (!adapter) return Config.GPU_DEFAULT_MAX_BUFFER;
+      if (!adapter) return GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER;
 
       // Request device with higher limits if supported
       const requiredLimits = {};
@@ -4630,13 +4628,13 @@ class GpuBaseBoard extends Board {
       GpuBaseBoard.cachedMaxBufferSize = Math.floor(limit * 0.9);  // 90% for safety
       return GpuBaseBoard.cachedMaxBufferSize;
     } catch (e) {
-      GpuBaseBoard.cachedMaxBufferSize = Config.GPU_DEFAULT_MAX_BUFFER;
+      GpuBaseBoard.cachedMaxBufferSize = GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER;
       return GpuBaseBoard.cachedMaxBufferSize;
     }
   }
 
-  static isSafeDims(dimsWidth, dimsHeight, bytesPerPixel = Config.GPU_BYTES_PER_PIXEL,
-                    maxBufferSize = Config.GPU_DEFAULT_MAX_BUFFER) {
+  static isSafeDims(dimsWidth, dimsHeight, bytesPerPixel = 16,
+                    maxBufferSize = GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER) {
     // Check WebGPU buffer size limit (workgroup limit handled by 2D dispatch)
     const dims2 = dimsWidth * dimsHeight;
     const largestBufferSize = dims2 * bytesPerPixel;
@@ -6342,7 +6340,7 @@ self.onmessage = async function(e) {
       const bytesPerPixel = GpuBoardClass.BYTES_PER_PIXEL;
       const gpuSafe = GpuBaseBoard.isSafeDims(data.config.dimsWidth, data.config.dimsHeight,
                                               bytesPerPixel,
-                                              gpuMaxBufferSize || Config.GPU_DEFAULT_MAX_BUFFER);
+                                              gpuMaxBufferSize || GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER);
 
       // Explicit board type selection via board= parameter
       if (forcedBoardType) {
@@ -6388,7 +6386,7 @@ self.onmessage = async function(e) {
         if (enableGPU && webGPUAvailable && !gpuSafe) {
           const dims2 = data.config.dims2;
           const bufferSizeMB = (dims2 * bytesPerPixel / (1024*1024)).toFixed(0);
-          const limitMB = ((gpuMaxBufferSize || Config.GPU_DEFAULT_MAX_BUFFER) / (1024*1024)).toFixed(0);
+          const limitMB = ((gpuMaxBufferSize || GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER) / (1024*1024)).toFixed(0);
           console.log(`Board ${data.k}: dims=${data.config.dimsWidth}x${data.config.dimsHeight} too large for GPU (buffer size ${bufferSizeMB} MB > ${limitMB} MB), using CPU`);
         }
         // WebGPU disabled or unavailable - use CPU-based boards
