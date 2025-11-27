@@ -170,6 +170,22 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 
 <script>
 class Config {
+  // Constants for iteration and convergence
+  static MAX_CHAOTIC_ITERATIONS = 100000;
+
+  // Constants for GPU buffers
+  static GPU_DEFAULT_MAX_BUFFER = 200 * 1024 * 1024;  // 200MB
+  static GPU_BYTES_PER_PIXEL = 16;
+
+  // Constants for display and zoom
+  static DEFAULT_ZOOM_FACTOR = 5;
+  static DEFAULT_ASPECT_RATIO = 1.0;
+  static WIDESCREEN_ASPECT_RATIO = 16 / 9;
+  static CENTER_COORDINATE = 0.5;
+
+  // Feigenbaum / Myreberg point (quad-precision real number [high, low])
+  static FEIGENBAUM_POINT = [-1.4011551890920506, 1.196330130384937e-17];
+
   constructor() {
     document.body.style.overflowY = 'scroll';
     this.vw = document.documentElement.clientWidth || (
@@ -185,8 +201,8 @@ class Config {
     this.firstj = [0.0, 0];
     this.firstsize = 3.0;
     this.pixelRatio = Math.max(Math.ceil(window.devicePixelRatio || 1), 2);
-    this.zoomfactor = 5;
-    this.aspectRatio = 1.0;  // 1.0 for square, 16/9 for widescreen
+    this.zoomfactor = Config.DEFAULT_ZOOM_FACTOR;
+    this.aspectRatio = Config.DEFAULT_ASPECT_RATIO;
     this.cssDims = 0;
     this.cssDimsWidth = 0;
     this.cssDimsHeight = 0;
@@ -322,10 +338,11 @@ class View {
     for (; j < histogram.length - 1 && i < histogram[j][0]; j += 1) {}
     // Clamp to last valid index if iteration exceeds histogram range
     j = Math.min(j, histogram.length - 1);
+    const [, uFrac, dFrac, lFrac] = histogram[j];
     return {
-      fracK: 1 - histogram[j][1],  // Fraction known
-      fracD: 1 - histogram[j][2],  // Fraction diverged
-      fracL: 1 - histogram[j][3]   // Estimated limit on fracD
+      fracK: 1 - uFrac,  // Fraction known
+      fracD: 1 - dFrac,  // Fraction diverged
+      fracL: 1 - lFrac   // Estimated limit on fracD
     };
   }
 
@@ -348,29 +365,30 @@ class View {
   }
 
   updateFromWorkerResult(data) {
+    const { changeList, un, di, ch, it, workerInfo, boardType } = data;
     const changedIndices = [];
 
-    for (let change of data.changeList) {
-      for (let index of change.nn) {
-        this.nn[index] = change.iter;
+    for (const { nn, vv, iter } of changeList) {
+      for (const index of nn) {
+        this.nn[index] = iter;
         changedIndices.push(index);
       }
-      for (let v of change.vv) {
-        this.nn[v.index] = -change.iter;
-        this.convergedData.set(v.index, { z: toQdc(v.z), p: v.p });
-        changedIndices.push(v.index);
+      for (const { index, z, p } of vv) {
+        this.nn[index] = -iter;
+        this.convergedData.set(index, { z: toQdc(z), p });
+        changedIndices.push(index);
       }
-      this.di += change.nn.length;
-      this.un -= change.nn.length + change.vv.length;
-      this.updateHistogram(this.un, this.di, change.iter);
+      this.di += nn.length;
+      this.un -= nn.length + vv.length;
+      this.updateHistogram(this.un, this.di, iter);
     }
-    this.un = data.un;
-    this.di = data.di;
-    this.ch = data.ch;
-    this.it = data.it;
-    this.workerInfo = data.workerInfo;
-    if (data.boardType) {
-      this.boardType = data.boardType;
+    this.un = un;
+    this.di = di;
+    this.ch = ch;
+    this.it = it;
+    this.workerInfo = workerInfo;
+    if (boardType) {
+      this.boardType = boardType;
     }
 
     // Propagate updates to child view
@@ -384,14 +402,16 @@ class View {
   }
 
   currentc(j) {
-    const x = j % this.config.dimsWidth;
-    const y = Math.floor(j / this.config.dimsWidth);
-    const rFrac = (x / this.config.dimsWidth) - 0.5;
-    const jFrac = 0.5 - (y / this.config.dimsHeight);
+    const { dimsWidth, dimsHeight, aspectRatio } = this.config;
+    const [size, centerR, centerI] = this.sizes;
+    const x = j % dimsWidth;
+    const y = Math.floor(j / dimsWidth);
+    const rFrac = (x / dimsWidth) - Config.CENTER_COORDINATE;
+    const jFrac = Config.CENTER_COORDINATE - (y / dimsHeight);
     // Scale real coordinate by full size, imaginary by size/aspectRatio
-    const r = qdAdd(this.sizes[1], qdScale(toQd(rFrac), this.sizes[0]));
-    const heightScale = this.sizes[0] / this.config.aspectRatio;
-    const i = qdAdd(this.sizes[2], qdScale(toQd(jFrac), heightScale));
+    const r = qdAdd(centerR, qdScale(toQd(rFrac), size));
+    const heightScale = size / aspectRatio;
+    const i = qdAdd(centerI, qdScale(toQd(jFrac), heightScale));
     return [r[0], r[1], i[0], i[1]];
   }
 
@@ -406,7 +426,7 @@ class View {
   }
 
   updateHistogram(un, di, i) {
-    if (this.hi[0][1] - un / this.config.dims2 >= 1 / 256) {
+    if (this.hi[0][1] - un / this.config.dims2 >= 1 / 256) {  // Histogram resolution
       const uFrac = un / this.config.dims2;
       const dFrac = 1 - di / this.config.dims2;
       this.hi.unshift([i, uFrac, dFrac, 0]);
@@ -457,6 +477,63 @@ class View {
     }
   }
 
+  // Calculate coordinate mapping from parent to child canvas
+  calculateParentMapping() {
+    const parent = this.parentView;
+    const [childSize, childCenterR, childCenterI] = this.sizes;
+    const [parentSize, parentCenterR, parentCenterI] = parent.sizes;
+    const { dimsWidth, dimsHeight, aspectRatio } = this.config;
+
+    const childLeft = childCenterR[0] - childSize / 2;
+    const childTop = childCenterI[0] + (childSize / aspectRatio) / 2;
+    const parentLeft = parentCenterR[0] - parentSize / 2;
+    const parentTop = parentCenterI[0] + (parentSize / aspectRatio) / 2;
+
+    const sx = ((childLeft - parentLeft) / parentSize) * dimsWidth;
+    const parentHeight = parentSize / aspectRatio;
+    const sy = ((parentTop - childTop) / parentHeight) * dimsHeight;
+    const sw = (childSize / parentSize) * dimsWidth;
+    const sh = (childSize / parentSize) * dimsHeight;
+
+    return { sx, sy, sw, sh };
+  }
+
+  // Check if a parent pixel should be cleared (unknown or on boundary)
+  shouldClearParentPixel(px, py, parentData, sx, sy, sw, sh) {
+    const { dimsWidth, dimsHeight } = this.config;
+
+    if (px < 0 || px >= dimsWidth || py < 0 || py >= dimsHeight) {
+      return false;
+    }
+
+    const parentIdx = py * dimsWidth + px;
+    const val = parentData[parentIdx];
+
+    // Clear if unknown
+    if (val === 0) return true;
+
+    // Check for diverged/converged boundary
+    const isDiverged = val > 0;
+    const isConverged = val < 0;
+
+    // Check 4-connected neighbors for opposite type
+    const neighbors = [
+      py > 0 ? parentData[(py - 1) * dimsWidth + px] : null,
+      py < dimsHeight - 1 ? parentData[(py + 1) * dimsWidth + px] : null,
+      px > 0 ? parentData[py * dimsWidth + (px - 1)] : null,
+      px < dimsWidth - 1 ? parentData[py * dimsWidth + (px + 1)] : null,
+    ];
+
+    for (const n of neighbors) {
+      if (n !== null && n !== 0) {
+        if ((isDiverged && n < 0) || (isConverged && n > 0)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   drawComposite(ctx, colorview = null, unknownColor = 'transparent') {
     // Draw parent canvas scaled as background, then local pixels on top
     if (colorview === null) {
@@ -473,22 +550,7 @@ class View {
       const parentCanvas = this.grid.canvas(parent.k);
 
       if (parentCanvas) {
-        // Calculate which portion of parent canvas maps to this child view
-        const childCenter = this.sizes.slice(1);
-        const childSize = this.sizes[0];
-        const parentCenter = parent.sizes.slice(1);
-        const parentSize = parent.sizes[0];
-
-        const childLeft = childCenter[0][0] - childSize / 2;
-        const childTop = childCenter[1][0] + (childSize / this.config.aspectRatio) / 2;
-        const parentLeft = parentCenter[0][0] - parentSize / 2;
-        const parentTop = parentCenter[1][0] + (parentSize / this.config.aspectRatio) / 2;
-
-        const sx = ((childLeft - parentLeft) / parentSize) * this.config.dimsWidth;
-        const parentHeight = parentSize / this.config.aspectRatio;
-        const sy = ((parentTop - childTop) / parentHeight) * this.config.dimsHeight;
-        const sw = (childSize / parentSize) * this.config.dimsWidth;
-        const sh = (childSize / parentSize) * this.config.dimsHeight;
+        const { sx, sy, sw, sh } = this.calculateParentMapping();
 
         // Create a temporary canvas at 3x parent resolution for finer inflation control
         const upsample = 3;
@@ -513,48 +575,14 @@ class View {
         const parentData = parent.nn;
         for (let py = Math.floor(sy) - 1; py < Math.ceil(sy + sh) + 1; py++) {
           for (let px = Math.floor(sx) - 1; px < Math.ceil(sx + sw) + 1; px++) {
-            if (px >= 0 && px < this.config.dimsWidth && py >= 0 && py < this.config.dimsHeight) {
-              const parentIdx = py * this.config.dimsWidth + px;
-              const val = parentData[parentIdx];
-              let shouldClear = false;
-
-              // Clear if unknown
-              if (val === 0) {
-                shouldClear = true;
-              } else {
-                // Check for diverged/converged boundary
-                const isDiverged = val > 0;
-                const isConverged = val < 0;
-
-                // Check 4-connected neighbors for opposite type
-                const w = this.config.dimsWidth;
-                const h = this.config.dimsHeight;
-                const neighbors = [
-                  py > 0 ? parentData[(py - 1) * w + px] : null,
-                  py < h - 1 ? parentData[(py + 1) * w + px] : null,
-                  px > 0 ? parentData[py * w + (px - 1)] : null,
-                  px < w - 1 ? parentData[py * w + (px + 1)] : null,
-                ];
-
-                for (const n of neighbors) {
-                  if (n !== null && n !== 0) {
-                    if ((isDiverged && n < 0) || (isConverged && n > 0)) {
-                      shouldClear = true;
-                      break;
-                    }
-                  }
-                }
-              }
-
-              if (shouldClear) {
-                // Clear pixel and 1-pixel margin at upsampled resolution
-                // Each parent pixel maps to a 3x3 block, plus 1px inflation = 5x5 area
-                const tx = (px - Math.floor(sx) + 1) * upsample;
-                const ty = (py - Math.floor(sy) + 1) * upsample;
-                for (let dy = -1; dy < upsample + 1; dy++) {
-                  for (let dx = -1; dx < upsample + 1; dx++) {
-                    tempCtx.clearRect(tx + dx, ty + dy, 1, 1);
-                  }
+            if (this.shouldClearParentPixel(px, py, parentData, sx, sy, sw, sh)) {
+              // Clear pixel and 1-pixel margin at upsampled resolution
+              // Each parent pixel maps to a 3x3 block, plus 1px inflation = 5x5 area
+              const tx = (px - Math.floor(sx) + 1) * upsample;
+              const ty = (py - Math.floor(sy) + 1) * upsample;
+              for (let dy = -1; dy < upsample + 1; dy++) {
+                for (let dx = -1; dx < upsample + 1; dx++) {
+                  tempCtx.clearRect(tx + dx, ty + dy, 1, 1);
                 }
               }
             }
@@ -642,8 +670,9 @@ class View {
   }
 
   unfinished() {
-    // Chaotic points in the spike counted as finished after 100000 iterations.
-    const result = Math.max(0, this.un + (this.it < 100000 ? 0 : -this.ch));
+    // Chaotic points in the spike counted as finished after max iterations.
+    const result = Math.max(0, this.un +
+      (this.it < Config.MAX_CHAOTIC_ITERATIONS ? 0 : -this.ch));
     return result;
   }
 
@@ -807,27 +836,36 @@ class Grid {
   }
 
   updateLayout(state = null, skipInitSizes = false) {
+    // Abort any current update process
     if (this.currentUpdateProcess) {
       this.currentUpdateProcess.abort();
     }
-    if (state === null) {
+
+    // Use current state if not provided
+    if (!state) {
       state = this.currentGridState();
     }
+
+    // Recalculate dimensions unless explicitly skipped
     if (!skipInitSizes) {
       this.config.initSizes();
     }
 
-    // Recreate the grid
-    let gridElement = document.getElementById('grid');
+    // Clear and recreate the grid DOM
+    const gridElement = document.getElementById('grid');
     gridElement.innerHTML = '';
     this.canvascount = 0;
     this.truncateviews(0);
 
-    // Recreate all canvases
-    for (let k = 0; k < state.sizes.length; k++) {
-      this.makecanvas(k, state.sizes[k]);
-      if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
+    // Create canvases for all views in the state
+    const {sizes, hidden} = state;
+    for (let k = 0; k < sizes.length; k++) {
+      this.makecanvas(k, sizes[k]);
+      if (hidden.includes(k)) {
+        this.hidecanvas(k);
+      }
     }
+
     // Update workers with hidden boards BEFORE creating boards
     // to prevent hidden boards from computing
     this.updateHiddenViews();
@@ -916,38 +954,49 @@ class Grid {
            `<div class="status"></div></a>`;
   }
 
+  // Get the container element for a view
+  container(k) {
+    return document.getElementById(`b_${k}`);
+  }
+
+  canvas(k) {
+    return this.container(k)?.firstElementChild;
+  }
+
+  closebutton(k) {
+    return this.container(k)?.firstElementChild?.nextElementSibling;
+  }
+
+  rect(k) {
+    return this.container(k)?.firstElementChild?.nextElementSibling?.nextElementSibling;
+  }
+
+  overlay(k) {
+    const container = this.container(k);
+    return container?.firstElementChild?.nextElementSibling?.nextElementSibling?.nextElementSibling;
+  }
+
   hidecanvas(k) {
-    this.canvas(k).parentElement.style.display = 'none';
+    const container = this.container(k);
+    if (container) {
+      container.style.display = 'none';
+    }
   }
 
   showcanvas(k) {
-    this.canvas(k).parentElement.style.display = '';
+    const container = this.container(k);
+    if (container) {
+      container.style.display = '';
+    }
   }
 
   hiddencanvas(k) {
-    let b = this.canvas(k);
-    return b?.parentElement.style.display === 'none';
+    const container = this.container(k);
+    return container?.style.display === 'none';
   }
 
   grid() {
     return document.getElementById('grid');
-  }
-
-  canvas(k) {
-    const b = document.getElementById(`b_${k}`);
-    return b?.firstElementChild;
-  }
-
-  closebutton(k) {
-      return this.canvas(k)?.nextElementSibling;
-  }
-
-  rect(k) {
-      return this.closebutton(k)?.nextElementSibling;
-  }
-
-  overlay(k) {
-      return this.rect(k)?.nextElementSibling;
   }
 
   truncateviews(k) {
@@ -1128,11 +1177,12 @@ class ZoomManager {
     let osize = this.grid.views[k].sizes[0];
     let ore = this.grid.views[k].sizes[1];
     let oim = this.grid.views[k].sizes[2];
-    let rre = 0.5;
+    let rre = Config.CENTER_COORDINATE;
     if (k === 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
       // Myreberg / Feigenbaum point
-      ore = [-1.4011551890920506, 1.196330130384937e-17];
-      rre = (ore[0] - this.grid.views[0].sizes[1][0]) / this.grid.views[0].sizes[0] + 0.5;
+      ore = Config.FEIGENBAUM_POINT;
+      rre = (ore[0] - this.grid.views[0].sizes[1][0]) / this.grid.views[0].sizes[0] +
+            Config.CENTER_COORDINATE;
     }
     this.showZoomRect(k, rre, 0.5, this.config.zoomfactor);
     let nsize = osize / this.config.zoomfactor;
@@ -1256,75 +1306,112 @@ class URLHandler {
     }
   }
 
+  setupUrlParameters() {
+    // Registry of simple URL parameters with their parse/apply logic
+    this.urlParams = [
+      {
+        name: 'exponent',
+        parse: (val) => {
+          this.config.exponent = Math.max(2, parseInt(val));
+          if (this.config.exponent > 2) { this.config.firstr = [0.0, 0]; }
+          for (const el of document.querySelectorAll('.exponent')) {
+            el.innerText = this.config.exponent;
+          }
+        }
+      },
+      {
+        name: 'gpu',
+        parse: (val) => {
+          this.config.enableGPU = parseInt(val) !== 0;
+        }
+      },
+      {
+        name: 'board',
+        parse: (val) => {
+          const boardType = val.toLowerCase();
+          const validTypes = ['cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'];
+          if (validTypes.includes(boardType)) {
+            this.config.forceBoard = boardType;
+          } else {
+            console.warn(`Invalid board type: ${boardType}. Valid types: ${validTypes.join(', ')}`);
+          }
+        }
+      },
+      {
+        name: 'grid',
+        parse: (val) => {
+          this.config.gridcols = Math.max(1, parseInt(val));
+        }
+      },
+      {
+        name: 'a',
+        parse: (val) => {
+          const m = val.match(/(\d+):(\d+)/);
+          if (m) {
+            const width = parseInt(m[1]);
+            const height = parseInt(m[2]);
+            if (width > 0 && height > 0) {
+              this.config.aspectRatio = width / height;
+            }
+          }
+        }
+      },
+      {
+        name: 'z',
+        parse: (val) => {
+          this.config.zoomFromUrl = parseFloat(val);
+        }
+      },
+      {
+        name: 's',
+        parse: (val) => {
+          // Legacy parameter: s is the actual size in complex plane
+          // Convert to zoom factor: z = 3.0 / s
+          this.config.zoomFromUrl = 3.0 / parseFloat(val);
+        }
+      },
+      {
+        name: 'pixelratio',
+        parse: (val) => {
+          this.config.pixelRatio = Math.max(1, parseInt(val));
+        }
+      },
+      {
+        name: 'theme',
+        parse: (val) => {
+          if (this.config.colorThemes.all.includes(val)) {
+            this.config.theme = val;
+          }
+        }
+      },
+      {
+        name: 'unk',
+        parse: (val) => {
+          // Allow any CSS color (e.g., 000, rgb(32,16,64), yellow, etc.)
+          let color = decodeURIComponent(val);
+          // Auto-prepend # for hex colors (e.g., 888 -> #888)
+          if (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(color)) {
+            color = `#${color}`;
+          }
+          this.config.unknowncolor = color;
+        }
+      }
+    ];
+  }
+
   parseUrl() {
     const startstate = { hidden: [], sizes: [] };
     const params = new URLSearchParams(document.location.search);
 
-    // Parse exponent parameter
-    const exponent = params.get('exponent');
-    if (exponent) {
-      this.config.exponent = Math.max(2, parseInt(exponent));
-      if (this.config.exponent > 2) { this.config.firstr = [0.0, 0]; }
-      for (const el of document.querySelectorAll('.exponent')) {
-        el.innerText = this.config.exponent;
+    // Parse all registered simple parameters
+    if (!this.urlParams) {
+      this.setupUrlParameters();
+    }
+    for (const param of this.urlParams) {
+      const value = params.get(param.name);
+      if (value) {
+        param.parse(value);
       }
-    }
-
-    // Parse GPU parameter
-    const gpu = params.get('gpu');
-    if (gpu) {
-      this.config.enableGPU = parseInt(gpu) !== 0;
-    }
-
-    // Parse board parameter
-    const board = params.get('board');
-    if (board) {
-      const boardType = board.toLowerCase();
-      const validTypes = ['cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'];
-      if (validTypes.includes(boardType)) {
-        this.config.forceBoard = boardType;
-      } else {
-        console.warn(`Invalid board type: ${boardType}. Valid types: ${validTypes.join(', ')}`);
-      }
-    }
-
-    // Parse grid parameter
-    const grid = params.get('grid');
-    if (grid) {
-      this.config.gridcols = Math.max(1, parseInt(grid));
-    }
-
-    // Parse aspect ratio parameter
-    const aspect = params.get('a');
-    if (aspect) {
-      const m = aspect.match(/(\d+):(\d+)/);
-      if (m) {
-        const width = parseInt(m[1]);
-        const height = parseInt(m[2]);
-        if (width > 0 && height > 0) {
-          this.config.aspectRatio = width / height;
-        }
-      }
-    }
-
-    // Parse zoom factor parameter
-    const z = params.get('z');
-    if (z) {
-      this.config.zoomFromUrl = parseFloat(z);
-    }
-
-    // Parse legacy size parameter
-    const s = params.get('s');
-    if (s) {
-      // Legacy parameter: s is the actual size in complex plane
-      // Convert to zoom factor: z = 3.0 / s
-      this.config.zoomFromUrl = 3.0 / parseFloat(s);
-    }
-
-    // Parse pixel ratio parameter
-    const pixelratio = params.get('pixelratio');
-    if (pixelratio) {
-      this.config.pixelRatio = Math.max(1, parseInt(pixelratio));
     }
 
     // Parse coordinates parameter
@@ -1349,24 +1436,6 @@ class URLHandler {
     const h = params.get('h');
     if (h) {
       startstate.hidden = h.split(',').map(x => parseInt(x));
-    }
-
-    // Parse theme parameter
-    const theme = params.get('theme');
-    if (theme && this.config.colorThemes.all.includes(theme)) {
-      this.config.theme = theme;
-    }
-
-    // Parse unknown color parameter
-    const unk = params.get('unk');
-    if (unk) {
-      // Allow any CSS color (e.g., 000, rgb(32,16,64), yellow, etc.)
-      let color = decodeURIComponent(unk);
-      // Auto-prepend # for hex colors (e.g., 888 -> #888)
-      if (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(color)) {
-        color = `#${color}`;
-      }
-      this.config.unknowncolor = color;
     }
 
     // Don't fill in default sizes yet - wait until after initSizes()
@@ -1435,17 +1504,27 @@ class EventHandler {
   }
 
   setup() {
+    this.setupKeyboardCommands();
+    this.setupEventDelegation();
     document.onmousedown = this.onmousedown.bind(this);
     document.onmousemove = this.onmousemove.bind(this);
     document.body.onkeydown = this.onkeydown.bind(this);
     document.body.onmouseover = this.onmouseover.bind(this);
-    document.body.onmousedown = (e) => {
-      if (e.target.className === 'closebox') {
+  }
+
+  setupEventDelegation() {
+    // Use event delegation on grid for closebox interactions
+    const gridElement = document.getElementById('grid');
+
+    gridElement.addEventListener('mousedown', (e) => {
+      if (e.target.classList.contains('closebox')) {
         e.stopPropagation();
       }
-    };
-    document.body.onclick = (e) => {
-      if (e.target.className === 'closebox' && !explorer.grid.currentUpdateProcess) {
+    }, true);  // Use capture phase
+
+    gridElement.addEventListener('click', (e) => {
+      if (e.target.classList.contains('closebox') &&
+          !this.explorer.grid.currentUpdateProcess) {
         e.target.parentElement.style.display = 'none';
         this.explorer.grid.truncatehiddenviews();
         this.explorer.zoomManager.updateZoomRectangles();
@@ -1453,7 +1532,7 @@ class EventHandler {
         this.explorer.grid.updateFullscreenButton();
         this.explorer.urlHandler.updateurl();
       }
-    };
+    });
   }
 
   onmousedown(e) {
@@ -1496,104 +1575,136 @@ class EventHandler {
     }
   }
 
+  setupKeyboardCommands() {
+    const { grid, config, movieMode, zoomManager, urlHandler } = this.explorer;
+
+    this.keyCommands = new Map([
+      ['backspace', {
+        condition: () => grid.views.length > 1 && !grid.currentUpdateProcess,
+        action: () => {
+          const k = grid.views.length - 1;
+          grid.truncateviews(k);
+          grid.truncatehiddenviews();
+          urlHandler.updateurl();
+        }
+      }],
+      ['c', {
+        condition: () => grid.views.length > 1,
+        action: (e) => zoomManager.centerViews(e.metaKey || e.ctrlKey)
+      }],
+      ['a', {
+        condition: () => !grid.currentUpdateProcess,
+        action: () => {
+          const oldFirstsize = config.firstsize;
+          config.aspectRatio = config.aspectRatio === Config.DEFAULT_ASPECT_RATIO ?
+            Config.WIDESCREEN_ASPECT_RATIO : Config.DEFAULT_ASPECT_RATIO;
+          config.initSizes();
+          const newFirstsize = config.firstsize;
+          const state = grid.currentGridState();
+          const scaleFactor = newFirstsize / oldFirstsize;
+          for (let i = 0; i < state.sizes.length; i++) {
+            state.sizes[i][0] *= scaleFactor;
+          }
+          grid.updateLayout(state);
+          urlHandler.updateurl();
+        }
+      }],
+      ['t', {
+        action: (e) => this.explorer.cycleColorTheme(e.shiftKey)
+      }],
+      ['u', {
+        action: (e) => this.explorer.cycleUnknownColor(e.shiftKey)
+      }],
+      ['i', {
+        action: (e) => zoomManager.zoomInAtCurrentPosition(e.metaKey || e.ctrlKey)
+      }],
+      ['?', {
+        action: () => {
+          document.getElementById('text').style.display = 'block';
+          document.getElementById('text').scrollIntoView({ behavior: 'smooth' });
+        }
+      }],
+      ['g', {
+        condition: () => config.gridcols > 1 && !grid.currentUpdateProcess,
+        action: () => {
+          config.gridcols -= 1;
+          grid.updateLayout();
+        }
+      }],
+      ['h', {
+        condition: () => !grid.currentUpdateProcess,
+        action: () => {
+          config.gridcols += 1;
+          grid.updateLayout();
+        }
+      }],
+      ['r', {
+        condition: () => !grid.currentUpdateProcess,
+        action: () => {
+          grid.showAllViews();
+          urlHandler.updateurl();
+          grid.updateHiddenViews();
+        }
+      }],
+      ['x', {
+        action: () => {
+          config.updateExponent(config.exponent + 1);
+          grid.updateLayout(config.firststate());
+        }
+      }],
+      ['z', {
+        condition: () => config.exponent > 2,
+        action: () => {
+          config.updateExponent(config.exponent - 1);
+          grid.updateLayout(config.firststate());
+        }
+      }],
+      ['f', {
+        action: () => {
+          config.pixelRatio += 1;
+          grid.updateLayout();
+        }
+      }],
+      ['d', {
+        condition: () => config.pixelRatio > 1,
+        action: () => {
+          config.pixelRatio -= 1;
+          grid.updateLayout();
+        }
+      }],
+      ['m', {
+        condition: () => grid.views.length > 1,
+        action: () => movieMode.toggle()
+      }],
+      ['enter', {
+        action: (e) => {
+          e.preventDefault();
+          this.explorer.toggleFullscreen();
+        }
+      }],
+      ['escape', {
+        condition: () => document.fullscreenElement,
+        action: () => this.explorer.toggleFullscreen()
+      }]
+    ]);
+  }
+
   onkeydown(e) {
     const key = e.key.toLowerCase();
+
+    // Movie mode intercepts most keys
     if (this.explorer.movieMode.active &&
         !['shift', 'alt', 'control', 'meta', 'capslock'].includes(key)) {
       this.explorer.movieMode.toggle();
       return;
     }
-    // Pressing backspace will delete the last zoom.
-    if (key === 'backspace' && this.explorer.grid.views.length > 1 &&
-        !this.explorer.grid.currentUpdateProcess) {
-      let k = this.explorer.grid.views.length - 1;
-      this.explorer.grid.truncateviews(k);
-      this.explorer.grid.truncatehiddenviews();
-      this.explorer.urlHandler.updateurl();
-    }
-    // Pressing C will center all the zoom positions.
-    if (key === 'c' && this.explorer.grid.views.length > 1) {
-      this.explorer.zoomManager.centerViews(e.metaKey || e.ctrlKey);
-    }
-    // Pressing A will toggle aspect ratio between square and 16:9
-    if (key === 'a' && !this.explorer.grid.currentUpdateProcess) {
-      const oldFirstsize = this.explorer.config.firstsize;
-      this.explorer.config.aspectRatio = this.explorer.config.aspectRatio === 1.0 ? 16/9 : 1.0;
-      this.explorer.config.initSizes();  // Recalculate sizes including firstsize
-      const newFirstsize = this.explorer.config.firstsize;
 
-      // Scale all existing view sizes proportionally
-      const state = this.explorer.grid.currentGridState();
-      const scaleFactor = newFirstsize / oldFirstsize;
-      for (let i = 0; i < state.sizes.length; i++) {
-        state.sizes[i][0] *= scaleFactor;
+    // Execute command if registered
+    const command = this.keyCommands.get(key);
+    if (command) {
+      if (!command.condition || command.condition()) {
+        command.action(e);
       }
-
-      this.explorer.grid.updateLayout(state);  // Update with rescaled views
-      this.explorer.urlHandler.updateurl();
-    }
-    // Pressing T will cycle through the color themes.
-    if (key === 't') {
-      this.explorer.cycleColorTheme(e.shiftKey);
-    }
-    // Pressing U will cycle through the uncomputed colors.
-    if (key === 'u') {
-      this.explorer.cycleUnknownColor(e.shiftKey);
-    }
-    // Pressing I will zoom in at the same position.
-    if (key === 'i') {
-      this.explorer.zoomManager.zoomInAtCurrentPosition(e.metaKey || e.ctrlKey);
-    }
-    // Pressing ? will show the help window
-    if (e.key === '?') {
-      document.getElementById('text').style.display = 'block';
-      document.getElementById('text').scrollIntoView({ behavior: 'smooth' });
-    }
-    // G reduces the grid column count
-    if (key === 'g' && this.explorer.config.gridcols > 1 &&
-        !this.explorer.grid.currentUpdateProcess) {
-      this.explorer.config.gridcols -= 1;
-      this.explorer.grid.updateLayout();
-    }
-    // H increases the grid column count
-    if (key === 'h' && !this.explorer.grid.currentUpdateProcess) {
-      this.explorer.config.gridcols += 1;
-      this.explorer.grid.updateLayout();
-    }
-    // R will restore any hidden views
-    if (key === 'r' && !this.explorer.grid.currentUpdateProcess) {
-      this.explorer.grid.showAllViews();
-      this.explorer.urlHandler.updateurl();
-      this.explorer.grid.updateHiddenViews();
-    }
-    // Increase the exponent
-    if (key === 'x') {
-      this.explorer.config.updateExponent(this.explorer.config.exponent + 1);
-      this.explorer.grid.updateLayout(this.explorer.config.firststate());
-    }
-    // Decrease the exponent
-    if (key === 'z' && this.explorer.config.exponent > 2) {
-      this.explorer.config.updateExponent(this.explorer.config.exponent - 1);
-      this.explorer.grid.updateLayout(this.explorer.config.firststate());
-    }
-    // Increase the pixel ratio
-    if (key === 'f') {
-      this.explorer.config.pixelRatio += 1;
-      this.explorer.grid.updateLayout();
-    }
-    // Decrease the pixel ratio
-    if (key === 'd' && this.explorer.config.pixelRatio > 1) {
-      this.explorer.config.pixelRatio -= 1;
-      this.explorer.grid.updateLayout();
-    }
-    // Toggle movie mode
-    if (key === 'm' && this.explorer.grid.views.length > 1) {
-      this.explorer.movieMode.toggle();
-    }
-    // Toggle fullscreen mode
-    if (key === 'enter' || document.fullscreenElement && key === 'escape') {
-      e.preventDefault(); // Prevent default action of the Enter key
-      this.explorer.toggleFullscreen();
     }
   }
 
@@ -3146,12 +3257,14 @@ class Board {
 
   inspike(re, im) {
     // We do not iterate infinitely for chaotic points in the spike.
+    // -1.401155 is the Feigenbaum point boundary
     return (im == 0.0 && re > -2.0 && re < -1.401155 &&
             this.config.exponent == 2);
   }
 
   inspikeQdA(re1, re2, im1, im2) {
     // We do not iterate infinitely for chaotic points in the spike.
+    // -1.401155 is the Feigenbaum point boundary
     return (im1 + im2 == 0.0 && re1 >= -2.0 && re1 < -1.401155 &&
             this.config.exponent == 2);
   }
@@ -4499,7 +4612,7 @@ class GpuBaseBoard extends Board {
     }
     try {
       const adapter = await navigator.gpu.requestAdapter();
-      if (!adapter) return 200 * 1024 * 1024;
+      if (!adapter) return Config.GPU_DEFAULT_MAX_BUFFER;
 
       // Request device with higher limits if supported
       const requiredLimits = {};
@@ -4517,12 +4630,13 @@ class GpuBaseBoard extends Board {
       GpuBaseBoard.cachedMaxBufferSize = Math.floor(limit * 0.9);  // 90% for safety
       return GpuBaseBoard.cachedMaxBufferSize;
     } catch (e) {
-      GpuBaseBoard.cachedMaxBufferSize = 200 * 1024 * 1024;
+      GpuBaseBoard.cachedMaxBufferSize = Config.GPU_DEFAULT_MAX_BUFFER;
       return GpuBaseBoard.cachedMaxBufferSize;
     }
   }
 
-  static isSafeDims(dimsWidth, dimsHeight, bytesPerPixel = 16, maxBufferSize = 200 * 1024 * 1024) {
+  static isSafeDims(dimsWidth, dimsHeight, bytesPerPixel = Config.GPU_BYTES_PER_PIXEL,
+                    maxBufferSize = Config.GPU_DEFAULT_MAX_BUFFER) {
     // Check WebGPU buffer size limit (workgroup limit handled by 2D dispatch)
     const dims2 = dimsWidth * dimsHeight;
     const largestBufferSize = dims2 * bytesPerPixel;
@@ -5295,7 +5409,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Storage buffer for threading data (4 floats per iter: next, deltaRe, deltaIm, pad)
     // Start with 1MB, will grow by doubling up to 128MB cap
     this.buffers.threading = this.device.createBuffer({
-      size: 1 * 1024 * 1024,  // Start at 1MB
+      size: 1 * 1024 * 1024,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       label: 'Threading buffer'
     });
@@ -5881,7 +5995,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const THREADING_CAPACITY = 4194304;  // 2^22
     const currentNeed = this.it + iterationsPerBatch;
     // Also allow growth for thread-following, but cap to avoid waste
-    // Use proportional buffer (10%) for long periods, or fixed 10k for short periods
+    // Use proportional buffer (10%) for long periods, or fixed 10k buffer for short periods
     const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
     const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
     // Cap at threading capacity - don't extend beyond this point
@@ -5920,7 +6034,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Resize threading buffer if needed (4 floats per iter), cap at 128MB
     const requiredThreadingSize = totalIters * 4 * 4;
-    const maxBufferSize = 128 * 1024 * 1024;  // 128MB cap
+    const maxBufferSize = 128 * 1024 * 1024;
     const allocSize = Math.min(Math.max(requiredThreadingSize * 2, 1024), maxBufferSize);
     if (this.buffers.threading.size < requiredThreadingSize && this.buffers.threading.size < allocSize) {
       // Only resize if we can actually allocate a larger buffer (not already at max cap)
@@ -6226,7 +6340,9 @@ self.onmessage = async function(e) {
       const pixelSize = data.size / data.config.dimsWidth;
       const GpuBoardClass = GpuBaseBoard.getBoardClass(pixelSize);
       const bytesPerPixel = GpuBoardClass.BYTES_PER_PIXEL;
-      const gpuSafe = GpuBaseBoard.isSafeDims(data.config.dimsWidth, data.config.dimsHeight, bytesPerPixel, gpuMaxBufferSize || 200 * 1024 * 1024);
+      const gpuSafe = GpuBaseBoard.isSafeDims(data.config.dimsWidth, data.config.dimsHeight,
+                                              bytesPerPixel,
+                                              gpuMaxBufferSize || Config.GPU_DEFAULT_MAX_BUFFER);
 
       // Explicit board type selection via board= parameter
       if (forcedBoardType) {
@@ -6272,7 +6388,7 @@ self.onmessage = async function(e) {
         if (enableGPU && webGPUAvailable && !gpuSafe) {
           const dims2 = data.config.dims2;
           const bufferSizeMB = (dims2 * bytesPerPixel / (1024*1024)).toFixed(0);
-          const limitMB = ((gpuMaxBufferSize || 200 * 1024 * 1024) / (1024*1024)).toFixed(0);
+          const limitMB = ((gpuMaxBufferSize || Config.GPU_DEFAULT_MAX_BUFFER) / (1024*1024)).toFixed(0);
           console.log(`Board ${data.k}: dims=${data.config.dimsWidth}x${data.config.dimsHeight} too large for GPU (buffer size ${bufferSizeMB} MB > ${limitMB} MB), using CPU`);
         }
         // WebGPU disabled or unavailable - use CPU-based boards
