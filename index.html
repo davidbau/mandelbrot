@@ -1134,21 +1134,21 @@ class View {
     }
   }
 
-  draw(ctx, colorview = null) {
+  draw(ctx, colorview = null, unknownColor = 'transparent') {
     if (colorview === null) {
       colorview = this;
     }
 
     // Draw composite: parent pixels + local pixels
     if (this.parentView) {
-      this.drawComposite(ctx, colorview);
+      this.drawComposite(ctx, colorview, unknownColor);
     } else {
       // No parent, just draw normally
-      this.drawLocal(ctx, colorview);
+      this.drawLocal(ctx, colorview, unknownColor);
     }
   }
 
-  drawLocal(ctx, colorview = null) {
+  drawLocal(ctx, colorview = null, unknownColor = 'transparent') {
     // Draw only locally computed pixels
     if (colorview === null) {
       colorview = this;
@@ -1161,14 +1161,14 @@ class View {
       const y = (m - x) / this.config.dimsWidth;
       const cur = n[m];
       if (prev !== cur) {
-        ctx.fillStyle = colorview.makecolor(cur);
+        ctx.fillStyle = colorview.makecolor(cur, null, null, unknownColor);
         prev = cur;
       }
       ctx.fillRect(x, y, 1, 1);
     }
   }
 
-  drawComposite(ctx, colorview = null) {
+  drawComposite(ctx, colorview = null, unknownColor = 'transparent') {
     // Draw parent canvas scaled as background, then local pixels on top
     if (colorview === null) {
       colorview = this;
@@ -1287,7 +1287,7 @@ class View {
     }
 
     // Draw local computed pixels on top (using child's palette)
-    this.drawLocal(ctx, colorview);
+    this.drawLocal(ctx, colorview, unknownColor);
   }
 
   clearcanvas(ctx) {
@@ -1333,8 +1333,8 @@ class View {
     }
   }
 
-  makecolor(i, histogram = null, scale = null) {
-    if (i == 0) return 'transparent';  // Transparent for uncomputed pixels
+  makecolor(i, histogram = null, scale = null, unknownColor = 'transparent') {
+    if (i == 0) return unknownColor;  // Color for uncomputed pixels
     if (i < 0) return 'black';
     // Use own histogram for consistent palette at this resolution
     const hi = histogram || this.hi;
@@ -2413,31 +2413,40 @@ class MovieMode {
           const scale = this.explorer.config.firstsize / this.explorer.grid.views[k].sizes[0];
           status.textContent = `${MSG.pre_rendering_}${formatScale(scale)}`;
         }
-        let canvas1 = null;
-        let canvas2 = null;
-        const n = this.explorer.grid.views[k].nn;
-        // Render with k-1 palette
+        let canvasPrev = null;
+        let canvasCurrent = null;
+        let canvasNext = null;
+
+        // Render with k-1 palette (unknown = transparent)
         if (k > 0) {
-          canvas1 = document.createElement('canvas');
-          canvas1.width = this.explorer.config.dimsWidth;
-          canvas1.height = this.explorer.config.dimsHeight;
-          const ctx1 = canvas1.getContext('2d');
-          this.explorer.grid.views[k].draw(ctx1, this.explorer.grid.views[k - 1]);
+          canvasPrev = document.createElement('canvas');
+          canvasPrev.width = this.explorer.config.dimsWidth;
+          canvasPrev.height = this.explorer.config.dimsHeight;
+          const ctxPrev = canvasPrev.getContext('2d');
+          this.explorer.grid.views[k].draw(ctxPrev, this.explorer.grid.views[k - 1], 'transparent');
           if (this.explorer.config.unknowncolor != '#000') {
-            ctx1.strokeStyle = 'yellow';
-            ctx1.lineWidth = this.explorer.config.pixelRatio * this.explorer.config.zoomfactor;
-            ctx1.strokeRect(0, 0, this.explorer.config.dimsWidth, this.explorer.config.dimsHeight);
+            ctxPrev.strokeStyle = 'yellow';
+            ctxPrev.lineWidth = this.explorer.config.pixelRatio * this.explorer.config.zoomfactor;
+            ctxPrev.strokeRect(0, 0, this.explorer.config.dimsWidth, this.explorer.config.dimsHeight);
           }
         }
-        // Render with k+1 palette
+
+        // Render with k palette (unknown = black)
+        canvasCurrent = document.createElement('canvas');
+        canvasCurrent.width = this.explorer.config.dimsWidth;
+        canvasCurrent.height = this.explorer.config.dimsHeight;
+        const ctxCurrent = canvasCurrent.getContext('2d');
+        this.explorer.grid.views[k].draw(ctxCurrent, this.explorer.grid.views[k], 'black');
+
+        // Render with k+1 palette (unknown = black)
         if (k < this.explorer.grid.views.length - 1) {
-          canvas2 = document.createElement('canvas');
-          canvas2.width = this.explorer.config.dimsWidth;
-          canvas2.height = this.explorer.config.dimsHeight;
-          const ctx2 = canvas2.getContext('2d');
-          this.explorer.grid.views[k].draw(ctx2, this.explorer.grid.views[k + 1]);
+          canvasNext = document.createElement('canvas');
+          canvasNext.width = this.explorer.config.dimsWidth;
+          canvasNext.height = this.explorer.config.dimsHeight;
+          const ctxNext = canvasNext.getContext('2d');
+          this.explorer.grid.views[k].draw(ctxNext, this.explorer.grid.views[k + 1], 'black');
         }
-        this.frameCanvases.push({ prev: canvas1, next: canvas2 });
+        this.frameCanvases.push({ prev: canvasPrev, current: canvasCurrent, next: canvasNext });
         this.preRenderTimer = setTimeout(after, 1);
       };
     }
@@ -2798,9 +2807,10 @@ class MovieMode {
     this.movieCtx.translate(-this.explorer.config.dimsWidth / 2 - offsetX,
                             -this.explorer.config.dimsHeight / 2 - offsetY);
     this.movieCtx.globalAlpha = 1;
-    this.movieCtx.drawImage(this.explorer.grid.canvas(k), 0, 0);
+    // Use pre-rendered current canvas with black unknown pixels
+    this.movieCtx.drawImage(this.frameCanvases[k].current, 0, 0);
 
-    // Blend the color palette of the next frame
+    // Blend the color palette of the next frame (unknown = black)
     if (this.frameCanvases[k].next) {
       this.movieCtx.globalAlpha = colorT;
       this.movieCtx.drawImage(this.frameCanvases[k].next, 0, 0);
@@ -2822,9 +2832,11 @@ class MovieMode {
       this.movieCtx.translate(-this.explorer.config.dimsWidth / 2 - targetOffsetX,
                               -this.explorer.config.dimsHeight / 2 - targetOffsetY);
       this.movieCtx.globalAlpha = 1;
+      // Draw prev palette version (unknown = transparent, shows lower res through)
       this.movieCtx.drawImage(this.frameCanvases[k + 1].prev, 0, 0);
       this.movieCtx.globalAlpha = colorT;
-      this.movieCtx.drawImage(this.explorer.grid.canvas(k + 1), 0, 0);
+      // Draw current palette version (unknown = black)
+      this.movieCtx.drawImage(this.frameCanvases[k + 1].current, 0, 0);
       this.movieCtx.restore();
     }
 
