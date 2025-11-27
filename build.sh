@@ -19,6 +19,7 @@ echo "Bundling and tree-shaking mp4-muxer..."
   --bundle \
   --minify \
   --format=iife \
+  --line-limit=100 \
   --outfile=build-output.js
 
 # Extract the bundled code

@@ -18,29 +18,38 @@ Keyboard controls added in 2022, and quad-precision perturbations,
 additional exponents, movie generation and web workers added in 2024.
 Claude code added GPU support in 2025.
 
-URL options: use ?grid=3 to select 3-column view,
-                    &c=-0.14-0.65i to set center,
-                and &s=0.5 to set viewed size.
+URL options: use ?grid=3           to select 3-column view,
+                    &c=-0.14-0.65i to set center (can chain: c=re+im,re+im,...),
+                    &z=25          to set zoom (1.0=default, higher=more zoomed),
+                    &a=16:9        to set aspect ratio (default is 1:1 square),
+             &exponent=3           to set exponent (default is 2),
+                &theme=fire        to set color theme (fire/ocean/forest/purple/grayscale),
+                  &unk=000         to set unknown pixel color (hex color or CSS color name),
+                    &h=1,2         to hide views by index (comma-separated),
+           &pixelratio=2           to set subpixel resolution,
+                 &lang=es          to set language (en/es/zh/zh-tw/ar/id/pt/fr/ja/ru/de),
+                  &gpu=0           to disable GPU acceleration,
+            and &board=gpuzhuoran  to force algorithm (cpu/gpu/gpuzhuoran/zhuoran/perturbation).
 
 Implementation notes.  To minimize computation, the code identifies both
 points that diverge and points that converge.  It uses a method that can
-identiify convergence to periodic cylces of arbitrarily long length.
+identify convergence to periodic cycles of arbitrarily long length.
 After the number of unknown points is less than half the visual field,
 it computes the remaining points sparsely, avoiding iterating over the
 already-known points.
 -->
 <style>
-body { font-family: Arial; background: #888; margin: 14px;}
+body { font-family: Arial; background: #888; margin: 14px; text-align: center; }
 canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
 #grid > div, #text { display: inline-block; margin: 10px;
   position: relative; vertical-align: top; background: rgba(90, 90, 90, 0.5); }
 #movie > div { display: inline-block; margin: 10px;
   position: relative; vertical-align: top; background: black; }
-#grid { color: yellow }
+#grid { color: yellow; }
 #grid > div:only-child .closebox { display: none; }
 #grid:empty ~ #text { display: none; }
 #text { text-align: left; width: auto; background:#aaa; margin: 10px;
-  position:relative;padding:3px 8px;font-size: 11pt }
+  position:relative;padding:3px 8px;font-size: 11pt; }
 .exponent { line-height: 0; }
 .closebox { position: absolute; right: 3px; top: 0; cursor: pointer;
   transition: opacity 0.3s; user-select: none; }
@@ -55,7 +64,7 @@ canvas { vertical-align:bottom; cursor:crosshair; user-select: none; }
 .circle .rect:after { border-radius: 100px; }
 .hidemarks .rect { opacity: 0; }
 .overlay { position: absolute; pointer-events: none; opacity: 0.8;
-  top:0; left:0; z-index:1; transition: opacity 0.3s }
+  top:0; left:0; z-index:1; transition: opacity 0.3s; }
 .zoomnum { position:absolute; display:inline-block; right:0; bottom:-11pt;
   text-decoration: none; font-size: 11pt; color: yellow; min-width: 25%;
   text-align:right; transition: opacity 0.3s; z-index: 1; cursor: pointer;
@@ -70,15 +79,12 @@ div a div.status { /* tooltips */
   font: 11pt Arial; text-align: right; white-space: pre;
   padding: 3px 7px; box-shadow: 2px 2px 5px #777;
   /* pointer-events: none; */ z-index: 2;
-  opacity: 0; transition: opacity 0.25s ease;
-}
+  opacity: 0; transition: opacity 0.25s ease; }
 #grid div:hover a div.status {
-  display: block;
-}
+  display: block; }
 div:hover a:focus div.status, div a:hover div.status {
   display: block;
-  opacity: 0.95;
-}
+  opacity: 0.95; }
 body.starting div#b_0:after { display: flex; position: absolute;
   top: 0; left: 0; width: 100%; height: 100%; align-items: center;
   justify-content: center; content:"Starting..."; color: white;
@@ -101,20 +107,8 @@ body.starting div#b_0:after { display: flex; position: absolute;
 :fullscreen #moviestatus { bottom: 0; }
 :fullscreen div a div.status { top: auto; bottom: 100%; }
 </style>
-<!-- BEGIN_MP4MUXER_LIBRARY -->
-<!-- mp4-muxer library (tree-shaken, 31151 bytes) -->
-<!-- Source: https://www.npmjs.com/package/mp4-muxer -->
-<!-- Built with: ./build.sh -->
-<script>
-(()=>{var Ee=(e,t,s)=>{if(!t.has(e))throw TypeError("Cannot "+s)},i=(e,t,s)=>(Ee(e,t,"read from private field"),s?s.call(e):t.get(e)),d=(e,t,s)=>{if(t.has(e))throw TypeError("Cannot add the same private member more than once");t instanceof WeakSet?t.add(e):t.set(e,s)},T=(e,t,s,r)=>(Ee(e,t,"write to private field"),r?r.call(e,s):t.set(e,s),s),st=(e,t,s,r)=>({set _(a){T(e,t,a,s)},get _(){return i(e,t,r)}}),m=(e,t,s)=>(Ee(e,t,"access private method"),s),p=new Uint8Array(8),B=new DataView(p.buffer),C=e=>[(e%256+256)%256],c=e=>(B.setUint16(0,e,!1),[p[0],p[1]]),rt=e=>(B.setInt16(0,e,!1),[p[0],p[1]]),Ve=e=>(B.setUint32(0,e,!1),[p[1],p[2],p[3]]),n=e=>(B.setUint32(0,e,!1),[p[0],p[1],p[2],p[3]]),at=e=>(B.setInt32(0,e,!1),[p[0],p[1],p[2],p[3]]),V=e=>(B.setUint32(0,Math.floor(e/2**32),!1),B.setUint32(4,e,!1),[p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7]]),ze=e=>(B.setInt16(0,2**8*e,!1),[p[0],p[1]]),A=e=>(B.setInt32(0,2**16*e,!1),[p[0],p[1],p[2],p[3]]),we=e=>(B.setInt32(0,2**30*e,!1),[p[0],p[1],p[2],p[3]]),E=(e,t=!1)=>{let s=Array(e.length).fill(null).map((r,a)=>e.charCodeAt(a));return t&&s.push(0),s},le=e=>e&&e[e.length-1],Ae=e=>{let t;for(let s of e)(!t||s.presentationTimestamp>t.presentationTimestamp)&&(t=s);return t},O=(e,t,s=!0)=>{let r=e*t;return s?Math.round(r):r},Pe=e=>{let t=e*(Math.PI/180),s=Math.cos(t),r=Math.sin(t);return[s,r,0,-r,s,0,0,0,1]},je=Pe(0),$e=e=>[A(e[0]),A(e[1]),we(e[2]),A(e[3]),A(e[4]),we(e[5]),A(e[6]),A(e[7]),we(e[8])],K=e=>!e||typeof e!="object"?e:Array.isArray(e)?e.map(K):Object.fromEntries(Object.entries(e).map(([t,s])=>[t,K(s)])),H=e=>e>=0&&e<2**32,g=(e,t,s)=>({type:e,contents:t&&new Uint8Array(t.flat(10)),children:s}),w=(e,t,s,r,a)=>g(e,[C(t),Ve(s),r??[]],a),nt=e=>{let t=512;return e.fragmented?g("ftyp",[E("iso5"),n(t),E("iso5"),E("iso6"),E("mp41")]):g("ftyp",[E("isom"),n(t),E("isom"),e.holdsAvc?E("avc1"):[],E("mp41")])},ve=e=>({type:"mdat",largeSize:e}),ot=e=>({type:"free",size:e}),re=(e,t,s=!1)=>g("moov",null,[ht(t,e),...e.map(r=>lt(r,t)),s?Lt(e):null]),ht=(e,t)=>{let s=O(Math.max(0,...t.filter(h=>h.samples.length>0).map(h=>{let f=Ae(h.samples);return f.presentationTimestamp+f.duration})),ye),r=Math.max(...t.map(h=>h.id))+1,a=!H(e)||!H(s),o=a?V:n;return w("mvhd",+a,0,[o(e),o(e),n(ye),o(s),A(1),ze(1),Array(10).fill(0),$e(je),Array(24).fill(0),n(r)])},lt=(e,t)=>g("trak",null,[ft(e,t),ut(e,t)]),ft=(e,t)=>{let s=Ae(e.samples),r=O(s?s.presentationTimestamp+s.duration:0,ye),a=!H(t)||!H(r),o=a?V:n,h;return e.info.type==="video"?h=typeof e.info.rotation=="number"?Pe(e.info.rotation):e.info.rotation:h=je,w("tkhd",+a,3,[o(t),o(t),n(e.id),n(0),o(r),Array(8).fill(0),c(0),c(0),ze(e.info.type==="audio"?1:0),c(0),$e(h),A(e.info.type==="video"?e.info.width:0),A(e.info.type==="video"?e.info.height:0)])},ut=(e,t)=>g("mdia",null,[dt(e,t),mt(e.info.type==="video"?"vide":"soun"),pt(e)]),dt=(e,t)=>{let s=Ae(e.samples),r=O(s?s.presentationTimestamp+s.duration:0,e.timescale),a=!H(t)||!H(r),o=a?V:n;return w("mdhd",+a,0,[o(t),o(t),n(e.timescale),o(r),c(21956),c(0)])},mt=e=>w("hdlr",0,0,[E("mhlr"),E(e),n(0),n(0),n(0),E("mp4-muxer-hdlr",!0)]),pt=e=>g("minf",null,[e.info.type==="video"?ct():wt(),vt(),yt(e)]),ct=()=>w("vmhd",0,1,[c(0),c(0),c(0),c(0)]),wt=()=>w("smhd",0,0,[c(0),c(0)]),vt=()=>g("dinf",null,[gt()]),gt=()=>w("dref",0,0,[n(1)],[Ct()]),Ct=()=>w("url ",0,1),yt=e=>{let t=e.compositionTimeOffsetTable.length>1||e.compositionTimeOffsetTable.some(s=>s.sampleCompositionTimeOffset!==0);return g("stbl",null,[Tt(e),Ut(e),xt(e),Wt(e),Ft(e),Nt(e),t?Rt(e):null])},Tt=e=>w("stsd",0,0,[n(1)],[e.info.type==="video"?St(Kt[e.info.codec],e):Mt(Yt[e.info.codec],e)]),St=(e,t)=>g(e,[Array(6).fill(0),c(1),c(0),c(0),Array(12).fill(0),c(t.info.width),c(t.info.height),n(4718592),n(4718592),n(0),c(1),Array(32).fill(0),c(24),rt(65535)],[Qt[t.info.codec](t),t.info.decoderConfig.colorSpace?Et(t):null]),bt={bt709:1,bt470bg:5,smpte170m:6},kt={bt709:1,smpte170m:6,"iec61966-2-1":13},_t={rgb:0,bt709:1,bt470bg:5,smpte170m:6},Et=e=>g("colr",[E("nclx"),c(bt[e.info.decoderConfig.colorSpace.primaries]),c(kt[e.info.decoderConfig.colorSpace.transfer]),c(_t[e.info.decoderConfig.colorSpace.matrix]),C((e.info.decoderConfig.colorSpace.fullRange?1:0)<<7)]),zt=e=>e.info.decoderConfig&&g("avcC",[...new Uint8Array(e.info.decoderConfig.description)]),At=e=>e.info.decoderConfig&&g("hvcC",[...new Uint8Array(e.info.decoderConfig.description)]),Ot=e=>{if(!e.info.decoderConfig)return null;let t=e.info.decoderConfig;if(!t.colorSpace)throw new Error("'colorSpace' is required in the decoder config for VP9.");let s=t.codec.split("."),r=Number(s[1]),a=Number(s[2]),f=(Number(s[3])<<4)+(0<<1)+Number(t.colorSpace.fullRange);return w("vpcC",1,0,[C(r),C(a),C(f),C(2),C(2),C(2),c(0)])},Bt=()=>{let s=(1<<7)+1;return g("av1C",[s,0,0,0])},Mt=(e,t)=>g(e,[Array(6).fill(0),c(1),c(0),c(0),n(0),c(t.info.numberOfChannels),c(16),c(0),c(0),A(t.info.sampleRate)],[Jt[t.info.codec](t)]),It=e=>{let t=new Uint8Array(e.info.decoderConfig.description);return w("esds",0,0,[n(58753152),C(32+t.byteLength),c(1),C(0),n(75530368),C(18+t.byteLength),C(64),C(21),Ve(0),n(130071),n(130071),n(92307584),C(t.byteLength),...t,n(109084800),C(1),C(2)])},Dt=e=>{let t=3840,s=0,r=e.info.decoderConfig?.description;if(r){if(r.byteLength<18)throw new TypeError("Invalid decoder description provided for Opus; must be at least 18 bytes long.");let a=ArrayBuffer.isView(r)?new DataView(r.buffer,r.byteOffset,r.byteLength):new DataView(r);t=a.getUint16(10,!0),s=a.getInt16(14,!0)}return g("dOps",[C(0),C(e.info.numberOfChannels),c(t),n(e.info.sampleRate),ze(s),C(0)])},Ut=e=>w("stts",0,0,[n(e.timeToSampleTable.length),e.timeToSampleTable.map(t=>[n(t.sampleCount),n(t.sampleDelta)])]),xt=e=>{if(e.samples.every(s=>s.type==="key"))return null;let t=[...e.samples.entries()].filter(([,s])=>s.type==="key");return w("stss",0,0,[n(t.length),t.map(([s])=>n(s+1))])},Wt=e=>w("stsc",0,0,[n(e.compactlyCodedChunkTable.length),e.compactlyCodedChunkTable.map(t=>[n(t.firstChunk),n(t.samplesPerChunk),n(1)])]),Ft=e=>w("stsz",0,0,[n(0),n(e.samples.length),e.samples.map(t=>n(t.size))]),Nt=e=>e.finalizedChunks.length>0&&le(e.finalizedChunks).offset>=2**32?w("co64",0,0,[n(e.finalizedChunks.length),e.finalizedChunks.map(t=>V(t.offset))]):w("stco",0,0,[n(e.finalizedChunks.length),e.finalizedChunks.map(t=>n(t.offset))]),Rt=e=>w("ctts",0,0,[n(e.compositionTimeOffsetTable.length),e.compositionTimeOffsetTable.map(t=>[n(t.sampleCount),n(t.sampleCompositionTimeOffset)])]),Lt=e=>g("mvex",null,e.map(Vt)),Vt=e=>w("trex",0,0,[n(e.id),n(1),n(0),n(0),n(0)]),Le=(e,t)=>g("moof",null,[Pt(e),...t.map(jt)]),Pt=e=>w("mfhd",0,0,[n(e)]),He=e=>{let t=0,s=0,r=0,a=0,o=e.type==="delta";return s|=+o,o?t|=1:t|=2,t<<24|s<<16|r<<8|a},jt=e=>g("traf",null,[$t(e),Ht(e),qt(e)]),$t=e=>{let t=0;t|=8,t|=16,t|=32,t|=131072;let s=e.currentChunk.samples[1]??e.currentChunk.samples[0],r={duration:s.timescaleUnitsToNextSample,size:s.size,flags:He(s)};return w("tfhd",0,t,[n(e.id),n(r.duration),n(r.size),n(r.flags)])},Ht=e=>w("tfdt",1,0,[V(O(e.currentChunk.startTimestamp,e.timescale))]),qt=e=>{let t=e.currentChunk.samples.map(M=>M.timescaleUnitsToNextSample),s=e.currentChunk.samples.map(M=>M.size),r=e.currentChunk.samples.map(He),a=e.currentChunk.samples.map(M=>O(M.presentationTimestamp-M.decodeTimestamp,e.timescale)),o=new Set(t),h=new Set(s),f=new Set(r),v=new Set(a),S=f.size===2&&r[0]!==r[1],U=o.size>1,X=h.size>1,Ne=!S&&f.size>1,Re=v.size>1||[...v].some(M=>M!==0),x=0;return x|=1,x|=4*+S,x|=256*+U,x|=512*+X,x|=1024*+Ne,x|=2048*+Re,w("trun",1,x,[n(e.currentChunk.samples.length),n(e.currentChunk.offset-e.currentChunk.moofOffset||0),S?n(r[0]):[],e.currentChunk.samples.map((M,se)=>[U?n(t[se]):[],X?n(s[se]):[],Ne?n(r[se]):[],Re?at(a[se]):[]])])},Xt=e=>g("mfra",null,[...e.map(Gt),Zt()]),Gt=(e,t)=>w("tfra",1,0,[n(e.id),n(63),n(e.finalizedChunks.length),e.finalizedChunks.map(r=>[V(O(r.startTimestamp,e.timescale)),V(r.moofOffset),n(t+1),n(1),n(1)])]),Zt=()=>w("mfro",0,0,[n(0)]),Kt={avc:"avc1",hevc:"hvc1",vp9:"vp09",av1:"av01"},Qt={avc:zt,hevc:At,vp9:Ot,av1:Bt},Yt={aac:"mp4a",opus:"Opus"},Jt={aac:It,opus:Dt},li=Symbol("isTarget"),ce=class{},Oe=class extends ce{constructor(){super(...arguments),this.buffer=null}},qe=class extends ce{constructor(e){if(super(),this.options=e,typeof e!="object")throw new TypeError("StreamTarget requires an options object to be passed to its constructor.");if(e.onData){if(typeof e.onData!="function")throw new TypeError("options.onData, when provided, must be a function.");if(e.onData.length<2)throw new TypeError("options.onData, when provided, must be a function that takes in at least two arguments (data and position). Ignoring the position argument, which specifies the byte offset at which the data is to be written, can lead to broken outputs.")}if(e.chunked!==void 0&&typeof e.chunked!="boolean")throw new TypeError("options.chunked, when provided, must be a boolean.");if(e.chunkSize!==void 0&&(!Number.isInteger(e.chunkSize)||e.chunkSize<1024))throw new TypeError("options.chunkSize, when provided, must be an integer and not smaller than 1024.")}},ei=class extends ce{constructor(e,t){if(super(),this.stream=e,this.options=t,!(e instanceof FileSystemWritableFileStream))throw new TypeError("FileSystemWritableFileStreamTarget requires a FileSystemWritableFileStream instance.");if(t!==void 0&&typeof t!="object")throw new TypeError("FileSystemWritableFileStreamTarget's options, when provided, must be an object.");if(t&&t.chunkSize!==void 0&&(!Number.isInteger(t.chunkSize)||t.chunkSize<=0))throw new TypeError("options.chunkSize, when provided, must be a positive integer")}},W,P,Xe=class{constructor(){this.pos=0,d(this,W,new Uint8Array(8)),d(this,P,new DataView(i(this,W).buffer)),this.offsets=new WeakMap}seek(e){this.pos=e}writeU32(e){i(this,P).setUint32(0,e,!1),this.write(i(this,W).subarray(0,4))}writeU64(e){i(this,P).setUint32(0,Math.floor(e/2**32),!1),i(this,P).setUint32(4,e,!1),this.write(i(this,W).subarray(0,8))}writeAscii(e){for(let t=0;t<e.length;t++)i(this,P).setUint8(t%8,e.charCodeAt(t)),t%8===7&&this.write(i(this,W));e.length%8!==0&&this.write(i(this,W).subarray(0,e.length%8))}writeBox(e){if(this.offsets.set(e,this.pos),e.contents&&!e.children)this.writeBoxHeader(e,e.size??e.contents.byteLength+8),this.write(e.contents);else{let t=this.pos;if(this.writeBoxHeader(e,0),e.contents&&this.write(e.contents),e.children)for(let a of e.children)a&&this.writeBox(a);let s=this.pos,r=e.size??s-t;this.seek(t),this.writeBoxHeader(e,r),this.seek(s)}}writeBoxHeader(e,t){this.writeU32(e.largeSize?1:t),this.writeAscii(e.type),e.largeSize&&this.writeU64(t)}measureBoxHeader(e){return 8+(e.largeSize?8:0)}patchBox(e){let t=this.pos;this.seek(this.offsets.get(e)),this.writeBox(e),this.seek(t)}measureBox(e){if(e.contents&&!e.children)return this.measureBoxHeader(e)+e.contents.byteLength;{let t=this.measureBoxHeader(e);if(e.contents&&(t+=e.contents.byteLength),e.children)for(let s of e.children)s&&(t+=this.measureBox(s));return t}}};W=new WeakMap;P=new WeakMap;var ae,L,te,G,ne,ge,ti=class extends Xe{constructor(e){super(),d(this,ne),d(this,ae,void 0),d(this,L,new ArrayBuffer(2**16)),d(this,te,new Uint8Array(i(this,L))),d(this,G,0),T(this,ae,e)}write(e){m(this,ne,ge).call(this,this.pos+e.byteLength),i(this,te).set(e,this.pos),this.pos+=e.byteLength,T(this,G,Math.max(i(this,G),this.pos))}finalize(){m(this,ne,ge).call(this,this.pos),i(this,ae).buffer=i(this,L).slice(0,Math.max(i(this,G),this.pos))}};ae=new WeakMap;L=new WeakMap;te=new WeakMap;G=new WeakMap;ne=new WeakSet;ge=function(e){let t=i(this,L).byteLength;for(;t<e;)t*=2;if(t===i(this,L).byteLength)return;let s=new ArrayBuffer(t),r=new Uint8Array(s);r.set(i(this,te),0),T(this,L,s),T(this,te,r)};var ii=2**24,si=2,Q,F,Z,D,_,fe,Ce,Be,Ge,Me,Ze,Y,ue,Ie=class extends Xe{constructor(e){super(),d(this,fe),d(this,Be),d(this,Me),d(this,Y),d(this,Q,void 0),d(this,F,[]),d(this,Z,void 0),d(this,D,void 0),d(this,_,[]),T(this,Q,e),T(this,Z,e.options?.chunked??!1),T(this,D,e.options?.chunkSize??ii)}write(e){i(this,F).push({data:e.slice(),start:this.pos}),this.pos+=e.byteLength}flush(){if(i(this,F).length===0)return;let e=[],t=[...i(this,F)].sort((s,r)=>s.start-r.start);e.push({start:t[0].start,size:t[0].data.byteLength});for(let s=1;s<t.length;s++){let r=e[e.length-1],a=t[s];a.start<=r.start+r.size?r.size=Math.max(r.size,a.start+a.data.byteLength-r.start):e.push({start:a.start,size:a.data.byteLength})}for(let s of e){s.data=new Uint8Array(s.size);for(let r of i(this,F))s.start<=r.start&&r.start<s.start+s.size&&s.data.set(r.data,r.start-s.start);i(this,Z)?(m(this,fe,Ce).call(this,s.data,s.start),m(this,Y,ue).call(this)):i(this,Q).options.onData?.(s.data,s.start)}i(this,F).length=0}finalize(){i(this,Z)&&m(this,Y,ue).call(this,!0)}};Q=new WeakMap;F=new WeakMap;Z=new WeakMap;D=new WeakMap;_=new WeakMap;fe=new WeakSet;Ce=function(e,t){let s=i(this,_).findIndex(f=>f.start<=t&&t<f.start+i(this,D));s===-1&&(s=m(this,Me,Ze).call(this,t));let r=i(this,_)[s],a=t-r.start,o=e.subarray(0,Math.min(i(this,D)-a,e.byteLength));r.data.set(o,a);let h={start:a,end:a+o.byteLength};if(m(this,Be,Ge).call(this,r,h),r.written[0].start===0&&r.written[0].end===i(this,D)&&(r.shouldFlush=!0),i(this,_).length>si){for(let f=0;f<i(this,_).length-1;f++)i(this,_)[f].shouldFlush=!0;m(this,Y,ue).call(this)}o.byteLength<e.byteLength&&m(this,fe,Ce).call(this,e.subarray(o.byteLength),t+o.byteLength)};Be=new WeakSet;Ge=function(e,t){let s=0,r=e.written.length-1,a=-1;for(;s<=r;){let o=Math.floor(s+(r-s+1)/2);e.written[o].start<=t.start?(s=o+1,a=o):r=o-1}for(e.written.splice(a+1,0,t),(a===-1||e.written[a].end<t.start)&&a++;a<e.written.length-1&&e.written[a].end>=e.written[a+1].start;)e.written[a].end=Math.max(e.written[a].end,e.written[a+1].end),e.written.splice(a+1,1)};Me=new WeakSet;Ze=function(e){let s={start:Math.floor(e/i(this,D))*i(this,D),data:new Uint8Array(i(this,D)),written:[],shouldFlush:!1};return i(this,_).push(s),i(this,_).sort((r,a)=>r.start-a.start),i(this,_).indexOf(s)};Y=new WeakSet;ue=function(e=!1){for(let t=0;t<i(this,_).length;t++){let s=i(this,_)[t];if(!(!s.shouldFlush&&!e)){for(let r of s.written)i(this,Q).options.onData?.(s.data.subarray(r.start,r.end),s.start+r.start);i(this,_).splice(t--,1)}}};var ri=class extends Ie{constructor(e){super(new qe({onData:(t,s)=>e.stream.write({type:"write",data:t,position:s}),chunked:!0,chunkSize:e.options?.chunkSize}))}},ye=1e3,ai=["avc","hevc","vp9","av1"],ni=["aac","opus"],oi=2082844800,hi=["strict","offset","cross-track-offset"],l,u,de,k,b,y,j,$,De,N,R,J,Te,Ke,Se,Qe,Ue,Ye,be,Je,xe,et,oe,ke,z,I,We,tt,ee,me,pe,Fe,q,ie,he,_e,it=class{constructor(e){if(d(this,Te),d(this,Se),d(this,Ue),d(this,be),d(this,xe),d(this,oe),d(this,z),d(this,We),d(this,ee),d(this,pe),d(this,q),d(this,he),d(this,l,void 0),d(this,u,void 0),d(this,de,void 0),d(this,k,void 0),d(this,b,null),d(this,y,null),d(this,j,Math.floor(Date.now()/1e3)+oi),d(this,$,[]),d(this,De,1),d(this,N,[]),d(this,R,[]),d(this,J,!1),m(this,Te,Ke).call(this,e),e.video=K(e.video),e.audio=K(e.audio),e.fastStart=K(e.fastStart),this.target=e.target,T(this,l,{firstTimestampBehavior:"strict",...e}),e.target instanceof Oe)T(this,u,new ti(e.target));else if(e.target instanceof qe)T(this,u,new Ie(e.target));else if(e.target instanceof ei)T(this,u,new ri(e.target));else throw new Error(`Invalid target: ${e.target}`);m(this,be,Je).call(this),m(this,Se,Qe).call(this)}addVideoChunk(e,t,s,r){if(!(e instanceof EncodedVideoChunk))throw new TypeError("addVideoChunk's first argument (sample) must be of type EncodedVideoChunk.");if(t&&typeof t!="object")throw new TypeError("addVideoChunk's second argument (meta), when provided, must be an object.");if(s!==void 0&&(!Number.isFinite(s)||s<0))throw new TypeError("addVideoChunk's third argument (timestamp), when provided, must be a non-negative real number.");if(r!==void 0&&!Number.isFinite(r))throw new TypeError("addVideoChunk's fourth argument (compositionTimeOffset), when provided, must be a real number.");let a=new Uint8Array(e.byteLength);e.copyTo(a),this.addVideoChunkRaw(a,e.type,s??e.timestamp,e.duration,t,r)}addVideoChunkRaw(e,t,s,r,a,o){if(!(e instanceof Uint8Array))throw new TypeError("addVideoChunkRaw's first argument (data) must be an instance of Uint8Array.");if(t!=="key"&&t!=="delta")throw new TypeError("addVideoChunkRaw's second argument (type) must be either 'key' or 'delta'.");if(!Number.isFinite(s)||s<0)throw new TypeError("addVideoChunkRaw's third argument (timestamp) must be a non-negative real number.");if(!Number.isFinite(r)||r<0)throw new TypeError("addVideoChunkRaw's fourth argument (duration) must be a non-negative real number.");if(a&&typeof a!="object")throw new TypeError("addVideoChunkRaw's fifth argument (meta), when provided, must be an object.");if(o!==void 0&&!Number.isFinite(o))throw new TypeError("addVideoChunkRaw's sixth argument (compositionTimeOffset), when provided, must be a real number.");if(m(this,he,_e).call(this),!i(this,l).video)throw new Error("No video track declared.");if(typeof i(this,l).fastStart=="object"&&i(this,b).samples.length===i(this,l).fastStart.expectedVideoChunks)throw new Error(`Cannot add more video chunks than specified in 'fastStart' (${i(this,l).fastStart.expectedVideoChunks}).`);let h=m(this,oe,ke).call(this,i(this,b),e,t,s,r,a,o);if(i(this,l).fastStart==="fragmented"&&i(this,y)){for(;i(this,R).length>0&&i(this,R)[0].decodeTimestamp<=h.decodeTimestamp;){let f=i(this,R).shift();m(this,z,I).call(this,i(this,y),f)}h.decodeTimestamp<=i(this,y).lastDecodeTimestamp?m(this,z,I).call(this,i(this,b),h):i(this,N).push(h)}else m(this,z,I).call(this,i(this,b),h)}addAudioChunk(e,t,s){if(!(e instanceof EncodedAudioChunk))throw new TypeError("addAudioChunk's first argument (sample) must be of type EncodedAudioChunk.");if(t&&typeof t!="object")throw new TypeError("addAudioChunk's second argument (meta), when provided, must be an object.");if(s!==void 0&&(!Number.isFinite(s)||s<0))throw new TypeError("addAudioChunk's third argument (timestamp), when provided, must be a non-negative real number.");let r=new Uint8Array(e.byteLength);e.copyTo(r),this.addAudioChunkRaw(r,e.type,s??e.timestamp,e.duration,t)}addAudioChunkRaw(e,t,s,r,a){if(!(e instanceof Uint8Array))throw new TypeError("addAudioChunkRaw's first argument (data) must be an instance of Uint8Array.");if(t!=="key"&&t!=="delta")throw new TypeError("addAudioChunkRaw's second argument (type) must be either 'key' or 'delta'.");if(!Number.isFinite(s)||s<0)throw new TypeError("addAudioChunkRaw's third argument (timestamp) must be a non-negative real number.");if(!Number.isFinite(r)||r<0)throw new TypeError("addAudioChunkRaw's fourth argument (duration) must be a non-negative real number.");if(a&&typeof a!="object")throw new TypeError("addAudioChunkRaw's fifth argument (meta), when provided, must be an object.");if(m(this,he,_e).call(this),!i(this,l).audio)throw new Error("No audio track declared.");if(typeof i(this,l).fastStart=="object"&&i(this,y).samples.length===i(this,l).fastStart.expectedAudioChunks)throw new Error(`Cannot add more audio chunks than specified in 'fastStart' (${i(this,l).fastStart.expectedAudioChunks}).`);let o=m(this,oe,ke).call(this,i(this,y),e,t,s,r,a);if(i(this,l).fastStart==="fragmented"&&i(this,b)){for(;i(this,N).length>0&&i(this,N)[0].decodeTimestamp<=o.decodeTimestamp;){let h=i(this,N).shift();m(this,z,I).call(this,i(this,b),h)}o.decodeTimestamp<=i(this,b).lastDecodeTimestamp?m(this,z,I).call(this,i(this,y),o):i(this,R).push(o)}else m(this,z,I).call(this,i(this,y),o)}finalize(){if(i(this,J))throw new Error("Cannot finalize a muxer more than once.");if(i(this,l).fastStart==="fragmented"){for(let t of i(this,N))m(this,z,I).call(this,i(this,b),t);for(let t of i(this,R))m(this,z,I).call(this,i(this,y),t);m(this,pe,Fe).call(this,!1)}else i(this,b)&&m(this,ee,me).call(this,i(this,b)),i(this,y)&&m(this,ee,me).call(this,i(this,y));let e=[i(this,b),i(this,y)].filter(Boolean);if(i(this,l).fastStart==="in-memory"){let t;for(let r=0;r<2;r++){let a=re(e,i(this,j)),o=i(this,u).measureBox(a);t=i(this,u).measureBox(i(this,k));let h=i(this,u).pos+o+t;for(let f of i(this,$)){f.offset=h;for(let{data:v}of f.samples)h+=v.byteLength,t+=v.byteLength}if(h<2**32)break;t>=2**32&&(i(this,k).largeSize=!0)}let s=re(e,i(this,j));i(this,u).writeBox(s),i(this,k).size=t,i(this,u).writeBox(i(this,k));for(let r of i(this,$))for(let a of r.samples)i(this,u).write(a.data),a.data=null}else if(i(this,l).fastStart==="fragmented"){let t=i(this,u).pos,s=Xt(e);i(this,u).writeBox(s);let r=i(this,u).pos-t;i(this,u).seek(i(this,u).pos-4),i(this,u).writeU32(r)}else{let t=i(this,u).offsets.get(i(this,k)),s=i(this,u).pos-t;i(this,k).size=s,i(this,k).largeSize=s>=2**32,i(this,u).patchBox(i(this,k));let r=re(e,i(this,j));if(typeof i(this,l).fastStart=="object"){i(this,u).seek(i(this,de)),i(this,u).writeBox(r);let a=t-i(this,u).pos;i(this,u).writeBox(ot(a))}else i(this,u).writeBox(r)}m(this,q,ie).call(this),i(this,u).finalize(),T(this,J,!0)}};l=new WeakMap;u=new WeakMap;de=new WeakMap;k=new WeakMap;b=new WeakMap;y=new WeakMap;j=new WeakMap;$=new WeakMap;De=new WeakMap;N=new WeakMap;R=new WeakMap;J=new WeakMap;Te=new WeakSet;Ke=function(e){if(typeof e!="object")throw new TypeError("The muxer requires an options object to be passed to its constructor.");if(!(e.target instanceof ce))throw new TypeError("The target must be provided and an instance of Target.");if(e.video){if(!ai.includes(e.video.codec))throw new TypeError(`Unsupported video codec: ${e.video.codec}`);if(!Number.isInteger(e.video.width)||e.video.width<=0)throw new TypeError(`Invalid video width: ${e.video.width}. Must be a positive integer.`);if(!Number.isInteger(e.video.height)||e.video.height<=0)throw new TypeError(`Invalid video height: ${e.video.height}. Must be a positive integer.`);let t=e.video.rotation;if(typeof t=="number"&&![0,90,180,270].includes(t))throw new TypeError(`Invalid video rotation: ${t}. Has to be 0, 90, 180 or 270.`);if(Array.isArray(t)&&(t.length!==9||t.some(s=>typeof s!="number")))throw new TypeError(`Invalid video transformation matrix: ${t.join()}`);if(e.video.frameRate!==void 0&&(!Number.isInteger(e.video.frameRate)||e.video.frameRate<=0))throw new TypeError(`Invalid video frame rate: ${e.video.frameRate}. Must be a positive integer.`)}if(e.audio){if(!ni.includes(e.audio.codec))throw new TypeError(`Unsupported audio codec: ${e.audio.codec}`);if(!Number.isInteger(e.audio.numberOfChannels)||e.audio.numberOfChannels<=0)throw new TypeError(`Invalid number of audio channels: ${e.audio.numberOfChannels}. Must be a positive integer.`);if(!Number.isInteger(e.audio.sampleRate)||e.audio.sampleRate<=0)throw new TypeError(`Invalid audio sample rate: ${e.audio.sampleRate}. Must be a positive integer.`)}if(e.firstTimestampBehavior&&!hi.includes(e.firstTimestampBehavior))throw new TypeError(`Invalid first timestamp behavior: ${e.firstTimestampBehavior}`);if(typeof e.fastStart=="object"){if(e.video){if(e.fastStart.expectedVideoChunks===void 0)throw new TypeError("'fastStart' is an object but is missing property 'expectedVideoChunks'.");if(!Number.isInteger(e.fastStart.expectedVideoChunks)||e.fastStart.expectedVideoChunks<0)throw new TypeError("'expectedVideoChunks' must be a non-negative integer.")}if(e.audio){if(e.fastStart.expectedAudioChunks===void 0)throw new TypeError("'fastStart' is an object but is missing property 'expectedAudioChunks'.");if(!Number.isInteger(e.fastStart.expectedAudioChunks)||e.fastStart.expectedAudioChunks<0)throw new TypeError("'expectedAudioChunks' must be a non-negative integer.")}}else if(![!1,"in-memory","fragmented"].includes(e.fastStart))throw new TypeError("'fastStart' option must be false, 'in-memory', 'fragmented' or an object.");if(e.minFragmentDuration!==void 0&&(!Number.isFinite(e.minFragmentDuration)||e.minFragmentDuration<0))throw new TypeError("'minFragmentDuration' must be a non-negative number.")};Se=new WeakSet;Qe=function(){if(i(this,u).writeBox(nt({holdsAvc:i(this,l).video?.codec==="avc",fragmented:i(this,l).fastStart==="fragmented"})),T(this,de,i(this,u).pos),i(this,l).fastStart==="in-memory")T(this,k,ve(!1));else if(i(this,l).fastStart!=="fragmented"){if(typeof i(this,l).fastStart=="object"){let e=m(this,Ue,Ye).call(this);i(this,u).seek(i(this,u).pos+e)}T(this,k,ve(!0)),i(this,u).writeBox(i(this,k))}m(this,q,ie).call(this)};Ue=new WeakSet;Ye=function(){if(typeof i(this,l).fastStart!="object")return;let e=0,t=[i(this,l).fastStart.expectedVideoChunks,i(this,l).fastStart.expectedAudioChunks];for(let s of t)s&&(e+=8*Math.ceil(2/3*s),e+=4*s,e+=12*Math.ceil(2/3*s),e+=4*s,e+=8*s);return e+=4096,e};be=new WeakSet;Je=function(){if(i(this,l).video&&T(this,b,{id:1,info:{type:"video",codec:i(this,l).video.codec,width:i(this,l).video.width,height:i(this,l).video.height,rotation:i(this,l).video.rotation??0,decoderConfig:null},timescale:i(this,l).video.frameRate??57600,samples:[],finalizedChunks:[],currentChunk:null,firstDecodeTimestamp:void 0,lastDecodeTimestamp:-1,timeToSampleTable:[],compositionTimeOffsetTable:[],lastTimescaleUnits:null,lastSample:null,compactlyCodedChunkTable:[]}),i(this,l).audio&&(T(this,y,{id:i(this,l).video?2:1,info:{type:"audio",codec:i(this,l).audio.codec,numberOfChannels:i(this,l).audio.numberOfChannels,sampleRate:i(this,l).audio.sampleRate,decoderConfig:null},timescale:i(this,l).audio.sampleRate,samples:[],finalizedChunks:[],currentChunk:null,firstDecodeTimestamp:void 0,lastDecodeTimestamp:-1,timeToSampleTable:[],compositionTimeOffsetTable:[],lastTimescaleUnits:null,lastSample:null,compactlyCodedChunkTable:[]}),i(this,l).audio.codec==="aac")){let e=m(this,xe,et).call(this,2,i(this,l).audio.sampleRate,i(this,l).audio.numberOfChannels);i(this,y).info.decoderConfig={codec:i(this,l).audio.codec,description:e,numberOfChannels:i(this,l).audio.numberOfChannels,sampleRate:i(this,l).audio.sampleRate}}};xe=new WeakSet;et=function(e,t,s){let a=[96e3,88200,64e3,48e3,44100,32e3,24e3,22050,16e3,12e3,11025,8e3,7350].indexOf(t),o=s,h="";h+=e.toString(2).padStart(5,"0"),h+=a.toString(2).padStart(4,"0"),a===15&&(h+=t.toString(2).padStart(24,"0")),h+=o.toString(2).padStart(4,"0");let f=Math.ceil(h.length/8)*8;h=h.padEnd(f,"0");let v=new Uint8Array(h.length/8);for(let S=0;S<h.length;S+=8)v[S/8]=parseInt(h.slice(S,S+8),2);return v};oe=new WeakSet;ke=function(e,t,s,r,a,o,h){let f=r/1e6,v=(r-(h??0))/1e6,S=a/1e6,U=m(this,We,tt).call(this,f,v,e);return f=U.presentationTimestamp,v=U.decodeTimestamp,o?.decoderConfig&&(e.info.decoderConfig===null?e.info.decoderConfig=o.decoderConfig:Object.assign(e.info.decoderConfig,o.decoderConfig)),{presentationTimestamp:f,decodeTimestamp:v,duration:S,data:t,size:t.byteLength,type:s,timescaleUnitsToNextSample:O(S,e.timescale)}};z=new WeakSet;I=function(e,t){i(this,l).fastStart!=="fragmented"&&e.samples.push(t);let s=O(t.presentationTimestamp-t.decodeTimestamp,e.timescale);if(e.lastTimescaleUnits!==null){let a=O(t.decodeTimestamp,e.timescale,!1),o=Math.round(a-e.lastTimescaleUnits);if(e.lastTimescaleUnits+=o,e.lastSample.timescaleUnitsToNextSample=o,i(this,l).fastStart!=="fragmented"){let h=le(e.timeToSampleTable);h.sampleCount===1?(h.sampleDelta=o,h.sampleCount++):h.sampleDelta===o?h.sampleCount++:(h.sampleCount--,e.timeToSampleTable.push({sampleCount:2,sampleDelta:o}));let f=le(e.compositionTimeOffsetTable);f.sampleCompositionTimeOffset===s?f.sampleCount++:e.compositionTimeOffsetTable.push({sampleCount:1,sampleCompositionTimeOffset:s})}}else e.lastTimescaleUnits=0,i(this,l).fastStart!=="fragmented"&&(e.timeToSampleTable.push({sampleCount:1,sampleDelta:O(t.duration,e.timescale)}),e.compositionTimeOffsetTable.push({sampleCount:1,sampleCompositionTimeOffset:s}));e.lastSample=t;let r=!1;if(!e.currentChunk)r=!0;else{let a=t.presentationTimestamp-e.currentChunk.startTimestamp;if(i(this,l).fastStart==="fragmented"){let o=i(this,b)??i(this,y),h=i(this,l).minFragmentDuration??1;e===o&&t.type==="key"&&a>=h&&(r=!0,m(this,pe,Fe).call(this))}else r=a>=.5}r&&(e.currentChunk&&m(this,ee,me).call(this,e),e.currentChunk={startTimestamp:t.presentationTimestamp,samples:[]}),e.currentChunk.samples.push(t)};We=new WeakSet;tt=function(e,t,s){let r=i(this,l).firstTimestampBehavior==="strict",a=s.lastDecodeTimestamp===-1;if(r&&a&&t!==0)throw new Error(`The first chunk for your media track must have a timestamp of 0 (received DTS=${t}).Non-zero first timestamps are often caused by directly piping frames or audio data from a MediaStreamTrack into the encoder. Their timestamps are typically relative to the age of thedocument, which is probably what you want.
-
-If you want to offset all timestamps of a track such that the first one is zero, set firstTimestampBehavior: 'offset' in the options.
-`);if(i(this,l).firstTimestampBehavior==="offset"||i(this,l).firstTimestampBehavior==="cross-track-offset"){s.firstDecodeTimestamp===void 0&&(s.firstDecodeTimestamp=t);let h;i(this,l).firstTimestampBehavior==="offset"?h=s.firstDecodeTimestamp:h=Math.min(i(this,b)?.firstDecodeTimestamp??1/0,i(this,y)?.firstDecodeTimestamp??1/0),t-=h,e-=h}if(t<s.lastDecodeTimestamp)throw new Error(`Timestamps must be monotonically increasing (DTS went from ${s.lastDecodeTimestamp*1e6} to ${t*1e6}).`);return s.lastDecodeTimestamp=t,{presentationTimestamp:e,decodeTimestamp:t}};ee=new WeakSet;me=function(e){if(i(this,l).fastStart==="fragmented")throw new Error("Can't finalize individual chunks if 'fastStart' is set to 'fragmented'.");if(e.currentChunk){if(e.finalizedChunks.push(e.currentChunk),i(this,$).push(e.currentChunk),(e.compactlyCodedChunkTable.length===0||le(e.compactlyCodedChunkTable).samplesPerChunk!==e.currentChunk.samples.length)&&e.compactlyCodedChunkTable.push({firstChunk:e.finalizedChunks.length,samplesPerChunk:e.currentChunk.samples.length}),i(this,l).fastStart==="in-memory"){e.currentChunk.offset=0;return}e.currentChunk.offset=i(this,u).pos;for(let t of e.currentChunk.samples)i(this,u).write(t.data),t.data=null;m(this,q,ie).call(this)}};pe=new WeakSet;Fe=function(e=!0){if(i(this,l).fastStart!=="fragmented")throw new Error("Can't finalize a fragment unless 'fastStart' is set to 'fragmented'.");let t=[i(this,b),i(this,y)].filter(f=>f&&f.currentChunk);if(t.length===0)return;let s=st(this,De)._++;if(s===1){let f=re(t,i(this,j),!0);i(this,u).writeBox(f)}let r=i(this,u).pos,a=Le(s,t);i(this,u).writeBox(a);{let f=ve(!1),v=0;for(let U of t)for(let X of U.currentChunk.samples)v+=X.size;let S=i(this,u).measureBox(f)+v;S>=2**32&&(f.largeSize=!0,S=i(this,u).measureBox(f)+v),f.size=S,i(this,u).writeBox(f)}for(let f of t){f.currentChunk.offset=i(this,u).pos,f.currentChunk.moofOffset=r;for(let v of f.currentChunk.samples)i(this,u).write(v.data),v.data=null}let o=i(this,u).pos;i(this,u).seek(i(this,u).offsets.get(a));let h=Le(s,t);i(this,u).writeBox(h),i(this,u).seek(o);for(let f of t)f.finalizedChunks.push(f.currentChunk),i(this,$).push(f.currentChunk),f.currentChunk=null;e&&m(this,q,ie).call(this)};q=new WeakSet;ie=function(){i(this,u)instanceof Ie&&i(this,u).flush()};he=new WeakSet;_e=function(){if(i(this,J))throw new Error("Cannot add new video or audio chunks after the file has been finalized.")};window.Mp4Muxer={Muxer:it,ArrayBufferTarget:Oe};})();
-</script>
-<!-- END_MP4MUXER_LIBRARY -->
 </head>
 <body class="starting">
-<center>
 <div id=movie></div>
 <div id=grid></div>
 <div id=fullscreen-button title="Enter fullscreen (Enter)">⛶</div>
@@ -174,713 +168,7 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 >David Bau</a></p>
 </div>
 
-<div lang="es" style="display:none">
-<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
-Explorador de Fractales del Conjunto de Mandelbrot
-</h1>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Toca">Haz clic</span> para ampliar.</b>  <span mobile="">Haz clic derecho para guardar imágenes, <b>M</b> para crear y guardar un vídeo de tu recorrido de zoom.</span>
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> se itera para cada <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">número complejo</a> <em>c</em>.  Los colores muestran <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iteraciones</a> hasta la divergencia; los puntos negros <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergen o ciclan</a>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Los puntos amarillos muestran <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">órbitas</a></b>.  Los puntos rojos muestran ciclos límite.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Acerca de las iteraciones.</b> Este visor muestra más detalle fractal con el tiempo al refinar las iteraciones hacia el infinito mientras exploras. Cuanto más esperes, más detalle se mostrará.
-Después de miles o millones de iteraciones, puedes resolver los detalles más finos en las partes más complejas del fractal.
-Ve información sobre iteraciones, progreso y coordenadas <span mobile="tocando">pasando el cursor sobre</span> el número amarillo de zoom bajo cada ventana.
-<span mobile="Manteniendo tu dedo">Mover el ratón</span> sobre el contenido fractal animará la órbita de valores <em>z</em> para cada ubicación <em>c</em>, revelando la compleja dinámica de frontera que ha fascinado a los matemáticos.
-</p>
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Explorando una ruta de zoom.</b>
-Cada <span mobile="toque">clic</span> en el fractal abre un nivel de zoom más alto en la ubicación seleccionada, calculado en tu GPU si está disponible.
-Después de ampliar más allá de una magnificación de un billón de veces, usamos un algoritmo de perturbación de precisión cuádruple que resuelve detalles finos con más de 30 dígitos de precisión.
-Una vez que hayas creado una ruta interesante que muestre el detalle que deseas, puedes <a class="moviemode">crear y descargar tu propio vídeo de zoom profundo de Mandelbrot</a> o marcar tu URL para guardar y compartir tu exploración.
-Para crear imágenes y vídeos de alta calidad, este visor calcula subpíxeles con una proporción de <span class="pixelratio">2</span>:1<span mobile="">, y eso puede aumentarse para crear visualizaciones más precisas</span>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px" mobile="">
-<b>Más comandos:</b>
-<b>I</b> amplía;
-<b mac="&#8984;">Ctrl</b>-clic para ampliar en el lugar;
-<b>H</b> encoge y <b>G</b> agranda cada ventana;
-<b>R</b> reabre ventanas intermedias;
-<b>C</b> recentra todas;
-<b>T</b> cambia el tema de color;
-<b>U</b> resalta píxeles sin terminar;
-<b mac="&#x23CE;">Enter</b> alterna pantalla completa;
-<b>X</b> aumenta y <b>Z</b> disminuye el exponente de <em>z</em>;
-<b>F</b> aumenta y <b>D</b> disminuye la proporción de píxeles;
-<b>A</b> alterna relación de aspecto;
-<b>M</b> crea un vídeo que sigue tu ruta;
-<nobr><b>?</b> muestra esta ayuda.</nobr></p>
-
-<p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a target="mbhelp"
-href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
-</div>
-
-<div lang="zh" style="display:none">
-<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
-曼德博集合分形探索器
-</h1>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="点击">单击</span>以缩放。</b>  <span mobile="">右键单击以保存图像，按<b>M</b>键创建并保存您的缩放路径视频。</span>
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-对每个<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">复数</a> <em>c</em> 迭代 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>。颜色显示到<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">发散的迭代次数</a>；黑色点<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">收敛或循环</a>。
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>黄点显示<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">轨道</a></b>。红点显示极限环。
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>关于迭代。</b>随着您的探索，此查看器通过将迭代精细化至无穷来显示更多分形细节。等待时间越长，显示的细节越多。
-经过数千或数百万次迭代后，您可以解析分形最复杂部分的最精细细节。
-通过<span mobile="点击">悬停在</span>每个窗口下方的黄色缩放数字上，查看有关迭代、进度和坐标的信息。
-<span mobile="按住手指">移动鼠标</span>到分形内容上将动画显示每个位置 <em>c</em> 的 <em>z</em> 值轨道，揭示令数学家着迷的复杂边界动力学。
-</p>
-<p style="margin-top:6px;margin-bottom:6px">
-<b>探索缩放路径。</b>
-分形上的每次<span mobile="点击">单击</span>都会在所选位置打开更高的缩放级别，如果可用，将在您的GPU上计算。
-当您放大超过万亿倍后，我们使用四精度扰动算法，可将精细细节解析到超过30位数字的精度。
-一旦您制作了一条显示所需细节的有趣路径，您可以<a class="moviemode">创建并下载自己的曼德博深度缩放视频</a>，或为您的URL添加书签以保存和分享您的探索。
-为了创建高质量的图像和视频，此查看器以<span class="pixelratio">2</span>:1的比例计算子像素<span mobile="">，并且可以增加该比例以创建更精确的显示</span>。
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px" mobile="">
-<b>更多命令：</b>
-<b>I</b> 放大；
-<b mac="&#8984;">Ctrl</b>-单击可原地放大；
-<b>H</b> 缩小，<b>G</b> 放大每个窗口；
-<b>R</b> 重新打开中间窗口；
-<b>C</b> 重新居中所有窗口；
-<b>T</b> 更改颜色主题；
-<b>U</b> 突出显示未完成的像素；
-<b mac="&#x23CE;">Enter</b> 切换全屏；
-<b>X</b> 增加，<b>Z</b> 减少 <em>z</em> 指数；
-<b>F</b> 增加，<b>D</b> 减少像素比率；
-<b>A</b> 切换纵横比；
-<b>M</b> 制作沿您路径的视频；
-<nobr><b>?</b> 显示此帮助。</nobr></p>
-
-<p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a target="mbhelp"
-href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
-</div>
-
-<div lang="zh-TW" style="display:none">
-<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
-曼德博集合碎形探索器
-</h1>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="點擊">點擊</span>以縮放。</b>  <span mobile="">右鍵點擊以儲存圖像，按<b>M</b>鍵創建並儲存您的縮放路徑影片。</span>
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-對每個<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複數</a> <em>c</em> 迭代 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>。顏色顯示到<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">發散的迭代次數</a>；黑色點<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">收斂或循環</a>。
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>黃點顯示<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">軌道</a></b>。紅點顯示極限環。
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>關於迭代。</b>隨著您的探索，此檢視器通過將迭代精細化至無窮來顯示更多碎形細節。等待時間越長，顯示的細節越多。
-經過數千或數百萬次迭代後，您可以解析碎形最複雜部分的最精細細節。
-通過<span mobile="點擊">懸停在</span>每個視窗下方的黃色縮放數字上，查看有關迭代、進度和座標的資訊。
-<span mobile="按住手指">移動滑鼠</span>到碎形內容上將動畫顯示每個位置 <em>c</em> 的 <em>z</em> 值軌道，揭示令數學家著迷的複雜邊界動力學。
-</p>
-<p style="margin-top:6px;margin-bottom:6px">
-<b>探索縮放路徑。</b>
-碎形上的每次<span mobile="點擊">點擊</span>都會在所選位置開啟更高的縮放級別，如果可用，將在您的GPU上計算。
-當您放大超過兆倍後，我們使用四精度擾動演算法，可將精細細節解析到超過30位數字的精度。
-一旦您製作了一條顯示所需細節的有趣路徑，您可以<a class="moviemode">創建並下載自己的曼德博深度縮放影片</a>，或為您的URL加入書籤以儲存和分享您的探索。
-為了創建高品質的圖像和影片，此檢視器以<span class="pixelratio">2</span>:1的比例計算子像素<span mobile="">，並且可以增加該比例以創建更精確的顯示</span>。
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px" mobile="">
-<b>更多命令：</b>
-<b>I</b> 放大；
-<b mac="&#8984;">Ctrl</b>-點擊可原地放大；
-<b>H</b> 縮小，<b>G</b> 放大每個視窗；
-<b>R</b> 重新開啟中間視窗；
-<b>C</b> 重新置中所有視窗；
-<b>T</b> 更改顏色主題；
-<b>U</b> 突出顯示未完成的像素；
-<b mac="&#x23CE;">Enter</b> 切換全螢幕；
-<b>X</b> 增加，<b>Z</b> 減少 <em>z</em> 指數；
-<b>F</b> 增加，<b>D</b> 減少像素比率；
-<b>A</b> 切換縱橫比；
-<b>M</b> 製作沿您路徑的影片；
-<nobr><b>?</b> 顯示此幫助。</nobr></p>
-
-<p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a target="mbhelp"
-href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
-</div>
-
-<div lang="ar" style="display:none;direction:rtl;text-align:right">
-<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
-مستكشف كسيريات مجموعة ماندلبروت
-</h1>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="اضغط">انقر</span> للتكبير.</b>  <span mobile="">انقر بزر الماوس الأيمن لحفظ الصور، <b>M</b> لإنشاء وحفظ فيديو لمسار التكبير الخاص بك.</span>
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-يتم تكرار <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> لكل <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">عدد مركب</a> <em>c</em>.  تُظهر الألوان <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">التكرارات</a> حتى التباعد؛ النقاط السوداء <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">تتقارب أو تدور</a>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>النقاط الصفراء تُظهر <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">المدارات</a></b>.  النقاط الحمراء تُظهر الدورات الحدية.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>حول التكرارات.</b> يُظهر هذا العارض المزيد من تفاصيل الكسيريات بمرور الوقت من خلال تحسين التكرارات إلى ما لا نهاية أثناء استكشافك. كلما انتظرت أكثر، كلما ظهر المزيد من التفاصيل.
-بعد آلاف أو ملايين التكرارات، يمكنك حل أدق التفاصيل في الأجزاء الأكثر تعقيداً من الكسيرية.
-شاهد معلومات حول التكرارات والتقدم والإحداثيات عن طريق <span mobile="الضغط على">تمرير المؤشر فوق</span> رقم التكبير الأصفر أسفل كل نافذة.
-<span mobile="الاحتفاظ بإصبعك">تحريك الماوس</span> فوق محتوى الكسيرية سيُحرك مدار قيم <em>z</em> لكل موقع <em>c</em>، مما يكشف ديناميكيات الحدود المعقدة التي فتنت علماء الرياضيات.
-</p>
-<p style="margin-top:6px;margin-bottom:6px">
-<b>استكشاف مسار التكبير.</b>
-كل <span mobile="نقرة">نقرة</span> على الكسيرية تفتح مستوى تكبير أعلى في الموقع المحدد، محسوباً على GPU الخاص بك إن توفر.
-بعد التكبير إلى ما يتجاوز تكبير تريليون ضعف، نستخدم خوارزمية اضطراب رباعية الدقة تحل التفاصيل الدقيقة لأكثر من 30 رقماً من الدقة.
-بمجرد أن تصنع مساراً مثيراً يُظهر التفاصيل التي تريدها، يمكنك <a class="moviemode">إنشاء وتنزيل فيديو تكبير عميق لماندلبروت الخاص بك</a> أو وضع إشارة مرجعية على عنوان URL الخاص بك لحفظ ومشاركة استكشافك.
-لإنشاء صور ومقاطع فيديو عالية الجودة، يحسب هذا العارض البكسلات الفرعية بنسبة <span class="pixelratio">2</span>:1<span mobile="">، ويمكن زيادة ذلك لإنشاء عروض أكثر دقة</span>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px" mobile="">
-<b>المزيد من الأوامر:</b>
-<b>I</b> يكبّر؛
-<b mac="&#8984;">Ctrl</b>-نقر للتكبير في المكان؛
-<b>H</b> يُصغّر و<b>G</b> يُكبّر كل نافذة؛
-<b>R</b> يُعيد فتح النوافذ المتوسطة؛
-<b>C</b> يُعيد توسيط الكل؛
-<b>T</b> يُغيّر موضوع الألوان؛
-<b>U</b> يُبرز البكسلات غير المكتملة؛
-<b mac="&#x23CE;">Enter</b> يُبدّل وضع ملء الشاشة؛
-<b>X</b> يزيد و<b>Z</b> ينقص أس <em>z</em>؛
-<b>F</b> يزيد و<b>D</b> ينقص نسبة البكسل؛
-<b>A</b> يبدّل نسبة العرض إلى الارتفاع؛
-<b>M</b> يصنع فيديو يتبع مسارك؛
-<nobr><b>?</b> يُظهر هذه المساعدة.</nobr></p>
-
-<p style="margin-top:8px;margin-bottom:0;text-align:left">
-<a target="mbhelp"
-href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> -</p>
-</div>
-
-<div lang="id" style="display:none">
-<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
-Penjelajah Fraktal Himpunan Mandelbrot
-</h1>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Ketuk">Klik</span> untuk memperbesar.</b>  <span mobile="">Klik kanan untuk menyimpan gambar, <b>M</b> untuk membuat dan menyimpan video jalur zoom Anda.</span>
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> diiterasi untuk setiap <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">bilangan kompleks</a> <em>c</em>.  Warna menunjukkan <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterasi</a> hingga divergensi; titik hitam <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">konvergen atau bersiklus</a>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Titik kuning menunjukkan <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbit</a></b>.  Titik merah menunjukkan siklus batas.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Tentang iterasi.</b> Penampil ini menunjukkan lebih banyak detail fraktal seiring waktu dengan menyempurnakan iterasi hingga tak terhingga saat Anda menjelajah. Semakin lama Anda menunggu, semakin banyak detail yang ditampilkan.
-Setelah ribuan atau jutaan iterasi, Anda dapat menyelesaikan detail terbaik di bagian paling kompleks dari fraktal.
-Lihat informasi tentang iterasi, kemajuan, dan koordinat dengan <span mobile="mengetuk">mengarahkan kursor ke</span> angka zoom kuning di bawah setiap jendela.
-<span mobile="Menahan jari Anda">Menggerakkan mouse</span> di atas konten fraktal akan menganimasi orbit nilai <em>z</em> untuk setiap lokasi <em>c</em>, mengungkapkan dinamika batas kompleks yang telah memukau para matematikawan.
-</p>
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Menjelajahi jalur zoom.</b>
-Setiap <span mobile="ketukan">klik</span> pada fraktal membuka level zoom yang lebih tinggi di lokasi yang dipilih, dihitung pada GPU Anda jika tersedia.
-Setelah Anda memperbesar melampaui pembesaran satu triliun kali, kami menggunakan algoritma perturbasi presisi ganda empat yang menyelesaikan detail halus hingga lebih dari 30 digit akurasi.
-Setelah Anda membuat jalur menarik yang menunjukkan detail yang Anda inginkan, Anda dapat <a class="moviemode">membuat dan mengunduh video zoom dalam Mandelbrot Anda sendiri</a> atau menandai URL Anda untuk menyimpan dan membagikan penjelajahan Anda.
-Untuk membuat gambar dan video berkualitas tinggi, penampil ini menghitung subpiksel dengan rasio <span class="pixelratio">2</span>:1<span mobile="">, dan itu dapat ditingkatkan untuk membuat tampilan yang lebih presisi</span>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px" mobile="">
-<b>Perintah lainnya:</b>
-<b>I</b> memperbesar;
-<b mac="&#8984;">Ctrl</b>-klik untuk memperbesar di tempat;
-<b>H</b> mengecilkan dan <b>G</b> memperbesar setiap jendela;
-<b>R</b> membuka kembali jendela tengah;
-<b>C</b> memusatkan kembali semua;
-<b>T</b> mengubah tema warna;
-<b>U</b> menyorot piksel yang belum selesai;
-<b mac="&#x23CE;">Enter</b> mengalihkan layar penuh;
-<b>X</b> meningkatkan dan <b>Z</b> menurunkan eksponen <em>z</em>;
-<b>F</b> meningkatkan dan <b>D</b> menurunkan rasio piksel;
-<b>A</b> mengalihkan rasio aspek;
-<b>M</b> membuat video yang mengikuti jalur Anda;
-<nobr><b>?</b> menampilkan bantuan ini.</nobr></p>
-
-<p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a target="mbhelp"
-href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
-</div>
-
-<div lang="pt" style="display:none">
-<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
-Explorador de Fractais do Conjunto de Mandelbrot
-</h1>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Toque">Clique</span> para ampliar.</b>  <span mobile="">Clique com o botão direito para salvar imagens, <b>M</b> para criar e salvar um vídeo do seu caminho de zoom.</span>
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> é iterado para cada <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">número complexo</a> <em>c</em>.  As cores mostram <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterações</a> até a divergência; pontos pretos <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergem ou ciclam</a>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Pontos amarelos mostram <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">órbitas</a></b>.  Pontos vermelhos mostram ciclos limite.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Sobre iterações.</b> Este visualizador mostra mais detalhes fractais ao longo do tempo, refinando iterações ao infinito enquanto você explora. Quanto mais você espera, mais detalhes são mostrados.
-Após milhares ou milhões de iterações, você pode resolver os detalhes mais finos nas partes mais complexas do fractal.
-Veja informações sobre iterações, progresso e coordenadas <span mobile="tocando">passando o mouse sobre</span> o número amarelo de zoom sob cada janela.
-<span mobile="Mantendo seu dedo">Mover o mouse</span> sobre o conteúdo fractal animará a órbita dos valores <em>z</em> para cada localização <em>c</em>, revelando a complexa dinâmica de fronteira que fascinou matemáticos.
-</p>
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Explorando um caminho de zoom.</b>
-Cada <span mobile="toque">clique</span> no fractal abre um nível de zoom mais alto no local selecionado, calculado na sua GPU se disponível.
-Após ampliar além de uma magnificação de um trilhão de vezes, usamos um algoritmo de perturbação de precisão quádrupla que resolve detalhes finos com mais de 30 dígitos de precisão.
-Depois de criar um caminho interessante que mostra os detalhes que você deseja, você pode <a class="moviemode">criar e baixar seu próprio vídeo de zoom profundo de Mandelbrot</a> ou marcar sua URL para salvar e compartilhar sua exploração.
-Para criar imagens e vídeos de alta qualidade, este visualizador calcula subpixels com uma proporção de <span class="pixelratio">2</span>:1<span mobile="">, e isso pode ser aumentado para criar exibições mais precisas</span>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px" mobile="">
-<b>Mais comandos:</b>
-<b>I</b> amplia;
-<b mac="&#8984;">Ctrl</b>-clique para ampliar no local;
-<b>H</b> encolhe e <b>G</b> aumenta cada janela;
-<b>R</b> reabre janelas intermediárias;
-<b>C</b> recentraliza todas;
-<b>T</b> muda o tema de cores;
-<b>U</b> destaca pixels inacabados;
-<b mac="&#x23CE;">Enter</b> alterna tela cheia;
-<b>X</b> aumenta e <b>Z</b> diminui o expoente de <em>z</em>;
-<b>F</b> aumenta e <b>D</b> diminui a proporção de pixels;
-<b>A</b> alterna proporção de tela;
-<b>M</b> cria um vídeo que segue seu caminho;
-<nobr><b>?</b> mostra esta ajuda.</nobr></p>
-
-<p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a target="mbhelp"
-href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
-</div>
-
-<div lang="fr" style="display:none">
-<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
-Explorateur de Fractales de l'Ensemble de Mandelbrot
-</h1>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Appuyez">Cliquez</span> pour zoomer.</b>  <span mobile="">Cliquez avec le bouton droit pour enregistrer les images, <b>M</b> pour créer et enregistrer une vidéo de votre parcours de zoom.</span>
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> est itéré pour chaque <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">nombre complexe</a> <em>c</em>.  Les couleurs montrent les <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">itérations</a> jusqu'à la divergence ; les points noirs <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergent ou cyclent</a>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Les points jaunes montrent les <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbites</a></b>.  Les points rouges montrent les cycles limites.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>À propos des itérations.</b> Ce visualiseur montre plus de détails fractals au fil du temps en affinant les itérations vers l'infini pendant votre exploration. Plus vous attendez, plus de détails sont affichés.
-Après des milliers ou des millions d'itérations, vous pouvez résoudre les détails les plus fins dans les parties les plus complexes de la fractale.
-Consultez les informations sur les itérations, la progression et les coordonnées en <span mobile="appuyant sur">passant la souris sur</span> le numéro de zoom jaune sous chaque fenêtre.
-<span mobile="En maintenant votre doigt">Déplacer votre souris</span> sur le contenu fractal animera l'orbite des valeurs <em>z</em> pour chaque emplacement <em>c</em>, révélant la dynamique de frontière complexe qui a fasciné les mathématiciens.
-</p>
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Explorer un parcours de zoom.</b>
-Chaque <span mobile="appui">clic</span> sur la fractale ouvre un niveau de zoom supérieur à l'emplacement sélectionné, calculé sur votre GPU si disponible.
-Après avoir zoomé au-delà d'un grossissement de mille milliards de fois, nous utilisons un algorithme de perturbation en quadruple précision qui résout les détails fins avec plus de 30 chiffres de précision.
-Une fois que vous avez créé un parcours intéressant qui montre les détails que vous souhaitez, vous pouvez <a class="moviemode">créer et télécharger votre propre vidéo de zoom profond de Mandelbrot</a> ou mettre en signet votre URL pour sauvegarder et partager votre exploration.
-Pour créer des images et des vidéos de haute qualité, ce visualiseur calcule les sous-pixels avec un rapport de <span class="pixelratio">2</span>:1<span mobile="">, et cela peut être augmenté pour créer des affichages plus précis</span>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px" mobile="">
-<b>Plus de commandes :</b>
-<b>I</b> zoom avant ;
-<b mac="&#8984;">Ctrl</b>-clic pour zoomer sur place ;
-<b>H</b> rétrécit et <b>G</b> agrandit chaque fenêtre ;
-<b>R</b> rouvre les fenêtres intermédiaires ;
-<b>C</b> recentre toutes ;
-<b>T</b> change le thème de couleur ;
-<b>U</b> met en évidence les pixels inachevés ;
-<b mac="&#x23CE;">Entrée</b> bascule en plein écran ;
-<b>X</b> augmente et <b>Z</b> diminue l'exposant de <em>z</em> ;
-<b>F</b> augmente et <b>D</b> diminue le rapport de pixels ;
-<b>A</b> bascule le rapport d'aspect ;
-<b>M</b> crée une vidéo qui suit votre parcours ;
-<nobr><b>?</b> affiche cette aide.</nobr></p>
-
-<p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a target="mbhelp"
-href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
-</div>
-
-<div lang="ja" style="display:none">
-<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
-マンデルブロ集合フラクタル探索ツール
-</h1>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="タップ">クリック</span>してズーム。</b>  <span mobile="">右クリックで画像を保存、<b>M</b>でズームパスの動画を作成・保存できます。</span>
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-各<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複素数</a> <em>c</em> に対して <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> が反復されます。色は発散までの<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">反復回数</a>を示し、黒い点は<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">収束または周期的</a>です。
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>黄色の点は<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">軌道</a>を示します</b>。赤い点は極限周期を示します。
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>反復について。</b>このビューアは、探索中に反復を無限大まで精緻化することで、時間とともにより多くのフラクタルの詳細を表示します。待つほど、より多くの詳細が表示されます。
-数千または数百万回の反復の後、フラクタルの最も複雑な部分で最も細かい詳細を解像できます。
-各ウィンドウ下の黄色のズーム番号を<span mobile="タップ">マウスオーバー</span>することで、反復、進行状況、座標に関する情報を確認できます。
-フラクタルコンテンツ上で<span mobile="指を保持">マウスを移動</span>すると、各位置 <em>c</em> の <em>z</em> 値の軌道がアニメーション化され、数学者を魅了してきた複雑な境界ダイナミクスが明らかになります。
-</p>
-<p style="margin-top:6px;margin-bottom:6px">
-<b>ズームパスの探索。</b>
-フラクタル上の各<span mobile="タップ">クリック</span>は、選択した場所でより高いズームレベルを開き、可能であればGPU上で計算されます。
-1兆倍を超える倍率までズームすると、30桁以上の精度で細かい詳細を解決する4倍精度摂動アルゴリズムを使用します。
-必要な詳細を示す興味深いパスを作成したら、<a class="moviemode">独自のマンデルブロディープズーム動画を作成してダウンロード</a>したり、URLをブックマークして探索を保存・共有したりできます。
-高品質の画像と動画を作成するために、このビューアは<span class="pixelratio">2</span>:1の比率でサブピクセルを計算し<span mobile="">、より正確な表示を作成するためにこれを増やすことができます</span>。
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px" mobile="">
-<b>その他のコマンド：</b>
-<b>I</b> ズームイン；
-<b mac="&#8984;">Ctrl</b>-クリックでその場でズーム；
-<b>H</b> で縮小、<b>G</b> で各ウィンドウを拡大；
-<b>R</b> 中間ウィンドウを再度開く；
-<b>C</b> すべてを再センタリング；
-<b>T</b> カラーテーマを変更；
-<b>U</b> 未完了のピクセルをハイライト；
-<b mac="&#x23CE;">Enter</b> フルスクリーンを切り替え；
-<b>X</b> で増加、<b>Z</b> で <em>z</em> 指数を減少；
-<b>F</b> で増加、<b>D</b> でピクセル比率を減少；
-<b>A</b> アスペクト比を切り替え；
-<b>M</b> パスに従う動画を作成；
-<nobr><b>?</b> このヘルプを表示。</nobr></p>
-
-<p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a target="mbhelp"
-href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
-</div>
-
-<div lang="ru" style="display:none">
-<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
-Исследователь фракталов множества Мандельброта
-</h1>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Нажмите">Щелкните</span>, чтобы увеличить.</b>  <span mobile="">Щелкните правой кнопкой мыши, чтобы сохранить изображения, <b>M</b>, чтобы создать и сохранить видео вашего пути увеличения.</span>
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> итерируется для каждого <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">комплексного числа</a> <em>c</em>.  Цвета показывают <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">итерации</a> до расхождения; черные точки <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">сходятся или циклируются</a>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Желтые точки показывают <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">орбиты</a></b>.  Красные точки показывают предельные циклы.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Об итерациях.</b> Этот просмотрщик показывает больше деталей фракталов с течением времени, уточняя итерации до бесконечности по мере вашего исследования. Чем дольше вы ждете, тем больше деталей отображается.
-После тысяч или миллионов итераций вы можете разрешить мельчайшие детали в самых сложных частях фрактала.
-Просмотрите информацию об итерациях, прогрессе и координатах, <span mobile="нажав на">наведя курсор на</span> желтый номер увеличения под каждым окном.
-<span mobile="Удерживая палец">Перемещение мыши</span> над фрактальным содержимым анимирует орбиту значений <em>z</em> для каждого местоположения <em>c</em>, раскрывая сложную динамику границ, которая восхищала математиков.
-</p>
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Исследование пути увеличения.</b>
-Каждый <span mobile="нажатие">щелчок</span> на фрактале открывает более высокий уровень увеличения в выбранном месте, вычисляемый на вашем GPU, если доступно.
-После увеличения более чем в триллион раз мы используем алгоритм возмущения с четверной точностью, который разрешает мелкие детали с точностью более 30 цифр.
-Как только вы создадите интересный путь, показывающий нужные вам детали, вы можете <a class="moviemode">создать и загрузить собственное видео глубокого увеличения Мандельброта</a> или добавить закладку на ваш URL, чтобы сохранить и поделиться своим исследованием.
-Для создания высококачественных изображений и видео этот просмотрщик вычисляет субпиксели с соотношением <span class="pixelratio">2</span>:1<span mobile="">, и это может быть увеличено для создания более точных дисплеев</span>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px" mobile="">
-<b>Дополнительные команды:</b>
-<b>I</b> увеличивает;
-<b mac="&#8984;">Ctrl</b>-щелчок для увеличения на месте;
-<b>H</b> уменьшает, а <b>G</b> увеличивает каждое окно;
-<b>R</b> повторно открывает промежуточные окна;
-<b>C</b> перецентрирует все;
-<b>T</b> меняет цветовую тему;
-<b>U</b> выделяет незавершенные пиксели;
-<b mac="&#x23CE;">Enter</b> переключает полноэкранный режим;
-<b>X</b> увеличивает, а <b>Z</b> уменьшает показатель степени <em>z</em>;
-<b>F</b> увеличивает, а <b>D</b> уменьшает соотношение пикселей;
-<b>A</b> переключает соотношение сторон;
-<b>M</b> создает видео, следующее вашему пути;
-<nobr><b>?</b> показывает эту справку.</nobr></p>
-
-<p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a target="mbhelp"
-href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
-</div>
-
-<div lang="de" style="display:none">
-<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
-Mandelbrot-Menge Fraktal-Explorer
-</h1>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b><span mobile="Tippen">Klicken</span> Sie zum Vergrößern.</b>  <span mobile="">Rechtsklick zum Speichern von Bildern, <b>M</b> zum Erstellen und Speichern eines Videos Ihres Zoom-Pfads.</span>
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> wird für jede <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">komplexe Zahl</a> <em>c</em> iteriert.  Farben zeigen <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">Iterationen</a> bis zur Divergenz; schwarze Punkte <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">konvergieren oder zyklieren</a>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Gelbe Punkte zeigen <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">Bahnen</a></b>.  Rote Punkte zeigen Grenzzyklen.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Über Iterationen.</b> Dieser Viewer zeigt im Laufe der Zeit mehr fraktale Details, indem er die Iterationen während Ihrer Erkundung gegen unendlich verfeinert. Je länger Sie warten, desto mehr Details werden angezeigt.
-Nach Tausenden oder Millionen von Iterationen können Sie die feinsten Details in den komplexesten Teilen des Fraktals auflösen.
-Sehen Sie Informationen zu Iterationen, Fortschritt und Koordinaten, indem Sie <span mobile="tippen">mit der Maus über</span> die gelbe Zoom-Nummer unter jedem Fenster fahren.
-<span mobile="Halten Sie Ihren Finger">Bewegen Sie Ihre Maus</span> über fraktale Inhalte, um die Bahn der <em>z</em>-Werte für jeden Ort <em>c</em> zu animieren und die komplexe Randdynamik zu enthüllen, die Mathematiker fasziniert hat.
-</p>
-<p style="margin-top:6px;margin-bottom:6px">
-<b>Einen Zoom-Pfad erkunden.</b>
-Jeder <span mobile="Tipp">Klick</span> auf das Fraktal öffnet eine höhere Zoomstufe an der ausgewählten Stelle, berechnet auf Ihrer GPU, falls verfügbar.
-Nachdem Sie über eine billionenfache Vergrößerung hinaus gezoomt haben, verwenden wir einen Störungsalgorithmus mit vierfacher Genauigkeit, der feine Details mit mehr als 30 Ziffern Genauigkeit auflöst.
-Sobald Sie einen interessanten Pfad erstellt haben, der die gewünschten Details zeigt, können Sie <a class="moviemode">Ihr eigenes Mandelbrot-Deep-Zoom-Video erstellen und herunterladen</a> oder Ihre URL als Lesezeichen setzen, um Ihre Erkundung zu speichern und zu teilen.
-Um qualitativ hochwertige Bilder und Videos zu erstellen, berechnet dieser Viewer Subpixel mit einem Verhältnis von <span class="pixelratio">2</span>:1<span mobile="">, und dies kann erhöht werden, um präzisere Anzeigen zu erstellen</span>.
-</p>
-
-<p style="margin-top:6px;margin-bottom:6px" mobile="">
-<b>Weitere Befehle:</b>
-<b>I</b> zoomt hinein;
-<b mac="&#8984;">Strg</b>-Klick zum direkten Zoomen;
-<b>H</b> verkleinert und <b>G</b> vergrößert jedes Fenster;
-<b>R</b> öffnet Zwischenfenster erneut;
-<b>C</b> zentriert alle neu;
-<b>T</b> ändert das Farbschema;
-<b>U</b> hebt unfertige Pixel hervor;
-<b mac="&#x23CE;">Enter</b> schaltet Vollbild um;
-<b>X</b> erhöht und <b>Z</b> verringert den <em>z</em>-Exponenten;
-<b>F</b> erhöht und <b>D</b> verringert das Pixelverhältnis;
-<b>A</b> schaltet Seitenverhältnis um;
-<b>M</b> erstellt ein Video, das Ihrem Pfad folgt;
-<nobr><b>?</b> zeigt diese Hilfe.</nobr></p>
-
-<p style="margin-top:8px;margin-bottom:0;text-align:right">
-- <a target="mbhelp"
-href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
-</div>
-</div>
-
-</center>
-
 <script>
-// Internationalization Messages
-const Messages = {
-  en: {
-    center_at_: 'center at ',
-    percent_done_after_: '% done after ',
-    iters: ' iters',
-    pre_rendering_movie: 'Pre-rendering movie...',
-    pre_rendering_: 'Pre-rendering ',
-    diverges_in_: '\ndiverges in ',
-    converges_after_: '\nconverges after ',
-    after_: '\nafter ',
-    period_: ', period '
-  },
-  es: {
-    center_at_: 'centro en ',
-    percent_done_after_: '% completado después de ',
-    iters: ' iteraciones',
-    pre_rendering_movie: 'Pre-renderizando video...',
-    pre_rendering_: 'Pre-renderizando ',
-    diverges_in_: '\ndiverge en ',
-    converges_after_: '\nconverge después de ',
-    after_: '\ndespués de ',
-    period_: ', período '
-  },
-  zh: {
-    center_at_: '中心位于 ',
-    percent_done_after_: '% 完成，已迭代 ',
-    iters: ' 次',
-    pre_rendering_movie: '正在预渲染视频...',
-    pre_rendering_: '正在预渲染 ',
-    diverges_in_: '\n在 ',
-    converges_after_: '\n在 ',
-    after_: '\n在 ',
-    period_: ' 后发散，周期 '
-  },
-  'zh-TW': {
-    center_at_: '中心位於 ',
-    percent_done_after_: '% 完成，已迭代 ',
-    iters: ' 次',
-    pre_rendering_movie: '正在預渲染影片...',
-    pre_rendering_: '正在預渲染 ',
-    diverges_in_: '\n在 ',
-    converges_after_: '\n在 ',
-    after_: '\n在 ',
-    period_: ' 後發散，週期 '
-  },
-  ar: {
-    center_at_: 'المركز في ',
-    percent_done_after_: '% مكتمل بعد ',
-    iters: ' تكرار',
-    pre_rendering_movie: 'جارٍ العرض المسبق للفيديو...',
-    pre_rendering_: 'جارٍ العرض المسبق ',
-    diverges_in_: '\nيتباعد في ',
-    converges_after_: '\nيتقارب بعد ',
-    after_: '\nبعد ',
-    period_: '، الفترة '
-  },
-  id: {
-    center_at_: 'pusat di ',
-    percent_done_after_: '% selesai setelah ',
-    iters: ' iterasi',
-    pre_rendering_movie: 'Pra-rendering video...',
-    pre_rendering_: 'Pra-rendering ',
-    diverges_in_: '\ndivergen dalam ',
-    converges_after_: '\nkonvergen setelah ',
-    after_: '\nsetelah ',
-    period_: ', periode '
-  },
-  pt: {
-    center_at_: 'centro em ',
-    percent_done_after_: '% concluído após ',
-    iters: ' iterações',
-    pre_rendering_movie: 'Pré-renderizando vídeo...',
-    pre_rendering_: 'Pré-renderizando ',
-    diverges_in_: '\ndiverge em ',
-    converges_after_: '\nconverge após ',
-    after_: '\napós ',
-    period_: ', período '
-  },
-  fr: {
-    center_at_: 'centre à ',
-    percent_done_after_: '% terminé après ',
-    iters: ' itérations',
-    pre_rendering_movie: 'Pré-rendu de la vidéo...',
-    pre_rendering_: 'Pré-rendu ',
-    diverges_in_: '\ndiverge en ',
-    converges_after_: '\nconverge après ',
-    after_: '\naprès ',
-    period_: ', période '
-  },
-  ja: {
-    center_at_: '中心: ',
-    percent_done_after_: '% 完了、',
-    iters: ' 回反復',
-    pre_rendering_movie: '動画をプレレンダリング中...',
-    pre_rendering_: 'プレレンダリング中 ',
-    diverges_in_: '\n',
-    converges_after_: '\n',
-    after_: '\n',
-    period_: ' 回反復後に発散、周期 '
-  },
-  ru: {
-    center_at_: 'центр в ',
-    percent_done_after_: '% завершено после ',
-    iters: ' итераций',
-    pre_rendering_movie: 'Предварительный рендеринг видео...',
-    pre_rendering_: 'Предварительный рендеринг ',
-    diverges_in_: '\nрасходится за ',
-    converges_after_: '\nсходится после ',
-    after_: '\nпосле ',
-    period_: ', период '
-  },
-  de: {
-    center_at_: 'Zentrum bei ',
-    percent_done_after_: '% abgeschlossen nach ',
-    iters: ' Iterationen',
-    pre_rendering_movie: 'Video wird vorgerendert...',
-    pre_rendering_: 'Vorrendering ',
-    diverges_in_: '\ndivergiert in ',
-    converges_after_: '\nkonvergiert nach ',
-    after_: '\nnach ',
-    period_: ', Periode '
-  }
-};
-
-// Global MSG object for current language
-let MSG = Messages.en;
-
-// Global selected language (for URL preservation)
-let SELECTED_LANG = 'en';
-let LANG_FROM_URL = false;
-
-// Detect and display the appropriate language
-(function() {
-  // Get language from URL parameter or browser setting
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlLang = urlParams.get('lang');
-  const browserLang = navigator.language.toLowerCase();
-  const userLang = urlLang || browserLang;
-
-  // List of supported languages
-  const supportedLangs = ['en', 'es', 'zh', 'zh-tw', 'ar', 'id', 'pt', 'fr', 'ja', 'ru', 'de'];
-
-  // Try exact match first, then base language code (e.g., zh-TW -> zh-tw, then zh)
-  let selectedLang = 'en';
-  if (supportedLangs.includes(userLang)) {
-    selectedLang = userLang;
-  } else {
-    const baseLang = userLang.split('-')[0];
-    selectedLang = supportedLangs.includes(baseLang) ? baseLang : 'en';
-  }
-
-  // Set globals
-  MSG = Messages[selectedLang] || Messages['en'];
-  SELECTED_LANG = selectedLang;
-  LANG_FROM_URL = !!urlLang && supportedLangs.includes(urlLang);
-
-  // Wait for DOM to be ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', applyLanguage);
-  } else {
-    applyLanguage();
-  }
-
-  function applyLanguage() {
-    const langDivs = document.querySelectorAll('#text [lang]');
-    langDivs.forEach(div => {
-      const divLang = div.getAttribute('lang').toLowerCase();
-      div.style.display = divLang === selectedLang ? '' : 'none';
-    });
-  }
-})();
-
 class Config {
   constructor() {
     document.body.style.overflowY = 'scroll';
@@ -7556,11 +6844,1027 @@ function fibonacciPeriod(iteration) {
 }
 
 </script>
+<!-- Internationalization: Non-English help text and language detection -->
+<div lang="es" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Explorador de Fractales del Conjunto de Mandelbrot
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Toca">Haz clic</span> para ampliar.</b>  <span mobile="">Haz clic derecho para guardar imágenes, <b>M</b> para crear y guardar un vídeo de tu recorrido de zoom.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> se itera para cada <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">número complejo</a> <em>c</em>.  Los colores muestran <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iteraciones</a> hasta la divergencia; los puntos negros <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergen o ciclan</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Los puntos amarillos muestran <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">órbitas</a></b>.  Los puntos rojos muestran ciclos límite.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Acerca de las iteraciones.</b> Este visor muestra más detalle fractal con el tiempo al refinar las iteraciones hacia el infinito mientras exploras. Cuanto más esperes, más detalle se mostrará.
+Después de miles o millones de iteraciones, puedes resolver los detalles más finos en las partes más complejas del fractal.
+Ve información sobre iteraciones, progreso y coordenadas <span mobile="tocando">pasando el cursor sobre</span> el número amarillo de zoom bajo cada ventana.
+<span mobile="Manteniendo tu dedo">Mover el ratón</span> sobre el contenido fractal animará la órbita de valores <em>z</em> para cada ubicación <em>c</em>, revelando la compleja dinámica de frontera que ha fascinado a los matemáticos.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Explorando una ruta de zoom.</b>
+Cada <span mobile="toque">clic</span> en el fractal abre un nivel de zoom más alto en la ubicación seleccionada, calculado en tu GPU si está disponible.
+Después de ampliar más allá de una magnificación de un billón de veces, usamos un algoritmo de perturbación de precisión cuádruple que resuelve detalles finos con más de 30 dígitos de precisión.
+Una vez que hayas creado una ruta interesante que muestre el detalle que deseas, puedes <a class="moviemode">crear y descargar tu propio vídeo de zoom profundo de Mandelbrot</a> o marcar tu URL para guardar y compartir tu exploración.
+Para crear imágenes y vídeos de alta calidad, este visor calcula subpíxeles con una proporción de <span class="pixelratio">2</span>:1<span mobile="">, y eso puede aumentarse para crear visualizaciones más precisas</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Más comandos:</b>
+<b>I</b> amplía;
+<b mac="&#8984;">Ctrl</b>-clic para ampliar en el lugar;
+<b>H</b> encoge y <b>G</b> agranda cada ventana;
+<b>R</b> reabre ventanas intermedias;
+<b>C</b> recentra todas;
+<b>T</b> cambia el tema de color;
+<b>U</b> resalta píxeles sin terminar;
+<b mac="&#x23CE;">Enter</b> alterna pantalla completa;
+<b>X</b> aumenta y <b>Z</b> disminuye el exponente de <em>z</em>;
+<b>F</b> aumenta y <b>D</b> disminuye la proporción de píxeles;
+<b>A</b> alterna relación de aspecto;
+<b>M</b> crea un vídeo que sigue tu ruta;
+<nobr><b>?</b> muestra esta ayuda.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="zh" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+曼德博集合分形探索器
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="点击">单击</span>以缩放。</b>  <span mobile="">右键单击以保存图像，按<b>M</b>键创建并保存您的缩放路径视频。</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+对每个<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">复数</a> <em>c</em> 迭代 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>。颜色显示到<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">发散的迭代次数</a>；黑色点<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">收敛或循环</a>。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>黄点显示<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">轨道</a></b>。红点显示极限环。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>关于迭代。</b>随着您的探索，此查看器通过将迭代精细化至无穷来显示更多分形细节。等待时间越长，显示的细节越多。
+经过数千或数百万次迭代后，您可以解析分形最复杂部分的最精细细节。
+通过<span mobile="点击">悬停在</span>每个窗口下方的黄色缩放数字上，查看有关迭代、进度和坐标的信息。
+<span mobile="按住手指">移动鼠标</span>到分形内容上将动画显示每个位置 <em>c</em> 的 <em>z</em> 值轨道，揭示令数学家着迷的复杂边界动力学。
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>探索缩放路径。</b>
+分形上的每次<span mobile="点击">单击</span>都会在所选位置打开更高的缩放级别，如果可用，将在您的GPU上计算。
+当您放大超过万亿倍后，我们使用四精度扰动算法，可将精细细节解析到超过30位数字的精度。
+一旦您制作了一条显示所需细节的有趣路径，您可以<a class="moviemode">创建并下载自己的曼德博深度缩放视频</a>，或为您的URL添加书签以保存和分享您的探索。
+为了创建高质量的图像和视频，此查看器以<span class="pixelratio">2</span>:1的比例计算子像素<span mobile="">，并且可以增加该比例以创建更精确的显示</span>。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>更多命令：</b>
+<b>I</b> 放大；
+<b mac="&#8984;">Ctrl</b>-单击可原地放大；
+<b>H</b> 缩小，<b>G</b> 放大每个窗口；
+<b>R</b> 重新打开中间窗口；
+<b>C</b> 重新居中所有窗口；
+<b>T</b> 更改颜色主题；
+<b>U</b> 突出显示未完成的像素；
+<b mac="&#x23CE;">Enter</b> 切换全屏；
+<b>X</b> 增加，<b>Z</b> 减少 <em>z</em> 指数；
+<b>F</b> 增加，<b>D</b> 减少像素比率；
+<b>A</b> 切换纵横比；
+<b>M</b> 制作沿您路径的视频；
+<nobr><b>?</b> 显示此帮助。</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="zh-TW" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+曼德博集合碎形探索器
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="點擊">點擊</span>以縮放。</b>  <span mobile="">右鍵點擊以儲存圖像，按<b>M</b>鍵創建並儲存您的縮放路徑影片。</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+對每個<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複數</a> <em>c</em> 迭代 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>。顏色顯示到<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">發散的迭代次數</a>；黑色點<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">收斂或循環</a>。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>黃點顯示<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">軌道</a></b>。紅點顯示極限環。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>關於迭代。</b>隨著您的探索，此檢視器通過將迭代精細化至無窮來顯示更多碎形細節。等待時間越長，顯示的細節越多。
+經過數千或數百萬次迭代後，您可以解析碎形最複雜部分的最精細細節。
+通過<span mobile="點擊">懸停在</span>每個視窗下方的黃色縮放數字上，查看有關迭代、進度和座標的資訊。
+<span mobile="按住手指">移動滑鼠</span>到碎形內容上將動畫顯示每個位置 <em>c</em> 的 <em>z</em> 值軌道，揭示令數學家著迷的複雜邊界動力學。
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>探索縮放路徑。</b>
+碎形上的每次<span mobile="點擊">點擊</span>都會在所選位置開啟更高的縮放級別，如果可用，將在您的GPU上計算。
+當您放大超過兆倍後，我們使用四精度擾動演算法，可將精細細節解析到超過30位數字的精度。
+一旦您製作了一條顯示所需細節的有趣路徑，您可以<a class="moviemode">創建並下載自己的曼德博深度縮放影片</a>，或為您的URL加入書籤以儲存和分享您的探索。
+為了創建高品質的圖像和影片，此檢視器以<span class="pixelratio">2</span>:1的比例計算子像素<span mobile="">，並且可以增加該比例以創建更精確的顯示</span>。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>更多命令：</b>
+<b>I</b> 放大；
+<b mac="&#8984;">Ctrl</b>-點擊可原地放大；
+<b>H</b> 縮小，<b>G</b> 放大每個視窗；
+<b>R</b> 重新開啟中間視窗；
+<b>C</b> 重新置中所有視窗；
+<b>T</b> 更改顏色主題；
+<b>U</b> 突出顯示未完成的像素；
+<b mac="&#x23CE;">Enter</b> 切換全螢幕；
+<b>X</b> 增加，<b>Z</b> 減少 <em>z</em> 指數；
+<b>F</b> 增加，<b>D</b> 減少像素比率；
+<b>A</b> 切換縱橫比；
+<b>M</b> 製作沿您路徑的影片；
+<nobr><b>?</b> 顯示此幫助。</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="ar" style="display:none;direction:rtl;text-align:right">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+مستكشف كسيريات مجموعة ماندلبروت
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="اضغط">انقر</span> للتكبير.</b>  <span mobile="">انقر بزر الماوس الأيمن لحفظ الصور، <b>M</b> لإنشاء وحفظ فيديو لمسار التكبير الخاص بك.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+يتم تكرار <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> لكل <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">عدد مركب</a> <em>c</em>.  تُظهر الألوان <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">التكرارات</a> حتى التباعد؛ النقاط السوداء <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">تتقارب أو تدور</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>النقاط الصفراء تُظهر <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">المدارات</a></b>.  النقاط الحمراء تُظهر الدورات الحدية.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>حول التكرارات.</b> يُظهر هذا العارض المزيد من تفاصيل الكسيريات بمرور الوقت من خلال تحسين التكرارات إلى ما لا نهاية أثناء استكشافك. كلما انتظرت أكثر، كلما ظهر المزيد من التفاصيل.
+بعد آلاف أو ملايين التكرارات، يمكنك حل أدق التفاصيل في الأجزاء الأكثر تعقيداً من الكسيرية.
+شاهد معلومات حول التكرارات والتقدم والإحداثيات عن طريق <span mobile="الضغط على">تمرير المؤشر فوق</span> رقم التكبير الأصفر أسفل كل نافذة.
+<span mobile="الاحتفاظ بإصبعك">تحريك الماوس</span> فوق محتوى الكسيرية سيُحرك مدار قيم <em>z</em> لكل موقع <em>c</em>، مما يكشف ديناميكيات الحدود المعقدة التي فتنت علماء الرياضيات.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>استكشاف مسار التكبير.</b>
+كل <span mobile="نقرة">نقرة</span> على الكسيرية تفتح مستوى تكبير أعلى في الموقع المحدد، محسوباً على GPU الخاص بك إن توفر.
+بعد التكبير إلى ما يتجاوز تكبير تريليون ضعف، نستخدم خوارزمية اضطراب رباعية الدقة تحل التفاصيل الدقيقة لأكثر من 30 رقماً من الدقة.
+بمجرد أن تصنع مساراً مثيراً يُظهر التفاصيل التي تريدها، يمكنك <a class="moviemode">إنشاء وتنزيل فيديو تكبير عميق لماندلبروت الخاص بك</a> أو وضع إشارة مرجعية على عنوان URL الخاص بك لحفظ ومشاركة استكشافك.
+لإنشاء صور ومقاطع فيديو عالية الجودة، يحسب هذا العارض البكسلات الفرعية بنسبة <span class="pixelratio">2</span>:1<span mobile="">، ويمكن زيادة ذلك لإنشاء عروض أكثر دقة</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>المزيد من الأوامر:</b>
+<b>I</b> يكبّر؛
+<b mac="&#8984;">Ctrl</b>-نقر للتكبير في المكان؛
+<b>H</b> يُصغّر و<b>G</b> يُكبّر كل نافذة؛
+<b>R</b> يُعيد فتح النوافذ المتوسطة؛
+<b>C</b> يُعيد توسيط الكل؛
+<b>T</b> يُغيّر موضوع الألوان؛
+<b>U</b> يُبرز البكسلات غير المكتملة؛
+<b mac="&#x23CE;">Enter</b> يُبدّل وضع ملء الشاشة؛
+<b>X</b> يزيد و<b>Z</b> ينقص أس <em>z</em>؛
+<b>F</b> يزيد و<b>D</b> ينقص نسبة البكسل؛
+<b>A</b> يبدّل نسبة العرض إلى الارتفاع؛
+<b>M</b> يصنع فيديو يتبع مسارك؛
+<nobr><b>?</b> يُظهر هذه المساعدة.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:left">
+<a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a> -</p>
+</div>
+
+<div lang="id" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Penjelajah Fraktal Himpunan Mandelbrot
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Ketuk">Klik</span> untuk memperbesar.</b>  <span mobile="">Klik kanan untuk menyimpan gambar, <b>M</b> untuk membuat dan menyimpan video jalur zoom Anda.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> diiterasi untuk setiap <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">bilangan kompleks</a> <em>c</em>.  Warna menunjukkan <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterasi</a> hingga divergensi; titik hitam <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">konvergen atau bersiklus</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Titik kuning menunjukkan <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbit</a></b>.  Titik merah menunjukkan siklus batas.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Tentang iterasi.</b> Penampil ini menunjukkan lebih banyak detail fraktal seiring waktu dengan menyempurnakan iterasi hingga tak terhingga saat Anda menjelajah. Semakin lama Anda menunggu, semakin banyak detail yang ditampilkan.
+Setelah ribuan atau jutaan iterasi, Anda dapat menyelesaikan detail terbaik di bagian paling kompleks dari fraktal.
+Lihat informasi tentang iterasi, kemajuan, dan koordinat dengan <span mobile="mengetuk">mengarahkan kursor ke</span> angka zoom kuning di bawah setiap jendela.
+<span mobile="Menahan jari Anda">Menggerakkan mouse</span> di atas konten fraktal akan menganimasi orbit nilai <em>z</em> untuk setiap lokasi <em>c</em>, mengungkapkan dinamika batas kompleks yang telah memukau para matematikawan.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Menjelajahi jalur zoom.</b>
+Setiap <span mobile="ketukan">klik</span> pada fraktal membuka level zoom yang lebih tinggi di lokasi yang dipilih, dihitung pada GPU Anda jika tersedia.
+Setelah Anda memperbesar melampaui pembesaran satu triliun kali, kami menggunakan algoritma perturbasi presisi ganda empat yang menyelesaikan detail halus hingga lebih dari 30 digit akurasi.
+Setelah Anda membuat jalur menarik yang menunjukkan detail yang Anda inginkan, Anda dapat <a class="moviemode">membuat dan mengunduh video zoom dalam Mandelbrot Anda sendiri</a> atau menandai URL Anda untuk menyimpan dan membagikan penjelajahan Anda.
+Untuk membuat gambar dan video berkualitas tinggi, penampil ini menghitung subpiksel dengan rasio <span class="pixelratio">2</span>:1<span mobile="">, dan itu dapat ditingkatkan untuk membuat tampilan yang lebih presisi</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Perintah lainnya:</b>
+<b>I</b> memperbesar;
+<b mac="&#8984;">Ctrl</b>-klik untuk memperbesar di tempat;
+<b>H</b> mengecilkan dan <b>G</b> memperbesar setiap jendela;
+<b>R</b> membuka kembali jendela tengah;
+<b>C</b> memusatkan kembali semua;
+<b>T</b> mengubah tema warna;
+<b>U</b> menyorot piksel yang belum selesai;
+<b mac="&#x23CE;">Enter</b> mengalihkan layar penuh;
+<b>X</b> meningkatkan dan <b>Z</b> menurunkan eksponen <em>z</em>;
+<b>F</b> meningkatkan dan <b>D</b> menurunkan rasio piksel;
+<b>A</b> mengalihkan rasio aspek;
+<b>M</b> membuat video yang mengikuti jalur Anda;
+<nobr><b>?</b> menampilkan bantuan ini.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="pt" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Explorador de Fractais do Conjunto de Mandelbrot
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Toque">Clique</span> para ampliar.</b>  <span mobile="">Clique com o botão direito para salvar imagens, <b>M</b> para criar e salvar um vídeo do seu caminho de zoom.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> é iterado para cada <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">número complexo</a> <em>c</em>.  As cores mostram <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterações</a> até a divergência; pontos pretos <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergem ou ciclam</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Pontos amarelos mostram <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">órbitas</a></b>.  Pontos vermelhos mostram ciclos limite.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Sobre iterações.</b> Este visualizador mostra mais detalhes fractais ao longo do tempo, refinando iterações ao infinito enquanto você explora. Quanto mais você espera, mais detalhes são mostrados.
+Após milhares ou milhões de iterações, você pode resolver os detalhes mais finos nas partes mais complexas do fractal.
+Veja informações sobre iterações, progresso e coordenadas <span mobile="tocando">passando o mouse sobre</span> o número amarelo de zoom sob cada janela.
+<span mobile="Mantendo seu dedo">Mover o mouse</span> sobre o conteúdo fractal animará a órbita dos valores <em>z</em> para cada localização <em>c</em>, revelando a complexa dinâmica de fronteira que fascinou matemáticos.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Explorando um caminho de zoom.</b>
+Cada <span mobile="toque">clique</span> no fractal abre um nível de zoom mais alto no local selecionado, calculado na sua GPU se disponível.
+Após ampliar além de uma magnificação de um trilhão de vezes, usamos um algoritmo de perturbação de precisão quádrupla que resolve detalhes finos com mais de 30 dígitos de precisão.
+Depois de criar um caminho interessante que mostra os detalhes que você deseja, você pode <a class="moviemode">criar e baixar seu próprio vídeo de zoom profundo de Mandelbrot</a> ou marcar sua URL para salvar e compartilhar sua exploração.
+Para criar imagens e vídeos de alta qualidade, este visualizador calcula subpixels com uma proporção de <span class="pixelratio">2</span>:1<span mobile="">, e isso pode ser aumentado para criar exibições mais precisas</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Mais comandos:</b>
+<b>I</b> amplia;
+<b mac="&#8984;">Ctrl</b>-clique para ampliar no local;
+<b>H</b> encolhe e <b>G</b> aumenta cada janela;
+<b>R</b> reabre janelas intermediárias;
+<b>C</b> recentraliza todas;
+<b>T</b> muda o tema de cores;
+<b>U</b> destaca pixels inacabados;
+<b mac="&#x23CE;">Enter</b> alterna tela cheia;
+<b>X</b> aumenta e <b>Z</b> diminui o expoente de <em>z</em>;
+<b>F</b> aumenta e <b>D</b> diminui a proporção de pixels;
+<b>A</b> alterna proporção de tela;
+<b>M</b> cria um vídeo que segue seu caminho;
+<nobr><b>?</b> mostra esta ajuda.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="fr" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Explorateur de Fractales de l'Ensemble de Mandelbrot
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Appuyez">Cliquez</span> pour zoomer.</b>  <span mobile="">Cliquez avec le bouton droit pour enregistrer les images, <b>M</b> pour créer et enregistrer une vidéo de votre parcours de zoom.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> est itéré pour chaque <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">nombre complexe</a> <em>c</em>.  Les couleurs montrent les <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">itérations</a> jusqu'à la divergence ; les points noirs <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">convergent ou cyclent</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Les points jaunes montrent les <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbites</a></b>.  Les points rouges montrent les cycles limites.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>À propos des itérations.</b> Ce visualiseur montre plus de détails fractals au fil du temps en affinant les itérations vers l'infini pendant votre exploration. Plus vous attendez, plus de détails sont affichés.
+Après des milliers ou des millions d'itérations, vous pouvez résoudre les détails les plus fins dans les parties les plus complexes de la fractale.
+Consultez les informations sur les itérations, la progression et les coordonnées en <span mobile="appuyant sur">passant la souris sur</span> le numéro de zoom jaune sous chaque fenêtre.
+<span mobile="En maintenant votre doigt">Déplacer votre souris</span> sur le contenu fractal animera l'orbite des valeurs <em>z</em> pour chaque emplacement <em>c</em>, révélant la dynamique de frontière complexe qui a fasciné les mathématiciens.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Explorer un parcours de zoom.</b>
+Chaque <span mobile="appui">clic</span> sur la fractale ouvre un niveau de zoom supérieur à l'emplacement sélectionné, calculé sur votre GPU si disponible.
+Après avoir zoomé au-delà d'un grossissement de mille milliards de fois, nous utilisons un algorithme de perturbation en quadruple précision qui résout les détails fins avec plus de 30 chiffres de précision.
+Une fois que vous avez créé un parcours intéressant qui montre les détails que vous souhaitez, vous pouvez <a class="moviemode">créer et télécharger votre propre vidéo de zoom profond de Mandelbrot</a> ou mettre en signet votre URL pour sauvegarder et partager votre exploration.
+Pour créer des images et des vidéos de haute qualité, ce visualiseur calcule les sous-pixels avec un rapport de <span class="pixelratio">2</span>:1<span mobile="">, et cela peut être augmenté pour créer des affichages plus précis</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Plus de commandes :</b>
+<b>I</b> zoom avant ;
+<b mac="&#8984;">Ctrl</b>-clic pour zoomer sur place ;
+<b>H</b> rétrécit et <b>G</b> agrandit chaque fenêtre ;
+<b>R</b> rouvre les fenêtres intermédiaires ;
+<b>C</b> recentre toutes ;
+<b>T</b> change le thème de couleur ;
+<b>U</b> met en évidence les pixels inachevés ;
+<b mac="&#x23CE;">Entrée</b> bascule en plein écran ;
+<b>X</b> augmente et <b>Z</b> diminue l'exposant de <em>z</em> ;
+<b>F</b> augmente et <b>D</b> diminue le rapport de pixels ;
+<b>A</b> bascule le rapport d'aspect ;
+<b>M</b> crée une vidéo qui suit votre parcours ;
+<nobr><b>?</b> affiche cette aide.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="ja" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+マンデルブロ集合フラクタル探索ツール
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="タップ">クリック</span>してズーム。</b>  <span mobile="">右クリックで画像を保存、<b>M</b>でズームパスの動画を作成・保存できます。</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+各<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複素数</a> <em>c</em> に対して <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> が反復されます。色は発散までの<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">反復回数</a>を示し、黒い点は<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">収束または周期的</a>です。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>黄色の点は<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">軌道</a>を示します</b>。赤い点は極限周期を示します。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>反復について。</b>このビューアは、探索中に反復を無限大まで精緻化することで、時間とともにより多くのフラクタルの詳細を表示します。待つほど、より多くの詳細が表示されます。
+数千または数百万回の反復の後、フラクタルの最も複雑な部分で最も細かい詳細を解像できます。
+各ウィンドウ下の黄色のズーム番号を<span mobile="タップ">マウスオーバー</span>することで、反復、進行状況、座標に関する情報を確認できます。
+フラクタルコンテンツ上で<span mobile="指を保持">マウスを移動</span>すると、各位置 <em>c</em> の <em>z</em> 値の軌道がアニメーション化され、数学者を魅了してきた複雑な境界ダイナミクスが明らかになります。
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>ズームパスの探索。</b>
+フラクタル上の各<span mobile="タップ">クリック</span>は、選択した場所でより高いズームレベルを開き、可能であればGPU上で計算されます。
+1兆倍を超える倍率までズームすると、30桁以上の精度で細かい詳細を解決する4倍精度摂動アルゴリズムを使用します。
+必要な詳細を示す興味深いパスを作成したら、<a class="moviemode">独自のマンデルブロディープズーム動画を作成してダウンロード</a>したり、URLをブックマークして探索を保存・共有したりできます。
+高品質の画像と動画を作成するために、このビューアは<span class="pixelratio">2</span>:1の比率でサブピクセルを計算し<span mobile="">、より正確な表示を作成するためにこれを増やすことができます</span>。
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>その他のコマンド：</b>
+<b>I</b> ズームイン；
+<b mac="&#8984;">Ctrl</b>-クリックでその場でズーム；
+<b>H</b> で縮小、<b>G</b> で各ウィンドウを拡大；
+<b>R</b> 中間ウィンドウを再度開く；
+<b>C</b> すべてを再センタリング；
+<b>T</b> カラーテーマを変更；
+<b>U</b> 未完了のピクセルをハイライト；
+<b mac="&#x23CE;">Enter</b> フルスクリーンを切り替え；
+<b>X</b> で増加、<b>Z</b> で <em>z</em> 指数を減少；
+<b>F</b> で増加、<b>D</b> でピクセル比率を減少；
+<b>A</b> アスペクト比を切り替え；
+<b>M</b> パスに従う動画を作成；
+<nobr><b>?</b> このヘルプを表示。</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="ru" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Исследователь фракталов множества Мандельброта
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Нажмите">Щелкните</span>, чтобы увеличить.</b>  <span mobile="">Щелкните правой кнопкой мыши, чтобы сохранить изображения, <b>M</b>, чтобы создать и сохранить видео вашего пути увеличения.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> итерируется для каждого <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">комплексного числа</a> <em>c</em>.  Цвета показывают <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">итерации</a> до расхождения; черные точки <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">сходятся или циклируются</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Желтые точки показывают <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">орбиты</a></b>.  Красные точки показывают предельные циклы.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Об итерациях.</b> Этот просмотрщик показывает больше деталей фракталов с течением времени, уточняя итерации до бесконечности по мере вашего исследования. Чем дольше вы ждете, тем больше деталей отображается.
+После тысяч или миллионов итераций вы можете разрешить мельчайшие детали в самых сложных частях фрактала.
+Просмотрите информацию об итерациях, прогрессе и координатах, <span mobile="нажав на">наведя курсор на</span> желтый номер увеличения под каждым окном.
+<span mobile="Удерживая палец">Перемещение мыши</span> над фрактальным содержимым анимирует орбиту значений <em>z</em> для каждого местоположения <em>c</em>, раскрывая сложную динамику границ, которая восхищала математиков.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Исследование пути увеличения.</b>
+Каждый <span mobile="нажатие">щелчок</span> на фрактале открывает более высокий уровень увеличения в выбранном месте, вычисляемый на вашем GPU, если доступно.
+После увеличения более чем в триллион раз мы используем алгоритм возмущения с четверной точностью, который разрешает мелкие детали с точностью более 30 цифр.
+Как только вы создадите интересный путь, показывающий нужные вам детали, вы можете <a class="moviemode">создать и загрузить собственное видео глубокого увеличения Мандельброта</a> или добавить закладку на ваш URL, чтобы сохранить и поделиться своим исследованием.
+Для создания высококачественных изображений и видео этот просмотрщик вычисляет субпиксели с соотношением <span class="pixelratio">2</span>:1<span mobile="">, и это может быть увеличено для создания более точных дисплеев</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Дополнительные команды:</b>
+<b>I</b> увеличивает;
+<b mac="&#8984;">Ctrl</b>-щелчок для увеличения на месте;
+<b>H</b> уменьшает, а <b>G</b> увеличивает каждое окно;
+<b>R</b> повторно открывает промежуточные окна;
+<b>C</b> перецентрирует все;
+<b>T</b> меняет цветовую тему;
+<b>U</b> выделяет незавершенные пиксели;
+<b mac="&#x23CE;">Enter</b> переключает полноэкранный режим;
+<b>X</b> увеличивает, а <b>Z</b> уменьшает показатель степени <em>z</em>;
+<b>F</b> увеличивает, а <b>D</b> уменьшает соотношение пикселей;
+<b>A</b> переключает соотношение сторон;
+<b>M</b> создает видео, следующее вашему пути;
+<nobr><b>?</b> показывает эту справку.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<div lang="de" style="display:none">
+<h1 style="margin-top:3px;margin-bottom:6px;font-size:1.1em">
+Mandelbrot-Menge Fraktal-Explorer
+</h1>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b><span mobile="Tippen">Klicken</span> Sie zum Vergrößern.</b>  <span mobile="">Rechtsklick zum Speichern von Bildern, <b>M</b> zum Erstellen und Speichern eines Videos Ihres Zoom-Pfads.</span>
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> wird für jede <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">komplexe Zahl</a> <em>c</em> iteriert.  Farben zeigen <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">Iterationen</a> bis zur Divergenz; schwarze Punkte <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">konvergieren oder zyklieren</a>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Gelbe Punkte zeigen <a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">Bahnen</a></b>.  Rote Punkte zeigen Grenzzyklen.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Über Iterationen.</b> Dieser Viewer zeigt im Laufe der Zeit mehr fraktale Details, indem er die Iterationen während Ihrer Erkundung gegen unendlich verfeinert. Je länger Sie warten, desto mehr Details werden angezeigt.
+Nach Tausenden oder Millionen von Iterationen können Sie die feinsten Details in den komplexesten Teilen des Fraktals auflösen.
+Sehen Sie Informationen zu Iterationen, Fortschritt und Koordinaten, indem Sie <span mobile="tippen">mit der Maus über</span> die gelbe Zoom-Nummer unter jedem Fenster fahren.
+<span mobile="Halten Sie Ihren Finger">Bewegen Sie Ihre Maus</span> über fraktale Inhalte, um die Bahn der <em>z</em>-Werte für jeden Ort <em>c</em> zu animieren und die komplexe Randdynamik zu enthüllen, die Mathematiker fasziniert hat.
+</p>
+<p style="margin-top:6px;margin-bottom:6px">
+<b>Einen Zoom-Pfad erkunden.</b>
+Jeder <span mobile="Tipp">Klick</span> auf das Fraktal öffnet eine höhere Zoomstufe an der ausgewählten Stelle, berechnet auf Ihrer GPU, falls verfügbar.
+Nachdem Sie über eine billionenfache Vergrößerung hinaus gezoomt haben, verwenden wir einen Störungsalgorithmus mit vierfacher Genauigkeit, der feine Details mit mehr als 30 Ziffern Genauigkeit auflöst.
+Sobald Sie einen interessanten Pfad erstellt haben, der die gewünschten Details zeigt, können Sie <a class="moviemode">Ihr eigenes Mandelbrot-Deep-Zoom-Video erstellen und herunterladen</a> oder Ihre URL als Lesezeichen setzen, um Ihre Erkundung zu speichern und zu teilen.
+Um qualitativ hochwertige Bilder und Videos zu erstellen, berechnet dieser Viewer Subpixel mit einem Verhältnis von <span class="pixelratio">2</span>:1<span mobile="">, und dies kann erhöht werden, um präzisere Anzeigen zu erstellen</span>.
+</p>
+
+<p style="margin-top:6px;margin-bottom:6px" mobile="">
+<b>Weitere Befehle:</b>
+<b>I</b> zoomt hinein;
+<b mac="&#8984;">Strg</b>-Klick zum direkten Zoomen;
+<b>H</b> verkleinert und <b>G</b> vergrößert jedes Fenster;
+<b>R</b> öffnet Zwischenfenster erneut;
+<b>C</b> zentriert alle neu;
+<b>T</b> ändert das Farbschema;
+<b>U</b> hebt unfertige Pixel hervor;
+<b mac="&#x23CE;">Enter</b> schaltet Vollbild um;
+<b>X</b> erhöht und <b>Z</b> verringert den <em>z</em>-Exponenten;
+<b>F</b> erhöht und <b>D</b> verringert das Pixelverhältnis;
+<b>A</b> schaltet Seitenverhältnis um;
+<b>M</b> erstellt ein Video, das Ihrem Pfad folgt;
+<nobr><b>?</b> zeigt diese Hilfe.</nobr></p>
+
+<p style="margin-top:8px;margin-bottom:0;text-align:right">
+- <a target="mbhelp"
+href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
+>David Bau</a></p>
+</div>
+
+<script>
+// Internationalization Messages
+const Messages = {
+  en: {
+    center_at_: 'center at ',
+    percent_done_after_: '% done after ',
+    iters: ' iters',
+    pre_rendering_movie: 'Pre-rendering movie...',
+    pre_rendering_: 'Pre-rendering ',
+    diverges_in_: '\ndiverges in ',
+    converges_after_: '\nconverges after ',
+    after_: '\nafter ',
+    period_: ', period '
+  },
+  es: {
+    center_at_: 'centro en ',
+    percent_done_after_: '% completado después de ',
+    iters: ' iteraciones',
+    pre_rendering_movie: 'Pre-renderizando video...',
+    pre_rendering_: 'Pre-renderizando ',
+    diverges_in_: '\ndiverge en ',
+    converges_after_: '\nconverge después de ',
+    after_: '\ndespués de ',
+    period_: ', período '
+  },
+  zh: {
+    center_at_: '中心位于 ',
+    percent_done_after_: '% 完成，已迭代 ',
+    iters: ' 次',
+    pre_rendering_movie: '正在预渲染视频...',
+    pre_rendering_: '正在预渲染 ',
+    diverges_in_: '\n在 ',
+    converges_after_: '\n在 ',
+    after_: '\n在 ',
+    period_: ' 后发散，周期 '
+  },
+  'zh-TW': {
+    center_at_: '中心位於 ',
+    percent_done_after_: '% 完成，已迭代 ',
+    iters: ' 次',
+    pre_rendering_movie: '正在預渲染影片...',
+    pre_rendering_: '正在預渲染 ',
+    diverges_in_: '\n在 ',
+    converges_after_: '\n在 ',
+    after_: '\n在 ',
+    period_: ' 後發散，週期 '
+  },
+  ar: {
+    center_at_: 'المركز في ',
+    percent_done_after_: '% مكتمل بعد ',
+    iters: ' تكرار',
+    pre_rendering_movie: 'جارٍ العرض المسبق للفيديو...',
+    pre_rendering_: 'جارٍ العرض المسبق ',
+    diverges_in_: '\nيتباعد في ',
+    converges_after_: '\nيتقارب بعد ',
+    after_: '\nبعد ',
+    period_: '، الفترة '
+  },
+  id: {
+    center_at_: 'pusat di ',
+    percent_done_after_: '% selesai setelah ',
+    iters: ' iterasi',
+    pre_rendering_movie: 'Pra-rendering video...',
+    pre_rendering_: 'Pra-rendering ',
+    diverges_in_: '\ndivergen dalam ',
+    converges_after_: '\nkonvergen setelah ',
+    after_: '\nsetelah ',
+    period_: ', periode '
+  },
+  pt: {
+    center_at_: 'centro em ',
+    percent_done_after_: '% concluído após ',
+    iters: ' iterações',
+    pre_rendering_movie: 'Pré-renderizando vídeo...',
+    pre_rendering_: 'Pré-renderizando ',
+    diverges_in_: '\ndiverge em ',
+    converges_after_: '\nconverge após ',
+    after_: '\napós ',
+    period_: ', período '
+  },
+  fr: {
+    center_at_: 'centre à ',
+    percent_done_after_: '% terminé après ',
+    iters: ' itérations',
+    pre_rendering_movie: 'Pré-rendu de la vidéo...',
+    pre_rendering_: 'Pré-rendu ',
+    diverges_in_: '\ndiverge en ',
+    converges_after_: '\nconverge après ',
+    after_: '\naprès ',
+    period_: ', période '
+  },
+  ja: {
+    center_at_: '中心: ',
+    percent_done_after_: '% 完了、',
+    iters: ' 回反復',
+    pre_rendering_movie: '動画をプレレンダリング中...',
+    pre_rendering_: 'プレレンダリング中 ',
+    diverges_in_: '\n',
+    converges_after_: '\n',
+    after_: '\n',
+    period_: ' 回反復後に発散、周期 '
+  },
+  ru: {
+    center_at_: 'центр в ',
+    percent_done_after_: '% завершено после ',
+    iters: ' итераций',
+    pre_rendering_movie: 'Предварительный рендеринг видео...',
+    pre_rendering_: 'Предварительный рендеринг ',
+    diverges_in_: '\nрасходится за ',
+    converges_after_: '\nсходится после ',
+    after_: '\nпосле ',
+    period_: ', период '
+  },
+  de: {
+    center_at_: 'Zentrum bei ',
+    percent_done_after_: '% abgeschlossen nach ',
+    iters: ' Iterationen',
+    pre_rendering_movie: 'Video wird vorgerendert...',
+    pre_rendering_: 'Vorrendering ',
+    diverges_in_: '\ndivergiert in ',
+    converges_after_: '\nkonvergiert nach ',
+    after_: '\nnach ',
+    period_: ', Periode '
+  }
+};
+
+// Global MSG object for current language
+let MSG = Messages.en;
+
+// Global selected language (for URL preservation)
+let SELECTED_LANG = 'en';
+let LANG_FROM_URL = false;
+
+// Detect and display the appropriate language
+(function() {
+  // Get language from URL parameter or browser setting
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlLang = urlParams.get('lang');
+  const browserLang = navigator.language.toLowerCase();
+  const userLang = urlLang || browserLang;
+
+  // List of supported languages
+  const supportedLangs = ['en', 'es', 'zh', 'zh-tw', 'ar', 'id', 'pt', 'fr', 'ja', 'ru', 'de'];
+
+  // Try exact match first, then base language code (e.g., zh-TW -> zh-tw, then zh)
+  let selectedLang = 'en';
+  if (supportedLangs.includes(userLang)) {
+    selectedLang = userLang;
+  } else {
+    const baseLang = userLang.split('-')[0];
+    selectedLang = supportedLangs.includes(baseLang) ? baseLang : 'en';
+  }
+
+  // Set globals
+  MSG = Messages[selectedLang] || Messages['en'];
+  SELECTED_LANG = selectedLang;
+  LANG_FROM_URL = !!urlLang && supportedLangs.includes(urlLang);
+
+  // Wait for DOM to be ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyLanguage);
+  } else {
+    applyLanguage();
+  }
+
+  function applyLanguage() {
+    const langDivs = document.querySelectorAll('#text [lang]');
+    langDivs.forEach(div => {
+      const divLang = div.getAttribute('lang').toLowerCase();
+      div.style.display = divLang === selectedLang ? '' : 'none';
+    });
+  }
+})();
+</script>
+<!-- BEGIN_MP4MUXER_LIBRARY -->
+<!-- mp4-muxer library (tree-shaken, 31505 bytes) -->
+<!-- Source: https://www.npmjs.com/package/mp4-muxer -->
+<!-- Built with: ./build.sh -->
+<script>
+(()=>{var Ee=(e,t,s)=>{if(!t.has(e))throw TypeError("Cannot "+s)},i=(e,t,s)=>(Ee(e,t,"read from private fi\
+eld"),s?s.call(e):t.get(e)),d=(e,t,s)=>{if(t.has(e))throw TypeError("Cannot add the same private mem\
+ber more than once");t instanceof WeakSet?t.add(e):t.set(e,s)},T=(e,t,s,r)=>(Ee(e,t,"write to privat\
+e field"),r?r.call(e,s):t.set(e,s),s),st=(e,t,s,r)=>({set _(a){T(e,t,a,s)},get _(){return i(e,t,r)}}),
+m=(e,t,s)=>(Ee(e,t,"access private method"),s),p=new Uint8Array(8),B=new DataView(p.buffer),C=e=>[(e%
+256+256)%256],c=e=>(B.setUint16(0,e,!1),[p[0],p[1]]),rt=e=>(B.setInt16(0,e,!1),[p[0],p[1]]),Ve=e=>(B.
+setUint32(0,e,!1),[p[1],p[2],p[3]]),n=e=>(B.setUint32(0,e,!1),[p[0],p[1],p[2],p[3]]),at=e=>(B.setInt32(
+0,e,!1),[p[0],p[1],p[2],p[3]]),V=e=>(B.setUint32(0,Math.floor(e/2**32),!1),B.setUint32(4,e,!1),[p[0],
+p[1],p[2],p[3],p[4],p[5],p[6],p[7]]),ze=e=>(B.setInt16(0,2**8*e,!1),[p[0],p[1]]),A=e=>(B.setInt32(0,
+2**16*e,!1),[p[0],p[1],p[2],p[3]]),we=e=>(B.setInt32(0,2**30*e,!1),[p[0],p[1],p[2],p[3]]),E=(e,t=!1)=>{
+let s=Array(e.length).fill(null).map((r,a)=>e.charCodeAt(a));return t&&s.push(0),s},le=e=>e&&e[e.length-
+1],Ae=e=>{let t;for(let s of e)(!t||s.presentationTimestamp>t.presentationTimestamp)&&(t=s);return t},
+O=(e,t,s=!0)=>{let r=e*t;return s?Math.round(r):r},Pe=e=>{let t=e*(Math.PI/180),s=Math.cos(t),r=Math.
+sin(t);return[s,r,0,-r,s,0,0,0,1]},je=Pe(0),$e=e=>[A(e[0]),A(e[1]),we(e[2]),A(e[3]),A(e[4]),we(e[5]),
+A(e[6]),A(e[7]),we(e[8])],K=e=>!e||typeof e!="object"?e:Array.isArray(e)?e.map(K):Object.fromEntries(
+Object.entries(e).map(([t,s])=>[t,K(s)])),H=e=>e>=0&&e<2**32,g=(e,t,s)=>({type:e,contents:t&&new Uint8Array(
+t.flat(10)),children:s}),w=(e,t,s,r,a)=>g(e,[C(t),Ve(s),r??[]],a),nt=e=>{let t=512;return e.fragmented?
+g("ftyp",[E("iso5"),n(t),E("iso5"),E("iso6"),E("mp41")]):g("ftyp",[E("isom"),n(t),E("isom"),e.holdsAvc?
+E("avc1"):[],E("mp41")])},ve=e=>({type:"mdat",largeSize:e}),ot=e=>({type:"free",size:e}),re=(e,t,s=!1)=>g(
+"moov",null,[ht(t,e),...e.map(r=>lt(r,t)),s?Lt(e):null]),ht=(e,t)=>{let s=O(Math.max(0,...t.filter(h=>h.
+samples.length>0).map(h=>{let f=Ae(h.samples);return f.presentationTimestamp+f.duration})),ye),r=Math.
+max(...t.map(h=>h.id))+1,a=!H(e)||!H(s),o=a?V:n;return w("mvhd",+a,0,[o(e),o(e),n(ye),o(s),A(1),ze(1),
+Array(10).fill(0),$e(je),Array(24).fill(0),n(r)])},lt=(e,t)=>g("trak",null,[ft(e,t),ut(e,t)]),ft=(e,t)=>{
+let s=Ae(e.samples),r=O(s?s.presentationTimestamp+s.duration:0,ye),a=!H(t)||!H(r),o=a?V:n,h;return e.
+info.type==="video"?h=typeof e.info.rotation=="number"?Pe(e.info.rotation):e.info.rotation:h=je,w("t\
+khd",+a,3,[o(t),o(t),n(e.id),n(0),o(r),Array(8).fill(0),c(0),c(0),ze(e.info.type==="audio"?1:0),c(0),
+$e(h),A(e.info.type==="video"?e.info.width:0),A(e.info.type==="video"?e.info.height:0)])},ut=(e,t)=>g(
+"mdia",null,[dt(e,t),mt(e.info.type==="video"?"vide":"soun"),pt(e)]),dt=(e,t)=>{let s=Ae(e.samples),
+r=O(s?s.presentationTimestamp+s.duration:0,e.timescale),a=!H(t)||!H(r),o=a?V:n;return w("mdhd",+a,0,
+[o(t),o(t),n(e.timescale),o(r),c(21956),c(0)])},mt=e=>w("hdlr",0,0,[E("mhlr"),E(e),n(0),n(0),n(0),E(
+"mp4-muxer-hdlr",!0)]),pt=e=>g("minf",null,[e.info.type==="video"?ct():wt(),vt(),yt(e)]),ct=()=>w("v\
+mhd",0,1,[c(0),c(0),c(0),c(0)]),wt=()=>w("smhd",0,0,[c(0),c(0)]),vt=()=>g("dinf",null,[gt()]),gt=()=>w(
+"dref",0,0,[n(1)],[Ct()]),Ct=()=>w("url ",0,1),yt=e=>{let t=e.compositionTimeOffsetTable.length>1||e.
+compositionTimeOffsetTable.some(s=>s.sampleCompositionTimeOffset!==0);return g("stbl",null,[Tt(e),Ut(
+e),xt(e),Wt(e),Ft(e),Nt(e),t?Rt(e):null])},Tt=e=>w("stsd",0,0,[n(1)],[e.info.type==="video"?St(Kt[e.
+info.codec],e):Mt(Yt[e.info.codec],e)]),St=(e,t)=>g(e,[Array(6).fill(0),c(1),c(0),c(0),Array(12).fill(
+0),c(t.info.width),c(t.info.height),n(4718592),n(4718592),n(0),c(1),Array(32).fill(0),c(24),rt(65535)],
+[Qt[t.info.codec](t),t.info.decoderConfig.colorSpace?Et(t):null]),bt={bt709:1,bt470bg:5,smpte170m:6},
+kt={bt709:1,smpte170m:6,"iec61966-2-1":13},_t={rgb:0,bt709:1,bt470bg:5,smpte170m:6},Et=e=>g("colr",[
+E("nclx"),c(bt[e.info.decoderConfig.colorSpace.primaries]),c(kt[e.info.decoderConfig.colorSpace.transfer]),
+c(_t[e.info.decoderConfig.colorSpace.matrix]),C((e.info.decoderConfig.colorSpace.fullRange?1:0)<<7)]),
+zt=e=>e.info.decoderConfig&&g("avcC",[...new Uint8Array(e.info.decoderConfig.description)]),At=e=>e.
+info.decoderConfig&&g("hvcC",[...new Uint8Array(e.info.decoderConfig.description)]),Ot=e=>{if(!e.info.
+decoderConfig)return null;let t=e.info.decoderConfig;if(!t.colorSpace)throw new Error("'colorSpace' \
+is required in the decoder config for VP9.");let s=t.codec.split("."),r=Number(s[1]),a=Number(s[2]),
+f=(Number(s[3])<<4)+(0<<1)+Number(t.colorSpace.fullRange);return w("vpcC",1,0,[C(r),C(a),C(f),C(2),C(
+2),C(2),c(0)])},Bt=()=>{let s=(1<<7)+1;return g("av1C",[s,0,0,0])},Mt=(e,t)=>g(e,[Array(6).fill(0),c(
+1),c(0),c(0),n(0),c(t.info.numberOfChannels),c(16),c(0),c(0),A(t.info.sampleRate)],[Jt[t.info.codec](
+t)]),It=e=>{let t=new Uint8Array(e.info.decoderConfig.description);return w("esds",0,0,[n(58753152),
+C(32+t.byteLength),c(1),C(0),n(75530368),C(18+t.byteLength),C(64),C(21),Ve(0),n(130071),n(130071),n(
+92307584),C(t.byteLength),...t,n(109084800),C(1),C(2)])},Dt=e=>{let t=3840,s=0,r=e.info.decoderConfig?.
+description;if(r){if(r.byteLength<18)throw new TypeError("Invalid decoder description provided for O\
+pus; must be at least 18 bytes long.");let a=ArrayBuffer.isView(r)?new DataView(r.buffer,r.byteOffset,
+r.byteLength):new DataView(r);t=a.getUint16(10,!0),s=a.getInt16(14,!0)}return g("dOps",[C(0),C(e.info.
+numberOfChannels),c(t),n(e.info.sampleRate),ze(s),C(0)])},Ut=e=>w("stts",0,0,[n(e.timeToSampleTable.
+length),e.timeToSampleTable.map(t=>[n(t.sampleCount),n(t.sampleDelta)])]),xt=e=>{if(e.samples.every(
+s=>s.type==="key"))return null;let t=[...e.samples.entries()].filter(([,s])=>s.type==="key");return w(
+"stss",0,0,[n(t.length),t.map(([s])=>n(s+1))])},Wt=e=>w("stsc",0,0,[n(e.compactlyCodedChunkTable.length),
+e.compactlyCodedChunkTable.map(t=>[n(t.firstChunk),n(t.samplesPerChunk),n(1)])]),Ft=e=>w("stsz",0,0,
+[n(0),n(e.samples.length),e.samples.map(t=>n(t.size))]),Nt=e=>e.finalizedChunks.length>0&&le(e.finalizedChunks).
+offset>=2**32?w("co64",0,0,[n(e.finalizedChunks.length),e.finalizedChunks.map(t=>V(t.offset))]):w("s\
+tco",0,0,[n(e.finalizedChunks.length),e.finalizedChunks.map(t=>n(t.offset))]),Rt=e=>w("ctts",0,0,[n(
+e.compositionTimeOffsetTable.length),e.compositionTimeOffsetTable.map(t=>[n(t.sampleCount),n(t.sampleCompositionTimeOffset)])]),
+Lt=e=>g("mvex",null,e.map(Vt)),Vt=e=>w("trex",0,0,[n(e.id),n(1),n(0),n(0),n(0)]),Le=(e,t)=>g("moof",
+null,[Pt(e),...t.map(jt)]),Pt=e=>w("mfhd",0,0,[n(e)]),He=e=>{let t=0,s=0,r=0,a=0,o=e.type==="delta";
+return s|=+o,o?t|=1:t|=2,t<<24|s<<16|r<<8|a},jt=e=>g("traf",null,[$t(e),Ht(e),qt(e)]),$t=e=>{let t=0;
+t|=8,t|=16,t|=32,t|=131072;let s=e.currentChunk.samples[1]??e.currentChunk.samples[0],r={duration:s.
+timescaleUnitsToNextSample,size:s.size,flags:He(s)};return w("tfhd",0,t,[n(e.id),n(r.duration),n(r.size),
+n(r.flags)])},Ht=e=>w("tfdt",1,0,[V(O(e.currentChunk.startTimestamp,e.timescale))]),qt=e=>{let t=e.currentChunk.
+samples.map(M=>M.timescaleUnitsToNextSample),s=e.currentChunk.samples.map(M=>M.size),r=e.currentChunk.
+samples.map(He),a=e.currentChunk.samples.map(M=>O(M.presentationTimestamp-M.decodeTimestamp,e.timescale)),
+o=new Set(t),h=new Set(s),f=new Set(r),v=new Set(a),S=f.size===2&&r[0]!==r[1],U=o.size>1,X=h.size>1,
+Ne=!S&&f.size>1,Re=v.size>1||[...v].some(M=>M!==0),x=0;return x|=1,x|=4*+S,x|=256*+U,x|=512*+X,x|=1024*
++Ne,x|=2048*+Re,w("trun",1,x,[n(e.currentChunk.samples.length),n(e.currentChunk.offset-e.currentChunk.
+moofOffset||0),S?n(r[0]):[],e.currentChunk.samples.map((M,se)=>[U?n(t[se]):[],X?n(s[se]):[],Ne?n(r[se]):
+[],Re?at(a[se]):[]])])},Xt=e=>g("mfra",null,[...e.map(Gt),Zt()]),Gt=(e,t)=>w("tfra",1,0,[n(e.id),n(63),
+n(e.finalizedChunks.length),e.finalizedChunks.map(r=>[V(O(r.startTimestamp,e.timescale)),V(r.moofOffset),
+n(t+1),n(1),n(1)])]),Zt=()=>w("mfro",0,0,[n(0)]),Kt={avc:"avc1",hevc:"hvc1",vp9:"vp09",av1:"av01"},Qt={
+avc:zt,hevc:At,vp9:Ot,av1:Bt},Yt={aac:"mp4a",opus:"Opus"},Jt={aac:It,opus:Dt},li=Symbol("isTarget"),
+ce=class{},Oe=class extends ce{constructor(){super(...arguments),this.buffer=null}},qe=class extends ce{constructor(e){
+if(super(),this.options=e,typeof e!="object")throw new TypeError("StreamTarget requires an options o\
+bject to be passed to its constructor.");if(e.onData){if(typeof e.onData!="function")throw new TypeError(
+"options.onData, when provided, must be a function.");if(e.onData.length<2)throw new TypeError("opti\
+ons.onData, when provided, must be a function that takes in at least two arguments (data and positio\
+n). Ignoring the position argument, which specifies the byte offset at which the data is to be writt\
+en, can lead to broken outputs.")}if(e.chunked!==void 0&&typeof e.chunked!="boolean")throw new TypeError(
+"options.chunked, when provided, must be a boolean.");if(e.chunkSize!==void 0&&(!Number.isInteger(e.
+chunkSize)||e.chunkSize<1024))throw new TypeError("options.chunkSize, when provided, must be an inte\
+ger and not smaller than 1024.")}},ei=class extends ce{constructor(e,t){if(super(),this.stream=e,this.
+options=t,!(e instanceof FileSystemWritableFileStream))throw new TypeError("FileSystemWritableFileSt\
+reamTarget requires a FileSystemWritableFileStream instance.");if(t!==void 0&&typeof t!="object")throw new TypeError(
+"FileSystemWritableFileStreamTarget's options, when provided, must be an object.");if(t&&t.chunkSize!==
+void 0&&(!Number.isInteger(t.chunkSize)||t.chunkSize<=0))throw new TypeError("options.chunkSize, whe\
+n provided, must be a positive integer")}},W,P,Xe=class{constructor(){this.pos=0,d(this,W,new Uint8Array(
+8)),d(this,P,new DataView(i(this,W).buffer)),this.offsets=new WeakMap}seek(e){this.pos=e}writeU32(e){
+i(this,P).setUint32(0,e,!1),this.write(i(this,W).subarray(0,4))}writeU64(e){i(this,P).setUint32(0,Math.
+floor(e/2**32),!1),i(this,P).setUint32(4,e,!1),this.write(i(this,W).subarray(0,8))}writeAscii(e){for(let t=0;t<
+e.length;t++)i(this,P).setUint8(t%8,e.charCodeAt(t)),t%8===7&&this.write(i(this,W));e.length%8!==0&&
+this.write(i(this,W).subarray(0,e.length%8))}writeBox(e){if(this.offsets.set(e,this.pos),e.contents&&
+!e.children)this.writeBoxHeader(e,e.size??e.contents.byteLength+8),this.write(e.contents);else{let t=this.
+pos;if(this.writeBoxHeader(e,0),e.contents&&this.write(e.contents),e.children)for(let a of e.children)
+a&&this.writeBox(a);let s=this.pos,r=e.size??s-t;this.seek(t),this.writeBoxHeader(e,r),this.seek(s)}}writeBoxHeader(e,t){
+this.writeU32(e.largeSize?1:t),this.writeAscii(e.type),e.largeSize&&this.writeU64(t)}measureBoxHeader(e){
+return 8+(e.largeSize?8:0)}patchBox(e){let t=this.pos;this.seek(this.offsets.get(e)),this.writeBox(e),
+this.seek(t)}measureBox(e){if(e.contents&&!e.children)return this.measureBoxHeader(e)+e.contents.byteLength;
+{let t=this.measureBoxHeader(e);if(e.contents&&(t+=e.contents.byteLength),e.children)for(let s of e.
+children)s&&(t+=this.measureBox(s));return t}}};W=new WeakMap;P=new WeakMap;var ae,L,te,G,ne,ge,ti=class extends Xe{constructor(e){
+super(),d(this,ne),d(this,ae,void 0),d(this,L,new ArrayBuffer(2**16)),d(this,te,new Uint8Array(i(this,
+L))),d(this,G,0),T(this,ae,e)}write(e){m(this,ne,ge).call(this,this.pos+e.byteLength),i(this,te).set(
+e,this.pos),this.pos+=e.byteLength,T(this,G,Math.max(i(this,G),this.pos))}finalize(){m(this,ne,ge).call(
+this,this.pos),i(this,ae).buffer=i(this,L).slice(0,Math.max(i(this,G),this.pos))}};ae=new WeakMap;L=
+new WeakMap;te=new WeakMap;G=new WeakMap;ne=new WeakSet;ge=function(e){let t=i(this,L).byteLength;for(;t<
+e;)t*=2;if(t===i(this,L).byteLength)return;let s=new ArrayBuffer(t),r=new Uint8Array(s);r.set(i(this,
+te),0),T(this,L,s),T(this,te,r)};var ii=2**24,si=2,Q,F,Z,D,_,fe,Ce,Be,Ge,Me,Ze,Y,ue,Ie=class extends Xe{constructor(e){
+super(),d(this,fe),d(this,Be),d(this,Me),d(this,Y),d(this,Q,void 0),d(this,F,[]),d(this,Z,void 0),d(
+this,D,void 0),d(this,_,[]),T(this,Q,e),T(this,Z,e.options?.chunked??!1),T(this,D,e.options?.chunkSize??
+ii)}write(e){i(this,F).push({data:e.slice(),start:this.pos}),this.pos+=e.byteLength}flush(){if(i(this,
+F).length===0)return;let e=[],t=[...i(this,F)].sort((s,r)=>s.start-r.start);e.push({start:t[0].start,
+size:t[0].data.byteLength});for(let s=1;s<t.length;s++){let r=e[e.length-1],a=t[s];a.start<=r.start+
+r.size?r.size=Math.max(r.size,a.start+a.data.byteLength-r.start):e.push({start:a.start,size:a.data.byteLength})}
+for(let s of e){s.data=new Uint8Array(s.size);for(let r of i(this,F))s.start<=r.start&&r.start<s.start+
+s.size&&s.data.set(r.data,r.start-s.start);i(this,Z)?(m(this,fe,Ce).call(this,s.data,s.start),m(this,
+Y,ue).call(this)):i(this,Q).options.onData?.(s.data,s.start)}i(this,F).length=0}finalize(){i(this,Z)&&
+m(this,Y,ue).call(this,!0)}};Q=new WeakMap;F=new WeakMap;Z=new WeakMap;D=new WeakMap;_=new WeakMap;fe=
+new WeakSet;Ce=function(e,t){let s=i(this,_).findIndex(f=>f.start<=t&&t<f.start+i(this,D));s===-1&&(s=
+m(this,Me,Ze).call(this,t));let r=i(this,_)[s],a=t-r.start,o=e.subarray(0,Math.min(i(this,D)-a,e.byteLength));
+r.data.set(o,a);let h={start:a,end:a+o.byteLength};if(m(this,Be,Ge).call(this,r,h),r.written[0].start===
+0&&r.written[0].end===i(this,D)&&(r.shouldFlush=!0),i(this,_).length>si){for(let f=0;f<i(this,_).length-
+1;f++)i(this,_)[f].shouldFlush=!0;m(this,Y,ue).call(this)}o.byteLength<e.byteLength&&m(this,fe,Ce).call(
+this,e.subarray(o.byteLength),t+o.byteLength)};Be=new WeakSet;Ge=function(e,t){let s=0,r=e.written.length-
+1,a=-1;for(;s<=r;){let o=Math.floor(s+(r-s+1)/2);e.written[o].start<=t.start?(s=o+1,a=o):r=o-1}for(e.
+written.splice(a+1,0,t),(a===-1||e.written[a].end<t.start)&&a++;a<e.written.length-1&&e.written[a].end>=
+e.written[a+1].start;)e.written[a].end=Math.max(e.written[a].end,e.written[a+1].end),e.written.splice(
+a+1,1)};Me=new WeakSet;Ze=function(e){let s={start:Math.floor(e/i(this,D))*i(this,D),data:new Uint8Array(
+i(this,D)),written:[],shouldFlush:!1};return i(this,_).push(s),i(this,_).sort((r,a)=>r.start-a.start),
+i(this,_).indexOf(s)};Y=new WeakSet;ue=function(e=!1){for(let t=0;t<i(this,_).length;t++){let s=i(this,
+_)[t];if(!(!s.shouldFlush&&!e)){for(let r of s.written)i(this,Q).options.onData?.(s.data.subarray(r.
+start,r.end),s.start+r.start);i(this,_).splice(t--,1)}}};var ri=class extends Ie{constructor(e){super(
+new qe({onData:(t,s)=>e.stream.write({type:"write",data:t,position:s}),chunked:!0,chunkSize:e.options?.
+chunkSize}))}},ye=1e3,ai=["avc","hevc","vp9","av1"],ni=["aac","opus"],oi=2082844800,hi=["strict","of\
+fset","cross-track-offset"],l,u,de,k,b,y,j,$,De,N,R,J,Te,Ke,Se,Qe,Ue,Ye,be,Je,xe,et,oe,ke,z,I,We,tt,
+ee,me,pe,Fe,q,ie,he,_e,it=class{constructor(e){if(d(this,Te),d(this,Se),d(this,Ue),d(this,be),d(this,
+xe),d(this,oe),d(this,z),d(this,We),d(this,ee),d(this,pe),d(this,q),d(this,he),d(this,l,void 0),d(this,
+u,void 0),d(this,de,void 0),d(this,k,void 0),d(this,b,null),d(this,y,null),d(this,j,Math.floor(Date.
+now()/1e3)+oi),d(this,$,[]),d(this,De,1),d(this,N,[]),d(this,R,[]),d(this,J,!1),m(this,Te,Ke).call(this,
+e),e.video=K(e.video),e.audio=K(e.audio),e.fastStart=K(e.fastStart),this.target=e.target,T(this,l,{firstTimestampBehavior:"\
+strict",...e}),e.target instanceof Oe)T(this,u,new ti(e.target));else if(e.target instanceof qe)T(this,
+u,new Ie(e.target));else if(e.target instanceof ei)T(this,u,new ri(e.target));else throw new Error(`\
+Invalid target: ${e.target}`);m(this,be,Je).call(this),m(this,Se,Qe).call(this)}addVideoChunk(e,t,s,r){
+if(!(e instanceof EncodedVideoChunk))throw new TypeError("addVideoChunk's first argument (sample) mu\
+st be of type EncodedVideoChunk.");if(t&&typeof t!="object")throw new TypeError("addVideoChunk's sec\
+ond argument (meta), when provided, must be an object.");if(s!==void 0&&(!Number.isFinite(s)||s<0))throw new TypeError(
+"addVideoChunk's third argument (timestamp), when provided, must be a non-negative real number.");if(r!==
+void 0&&!Number.isFinite(r))throw new TypeError("addVideoChunk's fourth argument (compositionTimeOff\
+set), when provided, must be a real number.");let a=new Uint8Array(e.byteLength);e.copyTo(a),this.addVideoChunkRaw(
+a,e.type,s??e.timestamp,e.duration,t,r)}addVideoChunkRaw(e,t,s,r,a,o){if(!(e instanceof Uint8Array))
+throw new TypeError("addVideoChunkRaw's first argument (data) must be an instance of Uint8Array.");if(t!==
+"key"&&t!=="delta")throw new TypeError("addVideoChunkRaw's second argument (type) must be either 'ke\
+y' or 'delta'.");if(!Number.isFinite(s)||s<0)throw new TypeError("addVideoChunkRaw's third argument \
+(timestamp) must be a non-negative real number.");if(!Number.isFinite(r)||r<0)throw new TypeError("a\
+ddVideoChunkRaw's fourth argument (duration) must be a non-negative real number.");if(a&&typeof a!="\
+object")throw new TypeError("addVideoChunkRaw's fifth argument (meta), when provided, must be an obj\
+ect.");if(o!==void 0&&!Number.isFinite(o))throw new TypeError("addVideoChunkRaw's sixth argument (co\
+mpositionTimeOffset), when provided, must be a real number.");if(m(this,he,_e).call(this),!i(this,l).
+video)throw new Error("No video track declared.");if(typeof i(this,l).fastStart=="object"&&i(this,b).
+samples.length===i(this,l).fastStart.expectedVideoChunks)throw new Error(`Cannot add more video chun\
+ks than specified in 'fastStart' (${i(this,l).fastStart.expectedVideoChunks}).`);let h=m(this,oe,ke).
+call(this,i(this,b),e,t,s,r,a,o);if(i(this,l).fastStart==="fragmented"&&i(this,y)){for(;i(this,R).length>
+0&&i(this,R)[0].decodeTimestamp<=h.decodeTimestamp;){let f=i(this,R).shift();m(this,z,I).call(this,i(
+this,y),f)}h.decodeTimestamp<=i(this,y).lastDecodeTimestamp?m(this,z,I).call(this,i(this,b),h):i(this,
+N).push(h)}else m(this,z,I).call(this,i(this,b),h)}addAudioChunk(e,t,s){if(!(e instanceof EncodedAudioChunk))
+throw new TypeError("addAudioChunk's first argument (sample) must be of type EncodedAudioChunk.");if(t&&
+typeof t!="object")throw new TypeError("addAudioChunk's second argument (meta), when provided, must \
+be an object.");if(s!==void 0&&(!Number.isFinite(s)||s<0))throw new TypeError("addAudioChunk's third\
+ argument (timestamp), when provided, must be a non-negative real number.");let r=new Uint8Array(e.byteLength);
+e.copyTo(r),this.addAudioChunkRaw(r,e.type,s??e.timestamp,e.duration,t)}addAudioChunkRaw(e,t,s,r,a){
+if(!(e instanceof Uint8Array))throw new TypeError("addAudioChunkRaw's first argument (data) must be \
+an instance of Uint8Array.");if(t!=="key"&&t!=="delta")throw new TypeError("addAudioChunkRaw's secon\
+d argument (type) must be either 'key' or 'delta'.");if(!Number.isFinite(s)||s<0)throw new TypeError(
+"addAudioChunkRaw's third argument (timestamp) must be a non-negative real number.");if(!Number.isFinite(
+r)||r<0)throw new TypeError("addAudioChunkRaw's fourth argument (duration) must be a non-negative re\
+al number.");if(a&&typeof a!="object")throw new TypeError("addAudioChunkRaw's fifth argument (meta),\
+ when provided, must be an object.");if(m(this,he,_e).call(this),!i(this,l).audio)throw new Error("N\
+o audio track declared.");if(typeof i(this,l).fastStart=="object"&&i(this,y).samples.length===i(this,
+l).fastStart.expectedAudioChunks)throw new Error(`Cannot add more audio chunks than specified in 'fa\
+stStart' (${i(this,l).fastStart.expectedAudioChunks}).`);let o=m(this,oe,ke).call(this,i(this,y),e,t,
+s,r,a);if(i(this,l).fastStart==="fragmented"&&i(this,b)){for(;i(this,N).length>0&&i(this,N)[0].decodeTimestamp<=
+o.decodeTimestamp;){let h=i(this,N).shift();m(this,z,I).call(this,i(this,b),h)}o.decodeTimestamp<=i(
+this,b).lastDecodeTimestamp?m(this,z,I).call(this,i(this,y),o):i(this,R).push(o)}else m(this,z,I).call(
+this,i(this,y),o)}finalize(){if(i(this,J))throw new Error("Cannot finalize a muxer more than once.");
+if(i(this,l).fastStart==="fragmented"){for(let t of i(this,N))m(this,z,I).call(this,i(this,b),t);for(let t of i(
+this,R))m(this,z,I).call(this,i(this,y),t);m(this,pe,Fe).call(this,!1)}else i(this,b)&&m(this,ee,me).
+call(this,i(this,b)),i(this,y)&&m(this,ee,me).call(this,i(this,y));let e=[i(this,b),i(this,y)].filter(
+Boolean);if(i(this,l).fastStart==="in-memory"){let t;for(let r=0;r<2;r++){let a=re(e,i(this,j)),o=i(
+this,u).measureBox(a);t=i(this,u).measureBox(i(this,k));let h=i(this,u).pos+o+t;for(let f of i(this,
+$)){f.offset=h;for(let{data:v}of f.samples)h+=v.byteLength,t+=v.byteLength}if(h<2**32)break;t>=2**32&&
+(i(this,k).largeSize=!0)}let s=re(e,i(this,j));i(this,u).writeBox(s),i(this,k).size=t,i(this,u).writeBox(
+i(this,k));for(let r of i(this,$))for(let a of r.samples)i(this,u).write(a.data),a.data=null}else if(i(
+this,l).fastStart==="fragmented"){let t=i(this,u).pos,s=Xt(e);i(this,u).writeBox(s);let r=i(this,u).
+pos-t;i(this,u).seek(i(this,u).pos-4),i(this,u).writeU32(r)}else{let t=i(this,u).offsets.get(i(this,
+k)),s=i(this,u).pos-t;i(this,k).size=s,i(this,k).largeSize=s>=2**32,i(this,u).patchBox(i(this,k));let r=re(
+e,i(this,j));if(typeof i(this,l).fastStart=="object"){i(this,u).seek(i(this,de)),i(this,u).writeBox(
+r);let a=t-i(this,u).pos;i(this,u).writeBox(ot(a))}else i(this,u).writeBox(r)}m(this,q,ie).call(this),
+i(this,u).finalize(),T(this,J,!0)}};l=new WeakMap;u=new WeakMap;de=new WeakMap;k=new WeakMap;b=new WeakMap;
+y=new WeakMap;j=new WeakMap;$=new WeakMap;De=new WeakMap;N=new WeakMap;R=new WeakMap;J=new WeakMap;Te=
+new WeakSet;Ke=function(e){if(typeof e!="object")throw new TypeError("The muxer requires an options \
+object to be passed to its constructor.");if(!(e.target instanceof ce))throw new TypeError("The targ\
+et must be provided and an instance of Target.");if(e.video){if(!ai.includes(e.video.codec))throw new TypeError(
+`Unsupported video codec: ${e.video.codec}`);if(!Number.isInteger(e.video.width)||e.video.width<=0)throw new TypeError(
+`Invalid video width: ${e.video.width}. Must be a positive integer.`);if(!Number.isInteger(e.video.height)||
+e.video.height<=0)throw new TypeError(`Invalid video height: ${e.video.height}. Must be a positive i\
+nteger.`);let t=e.video.rotation;if(typeof t=="number"&&![0,90,180,270].includes(t))throw new TypeError(
+`Invalid video rotation: ${t}. Has to be 0, 90, 180 or 270.`);if(Array.isArray(t)&&(t.length!==9||t.
+some(s=>typeof s!="number")))throw new TypeError(`Invalid video transformation matrix: ${t.join()}`);
+if(e.video.frameRate!==void 0&&(!Number.isInteger(e.video.frameRate)||e.video.frameRate<=0))throw new TypeError(
+`Invalid video frame rate: ${e.video.frameRate}. Must be a positive integer.`)}if(e.audio){if(!ni.includes(
+e.audio.codec))throw new TypeError(`Unsupported audio codec: ${e.audio.codec}`);if(!Number.isInteger(
+e.audio.numberOfChannels)||e.audio.numberOfChannels<=0)throw new TypeError(`Invalid number of audio \
+channels: ${e.audio.numberOfChannels}. Must be a positive integer.`);if(!Number.isInteger(e.audio.sampleRate)||
+e.audio.sampleRate<=0)throw new TypeError(`Invalid audio sample rate: ${e.audio.sampleRate}. Must be\
+ a positive integer.`)}if(e.firstTimestampBehavior&&!hi.includes(e.firstTimestampBehavior))throw new TypeError(
+`Invalid first timestamp behavior: ${e.firstTimestampBehavior}`);if(typeof e.fastStart=="object"){if(e.
+video){if(e.fastStart.expectedVideoChunks===void 0)throw new TypeError("'fastStart' is an object but\
+ is missing property 'expectedVideoChunks'.");if(!Number.isInteger(e.fastStart.expectedVideoChunks)||
+e.fastStart.expectedVideoChunks<0)throw new TypeError("'expectedVideoChunks' must be a non-negative \
+integer.")}if(e.audio){if(e.fastStart.expectedAudioChunks===void 0)throw new TypeError("'fastStart' \
+is an object but is missing property 'expectedAudioChunks'.");if(!Number.isInteger(e.fastStart.expectedAudioChunks)||
+e.fastStart.expectedAudioChunks<0)throw new TypeError("'expectedAudioChunks' must be a non-negative \
+integer.")}}else if(![!1,"in-memory","fragmented"].includes(e.fastStart))throw new TypeError("'fastS\
+tart' option must be false, 'in-memory', 'fragmented' or an object.");if(e.minFragmentDuration!==void 0&&
+(!Number.isFinite(e.minFragmentDuration)||e.minFragmentDuration<0))throw new TypeError("'minFragment\
+Duration' must be a non-negative number.")};Se=new WeakSet;Qe=function(){if(i(this,u).writeBox(nt({holdsAvc:i(
+this,l).video?.codec==="avc",fragmented:i(this,l).fastStart==="fragmented"})),T(this,de,i(this,u).pos),
+i(this,l).fastStart==="in-memory")T(this,k,ve(!1));else if(i(this,l).fastStart!=="fragmented"){if(typeof i(
+this,l).fastStart=="object"){let e=m(this,Ue,Ye).call(this);i(this,u).seek(i(this,u).pos+e)}T(this,k,
+ve(!0)),i(this,u).writeBox(i(this,k))}m(this,q,ie).call(this)};Ue=new WeakSet;Ye=function(){if(typeof i(
+this,l).fastStart!="object")return;let e=0,t=[i(this,l).fastStart.expectedVideoChunks,i(this,l).fastStart.
+expectedAudioChunks];for(let s of t)s&&(e+=8*Math.ceil(2/3*s),e+=4*s,e+=12*Math.ceil(2/3*s),e+=4*s,e+=
+8*s);return e+=4096,e};be=new WeakSet;Je=function(){if(i(this,l).video&&T(this,b,{id:1,info:{type:"v\
+ideo",codec:i(this,l).video.codec,width:i(this,l).video.width,height:i(this,l).video.height,rotation:i(
+this,l).video.rotation??0,decoderConfig:null},timescale:i(this,l).video.frameRate??57600,samples:[],
+finalizedChunks:[],currentChunk:null,firstDecodeTimestamp:void 0,lastDecodeTimestamp:-1,timeToSampleTable:[],
+compositionTimeOffsetTable:[],lastTimescaleUnits:null,lastSample:null,compactlyCodedChunkTable:[]}),
+i(this,l).audio&&(T(this,y,{id:i(this,l).video?2:1,info:{type:"audio",codec:i(this,l).audio.codec,numberOfChannels:i(
+this,l).audio.numberOfChannels,sampleRate:i(this,l).audio.sampleRate,decoderConfig:null},timescale:i(
+this,l).audio.sampleRate,samples:[],finalizedChunks:[],currentChunk:null,firstDecodeTimestamp:void 0,
+lastDecodeTimestamp:-1,timeToSampleTable:[],compositionTimeOffsetTable:[],lastTimescaleUnits:null,lastSample:null,
+compactlyCodedChunkTable:[]}),i(this,l).audio.codec==="aac")){let e=m(this,xe,et).call(this,2,i(this,
+l).audio.sampleRate,i(this,l).audio.numberOfChannels);i(this,y).info.decoderConfig={codec:i(this,l).
+audio.codec,description:e,numberOfChannels:i(this,l).audio.numberOfChannels,sampleRate:i(this,l).audio.
+sampleRate}}};xe=new WeakSet;et=function(e,t,s){let a=[96e3,88200,64e3,48e3,44100,32e3,24e3,22050,16e3,
+12e3,11025,8e3,7350].indexOf(t),o=s,h="";h+=e.toString(2).padStart(5,"0"),h+=a.toString(2).padStart(
+4,"0"),a===15&&(h+=t.toString(2).padStart(24,"0")),h+=o.toString(2).padStart(4,"0");let f=Math.ceil(
+h.length/8)*8;h=h.padEnd(f,"0");let v=new Uint8Array(h.length/8);for(let S=0;S<h.length;S+=8)v[S/8]=
+parseInt(h.slice(S,S+8),2);return v};oe=new WeakSet;ke=function(e,t,s,r,a,o,h){let f=r/1e6,v=(r-(h??
+0))/1e6,S=a/1e6,U=m(this,We,tt).call(this,f,v,e);return f=U.presentationTimestamp,v=U.decodeTimestamp,
+o?.decoderConfig&&(e.info.decoderConfig===null?e.info.decoderConfig=o.decoderConfig:Object.assign(e.
+info.decoderConfig,o.decoderConfig)),{presentationTimestamp:f,decodeTimestamp:v,duration:S,data:t,size:t.
+byteLength,type:s,timescaleUnitsToNextSample:O(S,e.timescale)}};z=new WeakSet;I=function(e,t){i(this,
+l).fastStart!=="fragmented"&&e.samples.push(t);let s=O(t.presentationTimestamp-t.decodeTimestamp,e.timescale);
+if(e.lastTimescaleUnits!==null){let a=O(t.decodeTimestamp,e.timescale,!1),o=Math.round(a-e.lastTimescaleUnits);
+if(e.lastTimescaleUnits+=o,e.lastSample.timescaleUnitsToNextSample=o,i(this,l).fastStart!=="fragment\
+ed"){let h=le(e.timeToSampleTable);h.sampleCount===1?(h.sampleDelta=o,h.sampleCount++):h.sampleDelta===
+o?h.sampleCount++:(h.sampleCount--,e.timeToSampleTable.push({sampleCount:2,sampleDelta:o}));let f=le(
+e.compositionTimeOffsetTable);f.sampleCompositionTimeOffset===s?f.sampleCount++:e.compositionTimeOffsetTable.
+push({sampleCount:1,sampleCompositionTimeOffset:s})}}else e.lastTimescaleUnits=0,i(this,l).fastStart!==
+"fragmented"&&(e.timeToSampleTable.push({sampleCount:1,sampleDelta:O(t.duration,e.timescale)}),e.compositionTimeOffsetTable.
+push({sampleCount:1,sampleCompositionTimeOffset:s}));e.lastSample=t;let r=!1;if(!e.currentChunk)r=!0;else{
+let a=t.presentationTimestamp-e.currentChunk.startTimestamp;if(i(this,l).fastStart==="fragmented"){let o=i(
+this,b)??i(this,y),h=i(this,l).minFragmentDuration??1;e===o&&t.type==="key"&&a>=h&&(r=!0,m(this,pe,Fe).
+call(this))}else r=a>=.5}r&&(e.currentChunk&&m(this,ee,me).call(this,e),e.currentChunk={startTimestamp:t.
+presentationTimestamp,samples:[]}),e.currentChunk.samples.push(t)};We=new WeakSet;tt=function(e,t,s){
+let r=i(this,l).firstTimestampBehavior==="strict",a=s.lastDecodeTimestamp===-1;if(r&&a&&t!==0)throw new Error(
+`The first chunk for your media track must have a timestamp of 0 (received DTS=${t}).Non-zero first \
+timestamps are often caused by directly piping frames or audio data from a MediaStreamTrack into the\
+ encoder. Their timestamps are typically relative to the age of thedocument, which is probably what \
+you want.
+
+If you want to offset all timestamps of a track such that the first one is zero, set firstTimestampB\
+ehavior: 'offset' in the options.
+`);if(i(this,l).firstTimestampBehavior==="offset"||i(this,l).firstTimestampBehavior==="cross-track-o\
+ffset"){s.firstDecodeTimestamp===void 0&&(s.firstDecodeTimestamp=t);let h;i(this,l).firstTimestampBehavior===
+"offset"?h=s.firstDecodeTimestamp:h=Math.min(i(this,b)?.firstDecodeTimestamp??1/0,i(this,y)?.firstDecodeTimestamp??
+1/0),t-=h,e-=h}if(t<s.lastDecodeTimestamp)throw new Error(`Timestamps must be monotonically increasi\
+ng (DTS went from ${s.lastDecodeTimestamp*1e6} to ${t*1e6}).`);return s.lastDecodeTimestamp=t,{presentationTimestamp:e,
+decodeTimestamp:t}};ee=new WeakSet;me=function(e){if(i(this,l).fastStart==="fragmented")throw new Error(
+"Can't finalize individual chunks if 'fastStart' is set to 'fragmented'.");if(e.currentChunk){if(e.finalizedChunks.
+push(e.currentChunk),i(this,$).push(e.currentChunk),(e.compactlyCodedChunkTable.length===0||le(e.compactlyCodedChunkTable).
+samplesPerChunk!==e.currentChunk.samples.length)&&e.compactlyCodedChunkTable.push({firstChunk:e.finalizedChunks.
+length,samplesPerChunk:e.currentChunk.samples.length}),i(this,l).fastStart==="in-memory"){e.currentChunk.
+offset=0;return}e.currentChunk.offset=i(this,u).pos;for(let t of e.currentChunk.samples)i(this,u).write(
+t.data),t.data=null;m(this,q,ie).call(this)}};pe=new WeakSet;Fe=function(e=!0){if(i(this,l).fastStart!==
+"fragmented")throw new Error("Can't finalize a fragment unless 'fastStart' is set to 'fragmented'.");
+let t=[i(this,b),i(this,y)].filter(f=>f&&f.currentChunk);if(t.length===0)return;let s=st(this,De)._++;
+if(s===1){let f=re(t,i(this,j),!0);i(this,u).writeBox(f)}let r=i(this,u).pos,a=Le(s,t);i(this,u).writeBox(
+a);{let f=ve(!1),v=0;for(let U of t)for(let X of U.currentChunk.samples)v+=X.size;let S=i(this,u).measureBox(
+f)+v;S>=2**32&&(f.largeSize=!0,S=i(this,u).measureBox(f)+v),f.size=S,i(this,u).writeBox(f)}for(let f of t){
+f.currentChunk.offset=i(this,u).pos,f.currentChunk.moofOffset=r;for(let v of f.currentChunk.samples)
+i(this,u).write(v.data),v.data=null}let o=i(this,u).pos;i(this,u).seek(i(this,u).offsets.get(a));let h=Le(
+s,t);i(this,u).writeBox(h),i(this,u).seek(o);for(let f of t)f.finalizedChunks.push(f.currentChunk),i(
+this,$).push(f.currentChunk),f.currentChunk=null;e&&m(this,q,ie).call(this)};q=new WeakSet;ie=function(){
+i(this,u)instanceof Ie&&i(this,u).flush()};he=new WeakSet;_e=function(){if(i(this,J))throw new Error(
+"Cannot add new video or audio chunks after the file has been finalized.")};window.Mp4Muxer={Muxer:it,ArrayBufferTarget:Oe};})();
+</script>
+<!-- END_MP4MUXER_LIBRARY -->
 <script>
 // Start the application
 const explorer = new MandelbrotExplorer();
 explorer.start();
 </script>
+</div> <!-- closes id=text -->
 </body>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-W8X6PWJH83"></script>
 <script>
