@@ -2257,6 +2257,7 @@ class EventHandler {
     this.setupEventDelegation();
     document.onmousedown = this.onmousedown.bind(this);
     document.onmousemove = this.onmousemove.bind(this);
+    document.onmouseup = this.onmouseup.bind(this);
     document.body.onkeydown = this.onkeydown.bind(this);
     document.body.onmouseover = this.onmouseover.bind(this);
   }
@@ -2286,6 +2287,17 @@ class EventHandler {
 
   onmousedown(e) {
     let target = this.eventtarget(e);
+
+    // Dispatch mouse down state
+    if (this.explorer.stateManager) {
+      this.explorer.stateManager.dispatch(
+        this.explorer.stateManager.actions.mouseDown(e.button, {
+          x: e.clientX,
+          y: e.clientY
+        })
+      );
+    }
+
     if (this.explorer.movieMode.active && (!target || target.id !== 'moviescale')) {
       this.explorer.movieMode.toggle();
     }
@@ -2301,6 +2313,14 @@ class EventHandler {
       if (m) {
         let p = this.pointInTarget(e, target);
         let k = parseInt(m[1]);
+
+        // Dispatch focused view change
+        if (this.explorer.stateManager) {
+          this.explorer.stateManager.dispatch(
+            this.explorer.stateManager.actions.setFocusedView(k)
+          );
+        }
+
         // Clear orbit before creating new view
         this.explorer.orbitComputer.updateOrbit(k, -1, target);
         this.explorer.zoomManager.cellclick(k, p.x + p.y * this.explorer.config.dimsWidth,
@@ -2313,6 +2333,17 @@ class EventHandler {
 
   onmousemove(e) {
     let target = this.eventtarget(e);
+
+    // Dispatch mouse move state
+    if (this.explorer.stateManager) {
+      this.explorer.stateManager.dispatch(
+        this.explorer.stateManager.actions.mouseMove({
+          x: e.clientX,
+          y: e.clientY
+        })
+      );
+    }
+
     if (target) {
       let m = target.id.match(/b_(\d+)/);
       if (m) {
@@ -2321,6 +2352,15 @@ class EventHandler {
         let j = p.x + p.y * this.explorer.config.dimsWidth;
         this.explorer.orbitComputer.updateOrbit(k, j, target);
       }
+    }
+  }
+
+  onmouseup(e) {
+    // Dispatch mouse up state
+    if (this.explorer.stateManager) {
+      this.explorer.stateManager.dispatch(
+        this.explorer.stateManager.actions.mouseUp()
+      );
     }
   }
 
@@ -2536,6 +2576,14 @@ class MovieMode {
 
   toggle() {
     this.active = !this.active;
+
+    // Dispatch movie mode toggle to state
+    if (this.explorer.stateManager) {
+      this.explorer.stateManager.dispatch(
+        this.explorer.stateManager.actions.toggleMovieMode()
+      );
+    }
+
     this.explorer.grid.scheduler.pauseComputation(this.active);
     if (this.active) {
       this.startMovie();
