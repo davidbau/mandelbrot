@@ -245,6 +245,8 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 //     ↓
 //   Grid.makeView() creates new View and canvas
 //     ↓
+//   Grid.notifyurl() → URLHandler.updateurl() syncs browser URL
+//     ↓
 //   Scheduler assigns Board to worker thread
 //     ↓
 //   Worker computes iterations, sends progress updates
@@ -252,8 +254,6 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 //   Grid.updateViewFromWorkerResult() updates View
 //     ↓
 //   View.color() renders pixels to canvas
-//     ↓
-//   URLHandler.updateurl() syncs browser URL
 //
 // OTHER CLASSES:
 //
