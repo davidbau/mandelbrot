@@ -1928,10 +1928,11 @@ class Grid {
       }
 
       // Regular status
-      // Use this.un directly for percentage (not unfinished() which subtracts chaotic pixels)
-      let percentDone = Math.floor(1000 * (1.0 - this.views[k].un / this.config.dimsArea))/10.0;
+      // Use unfinished() for percentage (accounts for chaotic pixels after max iterations)
+      const unfinishedCount = this.views[k].unfinished();
+      let percentDone = Math.floor(1000 * (1.0 - unfinishedCount / this.config.dimsArea))/10.0;
       // Cap at 99.9% until truly complete to avoid showing 100% while still computing
-      if (this.views[k].un > 0 && percentDone >= 99.9) {
+      if (unfinishedCount > 0 && percentDone >= 99.9) {
         percentDone = 99.9;
       }
       const coords = formatcomplex(k, this.views[k].sizes[1], this.views[k].sizes[2])
