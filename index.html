@@ -1715,12 +1715,15 @@ class Grid {
   }
 
   updateLayout(state = null, skipInitSizes = false) {
-    // Abort any current update process
+    // Abort any current update process and preserve its target state
     if (this.currentUpdateProcess) {
+      if (!state) {
+        state = this.currentUpdateProcess.targetState;
+      }
       this.currentUpdateProcess.abort();
     }
 
-    // Use current state if not provided
+    // Use current state only if no state provided and no process to abort
     if (!state) {
       state = this.currentGridState();
     }
@@ -1757,11 +1760,13 @@ class Grid {
     let currentIndex = 0;
 
     const processNext = () => {
-      if (aborted || currentIndex >= state.sizes.length) {
-        if (!aborted) {
-          this.notifyurl();
-          this.notifyzoom();
-        }
+      if (aborted) {
+        // Don't clear currentUpdateProcess - it may have been replaced by a new process
+        return;
+      }
+      if (currentIndex >= state.sizes.length) {
+        this.notifyurl();
+        this.notifyzoom();
         this.currentUpdateProcess = null;
         return;
       }
@@ -1784,6 +1789,7 @@ class Grid {
     };
 
     return {
+      targetState: state,
       start: () => {
         if (this.config.gridcols === 1) {
           setTimeout(processNext, 100);
@@ -2561,14 +2567,13 @@ class EventHandler {
         }
       }],
       ['g', {
-        condition: () => config.gridcols > 1 && !grid.currentUpdateProcess,
+        condition: () => config.gridcols > 1,
         action: () => {
           config.setGridcols(config.gridcols - 1);
           grid.updateLayout();
         }
       }],
       ['h', {
-        condition: () => !grid.currentUpdateProcess,
         action: () => {
           config.setGridcols(config.gridcols + 1);
           grid.updateLayout();
@@ -7039,9 +7044,6 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         // Decrement ch if this pixel was in the spike
         if (this.inSpike && this.inSpike[i] && this.ch > 0) {
           this.ch -= 1;
-          const x = i % this.config.dimsWidth;
-          const y = Math.floor(i / this.config.dimsWidth);
-          workerLog(`[GpuZhuoran] Spike pixel DIVERGED at (${x}, ${y}), iter=${iters}, ch now=${this.ch}, un=${this.un}`);
         }
       } else if (status === 2) {
         convergedCount++;
@@ -7094,9 +7096,6 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           // Decrement ch if this pixel was in the spike
           if (this.inSpike && this.inSpike[i] && this.ch > 0) {
             this.ch -= 1;
-            const x = i % this.config.dimsWidth;
-            const y = Math.floor(i / this.config.dimsWidth);
-            workerLog(`[GpuZhuoran] Spike pixel CONVERGED at (${x}, ${y}), iter=${iters}, ch now=${this.ch}, un=${this.un}`);
           }
         }
       }
