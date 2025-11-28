@@ -196,93 +196,316 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 
 <script>
 // =============================================================================
-// APPLICATION ARCHITECTURE
+// MANDELBROT FRACTAL EXPLORER - APPLICATION ARCHITECTURE
 // =============================================================================
 //
-// This Mandelbrot explorer uses a centralized state store for tracking
-// application state. Components update state via actions and dispatch.
+// This application renders the Mandelbrot set with deep zoom capabilities,
+// GPU acceleration, and quad-precision mathematics for trillion-fold
+// magnification.
 //
-// MAJOR COMPONENTS:
+// CORE COMPONENTS:
 //
-// 1. StateStore - Centralized state container (this class)
-//    - Holds all application state in a single immutable tree
-//    - Provides dispatch() to modify state via actions
+// 1. MandelbrotExplorer - Main application controller (this class below)
+//    - Initializes all subsystems
+//    - Coordinates application lifecycle
+//    - Manages fullscreen mode and theme cycling
+//
+// 2. StateStore - Centralized state container
+//    - Holds all application state in immutable tree
+//    - Provides dispatch() to update state via actions
 //    - Maintains action log for debugging
 //
-// 2. Config - Configuration facade
-//    - Provides property getters/setters that delegate to store
-//    - Maintains backward compatibility with legacy code
-//    - Handles viewport sizing, color themes, GPU settings
+// 3. Config - Configuration facade
+//    - Property getters/setters that delegate to StateStore
+//    - Handles viewport sizing and color themes
+//    - Maintains backward compatibility
 //
-// 3. Grid - View manager
-//    - Creates and manages multiple zoom level canvases
-//    - Coordinates worker threads for fractal computation
-//    - Updates computation progress in store
+// 4. Grid - Canvas and view manager
+//    - Creates/destroys View objects for each zoom level
+//    - Manages canvas DOM elements
+//    - Coordinates with Scheduler for worker threads
 //
-// 4. View - Individual zoom level
-//    - Stores pixel iteration data for one zoom level
-//    - Handles rendering to canvas
-//    - Manages convergence tracking
+// 5. View - Individual zoom level rendering
+//    - Stores pixel iteration data
+//    - Renders to canvas using color themes
+//    - Manages multi-resolution compositing
 //
-// 5. Board (CPU/GPU variants) - Computation engine
-//    - Executes Mandelbrot iteration algorithms
-//    - Reports progress back to Grid/Store
-//    - Supports perturbation theory for deep zooms
+// 6. Board subclasses - Fractal computation engines (run in worker threads)
+//    - CpuBoard: Basic CPU computation
+//    - PerturbationBoard: Quad-precision deep zoom (CPU)
+//    - ZhuoranBoard: Period detection for convergence (CPU)
+//    - GpuBoard: WebGPU parallel computation
+//    - GpuZhuoranBoard: WebGPU with period detection and perturbation
 //
-// STATE STRUCTURE:
+// UPDATE CYCLE EXAMPLE:
 //
-// store.state = {
-//   config: {
-//     // Viewport: vw, gridcols, cssDims, dimsWidth, dimsHeight, pixelRatio
-//     // Computation: exponent, enableGPU, forceBoard
-//     // Display: theme, unknowncolor, zoomfactor, aspectRatio
-//     // Initial view: firstr, firstj, firstsize
-//     // Platform: mobile, mac
-//   },
-//   views: [
-//     // Array of {k, sizes: [size, re, im], hidden, parentK}
-//   ],
-//   ui: {
-//     // Mouse: mouseDown, mouseButton, mousePosition, focusedView
-//     // Features: zoomRectangle, orbitPoint, movieMode, fullscreen
-//   },
-//   computation: {
-//     // Per-view progress: views[k] = {un, di, ch, it, workerInfo, boardType}
-//     // Overall status: isComputing, allCompleted
-//   }
-// }
-//
-// ACTION CATEGORIES:
-//
-// 1. CONFIG_* - Configuration changes
-//    - CONFIG_INIT_SIZES, CONFIG_SET_EXPONENT, CONFIG_SET_THEME, etc.
-//    - Triggered by: User keyboard commands, window resize, URL params
-//
-// 2. VIEW_* / VIEWS_* - Zoom level management
-//    - VIEWS_SET, VIEW_ADD, VIEW_UPDATE, VIEW_SET_HIDDEN, VIEW_REMOVE
-//    - Triggered by: User clicks (zoom), keyboard navigation
-//
-// 3. UI_* - User interface state
-//    - UI_MOUSE_*, UI_SET_FOCUSED_VIEW, UI_MOVIE_MODE_*, UI_SET_FULLSCREEN
-//    - Triggered by: Mouse/touch events, keyboard shortcuts
-//
-// 4. COMPUTATION_* - Fractal computation progress
-//    - COMPUTATION_UPDATE_VIEW, COMPUTATION_SET_COMPUTING
-//    - Triggered by: Worker thread progress reports
-//
-// DATA FLOW EXAMPLE:
-//
-//   User presses 't' key
+//   User clicks canvas to zoom
 //     ↓
-//   EventHandler calls config.theme = 'iceblue'
+//   EventHandler → ZoomManager.cellclick()
 //     ↓
-//   Config setter calls store.dispatch(setTheme('iceblue'))
+//   Grid.makeView() creates new View and canvas
 //     ↓
-//   Reducer creates new state with updated theme
+//   Scheduler assigns Board to worker thread
 //     ↓
-//   Component methods called directly to update display
+//   Worker computes iterations, sends progress updates
+//     ↓
+//   Grid.updateViewFromWorkerResult() updates View
+//     ↓
+//   View.color() renders pixels to canvas
+//     ↓
+//   URLHandler.updateurl() syncs browser URL
+//
+// OTHER CLASSES:
+//
+// - EventHandler: Mouse and keyboard input processing
+// - ZoomManager: Zoom rectangle selection and coordinate calculation
+// - URLHandler: Browser URL synchronization for bookmarking/sharing
+// - Scheduler: Worker thread pool management and load balancing
+// - MovieMode: Smooth zoom video recording and MP4 generation
+// - OrbitComputer: Hover-to-show orbit visualization
+// - RedrawProcess: Progressive rendering coordination
+// - ReferenceOrbitThreading: Deep zoom perturbation helper
 //
 // =============================================================================
+
+class MandelbrotExplorer {
+  constructor() {
+    // Create unified state store
+    this.store = new StateStore();
+
+    // Create subsystems with state store integration
+    this.config = new Config(this.store);
+    this.grid = new Grid(this.config, this.store);
+    this.zoomManager = new ZoomManager(this.config, this.grid);
+    this.urlHandler = new URLHandler(this.config, this.grid, this.store);
+    this.eventHandler = new EventHandler(this);
+    this.movieMode = new MovieMode(this);
+    this.orbitComputer = new OrbitComputer(this);
+    this.redrawProcess = new RedrawProcess(this);
+    this.movieContainer = document.getElementById('movie');
+    this.allViewsCompleted = false;
+
+    // Listen for fullscreen changes
+    document.addEventListener('fullscreenchange', () => this.onFullscreenChange());
+
+    // Clear native tooltip when hovering over zoom numbers to show custom tooltip
+    document.addEventListener('mouseover', (e) => {
+      if (e.target.classList.contains('zoomnum') || e.target.closest('.zoomnum')) {
+        const isZoomnum = e.target.classList.contains('zoomnum');
+        const zoomnum = isZoomnum ? e.target : e.target.closest('.zoomnum');
+        const gridDiv = zoomnum.closest('#grid > div');
+        if (gridDiv) {
+          gridDiv.setAttribute('title', '');
+        }
+      }
+    });
+  }
+
+  start() {
+    this.startTime = Date.now();
+    console.log(new Date);
+    let startState = this.urlHandler.parseUrl();
+    this.config.initSizes();
+
+    // Fill in default sizes if none were specified in URL
+    if (startState.sizes.length === 0) {
+      startState.sizes = this.config.firststate().sizes;
+    }
+
+    // Convert zoom factor from URL to absolute size
+    if (this.config.zoomFromUrl !== undefined) {
+      const actualSize = this.config.firstsize / this.config.zoomFromUrl;
+      delete this.config.zoomFromUrl;
+      // Fill in sizes with the zoom-adjusted value
+      for (let i = 0; i < startState.sizes.length; i++) {
+        if (startState.sizes[i][0] === null) {
+          startState.sizes[i][0] = actualSize / Math.pow(this.config.zoomfactor, i);
+        }
+      }
+    } else {
+      // Fill in sizes with default firstsize
+      for (let i = 0; i < startState.sizes.length; i++) {
+        if (startState.sizes[i][0] === null) {
+          startState.sizes[i][0] = this.config.firstsize / Math.pow(this.config.zoomfactor, i);
+        }
+      }
+    }
+
+    this.initPlatform();
+    this.grid.updateLayout(startState);
+    this.eventHandler.setup();
+    this.grid.updateHiddenViews(); // Initial update of hidden boards
+  }
+
+  checkAllViewsComplete() {
+    if (this.allViewsCompleted) return;
+
+    // Check if all views are done
+    const allDone = this.grid.views.every(view => view && view.un === 0);
+
+    if (allDone && this.grid.views.length > 0) {
+      this.allViewsCompleted = true;
+      const elapsed = Date.now() - this.startTime;
+      console.log(`All views completed in ${(elapsed / 1000).toFixed(2)}s`);
+    }
+  }
+
+  cycleUnknownColor(backward) {
+    const inc = backward ? this.config.ukcs.length - 1 : 1;
+    const currentIndex = this.config.ukcs.indexOf(this.config.unknowncolor);
+    const ind = (currentIndex + inc) % this.config.ukcs.length;
+    this.config.unknowncolor = this.config.ukcs[ind];
+    // Update div backgrounds instead of redrawing canvases
+    for (let k = 0; k < this.grid.views.length; ++k) {
+      const canvas = this.grid.canvas(k);
+      if (canvas && canvas.parentElement) {
+        canvas.parentElement.style.backgroundColor = this.config.unknowncolor;
+      }
+    }
+    this.urlHandler.updateurl();
+  }
+
+  cycleColorTheme(backward) {
+    const inc = backward ? this.config.colorThemes.all.length - 1 : 1;
+    const themes = this.config.colorThemes.all;
+    const currentIndex = themes.indexOf(this.config.theme);
+    const nextIndex = (currentIndex + inc) % themes.length;
+    this.config.theme = themes[nextIndex];
+    this.redrawProcess.start();
+    this.urlHandler.updateurl();
+  }
+
+  toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      // Save pre-fullscreen settings
+      this.preFullscreenGridcols = this.config.gridcols;
+      this.preFullscreenAspectRatio = this.config.aspectRatio;
+
+      document.documentElement.requestFullscreen().catch(err => {
+        console.log(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  }
+
+  onFullscreenChange() {
+    // Update state
+    if (this.store) {
+      this.store.dispatch(
+        this.store.actions.setFullscreen(!!document.fullscreenElement)
+      );
+    }
+
+    // Exit movie mode if active
+    if (this.movieMode.active) {
+      this.movieMode.toggle();
+    }
+
+    if (document.fullscreenElement) {
+      // Entering fullscreen
+      // Only process if grid has views
+      if (!this.grid.views || this.grid.views.length === 0) {
+        return;
+      }
+
+      // Delay to allow browser to fully transition to fullscreen
+      setTimeout(() => {
+        // Calculate fullscreen aspect ratio from actual window dimensions
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const viewportAspectRatio = viewportWidth / viewportHeight;
+
+        const oldFirstsize = this.config.firstsize;
+
+        // Set grid to 1 column and aspect ratio to match viewport
+        this.config.gridcols = 1;
+        this.config.aspectRatio = viewportAspectRatio;
+
+        // Get current state before recalculating sizes
+        const state = this.grid.currentGridState();
+
+        // Call initSizes to recalculate dimensions for fullscreen
+        this.config.initSizes();
+        const newFirstsize = this.config.firstsize;
+
+        // Scale all existing view sizes proportionally
+        const scaleFactor = newFirstsize / oldFirstsize;
+        for (let i = 0; i < state.sizes.length; i++) {
+          state.sizes[i][0] *= scaleFactor;
+        }
+
+        // Skip initSizes in updateLayout since we already called it
+        this.grid.updateLayout(state, true);
+
+        // Only update URL if we have views
+        if (this.grid.views && this.grid.views.length > 0) {
+          this.urlHandler.updateurl();
+        }
+
+        // Scroll to top immediately
+        window.scrollTo(0, 0);
+      }, 100);  // 100ms delay to allow fullscreen transition
+    } else {
+      // Exiting fullscreen - restore pre-fullscreen settings
+      if (this.preFullscreenGridcols !== undefined && this.grid.views &&
+          this.grid.views.length > 0) {
+        const oldFirstsize = this.config.firstsize;
+
+        this.config.gridcols = this.preFullscreenGridcols;
+        this.config.aspectRatio = this.preFullscreenAspectRatio;
+
+        // Get current state before recalculating sizes
+        const state = this.grid.currentGridState();
+
+        // Call initSizes to recalculate dimensions
+        this.config.initSizes();
+        const newFirstsize = this.config.firstsize;
+
+        // Scale all existing view sizes proportionally
+        const scaleFactor = newFirstsize / oldFirstsize;
+        for (let i = 0; i < state.sizes.length; i++) {
+          state.sizes[i][0] *= scaleFactor;
+        }
+
+        // Skip initSizes in updateLayout since we already called it
+        this.grid.updateLayout(state, true);
+        this.urlHandler.updateurl();
+      }
+    }
+  }
+
+  initPlatform() {
+    if (this.config.mac) {
+      for (let el of document.querySelectorAll('[mac]')) {
+        el.innerHTML = el.getAttribute('mac');
+      }
+    }
+    if (this.config.mobile) {
+      for (let el of document.querySelectorAll('[mobile]')) {
+        el.innerHTML = el.getAttribute('mobile');
+      }
+    }
+    for (let el of document.querySelectorAll('.moviemode')) {
+      el.href = '#movie';
+      el.onclick = (() => {
+        if (this.grid.views.length > 1) {
+          this.movieMode.toggle();
+        }
+        return true;
+      });
+    }
+    // Set up fullscreen button
+    const fullscreenButton = document.getElementById('fullscreen-button');
+    if (fullscreenButton) {
+      fullscreenButton.onclick = () => {
+        this.toggleFullscreen();
+      };
+    }
+  }
+}
 
 class StateStore {
   constructor() {
@@ -3697,245 +3920,6 @@ class RedrawProcess {
       this.timer = setTimeout(() => this.drawNext(), 0);
     } else {
       this.stop();
-    }
-  }
-}
-
-class MandelbrotExplorer {
-  constructor() {
-    // Create unified state store
-    this.store = new StateStore();
-
-    // Create subsystems with state store integration
-    this.config = new Config(this.store);
-    this.grid = new Grid(this.config, this.store);
-    this.zoomManager = new ZoomManager(this.config, this.grid);
-    this.urlHandler = new URLHandler(this.config, this.grid, this.store);
-    this.eventHandler = new EventHandler(this);
-    this.movieMode = new MovieMode(this);
-    this.orbitComputer = new OrbitComputer(this);
-    this.redrawProcess = new RedrawProcess(this);
-    this.movieContainer = document.getElementById('movie');
-    this.allViewsCompleted = false;
-
-    // Listen for fullscreen changes
-    document.addEventListener('fullscreenchange', () => this.onFullscreenChange());
-
-    // Clear native tooltip when hovering over zoom numbers to show custom tooltip
-    document.addEventListener('mouseover', (e) => {
-      if (e.target.classList.contains('zoomnum') || e.target.closest('.zoomnum')) {
-        const isZoomnum = e.target.classList.contains('zoomnum');
-        const zoomnum = isZoomnum ? e.target : e.target.closest('.zoomnum');
-        const gridDiv = zoomnum.closest('#grid > div');
-        if (gridDiv) {
-          gridDiv.setAttribute('title', '');
-        }
-      }
-    });
-  }
-
-  start() {
-    this.startTime = Date.now();
-    console.log(new Date);
-    let startState = this.urlHandler.parseUrl();
-    this.config.initSizes();
-
-    // Fill in default sizes if none were specified in URL
-    if (startState.sizes.length === 0) {
-      startState.sizes = this.config.firststate().sizes;
-    }
-
-    // Convert zoom factor from URL to absolute size
-    if (this.config.zoomFromUrl !== undefined) {
-      const actualSize = this.config.firstsize / this.config.zoomFromUrl;
-      delete this.config.zoomFromUrl;
-      // Fill in sizes with the zoom-adjusted value
-      for (let i = 0; i < startState.sizes.length; i++) {
-        if (startState.sizes[i][0] === null) {
-          startState.sizes[i][0] = actualSize / Math.pow(this.config.zoomfactor, i);
-        }
-      }
-    } else {
-      // Fill in sizes with default firstsize
-      for (let i = 0; i < startState.sizes.length; i++) {
-        if (startState.sizes[i][0] === null) {
-          startState.sizes[i][0] = this.config.firstsize / Math.pow(this.config.zoomfactor, i);
-        }
-      }
-    }
-
-    this.initPlatform();
-    this.grid.updateLayout(startState);
-    this.eventHandler.setup();
-    this.grid.updateHiddenViews(); // Initial update of hidden boards
-  }
-
-  checkAllViewsComplete() {
-    if (this.allViewsCompleted) return;
-
-    // Check if all views are done
-    const allDone = this.grid.views.every(view => view && view.un === 0);
-
-    if (allDone && this.grid.views.length > 0) {
-      this.allViewsCompleted = true;
-      const elapsed = Date.now() - this.startTime;
-      console.log(`All views completed in ${(elapsed / 1000).toFixed(2)}s`);
-    }
-  }
-
-  cycleUnknownColor(backward) {
-    const inc = backward ? this.config.ukcs.length - 1 : 1;
-    const currentIndex = this.config.ukcs.indexOf(this.config.unknowncolor);
-    const ind = (currentIndex + inc) % this.config.ukcs.length;
-    this.config.unknowncolor = this.config.ukcs[ind];
-    // Update div backgrounds instead of redrawing canvases
-    for (let k = 0; k < this.grid.views.length; ++k) {
-      const canvas = this.grid.canvas(k);
-      if (canvas && canvas.parentElement) {
-        canvas.parentElement.style.backgroundColor = this.config.unknowncolor;
-      }
-    }
-    this.urlHandler.updateurl();
-  }
-
-  cycleColorTheme(backward) {
-    const inc = backward ? this.config.colorThemes.all.length - 1 : 1;
-    const themes = this.config.colorThemes.all;
-    const currentIndex = themes.indexOf(this.config.theme);
-    const nextIndex = (currentIndex + inc) % themes.length;
-    this.config.theme = themes[nextIndex];
-    this.redrawProcess.start();
-    this.urlHandler.updateurl();
-  }
-
-  toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      // Save pre-fullscreen settings
-      this.preFullscreenGridcols = this.config.gridcols;
-      this.preFullscreenAspectRatio = this.config.aspectRatio;
-
-      document.documentElement.requestFullscreen().catch(err => {
-        console.log(`Error attempting to enable fullscreen: ${err.message}`);
-      });
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
-      }
-    }
-  }
-
-  onFullscreenChange() {
-    // Update state
-    if (this.store) {
-      this.store.dispatch(
-        this.store.actions.setFullscreen(!!document.fullscreenElement)
-      );
-    }
-
-    // Exit movie mode if active
-    if (this.movieMode.active) {
-      this.movieMode.toggle();
-    }
-
-    if (document.fullscreenElement) {
-      // Entering fullscreen
-      // Only process if grid has views
-      if (!this.grid.views || this.grid.views.length === 0) {
-        return;
-      }
-
-      // Delay to allow browser to fully transition to fullscreen
-      setTimeout(() => {
-        // Calculate fullscreen aspect ratio from actual window dimensions
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-        const viewportAspectRatio = viewportWidth / viewportHeight;
-
-        const oldFirstsize = this.config.firstsize;
-
-        // Set grid to 1 column and aspect ratio to match viewport
-        this.config.gridcols = 1;
-        this.config.aspectRatio = viewportAspectRatio;
-
-        // Get current state before recalculating sizes
-        const state = this.grid.currentGridState();
-
-        // Call initSizes to recalculate dimensions for fullscreen
-        this.config.initSizes();
-        const newFirstsize = this.config.firstsize;
-
-        // Scale all existing view sizes proportionally
-        const scaleFactor = newFirstsize / oldFirstsize;
-        for (let i = 0; i < state.sizes.length; i++) {
-          state.sizes[i][0] *= scaleFactor;
-        }
-
-        // Skip initSizes in updateLayout since we already called it
-        this.grid.updateLayout(state, true);
-
-        // Only update URL if we have views
-        if (this.grid.views && this.grid.views.length > 0) {
-          this.urlHandler.updateurl();
-        }
-
-        // Scroll to top immediately
-        window.scrollTo(0, 0);
-      }, 100);  // 100ms delay to allow fullscreen transition
-    } else {
-      // Exiting fullscreen - restore pre-fullscreen settings
-      if (this.preFullscreenGridcols !== undefined && this.grid.views &&
-          this.grid.views.length > 0) {
-        const oldFirstsize = this.config.firstsize;
-
-        this.config.gridcols = this.preFullscreenGridcols;
-        this.config.aspectRatio = this.preFullscreenAspectRatio;
-
-        // Get current state before recalculating sizes
-        const state = this.grid.currentGridState();
-
-        // Call initSizes to recalculate dimensions
-        this.config.initSizes();
-        const newFirstsize = this.config.firstsize;
-
-        // Scale all existing view sizes proportionally
-        const scaleFactor = newFirstsize / oldFirstsize;
-        for (let i = 0; i < state.sizes.length; i++) {
-          state.sizes[i][0] *= scaleFactor;
-        }
-
-        // Skip initSizes in updateLayout since we already called it
-        this.grid.updateLayout(state, true);
-        this.urlHandler.updateurl();
-      }
-    }
-  }
-
-  initPlatform() {
-    if (this.config.mac) {
-      for (let el of document.querySelectorAll('[mac]')) {
-        el.innerHTML = el.getAttribute('mac');
-      }
-    }
-    if (this.config.mobile) {
-      for (let el of document.querySelectorAll('[mobile]')) {
-        el.innerHTML = el.getAttribute('mobile');
-      }
-    }
-    for (let el of document.querySelectorAll('.moviemode')) {
-      el.href = '#movie';
-      el.onclick = (() => {
-        if (this.grid.views.length > 1) {
-          this.movieMode.toggle();
-        }
-        return true;
-      });
-    }
-    // Set up fullscreen button
-    const fullscreenButton = document.getElementById('fullscreen-button');
-    if (fullscreenButton) {
-      fullscreenButton.onclick = () => {
-        this.toggleFullscreen();
-      };
     }
   }
 }
