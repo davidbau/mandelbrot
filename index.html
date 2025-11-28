@@ -1066,6 +1066,40 @@ class Config {
         let light = 15 * frac + 85 * frac ** 5;
         return hclColor(hue, chroma, light);
       },
+      neon: (i, frac, fracD, fracL, s) => {
+        // Keep colors saturated - no desaturation to white at high iterations
+        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
+        // Use logarithmic scaling for iteration count to keep bands visible at high iterations
+        let angle = (Math.log(i + 10) * 0.8) * Math.PI;
+
+        // Generate three offset sine waves for RGB, keeping them always saturated
+        // Add phase offsets to create color variety
+        let r = Math.abs(Math.sin(angle));
+        let g = Math.abs(Math.sin(angle + Math.PI * 2/3));
+        let b = Math.abs(Math.sin(angle + Math.PI * 4/3));
+
+        // Boost saturation by pushing down the minimum channel
+        let minChannel = Math.min(r, g, b);
+        r = Math.max(0, r - minChannel * 2/3);
+        g = Math.max(0, g - minChannel * 2/3);
+        b = Math.max(0, b - minChannel * 2/3);
+
+        // Normalize so at least one channel is always at full brightness
+        let maxChannel = Math.max(r, g, b);
+        if (maxChannel > 0) {
+          r /= maxChannel;
+          g /= maxChannel;
+          b /= maxChannel;
+        }
+
+        // Scale for neon glow - higher brightness for more saturation
+        let brightness = 0.5 + 0.4 * frac;
+        r = intcolor(r * brightness);
+        g = intcolor(g * brightness);
+        b = intcolor(b * brightness);
+
+        return `rgb(${r},${g},${b})`;
+      },
       iceblue: (i, frac, fracD, fracL, s) => {
         // Current implementation
         let ff = Math.pow(frac, 2);
