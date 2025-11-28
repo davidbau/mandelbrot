@@ -351,10 +351,11 @@ class MandelbrotExplorer {
   }
 
   cycleUnknownColor(backward) {
-    const inc = backward ? this.config.ukcs.length - 1 : 1;
-    const currentIndex = this.config.ukcs.indexOf(this.config.unknowncolor);
-    const ind = (currentIndex + inc) % this.config.ukcs.length;
-    this.config.unknowncolor = this.config.ukcs[ind];
+    const palette = this.config.unknownColorPalette;
+    const inc = backward ? palette.length - 1 : 1;
+    const currentIndex = palette.indexOf(this.config.unknowncolor);
+    const ind = (currentIndex + inc) % palette.length;
+    this.config.setUnknowncolor(palette[ind]);
     // Update div backgrounds instead of redrawing canvases
     for (let k = 0; k < this.grid.views.length; ++k) {
       const canvas = this.grid.canvas(k);
@@ -370,7 +371,7 @@ class MandelbrotExplorer {
     const themes = this.config.colorThemes.all;
     const currentIndex = themes.indexOf(this.config.theme);
     const nextIndex = (currentIndex + inc) % themes.length;
-    this.config.theme = themes[nextIndex];
+    this.config.setTheme(themes[nextIndex]);
     this.redrawProcess.start();
     this.urlHandler.updateurl();
   }
@@ -420,9 +421,11 @@ class MandelbrotExplorer {
 
         const oldFirstsize = this.config.firstsize;
 
-        // Set grid to 1 column and aspect ratio to match viewport
-        this.config.gridcols = 1;
-        this.config.aspectRatio = viewportAspectRatio;
+        // Set grid to 1 column and aspect ratio to match viewport (batched)
+        this.store.dispatch(this.store.actions.updateConfig({
+          gridcols: 1,
+          aspectRatio: viewportAspectRatio
+        }));
 
         // Get current state before recalculating sizes
         const state = this.grid.currentGridState();
@@ -454,8 +457,11 @@ class MandelbrotExplorer {
           this.grid.views.length > 0) {
         const oldFirstsize = this.config.firstsize;
 
-        this.config.gridcols = this.preFullscreenGridcols;
-        this.config.aspectRatio = this.preFullscreenAspectRatio;
+        // Restore pre-fullscreen settings (batched)
+        this.store.dispatch(this.store.actions.updateConfig({
+          gridcols: this.preFullscreenGridcols,
+          aspectRatio: this.preFullscreenAspectRatio
+        }));
 
         // Get current state before recalculating sizes
         const state = this.grid.currentGridState();
@@ -1000,126 +1006,55 @@ class Config {
       mac
     }));
 
-    // Legacy properties for backward compatibility
-    this.ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
+    // Color palette options (not stored in state)
+    this.unknownColorPalette = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
     this.defineColorThemes();
   }
 
-  // Property getters/setters that delegate to state
+  // Read-only property getters (set once in constructor/URL or computed)
   get vw() { return this.store.getState().config.vw; }
-  set vw(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ vw: value }));
-  }
+  get cssDims() { return this.store.getState().config.cssDims; }
+  get cssDimsWidth() { return this.store.getState().config.cssDimsWidth; }
+  get cssDimsHeight() { return this.store.getState().config.cssDimsHeight; }
+  get dimsWidth() { return this.store.getState().config.dimsWidth; }
+  get dimsHeight() { return this.store.getState().config.dimsHeight; }
+  get zoomfactor() { return this.store.getState().config.zoomfactor; }
+  get firstsize() { return this.store.getState().config.firstsize; }
+  get mobile() { return this.store.getState().config.mobile; }
+  get mac() { return this.store.getState().config.mac; }
+  get exponent() { return this.store.getState().config.exponent; }
+  get enableGPU() { return this.store.getState().config.enableGPU; }
+  get forceBoard() { return this.store.getState().config.forceBoard; }
+  get firstr() { return this.store.getState().config.firstr; }
+  get firstj() { return this.store.getState().config.firstj; }
 
+  // Backward compatibility computed property
+  get dimsArea() { return this.dimsWidth * this.dimsHeight; }
+
+  // Writable properties - only these have runtime setter methods
   get gridcols() { return this.store.getState().config.gridcols; }
-  set gridcols(value) {
+  setGridcols(value) {
     this.store.dispatch(this.store.actions.updateConfig({ gridcols: value }));
   }
 
-  get exponent() { return this.store.getState().config.exponent; }
-  set exponent(value) {
-    this.store.dispatch(this.store.actions.setExponent(value));
-  }
-
-  get enableGPU() { return this.store.getState().config.enableGPU; }
-  set enableGPU(value) {
-    this.store.dispatch(this.store.actions.setGPU(value));
-  }
-
-  get forceBoard() { return this.store.getState().config.forceBoard; }
-  set forceBoard(value) {
-    this.store.dispatch(this.store.actions.setForceBoard(value));
-  }
-
-  get firstr() { return this.store.getState().config.firstr; }
-  set firstr(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ firstr: value }));
-  }
-
-  get firstj() { return this.store.getState().config.firstj; }
-  set firstj(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ firstj: value }));
-  }
-
-  get firstsize() { return this.store.getState().config.firstsize; }
-  set firstsize(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ firstsize: value }));
-  }
-
   get pixelRatio() { return this.store.getState().config.pixelRatio; }
-  set pixelRatio(value) {
+  setPixelRatio(value) {
     this.store.dispatch(this.store.actions.setPixelRatio(value));
   }
 
-  get zoomfactor() { return this.store.getState().config.zoomfactor; }
-  set zoomfactor(value) {
-    this.store.dispatch(this.store.actions.setZoomFactor(value));
-  }
-
   get aspectRatio() { return this.store.getState().config.aspectRatio; }
-  set aspectRatio(value) {
+  setAspectRatio(value) {
     this.store.dispatch(this.store.actions.setAspectRatio(value));
   }
 
   get theme() { return this.store.getState().config.theme; }
-  set theme(value) {
+  setTheme(value) {
     this.store.dispatch(this.store.actions.setTheme(value));
   }
 
   get unknowncolor() { return this.store.getState().config.unknowncolor; }
-  set unknowncolor(value) {
+  setUnknowncolor(value) {
     this.store.dispatch(this.store.actions.setUnknownColor(value));
-  }
-
-  get mobile() { return this.store.getState().config.mobile; }
-  set mobile(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ mobile: value }));
-  }
-
-  get mac() { return this.store.getState().config.mac; }
-  set mac(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ mac: value }));
-  }
-
-  // Derived/computed properties
-  get cssDims() { return this.store.getState().config.cssDims; }
-  set cssDims(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ cssDims: value }));
-  }
-
-  get cssDimsWidth() { return this.store.getState().config.cssDimsWidth; }
-  set cssDimsWidth(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ cssDimsWidth: value }));
-  }
-
-  get cssDimsHeight() { return this.store.getState().config.cssDimsHeight; }
-  set cssDimsHeight(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ cssDimsHeight: value }));
-  }
-
-  get dimsWidth() { return this.store.getState().config.dimsWidth; }
-  set dimsWidth(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ dimsWidth: value }));
-  }
-
-  get dimsHeight() { return this.store.getState().config.dimsHeight; }
-  set dimsHeight(value) {
-    this.store.dispatch(this.store.actions.updateConfig({ dimsHeight: value }));
-  }
-
-  // Backward compatibility
-  get dims() {
-    return this.dimsWidth;
-  }
-  set dims(value) {
-    this.dimsWidth = value;
-  }
-
-  get dims2() {
-    return this.dimsWidth * this.dimsHeight;
-  }
-  set dims2(value) {
-    // Ignore sets, this is computed
   }
 
   defineColorThemes() {
@@ -1277,8 +1212,8 @@ class View {
 
   initview(size, re, im) {
     this.sizes = [size, toQd(re), toQd(im)];
-    this.nn = new Array(this.config.dims2).fill(0);
-    this.un = this.config.dims2;
+    this.nn = new Array(this.config.dimsArea).fill(0);
+    this.un = this.config.dimsArea;
     this.di = 0;
     this.ch = 0;
     this.it = 0;
@@ -1355,9 +1290,9 @@ class View {
   }
 
   updateHistogram(un, di, i) {
-    if (this.hi[0][1] - un / this.config.dims2 >= 1 / 256) {  // Histogram resolution
-      const uFrac = un / this.config.dims2;
-      const dFrac = 1 - di / this.config.dims2;
+    if (this.hi[0][1] - un / this.config.dimsArea >= 1 / 256) {  // Histogram resolution
+      const uFrac = un / this.config.dimsArea;
+      const dFrac = 1 - di / this.config.dimsArea;
       this.hi.unshift([i, uFrac, dFrac, 0]);
       if (this.hi.length > 10) {
         // Estimate the limit of di as i goes to infinity.
@@ -1572,7 +1507,7 @@ class View {
     let color = this.makecolor(i);
     let converged = this.makecolor(-i);
     let n = this.nn;
-    for (let m = 0; m < this.config.dims2; ++m) {
+    for (let m = 0; m < this.config.dimsArea; ++m) {
       if (n[m] === i || n[m] === -i) {
         let x = m % this.config.dimsWidth;
         let y = (m - x) / this.config.dimsWidth;
@@ -1994,7 +1929,7 @@ class Grid {
 
       // Regular status
       // Use this.un directly for percentage (not unfinished() which subtracts chaotic pixels)
-      let percentDone = Math.floor(1000 * (1.0 - this.views[k].un / this.config.dims2))/10.0;
+      let percentDone = Math.floor(1000 * (1.0 - this.views[k].un / this.config.dimsArea))/10.0;
       // Cap at 99.9% until truly complete to avoid showing 100% while still computing
       if (this.views[k].un > 0 && percentDone >= 99.9) {
         percentDone = 99.9;
@@ -2252,31 +2187,34 @@ class URLHandler {
   }
 
   setupUrlParameters() {
-    // Registry of simple URL parameters with their parse/apply logic
+    // Registry of simple URL parameters with their parse logic
+    // Each parse function adds properties to the configUpdates object
     this.urlParams = [
       {
         name: 'exponent',
-        parse: (val) => {
-          this.config.exponent = Math.max(2, parseInt(val));
-          if (this.config.exponent > 2) { this.config.firstr = [0.0, 0]; }
+        parse: (val, configUpdates) => {
+          const exponent = Math.max(2, parseInt(val));
+          configUpdates.exponent = exponent;
+          if (exponent > 2) { configUpdates.firstr = [0.0, 0]; }
+          // DOM update (side effect, not state)
           for (const el of document.querySelectorAll('.exponent')) {
-            el.innerText = this.config.exponent;
+            el.innerText = exponent;
           }
         }
       },
       {
         name: 'gpu',
-        parse: (val) => {
-          this.config.enableGPU = parseInt(val) !== 0;
+        parse: (val, configUpdates) => {
+          configUpdates.enableGPU = parseInt(val) !== 0;
         }
       },
       {
         name: 'board',
-        parse: (val) => {
+        parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
           const validTypes = ['cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'];
           if (validTypes.includes(boardType)) {
-            this.config.forceBoard = boardType;
+            configUpdates.forceBoard = boardType;
           } else {
             console.warn(`Invalid board type: ${boardType}. Valid types: ${validTypes.join(', ')}`);
           }
@@ -2284,61 +2222,61 @@ class URLHandler {
       },
       {
         name: 'grid',
-        parse: (val) => {
-          this.config.gridcols = Math.max(1, parseInt(val));
+        parse: (val, configUpdates) => {
+          configUpdates.gridcols = Math.max(1, parseInt(val));
         }
       },
       {
         name: 'a',
-        parse: (val) => {
+        parse: (val, configUpdates) => {
           const m = val.match(/(\d+):(\d+)/);
           if (m) {
             const width = parseInt(m[1]);
             const height = parseInt(m[2]);
             if (width > 0 && height > 0) {
-              this.config.aspectRatio = width / height;
+              configUpdates.aspectRatio = width / height;
             }
           }
         }
       },
       {
         name: 'z',
-        parse: (val) => {
-          this.config.zoomFromUrl = parseFloat(val);
+        parse: (val, configUpdates) => {
+          configUpdates.zoomFromUrl = parseFloat(val);
         }
       },
       {
         name: 's',
-        parse: (val) => {
+        parse: (val, configUpdates) => {
           // Legacy parameter: s is the actual size in complex plane
           // Convert to zoom factor: z = 3.0 / s
-          this.config.zoomFromUrl = 3.0 / parseFloat(val);
+          configUpdates.zoomFromUrl = 3.0 / parseFloat(val);
         }
       },
       {
         name: 'pixelratio',
-        parse: (val) => {
-          this.config.pixelRatio = Math.max(1, parseInt(val));
+        parse: (val, configUpdates) => {
+          configUpdates.pixelRatio = Math.max(1, parseInt(val));
         }
       },
       {
         name: 'theme',
-        parse: (val) => {
+        parse: (val, configUpdates) => {
           if (this.config.colorThemes.all.includes(val)) {
-            this.config.theme = val;
+            configUpdates.theme = val;
           }
         }
       },
       {
         name: 'unk',
-        parse: (val) => {
+        parse: (val, configUpdates) => {
           // Allow any CSS color (e.g., 000, rgb(32,16,64), yellow, etc.)
           let color = decodeURIComponent(val);
           // Auto-prepend # for hex colors (e.g., 888 -> #888)
           if (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(color)) {
             color = `#${color}`;
           }
-          this.config.unknowncolor = color;
+          configUpdates.unknowncolor = color;
         }
       }
     ];
@@ -2352,11 +2290,21 @@ class URLHandler {
     if (!this.urlParams) {
       this.setupUrlParameters();
     }
+
+    // Collect all config updates to batch them into a single dispatch
+    const configUpdates = {};
     for (const param of this.urlParams) {
       const value = params.get(param.name);
       if (value) {
-        param.parse(value);
+        param.parse(value, configUpdates);
       }
+    }
+
+    // Batch update all config changes at once
+    if (Object.keys(configUpdates).length > 0) {
+      this.config.store.dispatch(
+        this.config.store.actions.updateConfig(configUpdates)
+      );
     }
 
     // Parse coordinates parameter
@@ -2582,8 +2530,10 @@ class EventHandler {
         condition: () => !grid.currentUpdateProcess,
         action: () => {
           const oldFirstsize = config.firstsize;
-          config.aspectRatio = config.aspectRatio === Config.DEFAULT_ASPECT_RATIO ?
-            Config.WIDESCREEN_ASPECT_RATIO : Config.DEFAULT_ASPECT_RATIO;
+          config.setAspectRatio(
+            config.aspectRatio === Config.DEFAULT_ASPECT_RATIO ?
+              Config.WIDESCREEN_ASPECT_RATIO : Config.DEFAULT_ASPECT_RATIO
+          );
           config.initSizes();
           const newFirstsize = config.firstsize;
           const state = grid.currentGridState();
@@ -2612,14 +2562,14 @@ class EventHandler {
       ['g', {
         condition: () => config.gridcols > 1 && !grid.currentUpdateProcess,
         action: () => {
-          config.gridcols -= 1;
+          config.setGridcols(config.gridcols - 1);
           grid.updateLayout();
         }
       }],
       ['h', {
         condition: () => !grid.currentUpdateProcess,
         action: () => {
-          config.gridcols += 1;
+          config.setGridcols(config.gridcols + 1);
           grid.updateLayout();
         }
       }],
@@ -2646,14 +2596,14 @@ class EventHandler {
       }],
       ['f', {
         action: () => {
-          config.pixelRatio += 1;
+          config.setPixelRatio(config.pixelRatio + 1);
           grid.updateLayout();
         }
       }],
       ['d', {
         condition: () => config.pixelRatio > 1,
         action: () => {
-          config.pixelRatio -= 1;
+          config.setPixelRatio(config.pixelRatio - 1);
           grid.updateLayout();
         }
       }],
@@ -3359,7 +3309,7 @@ class Scheduler {
       }
     }
     const worker = this.workers[workerNumber];
-    const estimatedWork = config.dims2 * ((size / config.dims < 1e-15) ? 7 : 1);
+    const estimatedWork = config.dimsArea * ((size / config.dimsWidth < 1e-15) ? 7 : 1);
     this.boardEfforts.set(k, estimatedWork);
     this.assignments[k] = workerNumber;
 
@@ -3371,8 +3321,7 @@ class Scheduler {
         re,
         im,
         config: {
-          dims: config.dims,
-          dims2: config.dims2,
+          dimsArea: config.dimsArea,
           dimsWidth: config.dimsWidth,
           dimsHeight: config.dimsHeight,
           aspectRatio: config.aspectRatio,
@@ -3627,7 +3576,7 @@ class OrbitComputer {
     let title = '';
     let view = this.explorer.grid.views[k];
 
-    if (view && j >= 0 && j < this.explorer.config.dims2) {
+    if (view && j >= 0 && j < this.explorer.config.dimsArea) {
       let c = view.currentc(j);
       let z = view.currentz(j);
 
@@ -3960,7 +3909,7 @@ class Board {
     this.config = config;  // Global config
 
     this.it = 1;            // Current iteration
-    this.un = config.dims2; // Unfinished pixels
+    this.un = config.dimsArea; // Unfinished pixels
     this.di = 0;            // Diverged pixels
     this.ch = 0;            // Chaotic pixels
     this.effort = 1;        // Work-per pixel
@@ -3974,15 +3923,15 @@ class Board {
     this.updateSize = 0;    // Amount of data to send
 
     // Initialize arrays
-    this.nn = new Array(this.config.dims2).fill(0);
-    this.pp = new Array(this.config.dims2).fill(0);
+    this.nn = new Array(this.config.dimsArea).fill(0);
+    this.pp = new Array(this.config.dimsArea).fill(0);
     this.cc = [];
     this.zz = [];
     this.bb = [];
     // Track if bb checkpoint is valid
-    this.hasCheckpoint = new Array(this.config.dims2).fill(false);
+    this.hasCheckpoint = new Array(this.config.dimsArea).fill(false);
     // Iteration when checkpoint was saved
-    this.checkpointIter = new Array(this.config.dims2).fill(0);
+    this.checkpointIter = new Array(this.config.dimsArea).fill(0);
   }
 
   serialize() {
@@ -4065,7 +4014,7 @@ class CpuBoard extends Board {
     }
     this.zz = this.cc.slice();  // Start with z = c
     this.bb = this.cc.slice();  // Initial checkpoint = c
-    this.ss = Array(this.config.dims2).fill(null).map((_, i) => i);  // All pixels active
+    this.ss = Array(this.config.dimsArea).fill(null).map((_, i) => i);  // All pixels active
   }
 
   static fromSerialized(serialized) {
@@ -4248,7 +4197,7 @@ class PerturbationBoard extends Board {
   }
 
   initPerturbationBoard(size, re, im) {
-    this.cc = new Array(this.config.dims2 * 4).fill(NaN);
+    this.cc = new Array(this.config.dimsArea * 4).fill(NaN);
     // Odd grid ensures that center point corresponds to a quad precision pixel
     const gridSizeX = Math.floor(this.config.dimsWidth / 17 / 2) * 2 + 1;
     const gridSizeY = Math.floor(this.config.dimsHeight / 17 / 2) * 2 + 1;
@@ -5436,8 +5385,8 @@ class GpuBaseBoard extends Board {
   static isSafeDims(dimsWidth, dimsHeight, bytesPerPixel = 16,
                     maxBufferSize = GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER) {
     // Check WebGPU buffer size limit (workgroup limit handled by 2D dispatch)
-    const dims2 = dimsWidth * dimsHeight;
-    const largestBufferSize = dims2 * bytesPerPixel;
+    const dimsArea = dimsWidth * dimsHeight;
+    const largestBufferSize = dimsArea * bytesPerPixel;
     return largestBufferSize <= maxBufferSize;
   }
 
@@ -5633,14 +5582,14 @@ class GpuBoard extends GpuBaseBoard {
   }
 
   async createBuffers() {
-    const dims2 = this.config.dimsWidth * this.config.dimsHeight;
+    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
 
     // Check buffer size limits before creating (safety margin applied upstream)
     const maxBufferSize = Math.min(
       this.device.limits.maxBufferSize,
       this.device.limits.maxStorageBufferBindingSize
     );
-    const largestBufferSize = dims2 * 2 * 4;  // zValues or baseValues buffer (8 bytes/pixel)
+    const largestBufferSize = dimsArea * 2 * 4;  // zValues or baseValues buffer (8 bytes/pixel)
 
     if (largestBufferSize > maxBufferSize) {
       throw new Error(
@@ -5661,88 +5610,88 @@ class GpuBoard extends GpuBaseBoard {
 
     // Storage buffer for iteration counts (one u32 per pixel)
     this.buffers.iterations = this.device.createBuffer({
-      size: dims2 * 4,  // 4 bytes per u32
+      size: dimsArea * 4,  // 4 bytes per u32
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'Iterations buffer'
     });
 
     // Storage buffer for z values (two f32 per pixel: zr, zi)
     this.buffers.zValues = this.device.createBuffer({
-      size: dims2 * 2 * 4,  // 2 floats per pixel, 4 bytes per float
+      size: dimsArea * 2 * 4,  // 2 floats per pixel, 4 bytes per float
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'Z values buffer'
     });
 
     // Storage buffer for status flags (one u32 per pixel: 0=computing, 1=diverged)
     this.buffers.status = this.device.createBuffer({
-      size: dims2 * 4,  // 4 bytes per u32
+      size: dimsArea * 4,  // 4 bytes per u32
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'Status buffer'
     });
 
-    // Storage buffer for active pixel indices (sparse list, max size = dims2)
+    // Storage buffer for active pixel indices (sparse list, max size = dimsArea)
     this.buffers.activePixels = this.device.createBuffer({
-      size: dims2 * 4,  // 4 bytes per u32
+      size: dimsArea * 4,  // 4 bytes per u32
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       label: 'Active pixels buffer'
     });
 
     // Storage buffer for base values (period detection)
     this.buffers.baseValues = this.device.createBuffer({
-      size: dims2 * 2 * 4,  // 2 floats per pixel
+      size: dimsArea * 2 * 4,  // 2 floats per pixel
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       label: 'Base values buffer'
     });
 
     // Storage buffer for period values
     this.buffers.period = this.device.createBuffer({
-      size: dims2 * 4,  // 4 bytes per u32
+      size: dimsArea * 4,  // 4 bytes per u32
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'Period buffer'
     });
 
     // Persistent staging buffers for reading results back to CPU
     this.buffers.stagingIterations = this.device.createBuffer({
-      size: dims2 * 4,
+      size: dimsArea * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       label: 'Staging iterations buffer'
     });
 
     this.buffers.stagingStatus = this.device.createBuffer({
-      size: dims2 * 4,
+      size: dimsArea * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       label: 'Staging status buffer'
     });
 
     this.buffers.stagingZValues = this.device.createBuffer({
-      size: dims2 * 2 * 4,
+      size: dimsArea * 2 * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       label: 'Staging z-values buffer'
     });
 
     this.buffers.stagingPeriod = this.device.createBuffer({
-      size: dims2 * 4,
+      size: dimsArea * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       label: 'Staging period buffer'
     });
 
     // Initialize all buffers
-    const zeroData = new Float32Array(dims2 * 2).fill(0);
+    const zeroData = new Float32Array(dimsArea * 2).fill(0);
     this.device.queue.writeBuffer(this.buffers.zValues, 0, zeroData);
     this.device.queue.writeBuffer(this.buffers.baseValues, 0, zeroData);
 
-    const statusData = new Uint32Array(dims2).fill(0);
+    const statusData = new Uint32Array(dimsArea).fill(0);
     this.device.queue.writeBuffer(this.buffers.status, 0, statusData);
 
-    const iterData = new Uint32Array(dims2).fill(0);
+    const iterData = new Uint32Array(dimsArea).fill(0);
     this.device.queue.writeBuffer(this.buffers.iterations, 0, iterData);
 
-    const periodData = new Uint32Array(dims2).fill(0);
+    const periodData = new Uint32Array(dimsArea).fill(0);
     this.device.queue.writeBuffer(this.buffers.period, 0, periodData);
 
     // Initialize active pixels list (all pixels start active)
-    const activePixels = new Uint32Array(dims2);
-    for (let i = 0; i < dims2; i++) {
+    const activePixels = new Uint32Array(dimsArea);
+    for (let i = 0; i < dimsArea; i++) {
       activePixels[i] = i;
     }
     this.device.queue.writeBuffer(this.buffers.activePixels, 0, activePixels);
@@ -5793,7 +5742,7 @@ class GpuBoard extends GpuBaseBoard {
     }
     this.isComputing = true;
     try {
-    const dims2 = this.config.dimsWidth * this.config.dimsHeight;
+    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
     const workgroupSize = 64;
 
     // Prepare parameters for GPU
@@ -5803,12 +5752,12 @@ class GpuBoard extends GpuBaseBoard {
 
     // Initialize CPU-side status tracking if needed
     if (!this.cpuStatus) {
-      this.cpuStatus = new Uint32Array(dims2).fill(0);  // 0 = computing
+      this.cpuStatus = new Uint32Array(dimsArea).fill(0);  // 0 = computing
     }
 
     // Build sparse active pixel list (only pixels still computing)
     const activePixels = [];
-    for (let i = 0; i < dims2; i++) {
+    for (let i = 0; i < dimsArea; i++) {
       if (this.cpuStatus[i] === 0) {
         activePixels.push(i);
       }
@@ -5894,9 +5843,9 @@ class GpuBoard extends GpuBaseBoard {
 
     // Batch all buffer copies into single command encoder for efficiency
     commandEncoder.copyBufferToBuffer(
-      this.buffers.iterations, 0, this.buffers.stagingIterations, 0, dims2 * 4);
+      this.buffers.iterations, 0, this.buffers.stagingIterations, 0, dimsArea * 4);
     commandEncoder.copyBufferToBuffer(
-      this.buffers.status, 0, this.buffers.stagingStatus, 0, dims2 * 4);
+      this.buffers.status, 0, this.buffers.stagingStatus, 0, dimsArea * 4);
 
     // Submit compute + buffer copies in single batch
     this.device.queue.submit([commandEncoder.finish()]);
@@ -5916,7 +5865,7 @@ class GpuBoard extends GpuBaseBoard {
 
     // Initialize lastReportedIters if needed
     if (!this.lastReportedIters) {
-      this.lastReportedIters = new Uint32Array(dims2).fill(0);
+      this.lastReportedIters = new Uint32Array(dimsArea).fill(0);
     }
 
     // Find pixels that NEWLY diverged or converged this batch
@@ -5959,9 +5908,9 @@ class GpuBoard extends GpuBaseBoard {
       // Create a new command encoder for heavy buffer readback
       const heavyEncoder = this.device.createCommandEncoder();
       heavyEncoder.copyBufferToBuffer(
-        this.buffers.zValues, 0, this.buffers.stagingZValues, 0, dims2 * 2 * 4);
+        this.buffers.zValues, 0, this.buffers.stagingZValues, 0, dimsArea * 2 * 4);
       heavyEncoder.copyBufferToBuffer(
-        this.buffers.period, 0, this.buffers.stagingPeriod, 0, dims2 * 4);
+        this.buffers.period, 0, this.buffers.stagingPeriod, 0, dimsArea * 4);
       this.device.queue.submit([heavyEncoder.finish()]);
       await this.device.queue.onSubmittedWorkDone();
 
@@ -6008,7 +5957,7 @@ class GpuBoard extends GpuBaseBoard {
     let totalDiverged = 0;
     let totalConverged = 0;
     let stillComputing = 0;
-    for (let i = 0; i < dims2; i++) {
+    for (let i = 0; i < dimsArea; i++) {
       const status = this.cpuStatus[i];
       if (status === 1) totalDiverged++;
       else if (status === 2) totalConverged++;
@@ -6100,7 +6049,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   initPixels(size, re, im) {
     const dimsWidth = this.config.dimsWidth;
     const dimsHeight = this.config.dimsHeight;
-    const dims2 = this.config.dims2;
+    const dimsArea = this.config.dimsArea;
 
     // Convert re/im to quad-double if needed
     const re_qd = Array.isArray(re) ? re : toQd(re);
@@ -6109,9 +6058,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const sizeY_qd = toQd(size / this.config.aspectRatio);
 
     // Per-pixel data arrays
-    this.dc = new Float32Array(dims2 * 2);  // Delta c from reference [real, imag] pairs
-    this.dz = new Float32Array(dims2 * 2);  // Current perturbation delta [real, imag] pairs
-    this.refIter = new Uint32Array(dims2);  // Which iteration of reference each pixel is following
+    this.dc = new Float32Array(dimsArea * 2);  // Delta c from reference [real, imag] pairs
+    this.dz = new Float32Array(dimsArea * 2);  // Current perturbation delta [real, imag] pairs
+    this.refIter = new Uint32Array(dimsArea);  // Which iteration of reference each pixel is following
 
     // Working arrays for quad-double arithmetic
     const cr_qd = new Array(4);
@@ -6162,14 +6111,14 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   }
 
   async createBuffers() {
-    const dims2 = this.config.dimsWidth * this.config.dimsHeight;
+    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
 
     // Check buffer size limits before creating (safety margin applied upstream)
     const maxBufferSize = Math.min(
       this.device.limits.maxBufferSize,
       this.device.limits.maxStorageBufferBindingSize
     );
-    const largestBufferSize = dims2 * 4 * 4;  // dzAndCheckpoint buffer (16 bytes/pixel)
+    const largestBufferSize = dimsArea * 4 * 4;  // dzAndCheckpoint buffer (16 bytes/pixel)
 
     if (largestBufferSize > maxBufferSize) {
       throw new Error(
@@ -6181,21 +6130,21 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Storage buffer for iteration counts
     this.buffers.iterations = this.device.createBuffer({
-      size: dims2 * 4,  // 4 bytes per u32
+      size: dimsArea * 4,  // 4 bytes per u32
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'Iterations buffer'
     });
 
     // Storage buffer for status and period (packed: 2 u32 per pixel)
     this.buffers.statusAndPeriod = this.device.createBuffer({
-      size: dims2 * 2 * 4,  // 2 u32 per pixel
+      size: dimsArea * 2 * 4,  // 2 u32 per pixel
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
       label: 'Status and period buffer'
     });
 
     // Storage buffer for dc (delta c - constant offsets)
     this.buffers.dc = this.device.createBuffer({
-      size: dims2 * 2 * 4,  // 2 f32 per pixel
+      size: dimsArea * 2 * 4,  // 2 f32 per pixel
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       label: 'Delta C buffer'
     });
@@ -6205,7 +6154,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.buffers.dzAndCheckpoint = this.device.createBuffer({
       // 6 f32 per pixel: dz.x, dz.y, bb.x, bb.y,
       // threaded_delta_re, threaded_delta_im
-      size: dims2 * 6 * 4,
+      size: dimsArea * 6 * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'DZ and checkpoint buffer'
     });
@@ -6213,7 +6162,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Storage buffer for refIter, checkpointIter,
     // and next_threaded_ref_iter (3 u32 per pixel)
     this.buffers.refIterAndCheckpoint = this.device.createBuffer({
-      size: dims2 * 3 * 4,  // 3 u32 per pixel: [ref_iter, checkpoint_iter, next_threaded_ref_iter]
+      size: dimsArea * 3 * 4,  // 3 u32 per pixel: [ref_iter, checkpoint_iter, next_threaded_ref_iter]
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'RefIter and checkpoint buffer'
     });
@@ -6248,8 +6197,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Initialize buffers with packed data
     // dzAndCheckpoint: [dz.x, dz.y, bb.x=0, bb.y=0,
     // threaded_delta_re=0, threaded_delta_im=0] per pixel
-    const dzAndCheckpointData = new Float32Array(dims2 * 6);
-    for (let i = 0; i < dims2; i++) {
+    const dzAndCheckpointData = new Float32Array(dimsArea * 6);
+    for (let i = 0; i < dimsArea; i++) {
       dzAndCheckpointData[i * 6] = this.dz[i * 2];      // dz.x
       dzAndCheckpointData[i * 6 + 1] = this.dz[i * 2 + 1];  // dz.y
       dzAndCheckpointData[i * 6 + 2] = 0;  // bb.x
@@ -6260,8 +6209,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Initialize refIterAndCheckpoint:
     // [ref_iter, checkpoint_iter, next_threaded_ref_iter] per pixel
-    const refIterAndCheckpointData = new Uint32Array(dims2 * 3);
-    for (let i = 0; i < dims2; i++) {
+    const refIterAndCheckpointData = new Uint32Array(dimsArea * 3);
+    for (let i = 0; i < dimsArea; i++) {
       refIterAndCheckpointData[i * 3] = this.refIter[i];  // ref_iter
       // checkpoint_iter: use sentinel for "no checkpoint yet"
       refIterAndCheckpointData[i * 3 + 1] = 0xFFFFFFFF;
@@ -6288,7 +6237,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.device.queue.writeBuffer(this.buffers.threading, 0, initialThreadingData);
 
     // Initialize iterations buffer to 1 (z=c is iteration 1, not 0)
-    const iterData = new Uint32Array(dims2).fill(1);
+    const iterData = new Uint32Array(dimsArea).fill(1);
     this.device.queue.writeBuffer(this.buffers.iterations, 0, iterData);
 
     // Mark initial data as uploaded
@@ -6523,8 +6472,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // 2D dispatch: calculate linear index from 2D coordinates
         let index = global_id.y * params.workgroups_x + global_id.x;
-        let dims2 = params.dims_width * params.dims_height;
-        if (index >= dims2) { return; }
+        let dimsArea = params.dims_width * params.dims_height;
+        if (index >= dimsArea) { return; }
 
         // Skip if already finished
         let status_val = statusAndPeriod[index].x;
@@ -6814,7 +6763,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       return;
     }
     this.isComputing = true;
-    const dims2 = this.config.dimsWidth * this.config.dimsHeight;
+    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
 
     try {
     // Calculate batch size first (needed to determine reference orbit buffer)
@@ -6969,7 +6918,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Step 5: Dispatch GPU compute - process all pixels
     const workgroupSize = 64;
-    const numWorkgroups = Math.ceil(dims2 / workgroupSize);
+    const numWorkgroups = Math.ceil(dimsArea / workgroupSize);
 
     // 2D workgroup dispatch
     const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
@@ -6984,7 +6933,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     paramsU32[0] = this.config.dimsWidth;
     paramsU32[1] = this.config.dimsHeight;
     paramsU32[2] = iterationsPerBatch;
-    paramsU32[3] = dims2;  // active_count: Process all pixels, skip finished ones in shader
+    paramsU32[3] = dimsArea;  // active_count: Process all pixels, skip finished ones in shader
     paramsU32[4] = this.refIterations + 1;  // ref_orbit_length: includes iteration 0
     paramsU32[5] = this.config.exponent || 2;
     paramsU32[6] = workgroupsX * workgroupSize;  // Total threads in X dimension
@@ -7041,7 +6990,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     let divergedCount = 0;
     let convergedCount = 0;
 
-    for (let i = 0; i < dims2; i++) {
+    for (let i = 0; i < dimsArea; i++) {
       const status = statusAndPeriodData[i * 2];  // First u32 in vec2
       const period = statusAndPeriodData[i * 2 + 1];  // Second u32 in vec2
 
@@ -7071,7 +7020,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       dzAndCheckpointData = await this.readBuffer(this.buffers.dzAndCheckpoint, Float32Array);
       refIterData = await this.readBuffer(this.buffers.refIterAndCheckpoint, Uint32Array);
 
-      for (let i = 0; i < dims2; i++) {
+      for (let i = 0; i < dimsArea; i++) {
         const status = statusAndPeriodData[i * 2];
         const period = statusAndPeriodData[i * 2 + 1];
 
@@ -7240,8 +7189,8 @@ self.onmessage = async function(e) {
         board = new GpuBoardClass(data.k, data.size, data.re, data.im, data.config, data.id);
       } else {
         if (enableGPU && webGPUAvailable && !gpuSafe) {
-          const dims2 = data.config.dims2;
-          const bufferSizeMB = (dims2 * bytesPerPixel / (1024*1024)).toFixed(0);
+          const dimsArea = data.config.dimsArea;
+          const bufferSizeMB = (dimsArea * bytesPerPixel / (1024*1024)).toFixed(0);
           const limitMB = (
             (gpuMaxBufferSize || GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER) / (1024*1024)
           ).toFixed(0);
