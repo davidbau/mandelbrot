@@ -2305,15 +2305,21 @@ class URLHandler {
       {
         name: 'z',
         parse: (val, configUpdates) => {
-          configUpdates.zoomFromUrl = parseFloat(val);
+          // URLSearchParams decodes '+' as space, convert back for scientific notation
+          val = val.replace(/ /g, '+');
+          // zoomFromUrl is not stored in state - set directly on config object
+          this.config.zoomFromUrl = parseFloat(val);
         }
       },
       {
         name: 's',
         parse: (val, configUpdates) => {
+          // URLSearchParams decodes '+' as space, convert back for scientific notation
+          val = val.replace(/ /g, '+');
           // Legacy parameter: s is the actual size in complex plane
           // Convert to zoom factor: z = 3.0 / s
-          configUpdates.zoomFromUrl = 3.0 / parseFloat(val);
+          // zoomFromUrl is not stored in state - set directly on config object
+          this.config.zoomFromUrl = 3.0 / parseFloat(val);
         }
       },
       {
