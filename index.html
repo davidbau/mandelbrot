@@ -1384,14 +1384,34 @@ class View {
     const [parentSize, parentCenterR, parentCenterI] = parent.sizes;
     const { dimsWidth, dimsHeight, aspectRatio } = this.config;
 
-    const childLeft = childCenterR[0] - childSize / 2;
-    const childTop = childCenterI[0] + (childSize / aspectRatio) / 2;
-    const parentLeft = parentCenterR[0] - parentSize / 2;
-    const parentTop = parentCenterI[0] + (parentSize / aspectRatio) / 2;
+    // Use quad-double precision for coordinate calculations at deep zoom
+    const temp = new Float64Array(4);
 
-    const sx = ((childLeft - parentLeft) / parentSize) * dimsWidth;
+    // childLeft = childCenterR - childSize / 2
+    AqdAdd(temp, 0, childCenterR[0], childCenterR[1], -childSize / 2, 0);
+    const childLeft = [temp[0], temp[1]];
+
+    // childTop = childCenterI + (childSize / aspectRatio) / 2
+    AqdAdd(temp, 0, childCenterI[0], childCenterI[1], (childSize / aspectRatio) / 2, 0);
+    const childTop = [temp[0], temp[1]];
+
+    // parentLeft = parentCenterR - parentSize / 2
+    AqdAdd(temp, 0, parentCenterR[0], parentCenterR[1], -parentSize / 2, 0);
+    const parentLeft = [temp[0], temp[1]];
+
+    // parentTop = parentCenterI + (parentSize / aspectRatio) / 2
     const parentHeight = parentSize / aspectRatio;
-    const sy = ((parentTop - childTop) / parentHeight) * dimsHeight;
+    AqdAdd(temp, 0, parentCenterI[0], parentCenterI[1], parentHeight / 2, 0);
+    const parentTop = [temp[0], temp[1]];
+
+    // sx = ((childLeft - parentLeft) / parentSize) * dimsWidth
+    AqdAdd(temp, 0, childLeft[0], childLeft[1], -parentLeft[0], -parentLeft[1]);
+    const sx = ((temp[0] + temp[1]) / parentSize) * dimsWidth;
+
+    // sy = ((parentTop - childTop) / parentHeight) * dimsHeight
+    AqdAdd(temp, 0, parentTop[0], parentTop[1], -childTop[0], -childTop[1]);
+    const sy = ((temp[0] + temp[1]) / parentHeight) * dimsHeight;
+
     const sw = (childSize / parentSize) * dimsWidth;
     const sh = (childSize / parentSize) * dimsHeight;
 
