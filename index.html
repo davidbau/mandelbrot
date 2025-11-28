@@ -964,7 +964,10 @@ class Config {
   // Feigenbaum / Myreberg point (quad-precision real number [high, low])
   static FEIGENBAUM_POINT = [-1.4011551890920506, 1.196330130384937e-17];
 
-  constructor(store = null) {
+  constructor(store) {
+    if (!store) {
+      throw new Error('Config requires a StateStore instance');
+    }
     this.store = store;
 
     // Initialize viewport width
@@ -978,26 +981,24 @@ class Config {
     const mobile = ('ontouchstart' in document.documentElement);
     const mac = (navigator.platform.indexOf('Mac') === 0);
 
-    // Initialize state if we have a state store
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({
-        vw,
-        gridcols: dgc,
-        exponent: 2,
-        enableGPU: true,
-        forceBoard: null,
-        firstr: [-0.5, 0],
-        firstj: [0.0, 0],
-        firstsize: 3.0,
-        pixelRatio,
-        zoomfactor: Config.DEFAULT_ZOOM_FACTOR,
-        aspectRatio: Config.DEFAULT_ASPECT_RATIO,
-        theme: 'warm',
-        unknowncolor: '#000',
-        mobile,
-        mac
-      }));
-    }
+    // Initialize state
+    this.store.dispatch(this.store.actions.updateConfig({
+      vw,
+      gridcols: dgc,
+      exponent: 2,
+      enableGPU: true,
+      forceBoard: null,
+      firstr: [-0.5, 0],
+      firstj: [0.0, 0],
+      firstsize: 3.0,
+      pixelRatio,
+      zoomfactor: Config.DEFAULT_ZOOM_FACTOR,
+      aspectRatio: Config.DEFAULT_ASPECT_RATIO,
+      theme: 'warm',
+      unknowncolor: '#000',
+      mobile,
+      mac
+    }));
 
     // Legacy properties for backward compatibility
     this.ukcs = ["#000", "#888", "#fff", "yellow", "red", "rgb(32,16,64)"];
@@ -1005,249 +1006,105 @@ class Config {
   }
 
   // Property getters/setters that delegate to state
-  get vw() {
-    return this.store ? this.store.getState().config.vw : this._vw || 0;
-  }
+  get vw() { return this.store.getState().config.vw; }
   set vw(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ vw: value }));
-    } else {
-      this._vw = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ vw: value }));
   }
 
-  get gridcols() {
-    return this.store ? this.store.getState().config.gridcols : this._gridcols || 1;
-  }
+  get gridcols() { return this.store.getState().config.gridcols; }
   set gridcols(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ gridcols: value }));
-    } else {
-      this._gridcols = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ gridcols: value }));
   }
 
-  get exponent() {
-    return this.store ? this.store.getState().config.exponent : this._exponent || 2;
-  }
+  get exponent() { return this.store.getState().config.exponent; }
   set exponent(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.setExponent(value));
-    } else {
-      this._exponent = value;
-    }
+    this.store.dispatch(this.store.actions.setExponent(value));
   }
 
-  get enableGPU() {
-    return this.store
-      ? this.store.getState().config.enableGPU
-      : this._enableGPU !== undefined ? this._enableGPU : true;
-  }
+  get enableGPU() { return this.store.getState().config.enableGPU; }
   set enableGPU(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.setGPU(value));
-    } else {
-      this._enableGPU = value;
-    }
+    this.store.dispatch(this.store.actions.setGPU(value));
   }
 
-  get forceBoard() {
-    return this.store
-      ? this.store.getState().config.forceBoard
-      : this._forceBoard || null;
-  }
+  get forceBoard() { return this.store.getState().config.forceBoard; }
   set forceBoard(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.setForceBoard(value));
-    } else {
-      this._forceBoard = value;
-    }
+    this.store.dispatch(this.store.actions.setForceBoard(value));
   }
 
-  get firstr() {
-    return this.store
-      ? this.store.getState().config.firstr
-      : this._firstr || [-0.5, 0];
-  }
+  get firstr() { return this.store.getState().config.firstr; }
   set firstr(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ firstr: value }));
-    } else {
-      this._firstr = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ firstr: value }));
   }
 
-  get firstj() {
-    return this.store
-      ? this.store.getState().config.firstj
-      : this._firstj || [0.0, 0];
-  }
+  get firstj() { return this.store.getState().config.firstj; }
   set firstj(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ firstj: value }));
-    } else {
-      this._firstj = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ firstj: value }));
   }
 
-  get firstsize() {
-    return this.store
-      ? this.store.getState().config.firstsize
-      : this._firstsize || 3.0;
-  }
+  get firstsize() { return this.store.getState().config.firstsize; }
   set firstsize(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ firstsize: value }));
-    } else {
-      this._firstsize = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ firstsize: value }));
   }
 
-  get pixelRatio() {
-    return this.store
-      ? this.store.getState().config.pixelRatio
-      : this._pixelRatio || 2;
-  }
+  get pixelRatio() { return this.store.getState().config.pixelRatio; }
   set pixelRatio(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.setPixelRatio(value));
-    } else {
-      this._pixelRatio = value;
-    }
+    this.store.dispatch(this.store.actions.setPixelRatio(value));
   }
 
-  get zoomfactor() {
-    return this.store
-      ? this.store.getState().config.zoomfactor
-      : this._zoomfactor || Config.DEFAULT_ZOOM_FACTOR;
-  }
+  get zoomfactor() { return this.store.getState().config.zoomfactor; }
   set zoomfactor(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.setZoomFactor(value));
-    } else {
-      this._zoomfactor = value;
-    }
+    this.store.dispatch(this.store.actions.setZoomFactor(value));
   }
 
-  get aspectRatio() {
-    return this.store
-      ? this.store.getState().config.aspectRatio
-      : this._aspectRatio || Config.DEFAULT_ASPECT_RATIO;
-  }
+  get aspectRatio() { return this.store.getState().config.aspectRatio; }
   set aspectRatio(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.setAspectRatio(value));
-    } else {
-      this._aspectRatio = value;
-    }
+    this.store.dispatch(this.store.actions.setAspectRatio(value));
   }
 
-  get theme() {
-    return this.store ? this.store.getState().config.theme : this._theme || 'warm';
-  }
+  get theme() { return this.store.getState().config.theme; }
   set theme(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.setTheme(value));
-    } else {
-      this._theme = value;
-    }
+    this.store.dispatch(this.store.actions.setTheme(value));
   }
 
-  get unknowncolor() {
-    return this.store
-      ? this.store.getState().config.unknowncolor
-      : this._unknowncolor || '#000';
-  }
+  get unknowncolor() { return this.store.getState().config.unknowncolor; }
   set unknowncolor(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.setUnknownColor(value));
-    } else {
-      this._unknowncolor = value;
-    }
+    this.store.dispatch(this.store.actions.setUnknownColor(value));
   }
 
-  get mobile() {
-    return this.store ? this.store.getState().config.mobile : this._mobile || false;
-  }
+  get mobile() { return this.store.getState().config.mobile; }
   set mobile(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ mobile: value }));
-    } else {
-      this._mobile = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ mobile: value }));
   }
 
-  get mac() {
-    return this.store ? this.store.getState().config.mac : this._mac || false;
-  }
+  get mac() { return this.store.getState().config.mac; }
   set mac(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ mac: value }));
-    } else {
-      this._mac = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ mac: value }));
   }
 
   // Derived/computed properties
-  get cssDims() {
-    return this.store ? this.store.getState().config.cssDims : this._cssDims || 0;
-  }
+  get cssDims() { return this.store.getState().config.cssDims; }
   set cssDims(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ cssDims: value }));
-    } else {
-      this._cssDims = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ cssDims: value }));
   }
 
-  get cssDimsWidth() {
-    return this.store
-      ? this.store.getState().config.cssDimsWidth
-      : this._cssDimsWidth || 0;
-  }
+  get cssDimsWidth() { return this.store.getState().config.cssDimsWidth; }
   set cssDimsWidth(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ cssDimsWidth: value }));
-    } else {
-      this._cssDimsWidth = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ cssDimsWidth: value }));
   }
 
-  get cssDimsHeight() {
-    return this.store
-      ? this.store.getState().config.cssDimsHeight
-      : this._cssDimsHeight || 0;
-  }
+  get cssDimsHeight() { return this.store.getState().config.cssDimsHeight; }
   set cssDimsHeight(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ cssDimsHeight: value }));
-    } else {
-      this._cssDimsHeight = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ cssDimsHeight: value }));
   }
 
-  get dimsWidth() {
-    return this.store ? this.store.getState().config.dimsWidth : this._dimsWidth || 0;
-  }
+  get dimsWidth() { return this.store.getState().config.dimsWidth; }
   set dimsWidth(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ dimsWidth: value }));
-    } else {
-      this._dimsWidth = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ dimsWidth: value }));
   }
 
-  get dimsHeight() {
-    return this.store
-      ? this.store.getState().config.dimsHeight
-      : this._dimsHeight || 0;
-  }
+  get dimsHeight() { return this.store.getState().config.dimsHeight; }
   set dimsHeight(value) {
-    if (this.store) {
-      this.store.dispatch(this.store.actions.updateConfig({ dimsHeight: value }));
-    } else {
-      this._dimsHeight = value;
-    }
+    this.store.dispatch(this.store.actions.updateConfig({ dimsHeight: value }));
   }
 
   // Backward compatibility
