@@ -244,16 +244,16 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 //   EventHandler → ZoomManager.cellclick()
 //     ↓
 //   Grid.makeView() creates new View and canvas
-//     ↓
-//   Grid.notifyurl() → URLHandler.updateurl() syncs browser URL
-//     ↓
-//   Scheduler assigns Board to worker thread
-//     ↓
-//   Worker computes iterations, sends progress updates
-//     ↓
-//   Grid.updateViewFromWorkerResult() updates View
-//     ↓
-//   View.color() renders pixels to canvas
+//     │
+//     ├─→ Scheduler assigns Board to worker thread
+//     │     ↓
+//     │   Worker computes iterations, sends progress updates
+//     │     ↓
+//     │   Grid.updateViewFromWorkerResult() updates View
+//     │     ↓
+//     │   View.color() renders pixels to canvas
+//     │
+//     └─→ Grid.notifyurl() → URLHandler.updateurl() syncs browser URL
 //
 // OTHER CLASSES:
 //
