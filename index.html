@@ -1165,13 +1165,15 @@ class Config {
 
   updateExponent(newExponent) {
     if (newExponent < 2) { return; }
-    this.exponent = newExponent;
+    // Bulk update all three properties at once
+    this.store.dispatch(this.store.actions.updateConfig({
+      exponent: newExponent,
+      firstr: [newExponent > 2 ? 0.0 : -0.5, 0],
+      firstj: [0.0, 0]
+    }));
     for (const el of document.querySelectorAll('.exponent')) {
-      el.innerText = this.exponent;
+      el.innerText = newExponent;
     }
-    // Update default center based on exponent
-    this.firstr = [this.exponent > 2 ? 0.0 : -0.5, 0];
-    this.firstj = [0.0, 0];
   }
 
   firststate() {
