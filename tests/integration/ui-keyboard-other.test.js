@@ -15,13 +15,13 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
   }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await setupPage(browser, {});
+    page = await setupPage(browser, {}, TEST_TIMEOUT);
     await navigateToApp(page);
   }, TEST_TIMEOUT);
 
   afterEach(async () => {
-    if (page) await page.close();
-  });
+    if (page) { try { await page.close(); } catch (e) { /* ignore */ } }
+  }, TEST_TIMEOUT);
 
   afterAll(async () => {
     if (browser) await browser.close();
@@ -56,14 +56,14 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       await page.waitForTimeout(300);
       expect(await page.evaluate(() => window.explorer.config.pixelRatio)).toBe(initialRatio);
     }, TEST_TIMEOUT);
-  });
+  }, TEST_TIMEOUT);
 
   describe('Help Text Box', () => {
     test('? key shows help (centered), X closebox hides it', async () => {
       const initialStyle = await page.evaluate(() => {
         const textEl = document.getElementById('text');
         return window.getComputedStyle(textEl).display;
-      });
+      }, TEST_TIMEOUT);
       expect(initialStyle).toBe('inline-block');
 
       const closebox = await page.$('#text .closebox');
@@ -81,9 +81,9 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
           styleDisplay: textEl.style.display,
           computedDisplay: window.getComputedStyle(textEl).display
         };
-      });
+      }, TEST_TIMEOUT);
       expect(afterShow.styleDisplay).not.toBe('block');
       expect(afterShow.computedDisplay).toBe('inline-block');
     }, TEST_TIMEOUT);
-  });
-});
+  }, TEST_TIMEOUT);
+}, TEST_TIMEOUT);

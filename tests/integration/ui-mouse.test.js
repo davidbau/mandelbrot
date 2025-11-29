@@ -15,13 +15,13 @@ describe('Mouse UI Tests', () => {
   }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await setupPage(browser, {});
+    page = await setupPage(browser, {}, TEST_TIMEOUT);
     await navigateToApp(page);
   }, TEST_TIMEOUT);
 
   afterEach(async () => {
-    if (page) await page.close();
-  });
+    if (page) { try { await page.close(); } catch (e) { /* ignore */ } }
+  }, TEST_TIMEOUT);
 
   afterAll(async () => {
     if (browser) await browser.close();
@@ -50,7 +50,7 @@ describe('Mouse UI Tests', () => {
 
       const sizes = await page.evaluate(() => {
         return window.explorer.grid.views.map(v => v ? v.sizes[0] : null);
-      });
+      }, TEST_TIMEOUT);
       expect(sizes[1]).toBeLessThan(sizes[0]);
     }, TEST_TIMEOUT);
 
@@ -61,7 +61,9 @@ describe('Mouse UI Tests', () => {
       const box = await canvas.boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 
-      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 }, TEST_TIMEOUT);
+      // Wait for update to complete - closebox click is blocked during updates
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       const viewsBefore = await page.evaluate(() => window.explorer.grid.views.length);
       expect(viewsBefore).toBeGreaterThanOrEqual(2);
@@ -75,11 +77,11 @@ describe('Mouse UI Tests', () => {
 
       const viewsAfter = await page.evaluate(() => {
         return window.explorer.grid.views.filter(v => v !== null).length;
-      });
+      }, TEST_TIMEOUT);
 
       expect(viewsAfter).toBeLessThan(viewsBefore);
     }, TEST_TIMEOUT);
-  });
+  }, TEST_TIMEOUT);
 
   describe('View Hiding and Restore', () => {
     test('Ctrl+Click hides view, R key restores, closebox hides, R restores again', async () => {
@@ -96,7 +98,7 @@ describe('Mouse UI Tests', () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       await page.keyboard.up('Control');
 
-      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 }, TEST_TIMEOUT);
       await page.waitForTimeout(300);
 
       // Verify first view is hidden and tracked
@@ -133,13 +135,13 @@ describe('Mouse UI Tests', () => {
       const afterRestore2 = await page.evaluate(() => window.explorer.grid.hiddencanvas(0));
       expect(afterRestore2).toBe(false);
     }, TEST_TIMEOUT);
-  });
+  }, TEST_TIMEOUT);
 
   describe('Computation and URL', () => {
     test('Should complete computation and verify pixel values', async () => {
       // Use grid=5 for a small but meaningful computation
       await page.goto(`file://${path.join(__dirname, '../../index.html')}?grid=5`);
-      await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+      await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
 
       const result = await page.evaluate(async () => {
         const view = window.explorer.grid.views[0];
@@ -213,7 +215,7 @@ describe('Mouse UI Tests', () => {
           centerIm,
           testResults: results
         };
-      });
+      }, TEST_TIMEOUT);
 
       expect(result.error).toBeUndefined();
       expect(result.completed).toBe(true);
@@ -241,27 +243,27 @@ describe('Mouse UI Tests', () => {
       await page.waitForFunction(() => {
         const view = window.explorer.grid.views[0];
         return view && !view.uninteresting();
-      }, { timeout: 10000 });
+      }, { timeout: 10000 }, TEST_TIMEOUT);
 
       const url = await page.url();
       expect(url).toContain('?');
     }, TEST_TIMEOUT);
-  });
+  }, TEST_TIMEOUT);
 
   describe('Error Handling', () => {
     test('Should handle WebGPU unavailable gracefully', async () => {
       await page.evaluateOnNewDocument(() => {
         Object.defineProperty(navigator, 'gpu', {
           get: () => undefined
-        });
-      });
+        }, TEST_TIMEOUT);
+      }, TEST_TIMEOUT);
 
       await page.goto(`file://${path.join(__dirname, '../../index.html')}`);
-      await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+      await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
       await page.waitForTimeout(500);
 
       const hasViews = await page.evaluate(() => window.explorer.grid.views.length > 0);
       expect(hasViews).toBe(true);
     }, TEST_TIMEOUT);
-  });
-});
+  }, TEST_TIMEOUT);
+}, TEST_TIMEOUT);

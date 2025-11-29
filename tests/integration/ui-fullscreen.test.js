@@ -14,13 +14,13 @@ describe('Fullscreen Mode Tests', () => {
   }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await setupPage(browser, {});
+    page = await setupPage(browser, {}, TEST_TIMEOUT);
     await navigateToApp(page);
   }, TEST_TIMEOUT);
 
   afterEach(async () => {
-    if (page) await page.close();
-  });
+    if (page) { try { await page.close(); } catch (e) { /* ignore */ } }
+  }, TEST_TIMEOUT);
 
   afterAll(async () => {
     if (browser) await browser.close();
@@ -32,7 +32,7 @@ describe('Fullscreen Mode Tests', () => {
 
     const hasMethod = await page.evaluate(() => {
       return typeof window.explorer.toggleFullscreen === 'function';
-    });
+    }, TEST_TIMEOUT);
     expect(hasMethod).toBe(true);
   }, TEST_TIMEOUT);
 
@@ -88,4 +88,4 @@ describe('Fullscreen Mode Tests', () => {
       expect(afterExit).toBe(false);
     }
   }, TEST_TIMEOUT);
-});
+}, TEST_TIMEOUT);

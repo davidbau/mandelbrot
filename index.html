@@ -1263,8 +1263,16 @@ class View {
   }
 
   setParentView(parentView) {
+    // Clear old parent's reference to us
+    if (this.parentView && this.parentView.childView === this) {
+      this.parentView.childView = null;
+    }
     this.parentView = parentView;
     if (parentView) {
+      // Clear old child reference before setting new one
+      if (parentView.childView && parentView.childView !== this) {
+        parentView.childView.parentView = null;
+      }
       parentView.childView = this;
     }
   }
@@ -1351,6 +1359,15 @@ class View {
   draw(ctx, colorview = null, unknownColor = 'transparent') {
     if (colorview === null) {
       colorview = this;
+    }
+
+    // Validate colorview has valid histogram
+    if (!colorview.hi || colorview.hi.length === 0) {
+      console.warn('draw() called with invalid colorview histogram:', {
+        thisK: this.k, thisId: this.id,
+        colorviewK: colorview.k, colorviewId: colorview.id,
+        colorviewHi: colorview.hi
+      });
     }
 
     // Draw composite: parent pixels + local pixels
@@ -1584,6 +1601,16 @@ class View {
     // Use own histogram for consistent palette at this resolution
     const hi = histogram || this.hi;
     const size = scale || this.sizes[0];
+    // Validate histogram structure
+    if (!hi || !Array.isArray(hi) || hi.length === 0 || !Array.isArray(hi[0]) || hi[0].length < 4) {
+      console.warn('Invalid histogram structure:', { hi, viewK: this.k, viewId: this.id });
+      return unknownColor;
+    }
+    // Validate histogram values are in expected ranges
+    const [iter, uFrac, dFrac, est] = hi[0];
+    if (uFrac < 0 || uFrac > 1 || dFrac < 0 || dFrac > 1 || isNaN(uFrac) || isNaN(dFrac)) {
+      console.warn('Invalid histogram values:', { hi0: hi[0], viewK: this.k, viewId: this.id, hiLen: hi.length });
+    }
     const fracs = View.lookupHistogram(i, hi);
     return this.config.colorThemes[this.config.theme](
        i, fracs.fracK, fracs.fracD, fracs.fracL, size);
@@ -1795,6 +1822,12 @@ class Grid {
       this.config.initSizes();
     }
 
+    // IMPORTANT: Capture oldViews before clearing. If popstate fires during async update,
+    // handlePopState needs access to the complete view array from before the update started.
+    // Chain oldViews from previous update if available and non-empty, otherwise use current views.
+    const prevOldViews = this.currentUpdateProcess?.oldViews;
+    const oldViews = (prevOldViews && prevOldViews.length > 0) ? prevOldViews : this.views.slice();
+
     // Clear and recreate the grid DOM
     const gridElement = document.getElementById('grid');
     gridElement.innerHTML = '';
@@ -1813,7 +1846,7 @@ class Grid {
     // Update workers with hidden boards BEFORE creating boards
     // to prevent hidden boards from computing
     this.updateHiddenViews();
-    this.currentUpdateProcess = this.createUpdateProcess(state);
+    this.currentUpdateProcess = this.createUpdateProcess(state, oldViews);
     this.currentUpdateProcess.start();
   }
 
@@ -1895,7 +1928,10 @@ class Grid {
     }
 
     // Reset views array but keep preserved view objects
-    const oldViews = this.views;
+    // IMPORTANT: If an update is in progress, its oldViews contains the complete view
+    // array from before any updates started. Use that instead of the partially-rebuilt
+    // this.views to ensure we don't lose views during rapid popstate events.
+    const oldViews = this.currentUpdateProcess?.oldViews || this.views;
     this.views = [];
 
     // Create update process that reuses preserved views
@@ -1908,7 +1944,9 @@ class Grid {
     let currentIndex = 0;
 
     const processNext = () => {
-      if (aborted) return;
+      if (aborted) {
+        return;
+      }
       if (currentIndex >= state.sizes.length) {
         this.notifyurl();
         this.notifyzoom();
@@ -1936,9 +1974,11 @@ class Grid {
             this.config, preserved.id);
         }
 
-        // Set up parent-child relationship
+        // Set up parent-child relationship (view 0 has no parent)
         if (k > 0 && this.views[k - 1]) {
           preserved.setParentView(this.views[k - 1]);
+        } else if (k === 0) {
+          preserved.setParentView(null);
         }
         // Draw the preserved view to the new canvas
         this.views[k].draw(this.canvas(k).getContext('2d'));
@@ -1958,12 +1998,13 @@ class Grid {
 
     return {
       targetState: state,
+      oldViews: oldViews,  // Store old views for lookup during popstate
       start: () => processNext(),
       abort: () => { aborted = true; }
     };
   }
 
-  createUpdateProcess(state) {
+  createUpdateProcess(state, oldViews = null) {
     let aborted = false;
     let currentIndex = 0;
 
@@ -1998,6 +2039,7 @@ class Grid {
 
     return {
       targetState: state,
+      oldViews: oldViews,  // Store old views for lookup during popstate
       start: () => {
         if (this.config.gridcols === 1) {
           setTimeout(processNext, 100);
@@ -2394,7 +2436,9 @@ class URLHandler {
     this.config = config;
     this.grid = grid;
     this.store = store;
-    this.lastCenters = null;  // Track previous center points for history management
+    // Initialize from current URL so changes can be detected
+    this.lastCenters = this.extractCenters(document.location.search);
+    this.lastHidden = this.extractHidden(document.location.search);
     this.grid.onurlchange(x => this.updateurl());
     // Handle browser back/forward navigation
     window.addEventListener('popstate', () => this.handlePopState());
@@ -2406,6 +2450,7 @@ class URLHandler {
       window.location.reload();
       return;
     }
+
 
     // Apply display-only config changes (theme, unknowncolor)
     this.applyDisplayConfigFromUrl();
@@ -2419,7 +2464,25 @@ class URLHandler {
     }
 
     // Get current state
-    const currentState = this.grid.currentGridState();
+    // IMPORTANT: If an update is in progress, use oldViews to build currentState.
+    // oldViews contains the complete view array from before updates started,
+    // and its indices must match what we use for lookup in applyViewTransition.
+    let currentState;
+    if (this.grid.currentUpdateProcess && this.grid.currentUpdateProcess.oldViews) {
+      // Build currentState from oldViews to ensure index consistency
+      const oldViews = this.grid.currentUpdateProcess.oldViews;
+      currentState = { hidden: [], sizes: [] };
+      for (let k = 0; k < oldViews.length; k++) {
+        if (oldViews[k]) {
+          currentState.sizes.push(oldViews[k].sizes);
+          if (this.grid.hiddencanvas(k)) {
+            currentState.hidden.push(k);
+          }
+        }
+      }
+    } else {
+      currentState = this.grid.currentGridState();
+    }
 
     // Find views to keep vs recreate by comparing coordinates
     const { viewsToKeep, newState } = this.computeViewTransition(currentState, targetState);
@@ -2591,19 +2654,25 @@ class URLHandler {
       preserveMap.set(currentIdx, targetIdx);
     }
 
+    // Determine which view array to use for lookup.
+    // If an update is in progress, the this.grid.views array is partially populated
+    // (cleared and being rebuilt async). Use oldViews from the update process instead.
+    const viewsSource = this.grid.currentUpdateProcess?.oldViews || this.grid.views;
+
     // Collect views to preserve before modifying the grid
     const preservedViews = new Map();  // targetIdx -> view
     for (const [currentIdx, targetIdx] of preserveMap) {
-      if (this.grid.views[currentIdx]) {
-        preservedViews.set(targetIdx, this.grid.views[currentIdx]);
+      if (viewsSource[currentIdx]) {
+        preservedViews.set(targetIdx, viewsSource[currentIdx]);
       }
     }
 
     // Update the grid with the new state, but inject preserved views
     this.grid.updateLayoutWithPreservedViews(newState, preservedViews);
 
-    // Update lastCenters to reflect new URL
+    // Update lastCenters and lastHidden to reflect new URL
     this.lastCenters = this.extractCenters(document.location.search);
+    this.lastHidden = this.extractHidden(document.location.search);
   }
 
   updateurl() {
@@ -2611,20 +2680,31 @@ class URLHandler {
 
     const newUrl = this.currenturl();
     const newCenters = this.extractCenters(newUrl);
+    const newHidden = this.extractHidden(newUrl);
 
-    // Use pushState if centers were removed or replaced (user might want to go back)
-    if (this.lastCenters !== null && centersWereLost(this.lastCenters, newCenters)) {
+    // Use pushState if centers were removed/replaced OR hidden views changed
+    const centersLost = this.lastCenters !== null && centersWereLost(this.lastCenters, newCenters);
+    const hiddenChanged = this.lastHidden !== null && this.lastHidden !== newHidden;
+
+    if (centersLost || hiddenChanged) {
       history.pushState(null, '', newUrl);
     } else {
       history.replaceState(null, '', newUrl);
     }
 
     this.lastCenters = newCenters;
+    this.lastHidden = newHidden;
   }
 
   // Extract the c parameter value from a URL string
   extractCenters(url) {
     const match = url.match(/[?&]c=([^&]*)/);
+    return match ? match[1] : '';
+  }
+
+  // Extract the h parameter value from a URL string
+  extractHidden(url) {
+    const match = url.match(/[?&]h=([^&]*)/);
     return match ? match[1] : '';
   }
 

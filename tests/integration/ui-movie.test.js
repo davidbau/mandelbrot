@@ -14,13 +14,13 @@ describe('Movie Mode Tests', () => {
   }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await setupPage(browser, {});
+    page = await setupPage(browser, {}, TEST_TIMEOUT);
     await navigateToApp(page);
   }, TEST_TIMEOUT);
 
   afterEach(async () => {
-    if (page) await page.close();
-  });
+    if (page) { try { await page.close(); } catch (e) { /* ignore */ } }
+  }, TEST_TIMEOUT);
 
   afterAll(async () => {
     if (browser) await browser.close();
@@ -31,7 +31,7 @@ describe('Movie Mode Tests', () => {
     const canvas = await page.$('#grid canvas');
     const box = await canvas.boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+    await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 }, TEST_TIMEOUT);
     await page.waitForTimeout(300);
   }
 
@@ -63,7 +63,7 @@ describe('Movie Mode Tests', () => {
         gridDisplay: window.getComputedStyle(grid).display,
         movieDisplay: window.getComputedStyle(movie).display
       };
-    });
+    }, TEST_TIMEOUT);
     expect(afterMPress.active).toBe(true);
     expect(afterMPress.gridDisplay).toBe('none');
     expect(afterMPress.movieDisplay).not.toBe('none');
@@ -77,7 +77,7 @@ describe('Movie Mode Tests', () => {
         active: window.explorer.movieMode.active,
         gridDisplay: window.getComputedStyle(grid).display
       };
-    });
+    }, TEST_TIMEOUT);
     expect(afterSecondM.active).toBe(false);
     expect(afterSecondM.gridDisplay).not.toBe('none');
   }, TEST_TIMEOUT);
@@ -96,7 +96,7 @@ describe('Movie Mode Tests', () => {
         hasScale: movie.querySelector('#moviescale') !== null,
         hasStatus: movie.querySelector('#moviestatus') !== null
       };
-    });
+    }, TEST_TIMEOUT);
     expect(movieState.hasMovieCanvas).toBe(true);
     expect(movieState.containerHasCanvas).toBe(true);
     expect(movieState.hasScale).toBe(true);
@@ -111,7 +111,7 @@ describe('Movie Mode Tests', () => {
         canvasCleanedUp: window.explorer.movieMode.movieCanvas === null,
         containerEmpty: movie.children.length === 0
       };
-    });
+    }, TEST_TIMEOUT);
     expect(afterStop.canvasCleanedUp).toBe(true);
     expect(afterStop.containerEmpty).toBe(true);
   }, TEST_TIMEOUT);
@@ -154,4 +154,4 @@ describe('Movie Mode Tests', () => {
     await page.waitForTimeout(200);
     expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(false);
   }, TEST_TIMEOUT);
-});
+}, TEST_TIMEOUT);
