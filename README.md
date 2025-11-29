@@ -38,5 +38,6 @@ infinite number of iterations to render crisp fractals over time.
 - [Colors](docs/COLORS.md) - Histogram-based coloring, HCL color space
 - [Movies](docs/MOVIES.md) - Smooth zoom animations, video encoding
 - [Changelog](docs/CHANGELOG.md) - History from 2009 to present
+- [Development](docs/DEVELOPMENT.md) - Build setup, testing, contributing
 
 [David Bau](http://davidbau.com/archives/2009/09/27/mandelbrot.html)
