@@ -99,6 +99,48 @@ describe('History Fuzzing Stress Tests', () => {
   }
 
   /**
+   * Helper to check URL/view count invariant:
+   * The number of views should equal the number of coordinates in the URL's 'c' parameter + 1
+   * (or just 1 if no 'c' parameter)
+   */
+  async function checkUrlViewCountInvariant(page) {
+    return await page.evaluate(() => {
+      if (!window.explorer || !window.explorer.grid) {
+        return { valid: false, error: 'explorer not available' };
+      }
+      const grid = window.explorer.grid;
+
+      // Don't check during updates
+      if (grid.currentUpdateProcess) {
+        return { valid: true, skipped: true, reason: 'update in progress' };
+      }
+
+      const url = new URL(location.href);
+      const cParam = url.searchParams.get('c');
+
+      // Count coordinates in 'c' parameter
+      // Format is like "c=-0.5+0i,-0.6+0.2i" - count commas + 1
+      let expectedViews;
+      if (!cParam) {
+        expectedViews = 1;  // Default single view
+      } else {
+        // Count the number of coordinate pairs (comma-separated)
+        expectedViews = (cParam.match(/,/g) || []).length + 1;
+      }
+
+      const actualViews = grid.views.length;
+
+      return {
+        valid: actualViews === expectedViews,
+        expectedViews,
+        actualViews,
+        cParam: cParam || '(none)',
+        url: location.href
+      };
+    });
+  }
+
+  /**
    * 30-second stress test: Random back/forward navigation
    * Tests for forward history destruction
    */
@@ -207,6 +249,18 @@ describe('History Fuzzing Stress Tests', () => {
         { timeout: 10000 });
     } catch (e) {
       failures.push({ type: 'update_stuck', message: 'currentUpdateProcess never completed' });
+    }
+
+    // Check URL/view count invariant now that state has settled
+    const urlViewCheck = await checkUrlViewCountInvariant(page);
+    if (!urlViewCheck.valid && !urlViewCheck.skipped) {
+      failures.push({
+        type: 'url_view_mismatch',
+        expectedViews: urlViewCheck.expectedViews,
+        actualViews: urlViewCheck.actualViews,
+        cParam: urlViewCheck.cParam,
+        url: urlViewCheck.url
+      });
     }
 
     // Wait for computation to start on all views (di > 0)
@@ -338,6 +392,27 @@ describe('History Fuzzing Stress Tests', () => {
       }
     }
 
+    // Wait for any pending updates to complete
+    try {
+      await page.waitForFunction(() =>
+        !window.explorer.grid.currentUpdateProcess,
+        { timeout: 10000 });
+    } catch (e) {
+      failures.push({ type: 'update_stuck', message: 'currentUpdateProcess never completed' });
+    }
+
+    // Check URL/view count invariant now that state has settled
+    const urlViewCheck = await checkUrlViewCountInvariant(page);
+    if (!urlViewCheck.valid && !urlViewCheck.skipped) {
+      failures.push({
+        type: 'url_view_mismatch',
+        expectedViews: urlViewCheck.expectedViews,
+        actualViews: urlViewCheck.actualViews,
+        cParam: urlViewCheck.cParam,
+        url: urlViewCheck.url
+      });
+    }
+
     // Final health check - verify computation is still progressing (or legitimately complete)
     const beforeDi = await page.evaluate(() =>
       window.explorer.grid.views.map(v => v ? v.di : 0)
@@ -379,9 +454,10 @@ describe('History Fuzzing Stress Tests', () => {
       console.log(`FAILURES (${failures.length}):`, JSON.stringify(failures, null, 2));
       const skeletonCount = failures.filter(f => f.type === 'skeleton_view').length;
       const stalledCount = failures.filter(f => f.type === 'computation_stalled').length;
+      const mismatchCount = failures.filter(f => f.type === 'url_view_mismatch').length;
       throw new Error(
         `Hide/unhide stress test failed! ` +
-        `Skeleton views: ${skeletonCount}, Computation stalled: ${stalledCount}. ` +
+        `Skeleton views: ${skeletonCount}, Computation stalled: ${stalledCount}, URL/view mismatch: ${mismatchCount}. ` +
         `Total failures: ${failures.length}`
       );
     }
@@ -481,6 +557,18 @@ describe('History Fuzzing Stress Tests', () => {
               failures.push({ action: actionCount, type: 'paused_view', index: vh.index });
             }
           }
+          // Check URL/view count invariant
+          const urlViewCheck = await checkUrlViewCountInvariant(page);
+          if (!urlViewCheck.valid && !urlViewCheck.skipped) {
+            failures.push({
+              action: actionCount,
+              type: 'url_view_mismatch',
+              expectedViews: urlViewCheck.expectedViews,
+              actualViews: urlViewCheck.actualViews,
+              cParam: urlViewCheck.cParam,
+              url: urlViewCheck.url
+            });
+          }
         }
       } catch (e) {
         // Errors during random operations are expected sometimes
@@ -505,6 +593,17 @@ describe('History Fuzzing Stress Tests', () => {
           failures.push({ type: 'final_null_view', index: vh.index });
         }
       }
+      // Final URL/view count check
+      const finalUrlViewCheck = await checkUrlViewCountInvariant(page);
+      if (!finalUrlViewCheck.valid && !finalUrlViewCheck.skipped) {
+        failures.push({
+          type: 'final_url_view_mismatch',
+          expectedViews: finalUrlViewCheck.expectedViews,
+          actualViews: finalUrlViewCheck.actualViews,
+          cParam: finalUrlViewCheck.cParam,
+          url: finalUrlViewCheck.url
+        });
+      }
     } catch (e) {
       failures.push({ type: 'final_check_error', message: e.message });
     }
@@ -515,10 +614,11 @@ describe('History Fuzzing Stress Tests', () => {
     }
 
     // This test is more tolerant - some errors are expected with random operations
-    // But we should have no null views or paused views at the end
+    // But we should have no null views, paused views, or URL/view mismatches at the end
     const criticalFailures = failures.filter(f =>
       f.type === 'null_view' || f.type === 'final_null_view' ||
-      f.type === 'paused_view' || f.type === 'computation_stalled'
+      f.type === 'paused_view' || f.type === 'computation_stalled' ||
+      f.type === 'url_view_mismatch' || f.type === 'final_url_view_mismatch'
     );
     if (criticalFailures.length > 0) {
       throw new Error(
