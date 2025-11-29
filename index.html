@@ -1931,71 +1931,102 @@ class Grid {
 
   createUpdateProcess(state, preservedViews) {
     let aborted = false;
-    let currentIndex = 0;
     const usedViewIds = new Set();  // Track which stableView IDs were reused
 
-    const processNext = () => {
+    // Build list of indices that need new views (not preserved)
+    const newViewIndices = [];
+    for (let k = 0; k < state.sizes.length; k++) {
+      if (!preservedViews.has(k)) {
+        newViewIndices.push(k);
+      }
+    }
+
+    // Function to place all preserved views immediately (called by start)
+    const placePreservedViews = () => {
+      for (let k = 0; k < state.sizes.length; k++) {
+        const preserved = preservedViews.get(k);
+        if (preserved) {
+          usedViewIds.add(preserved.id);
+          const oldK = preserved.k;
+          preserved.k = k;
+          this.views[k] = preserved;
+
+          // Only need to update scheduler if the index changed
+          if (oldK !== k) {
+            this.scheduler.removeBoardFromWorker(oldK);
+            this.scheduler.assignBoardToWorker(
+              k, preserved.sizes[0], preserved.sizes[1], preserved.sizes[2],
+              this.config, preserved.id);
+          }
+
+          // Set up parent-child relationship (view 0 has no parent)
+          if (k > 0 && this.views[k - 1]) {
+            preserved.setParentView(this.views[k - 1]);
+          } else if (k === 0) {
+            preserved.setParentView(null);
+          }
+
+          // Draw the preserved view to the canvas immediately
+          this.views[k].draw(this.canvas(k).getContext('2d'));
+
+          if (state.hidden.indexOf(k) >= 0) {
+            this.hidecanvas(k);
+          }
+        }
+      }
+    };
+
+    // Now process new views with 50ms delays
+    let newViewIndex = 0;
+
+    const processNextNew = () => {
       if (aborted) {
         return;
       }
-      if (currentIndex >= state.sizes.length) {
+      if (newViewIndex >= newViewIndices.length) {
+        // All done
         this.notifyurl();
         this.notifyzoom();
         this.updateHiddenViews();
-        // Update complete - clean up boards for any stableViews that weren't reused
         this.cleanupUnusedStableViews(usedViewIds);
         this.currentUpdateProcess = null;
         return;
       }
 
-      const k = currentIndex;
-      const preserved = preservedViews.get(k);
+      const k = newViewIndices[newViewIndex];
+      this.views[k] = this.makeView(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
+      this.views[k].draw(this.canvas(k).getContext('2d'));
 
-      if (preserved) {
-        // Reuse preserved view - board is still in worker (not removed by saveViewsToStable)
-        usedViewIds.add(preserved.id);
-        const oldK = preserved.k;
-        preserved.k = k;
-        this.views[k] = preserved;
-
-        // Only need to update scheduler if the index changed
-        if (oldK !== k) {
-          // Remove from old index, re-assign at new index
-          this.scheduler.removeBoardFromWorker(oldK);
-          this.scheduler.assignBoardToWorker(
-            k, preserved.sizes[0], preserved.sizes[1], preserved.sizes[2],
-            this.config, preserved.id);
-        }
-        // If index unchanged, board is already registered at correct index
-        // (or was deleted if finished, which is fine - no more work needed)
-
-        // Set up parent-child relationship (view 0 has no parent)
-        if (k > 0 && this.views[k - 1]) {
-          preserved.setParentView(this.views[k - 1]);
-        } else if (k === 0) {
-          preserved.setParentView(null);
-        }
-        // Draw the preserved view to the new canvas
-        this.views[k].draw(this.canvas(k).getContext('2d'));
-      } else {
-        // Create new view - the scheduler now tracks boards by ID, so even if
-        // cleanupUnusedStableViews tries to remove the old view's board later,
-        // it will pass the old ID and the scheduler will only remove if the IDs match.
-        this.views[k] = this.makeView(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
-        this.views[k].draw(this.canvas(k).getContext('2d'));
+      // Set up parent-child relationship for new view
+      if (k > 0 && this.views[k - 1]) {
+        this.views[k].setParentView(this.views[k - 1]);
       }
 
       if (state.hidden.indexOf(k) >= 0) {
         this.hidecanvas(k);
       }
       this.updateFullscreenButton();
-      currentIndex++;
-      setTimeout(processNext, 50);  // Faster since some views are preserved
+      newViewIndex++;
+      setTimeout(processNextNew, 50);
     };
 
     return {
       targetState: state,
-      start: () => processNext(),
+      start: () => {
+        // Place preserved views immediately (synchronously) on start
+        placePreservedViews();
+        this.updateFullscreenButton();
+        if (newViewIndices.length === 0) {
+          // No new views, finish immediately
+          this.notifyurl();
+          this.notifyzoom();
+          this.updateHiddenViews();
+          this.cleanupUnusedStableViews(usedViewIds);
+          this.currentUpdateProcess = null;
+        } else {
+          processNextNew();
+        }
+      },
       abort: () => { aborted = true; }
     };
   }

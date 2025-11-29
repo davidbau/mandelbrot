@@ -252,11 +252,44 @@ This is crucial for a good user experience because:
 
 The matching algorithm uses tolerances because URL encoding loses precision:
 - Coordinates match within 1% of the view's visible extent
-- Zoom levels match within 10% of each other
+- Zoom levels match within 1% of each other
 
-This tolerance-based matching handles the precision loss from URL encoding
-(which typically has 4-5 significant digits) while avoiding false matches
-between views at the same coordinates but different zoom levels.
+### The stableViews System
+
+During layout transitions (popstate, grid resize, H/G keys), views need to be
+preserved without losing worker messages or computation progress. The `stableViews`
+system handles this:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Normal State: this.views = [view0, view1, view2]           │
+│                this.stableViews = null                       │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼ updateLayout() called
+┌─────────────────────────────────────────────────────────────┐
+│  During Update: this.views = []  (cleared)                   │
+│                 this.stableViews = [view0, view1, view2]     │
+│                 (boards continue computing in workers)       │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼ Views recreated/preserved
+┌─────────────────────────────────────────────────────────────┐
+│  After Update: this.views = [view0', view1', view2']        │
+│                this.stableViews = null (cleaned up)          │
+│                (unused boards removed from workers)          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Key invariants:
+1. **stableViews is null except during updates** - If non-null, an update is in progress
+2. **Worker messages route to stableViews during updates** - Messages find views by ID
+3. **Boards are tracked by ID, not just index** - Prevents removing the wrong board
+4. **processingPopState flag prevents forward history loss** - No pushState during popstate
+
+The scheduler's `boardIds` map tracks which view ID owns each board index. When
+cleaning up unused boards, it only removes boards whose ID matches, preventing
+accidental removal of newer boards created at the same index.
 
 ## Worker Communication
 

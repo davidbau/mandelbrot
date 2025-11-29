@@ -95,26 +95,21 @@ describe('Browser History View Preservation Tests', () => {
       { timeout: 5000 }
     );
 
-    // Log state before popstate for debugging
+    // Verify the view we're tracking is still the same object
+    // (either in stableViews or already in views after immediate placement)
     const stateBeforePopstate = await page.evaluate((origId) => {
       const grid = window.explorer.grid;
+      // Check if the original view exists in stableViews OR in views
+      const inStableViews = (grid.stableViews || []).some(v => v?.id === origId);
+      const inViews = grid.views.some(v => v?.id === origId);
       return {
-        // Is update still in progress?
         updateInProgress: !!grid.currentUpdateProcess,
-        // What's in stableViews?
-        stableViewsLen: grid.stableViews?.length,
-        stableView2Id: grid.stableViews?.[2]?.id,
-        stableView2MatchesOriginal: grid.stableViews?.[2]?.id === origId,
-        // Original ID for reference
+        originalViewFound: inStableViews || inViews,
         originalId: origId
       };
     }, beforeState.viewId);
-    console.log('State before popstate:', JSON.stringify(stateBeforePopstate));
-
-    // Key invariant: original view 2 must be in stableViews
-    if (!stateBeforePopstate.stableView2MatchesOriginal) {
-      console.log('WARNING: Original view 2 is not in stableViews!');
-    }
+    // Key invariant: original view 2 must be preserved (in stableViews or already in views)
+    expect(stateBeforePopstate.originalViewFound).toBe(true);
 
     // Update URL and set lastCenters for popstate detection
     await page.evaluate(() => {
