@@ -3,6 +3,70 @@
 How work is distributed across threads and GPUs, and how results flow back
 to create the final image.
 
+## The Three-Tier Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              MAIN THREAD                                    │
+│                                                                             │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
+│  │    Grid     │    │  Scheduler  │    │    View     │    │   Canvas    │  │
+│  │  (manages   │───►│  (assigns   │    │  (pixels,   │───►│  (display)  │  │
+│  │   views)    │    │   work)     │    │  histogram) │    │             │  │
+│  └─────────────┘    └──────┬──────┘    └──────▲──────┘    └─────────────┘  │
+│                            │                  │                             │
+└────────────────────────────┼──────────────────┼─────────────────────────────┘
+                             │                  │
+          createBoard        │                  │  changeList
+          {k, size, re, im}  │                  │  {nn, pp}
+                             ▼                  │
+┌────────────────────────────────────────────────────────────────────────────┐
+│                            WEB WORKERS                                     │
+│                                                                            │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                            Board                                     │  │
+│  │                                                                      │  │
+│  │   Arrays:  nn (iterations)  pp (periods)  zz (current z)            │  │
+│  │            cc (c values)    bb (checkpoints)                        │  │
+│  │                                                                      │  │
+│  │   Perturbation (deep zoom):  dc, dz, refIter, refOrbit              │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                            │                                               │
+│              GPU available │                                               │
+│              & shallow zoom│                                               │
+│                            ▼                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                         GpuBoard                                     │  │
+│  │                                                                      │  │
+│  │   Buffers:  iterations (read/write)    staging (for readback)       │  │
+│  │             zValues, cValues           uniforms (params)            │  │
+│  └─────────────────────────────┬────────────────────────────────────────┘  │
+│                                │                                           │
+└────────────────────────────────┼───────────────────────────────────────────┘
+                                 │
+           dispatch + readback   │
+                                 ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                            GPU SHADER                                      │
+│                                                                            │
+│   @compute @workgroup_size(64)                                             │
+│   fn main(index):                                                          │
+│       if iterations[index] != 0: return     // skip finished               │
+│       z = zValues[index]                                                   │
+│       for batch_size iterations:                                           │
+│           z = z² + c                                                       │
+│           if |z| > 2: iterations[index] = i; return                        │
+│       zValues[index] = z                    // continue next batch         │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data flow summary:**
+- Main → Worker: `createBoard` with coordinates and size
+- Worker → GPU: buffer writes (z, c values) and compute dispatch
+- GPU → Worker: buffer readback (iterations, convergence status)
+- Worker → Main: `changeList` with newly finished pixels
+
 ## Sparse, Infinite Computation
 
 The explorer computes forever, refining as you watch. The trick: be smart
