@@ -1,0 +1,1087 @@
+/**
+ * Unit tests for Mandelbrot computation boards
+ * Tests various board implementations on small pixel grids at interesting locations
+ *
+ * NOTE: These tests require proper iteration loops to drive computation.
+ * The Board classes don't compute automatically - iterate() must be called.
+ */
+
+const puppeteer = require('puppeteer');
+const path = require('path');
+const fs = require('fs');
+
+// Find system Chrome for better headless support
+function findChrome() {
+  const chromePaths = [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',  // macOS
+    '/usr/bin/google-chrome',  // Linux
+    '/usr/bin/chromium-browser',  // Linux Chromium
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',  // Windows
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'  // Windows x86
+  ];
+  for (const p of chromePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;  // Fall back to Puppeteer's bundled Chrome
+}
+
+// Test parameters
+const TEST_TIMEOUT = 60000; // 60 seconds - needs more time for iteration loops
+const SMALL_GRID = { width: 4, height: 4 }; // Small grid for fast testing
+const MAX_ITERATIONS = 10000; // Maximum iterations before giving up
+
+// Interesting test locations in the Mandelbrot set
+const TEST_LOCATIONS = {
+  origin: {
+    name: 'Origin (0, 0)',
+    center: [0.0, 0.0],
+    size: 3.0,
+    // Most pixels diverge, but some may be chaotic (on the spike)
+    expectedDivergedMin: 10,
+    expectedConverged: 0
+  },
+  mainCardioid: {
+    name: 'Main cardioid center',
+    center: [-0.5, 0.0],
+    size: 0.1,
+    expectedDiverged: 0, // Most/all pixels should be in the set
+    expectedConverged: 16
+  },
+  feigenbaumPoint: {
+    name: 'Feigenbaum point',
+    center: [-1.401155, 0.0],
+    size: 0.001,
+    expectedChaotic: 16 // Pixels on the spike should be chaotic
+  },
+  julia: {
+    name: 'Julia set boundary',
+    center: [-0.75, 0.1],
+    size: 0.01,
+    expectedMixed: true // Should have mix of diverged and converged
+  },
+  outsideSet: {
+    name: 'Far outside (c=2)',
+    center: [2.0, 0.0],
+    size: 0.1,
+    expectedDiverged: 16,
+    expectedConverged: 0
+  },
+  period2Bulb: {
+    name: 'Period-2 bulb',
+    center: [-1.0, 0.0],
+    size: 0.1,
+    expectedMixed: true // Mix near boundary
+  }
+};
+
+describe('Mandelbrot Board Computations', () => {
+  let browser;
+  let page;
+
+  beforeAll(async () => {
+    const chromePath = findChrome();
+    const launchOptions = {
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        // Enable WebGPU support
+        '--enable-unsafe-webgpu',
+        '--enable-features=Vulkan',
+        '--use-angle=metal',  // Use Metal on macOS
+      ]
+    };
+    if (chromePath) {
+      launchOptions.executablePath = chromePath;
+    }
+    browser = await puppeteer.launch(launchOptions);
+    page = await browser.newPage();
+
+    // Load the page
+    const htmlPath = `file://${path.join(__dirname, '../../index.html')}`;
+    await page.goto(htmlPath);
+
+    // Wait for initialization
+    await page.waitForTimeout(1000);
+  }, TEST_TIMEOUT);
+
+  afterAll(async () => {
+    if (browser) {
+      await browser.close();
+    }
+  });
+
+  /**
+   * Helper to compute a small Mandelbrot region and return results
+   * This version properly calls iterate() in a loop
+   */
+  async function computeRegion(location, boardType = null) {
+    return await page.evaluate(async (loc, dims, boardTypeName, maxIter) => {
+      // Create a minimal config for testing
+      const config = {
+        dimsWidth: dims.width,
+        dimsHeight: dims.height,
+        dimsArea: dims.width * dims.height,
+        aspectRatio: dims.width / dims.height,
+        exponent: 2,
+        enableGPU: false // Don't use GPU in headless browser
+      };
+
+      // Parse center coordinates - ensure they're quad-double format
+      const center_re = typeof loc.center[0] === 'number'
+        ? [loc.center[0], 0]
+        : loc.center[0];
+      const center_im = typeof loc.center[1] === 'number'
+        ? [loc.center[1], 0]
+        : loc.center[1];
+
+      // Check if board class exists
+      if (typeof CpuBoard === 'undefined') {
+        return { error: 'CpuBoard not defined' };
+      }
+
+      // Only use CpuBoard for testing - it's the only one that works
+      // synchronously in this context
+      let board;
+      try {
+        board = new CpuBoard(0, loc.size, center_re, center_im, config);
+      } catch (e) {
+        return { error: `Failed to create board: ${e.message}` };
+      }
+
+      // Run iterations until complete or max iterations reached
+      let iterCount = 0;
+      const startTime = Date.now();
+      const timeLimit = 10000; // 10 second time limit
+
+      while (board.un > 0 && iterCount < maxIter && (Date.now() - startTime) < timeLimit) {
+        try {
+          board.iterate();
+          iterCount++;
+        } catch (e) {
+          return { error: `Iteration failed: ${e.message}` };
+        }
+      }
+
+      // Count converged pixels (those with negative nn values)
+      let converged = 0;
+      for (let i = 0; i < config.dimsArea; i++) {
+        if (board.nn[i] < 0) converged++;
+      }
+
+      // Gather results
+      return {
+        boardType: board.constructor.name,
+        unfinished: board.un,
+        diverged: board.di,
+        converged: converged,
+        chaotic: board.ch || 0,
+        iterations: board.it,
+        totalPixels: config.dimsArea,
+        timedOut: board.un > 0,
+        iterCount: iterCount
+      };
+    }, location, SMALL_GRID, boardType, MAX_ITERATIONS);
+  }
+
+  describe('CpuBoard basic tests', () => {
+    test('should correctly compute origin area (most diverge)', async () => {
+      const result = await computeRegion(TEST_LOCATIONS.origin, 'cpu');
+
+      if (result.error) {
+        console.log('Test error:', result.error);
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('CpuBoard');
+      // Most pixels should diverge (some may be chaotic on the spike)
+      expect(result.diverged).toBeGreaterThanOrEqual(TEST_LOCATIONS.origin.expectedDivergedMin);
+      // All or almost all pixels should finish (unfinished chaotic pixels may exist)
+      expect(result.unfinished).toBeLessThanOrEqual(3);
+    }, TEST_TIMEOUT);
+
+    test('should correctly compute main cardioid (all/most converge)', async () => {
+      const result = await computeRegion(TEST_LOCATIONS.mainCardioid, 'cpu');
+
+      if (result.error) {
+        console.log('Test error:', result.error);
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('CpuBoard');
+      // Most/all should converge in the main cardioid
+      expect(result.converged).toBeGreaterThan(10);
+      expect(result.unfinished).toBe(0);
+    }, TEST_TIMEOUT);
+
+    test('should complete computation for outside-set location', async () => {
+      const result = await computeRegion(TEST_LOCATIONS.outsideSet, 'cpu');
+
+      if (result.error) {
+        console.log('Test error:', result.error);
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('CpuBoard');
+      // All pixels around c=2 should diverge quickly
+      expect(result.diverged).toBe(result.totalPixels);
+      expect(result.unfinished).toBe(0);
+    }, TEST_TIMEOUT);
+  });
+
+  describe('Known Mandelbrot properties', () => {
+    test('should have converging pixels near c=0', async () => {
+      // Small region centered at origin - inner pixels should be in set
+      const location = {
+        center: [0.0, 0.0],
+        size: 0.01
+      };
+
+      const result = await computeRegion(location, 'cpu');
+
+      expect(result.error).toBeUndefined();
+      // Center pixels at exactly (0, 0) should converge
+      expect(result.converged).toBeGreaterThan(0);
+    }, TEST_TIMEOUT);
+
+    test('should have all diverging pixels around c=2', async () => {
+      const result = await computeRegion(TEST_LOCATIONS.outsideSet, 'cpu');
+
+      expect(result.error).toBeUndefined();
+      // All pixels around c=2 should diverge
+      expect(result.diverged).toBe(result.totalPixels);
+      expect(result.converged).toBe(0);
+    }, TEST_TIMEOUT);
+
+    test('should have converging pixels in period-2 bulb', async () => {
+      const result = await computeRegion(TEST_LOCATIONS.period2Bulb, 'cpu');
+
+      expect(result.error).toBeUndefined();
+      // Most pixels in period-2 bulb should converge
+      expect(result.converged).toBeGreaterThan(result.totalPixels / 2);
+    }, TEST_TIMEOUT);
+
+    test('should detect chaotic pixels on Feigenbaum spike', async () => {
+      const result = await computeRegion(TEST_LOCATIONS.feigenbaumPoint, 'cpu');
+
+      expect(result.error).toBeUndefined();
+      // Should have chaotic pixels detected on the spike
+      expect(result.chaotic).toBeGreaterThan(0);
+    }, TEST_TIMEOUT);
+  });
+
+  describe('Computation correctness', () => {
+    test('total finished pixels should equal totalPixels when done', async () => {
+      // Use outsideSet which has no chaotic pixels - all should diverge
+      const result = await computeRegion(TEST_LOCATIONS.outsideSet, 'cpu');
+
+      expect(result.error).toBeUndefined();
+      expect(result.unfinished).toBe(0);
+      // All pixels should be accounted for
+      expect(result.diverged + result.converged + result.chaotic).toBe(result.totalPixels);
+    }, TEST_TIMEOUT);
+
+    test('iteration count should be reasonable', async () => {
+      const result = await computeRegion(TEST_LOCATIONS.outsideSet, 'cpu');
+
+      expect(result.error).toBeUndefined();
+      // Points outside set should escape quickly
+      expect(result.iterCount).toBeLessThan(100);
+    }, TEST_TIMEOUT);
+  });
+
+  // GPU-related tests - now enabled with WebGPU support via Metal on macOS
+  describe('GpuBoard tests (WebGPU required)', () => {
+    /**
+     * Helper to compute a region using GpuBoard
+     */
+    async function computeGpuRegion(location) {
+      return await page.evaluate(async (loc, dims, maxIter) => {
+        const config = {
+          dimsWidth: dims.width,
+          dimsHeight: dims.height,
+          dimsArea: dims.width * dims.height,
+          aspectRatio: dims.width / dims.height,
+          exponent: 2,
+          enableGPU: true
+        };
+
+        const center_re = typeof loc.center[0] === 'number'
+          ? [loc.center[0], 0]
+          : loc.center[0];
+        const center_im = typeof loc.center[1] === 'number'
+          ? [loc.center[1], 0]
+          : loc.center[1];
+
+        // Check if WebGPU and GpuBoard are available
+        if (!navigator.gpu) {
+          return { error: 'WebGPU not available', skipped: true };
+        }
+        if (typeof GpuBoard === 'undefined') {
+          return { error: 'GpuBoard not defined', skipped: true };
+        }
+
+        let board;
+        try {
+          board = new GpuBoard(0, loc.size, center_re, center_im, config);
+          // Wait for GPU initialization
+          await board.initGPU();
+        } catch (e) {
+          return { error: `Failed to create GpuBoard: ${e.message}` };
+        }
+
+        // Run iterations until complete
+        let iterCount = 0;
+        const startTime = Date.now();
+        const timeLimit = 15000; // 15 second time limit for GPU
+
+        while (board.un > 0 && iterCount < maxIter && (Date.now() - startTime) < timeLimit) {
+          try {
+            await board.iterate();
+            iterCount++;
+          } catch (e) {
+            return { error: `Iteration failed: ${e.message}` };
+          }
+        }
+
+        // Count converged pixels
+        let converged = 0;
+        for (let i = 0; i < config.dimsArea; i++) {
+          if (board.nn[i] < 0) converged++;
+        }
+
+        return {
+          boardType: board.constructor.name,
+          unfinished: board.un,
+          diverged: board.di,
+          converged: converged,
+          chaotic: board.ch || 0,
+          totalPixels: config.dimsArea,
+          timedOut: board.un > 0,
+          iterCount: iterCount
+        };
+      }, location, SMALL_GRID, MAX_ITERATIONS);
+    }
+
+    test('should compute using WebGPU acceleration', async () => {
+      const result = await computeGpuRegion(TEST_LOCATIONS.outsideSet);
+
+      // Skip if WebGPU not available
+      if (result.skipped) {
+        console.log('Skipping GpuBoard test:', result.error);
+        return;
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('GpuBoard');
+      // All pixels around c=2 should diverge
+      expect(result.diverged).toBe(result.totalPixels);
+      expect(result.unfinished).toBe(0);
+    }, TEST_TIMEOUT);
+
+    test('should produce correct results for main cardioid', async () => {
+      const result = await computeGpuRegion(TEST_LOCATIONS.mainCardioid);
+
+      if (result.skipped) {
+        console.log('Skipping GpuBoard test:', result.error);
+        return;
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('GpuBoard');
+      // Most/all should converge in the main cardioid
+      expect(result.converged).toBeGreaterThan(10);
+      expect(result.unfinished).toBe(0);
+    }, TEST_TIMEOUT);
+  });
+
+  describe('GpuZhuoranBoard tests (WebGPU required)', () => {
+    /**
+     * Helper to compute a region using GpuZhuoranBoard
+     */
+    async function computeGpuZhuoranRegion(location) {
+      return await page.evaluate(async (loc, dims, maxIter) => {
+        const config = {
+          dimsWidth: dims.width,
+          dimsHeight: dims.height,
+          dimsArea: dims.width * dims.height,
+          aspectRatio: dims.width / dims.height,
+          exponent: 2,
+          enableGPU: true
+        };
+
+        const center_re = typeof loc.center[0] === 'number'
+          ? [loc.center[0], 0]
+          : loc.center[0];
+        const center_im = typeof loc.center[1] === 'number'
+          ? [loc.center[1], 0]
+          : loc.center[1];
+
+        // Check if WebGPU and GpuZhuoranBoard are available
+        if (!navigator.gpu) {
+          return { error: 'WebGPU not available', skipped: true };
+        }
+        if (typeof GpuZhuoranBoard === 'undefined') {
+          return { error: 'GpuZhuoranBoard not defined', skipped: true };
+        }
+
+        let board;
+        try {
+          board = new GpuZhuoranBoard(0, loc.size, center_re, center_im, config);
+          await board.initGPU();
+        } catch (e) {
+          return { error: `Failed to create GpuZhuoranBoard: ${e.message}` };
+        }
+
+        // Run iterations until complete
+        let iterCount = 0;
+        const startTime = Date.now();
+        const timeLimit = 15000;
+
+        while (board.un > 0 && iterCount < maxIter && (Date.now() - startTime) < timeLimit) {
+          try {
+            await board.iterate();
+            iterCount++;
+          } catch (e) {
+            return { error: `Iteration failed: ${e.message}` };
+          }
+        }
+
+        let converged = 0;
+        for (let i = 0; i < config.dimsArea; i++) {
+          if (board.nn[i] < 0) converged++;
+        }
+
+        return {
+          boardType: board.constructor.name,
+          unfinished: board.un,
+          diverged: board.di,
+          converged: converged,
+          chaotic: board.ch || 0,
+          totalPixels: config.dimsArea,
+          timedOut: board.un > 0,
+          iterCount: iterCount,
+          refIterations: board.refIterations
+        };
+      }, location, SMALL_GRID, MAX_ITERATIONS);
+    }
+
+    test('should handle computation with GPU perturbation', async () => {
+      const result = await computeGpuZhuoranRegion(TEST_LOCATIONS.outsideSet);
+
+      if (result.skipped) {
+        console.log('Skipping GpuZhuoranBoard test:', result.error);
+        return;
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('GpuZhuoranBoard');
+      expect(result.diverged).toBe(result.totalPixels);
+      expect(result.unfinished).toBe(0);
+    }, TEST_TIMEOUT);
+
+    test('should produce results consistent with CPU ZhuoranBoard', async () => {
+      const location = TEST_LOCATIONS.outsideSet;
+
+      // Run both GPU and CPU versions
+      const gpuResult = await computeGpuZhuoranRegion(location);
+
+      if (gpuResult.skipped) {
+        console.log('Skipping GPU/CPU consistency test:', gpuResult.error);
+        return;
+      }
+
+      // Get CPU ZhuoranBoard result for comparison
+      const cpuResult = await page.evaluate(async (loc, dims, maxIter) => {
+        const config = {
+          dimsWidth: dims.width,
+          dimsHeight: dims.height,
+          dimsArea: dims.width * dims.height,
+          aspectRatio: dims.width / dims.height,
+          exponent: 2,
+          enableGPU: false
+        };
+
+        const center_re = typeof loc.center[0] === 'number'
+          ? [loc.center[0], 0]
+          : loc.center[0];
+        const center_im = typeof loc.center[1] === 'number'
+          ? [loc.center[1], 0]
+          : loc.center[1];
+
+        const board = new ZhuoranBoard(0, loc.size, center_re, center_im, config);
+
+        let iterCount = 0;
+        const startTime = Date.now();
+        const timeLimit = 10000;
+
+        while (board.un > 0 && iterCount < maxIter && (Date.now() - startTime) < timeLimit) {
+          board.iterate();
+          iterCount++;
+        }
+
+        const pixelResults = [];
+        for (let i = 0; i < config.dimsArea; i++) {
+          pixelResults.push({
+            diverged: board.nn[i] > 0,
+            converged: board.nn[i] < 0
+          });
+        }
+
+        return {
+          diverged: board.di,
+          converged: pixelResults.filter(p => p.converged).length,
+          pixelResults: pixelResults
+        };
+      }, location, SMALL_GRID, MAX_ITERATIONS);
+
+      // GPU and CPU should agree
+      expect(gpuResult.diverged).toBe(cpuResult.diverged);
+      expect(gpuResult.converged).toBe(cpuResult.converged);
+    }, TEST_TIMEOUT);
+  });
+
+  // ZhuoranBoard tests - single reference orbit perturbation
+  describe('ZhuoranBoard tests', () => {
+    /**
+     * Helper to compute a region using ZhuoranBoard
+     */
+    async function computeZhuoranRegion(location) {
+      return await page.evaluate(async (loc, dims, maxIter) => {
+        // Create a minimal config for testing
+        const config = {
+          dimsWidth: dims.width,
+          dimsHeight: dims.height,
+          dimsArea: dims.width * dims.height,
+          aspectRatio: dims.width / dims.height,
+          exponent: 2,
+          enableGPU: false
+        };
+
+        // Parse center coordinates
+        const center_re = typeof loc.center[0] === 'number'
+          ? [loc.center[0], 0]
+          : loc.center[0];
+        const center_im = typeof loc.center[1] === 'number'
+          ? [loc.center[1], 0]
+          : loc.center[1];
+
+        // Check if ZhuoranBoard class exists
+        if (typeof ZhuoranBoard === 'undefined') {
+          return { error: 'ZhuoranBoard not defined' };
+        }
+
+        let board;
+        try {
+          board = new ZhuoranBoard(0, loc.size, center_re, center_im, config);
+        } catch (e) {
+          return { error: `Failed to create board: ${e.message}` };
+        }
+
+        // Run iterations until complete or max iterations reached
+        let iterCount = 0;
+        const startTime = Date.now();
+        const timeLimit = 10000; // 10 second time limit
+
+        while (board.un > 0 && iterCount < maxIter && (Date.now() - startTime) < timeLimit) {
+          try {
+            board.iterate();
+            iterCount++;
+          } catch (e) {
+            return { error: `Iteration failed: ${e.message}` };
+          }
+        }
+
+        // Count converged pixels (those with negative nn values)
+        let converged = 0;
+        for (let i = 0; i < config.dimsArea; i++) {
+          if (board.nn[i] < 0) converged++;
+        }
+
+        // Gather results
+        return {
+          boardType: board.constructor.name,
+          unfinished: board.un,
+          diverged: board.di,
+          converged: converged,
+          chaotic: board.ch || 0,
+          iterations: board.it,
+          totalPixels: config.dimsArea,
+          timedOut: board.un > 0,
+          iterCount: iterCount,
+          refIterations: board.refIterations
+        };
+      }, location, SMALL_GRID, MAX_ITERATIONS);
+    }
+
+    test('should correctly compute origin area', async () => {
+      const result = await computeZhuoranRegion(TEST_LOCATIONS.origin);
+
+      if (result.error) {
+        console.log('ZhuoranBoard test error:', result.error);
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('ZhuoranBoard');
+      // Most pixels should diverge
+      expect(result.diverged).toBeGreaterThanOrEqual(TEST_LOCATIONS.origin.expectedDivergedMin);
+      // Should complete or nearly complete
+      expect(result.unfinished).toBeLessThanOrEqual(3);
+    }, TEST_TIMEOUT);
+
+    test('should correctly compute main cardioid', async () => {
+      const result = await computeZhuoranRegion(TEST_LOCATIONS.mainCardioid);
+
+      if (result.error) {
+        console.log('ZhuoranBoard test error:', result.error);
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('ZhuoranBoard');
+      // Most/all should converge in the main cardioid
+      expect(result.converged).toBeGreaterThan(10);
+      expect(result.unfinished).toBe(0);
+    }, TEST_TIMEOUT);
+
+    test('should handle all-diverging region', async () => {
+      const result = await computeZhuoranRegion(TEST_LOCATIONS.outsideSet);
+
+      if (result.error) {
+        console.log('ZhuoranBoard test error:', result.error);
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('ZhuoranBoard');
+      // All pixels around c=2 should diverge quickly
+      expect(result.diverged).toBe(result.totalPixels);
+      expect(result.unfinished).toBe(0);
+    }, TEST_TIMEOUT);
+
+    test('should build reference orbit', async () => {
+      const result = await computeZhuoranRegion(TEST_LOCATIONS.outsideSet);
+
+      expect(result.error).toBeUndefined();
+      // ZhuoranBoard should have computed a reference orbit
+      expect(result.refIterations).toBeGreaterThan(0);
+    }, TEST_TIMEOUT);
+  });
+
+  // PerturbationBoard tests - grid of quad-double reference points
+  describe('PerturbationBoard tests', () => {
+    /**
+     * Helper to compute a region using PerturbationBoard
+     */
+    async function computePerturbationRegion(location) {
+      return await page.evaluate(async (loc, dims, maxIter) => {
+        // Create a minimal config for testing
+        const config = {
+          dimsWidth: dims.width,
+          dimsHeight: dims.height,
+          dimsArea: dims.width * dims.height,
+          aspectRatio: dims.width / dims.height,
+          exponent: 2,
+          enableGPU: false
+        };
+
+        // Parse center coordinates
+        const center_re = typeof loc.center[0] === 'number'
+          ? [loc.center[0], 0]
+          : loc.center[0];
+        const center_im = typeof loc.center[1] === 'number'
+          ? [loc.center[1], 0]
+          : loc.center[1];
+
+        // Check if PerturbationBoard class exists
+        if (typeof PerturbationBoard === 'undefined') {
+          return { error: 'PerturbationBoard not defined' };
+        }
+
+        let board;
+        try {
+          board = new PerturbationBoard(0, loc.size, center_re, center_im, config);
+        } catch (e) {
+          return { error: `Failed to create board: ${e.message}` };
+        }
+
+        // Run iterations until complete or max iterations reached
+        let iterCount = 0;
+        const startTime = Date.now();
+        const timeLimit = 10000; // 10 second time limit
+
+        while (board.un > 0 && iterCount < maxIter && (Date.now() - startTime) < timeLimit) {
+          try {
+            board.iterate();
+            iterCount++;
+          } catch (e) {
+            return { error: `Iteration failed: ${e.message}` };
+          }
+        }
+
+        // Count converged pixels (those with negative nn values)
+        let converged = 0;
+        for (let i = 0; i < config.dimsArea; i++) {
+          if (board.nn[i] < 0) converged++;
+        }
+
+        // Gather results
+        return {
+          boardType: board.constructor.name,
+          unfinished: board.un,
+          diverged: board.di,
+          converged: converged,
+          chaotic: board.ch || 0,
+          iterations: board.it,
+          totalPixels: config.dimsArea,
+          timedOut: board.un > 0,
+          iterCount: iterCount,
+          quadIndexesCount: board.quadIndexes ? board.quadIndexes.length : 0,
+          pertIndexesCount: board.pertIndexes ? board.pertIndexes.length : 0
+        };
+      }, location, SMALL_GRID, MAX_ITERATIONS);
+    }
+
+    test('should correctly compute origin area', async () => {
+      const result = await computePerturbationRegion(TEST_LOCATIONS.origin);
+
+      if (result.error) {
+        console.log('PerturbationBoard test error:', result.error);
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('PerturbationBoard');
+      // Most pixels should diverge
+      expect(result.diverged).toBeGreaterThanOrEqual(TEST_LOCATIONS.origin.expectedDivergedMin);
+      // Should complete or nearly complete
+      expect(result.unfinished).toBeLessThanOrEqual(3);
+    }, TEST_TIMEOUT);
+
+    test('should correctly compute main cardioid', async () => {
+      const result = await computePerturbationRegion(TEST_LOCATIONS.mainCardioid);
+
+      if (result.error) {
+        console.log('PerturbationBoard test error:', result.error);
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('PerturbationBoard');
+      // Most/all should converge in the main cardioid
+      expect(result.converged).toBeGreaterThan(10);
+      expect(result.unfinished).toBe(0);
+    }, TEST_TIMEOUT);
+
+    test('should handle all-diverging region', async () => {
+      const result = await computePerturbationRegion(TEST_LOCATIONS.outsideSet);
+
+      if (result.error) {
+        console.log('PerturbationBoard test error:', result.error);
+      }
+
+      expect(result.error).toBeUndefined();
+      expect(result.boardType).toBe('PerturbationBoard');
+      // All pixels around c=2 should diverge quickly
+      expect(result.diverged).toBe(result.totalPixels);
+      expect(result.unfinished).toBe(0);
+    }, TEST_TIMEOUT);
+
+    test('should use quad reference points', async () => {
+      const result = await computePerturbationRegion(TEST_LOCATIONS.origin);
+
+      expect(result.error).toBeUndefined();
+      // PerturbationBoard should have quad-double reference points
+      expect(result.quadIndexesCount).toBeGreaterThan(0);
+    }, TEST_TIMEOUT);
+  });
+
+  describe('Board consistency tests', () => {
+    /**
+     * Helper to compute a region and return pixel-by-pixel results
+     * Uses eval to access board classes from the global scope
+     */
+    async function computeAllBoards(location) {
+      return await page.evaluate(async (loc, dims, maxIter) => {
+        const config = {
+          dimsWidth: dims.width,
+          dimsHeight: dims.height,
+          dimsArea: dims.width * dims.height,
+          aspectRatio: dims.width / dims.height,
+          exponent: 2,
+          enableGPU: false
+        };
+
+        const center_re = typeof loc.center[0] === 'number'
+          ? [loc.center[0], 0]
+          : loc.center[0];
+        const center_im = typeof loc.center[1] === 'number'
+          ? [loc.center[1], 0]
+          : loc.center[1];
+
+        // Check if board classes exist
+        if (typeof CpuBoard === 'undefined') {
+          return { error: 'CpuBoard not defined' };
+        }
+        if (typeof ZhuoranBoard === 'undefined') {
+          return { error: 'ZhuoranBoard not defined' };
+        }
+        if (typeof PerturbationBoard === 'undefined') {
+          return { error: 'PerturbationBoard not defined' };
+        }
+
+        function runBoard(BoardClass, name) {
+          let board;
+          try {
+            board = new BoardClass(0, loc.size, center_re, center_im, config);
+          } catch (e) {
+            return { error: `Failed to create ${name}: ${e.message}` };
+          }
+
+          let iterCount = 0;
+          const startTime = Date.now();
+          const timeLimit = 10000;
+
+          while (board.un > 0 && iterCount < maxIter && (Date.now() - startTime) < timeLimit) {
+            try {
+              board.iterate();
+              iterCount++;
+            } catch (e) {
+              return { error: `${name} iteration failed: ${e.message}` };
+            }
+          }
+
+          const pixelResults = [];
+          for (let i = 0; i < config.dimsArea; i++) {
+            pixelResults.push({
+              nn: board.nn[i],
+              diverged: board.nn[i] > 0,
+              converged: board.nn[i] < 0
+            });
+          }
+
+          return {
+            boardType: name,
+            unfinished: board.un,
+            diverged: board.di,
+            converged: pixelResults.filter(p => p.converged).length,
+            chaotic: board.ch || 0,
+            totalPixels: config.dimsArea,
+            pixelResults: pixelResults
+          };
+        }
+
+        return {
+          cpu: runBoard(CpuBoard, 'CpuBoard'),
+          zhuoran: runBoard(ZhuoranBoard, 'ZhuoranBoard'),
+          perturbation: runBoard(PerturbationBoard, 'PerturbationBoard')
+        };
+      }, location, SMALL_GRID, MAX_ITERATIONS);
+    }
+
+    test('CpuBoard and ZhuoranBoard should agree on divergence/convergence', async () => {
+      const location = TEST_LOCATIONS.outsideSet; // All diverge - clear case
+      const results = await computeAllBoards(location);
+
+      if (results.error) {
+        console.log('Board consistency test error:', results.error);
+      }
+      expect(results.error).toBeUndefined();
+
+      const cpuResult = results.cpu;
+      const zhuoranResult = results.zhuoran;
+
+      expect(cpuResult.error).toBeUndefined();
+      expect(zhuoranResult.error).toBeUndefined();
+
+      // Both should complete
+      expect(cpuResult.unfinished).toBe(0);
+      expect(zhuoranResult.unfinished).toBe(0);
+
+      // Both should have same diverged count
+      expect(cpuResult.diverged).toBe(zhuoranResult.diverged);
+      expect(cpuResult.converged).toBe(zhuoranResult.converged);
+
+      // Each pixel should agree on diverged vs converged
+      for (let i = 0; i < cpuResult.totalPixels; i++) {
+        expect(cpuResult.pixelResults[i].diverged).toBe(zhuoranResult.pixelResults[i].diverged);
+        expect(cpuResult.pixelResults[i].converged).toBe(zhuoranResult.pixelResults[i].converged);
+      }
+    }, TEST_TIMEOUT);
+
+    test('CpuBoard and PerturbationBoard should agree on divergence/convergence', async () => {
+      const location = TEST_LOCATIONS.outsideSet; // All diverge - clear case
+      const results = await computeAllBoards(location);
+
+      expect(results.error).toBeUndefined();
+
+      const cpuResult = results.cpu;
+      const pertResult = results.perturbation;
+
+      expect(cpuResult.error).toBeUndefined();
+      expect(pertResult.error).toBeUndefined();
+
+      // Both should complete
+      expect(cpuResult.unfinished).toBe(0);
+      expect(pertResult.unfinished).toBe(0);
+
+      // Both should have same diverged count
+      expect(cpuResult.diverged).toBe(pertResult.diverged);
+      expect(cpuResult.converged).toBe(pertResult.converged);
+
+      // Each pixel should agree on diverged vs converged
+      for (let i = 0; i < cpuResult.totalPixels; i++) {
+        expect(cpuResult.pixelResults[i].diverged).toBe(pertResult.pixelResults[i].diverged);
+        expect(cpuResult.pixelResults[i].converged).toBe(pertResult.pixelResults[i].converged);
+      }
+    }, TEST_TIMEOUT);
+
+    test('All CPU boards should agree on main cardioid convergence', async () => {
+      const location = TEST_LOCATIONS.mainCardioid;
+      const results = await computeAllBoards(location);
+
+      expect(results.error).toBeUndefined();
+
+      const cpuResult = results.cpu;
+      const zhuoranResult = results.zhuoran;
+      const pertResult = results.perturbation;
+
+      expect(cpuResult.error).toBeUndefined();
+      expect(zhuoranResult.error).toBeUndefined();
+      expect(pertResult.error).toBeUndefined();
+
+      // All should complete
+      expect(cpuResult.unfinished).toBe(0);
+      expect(zhuoranResult.unfinished).toBe(0);
+      expect(pertResult.unfinished).toBe(0);
+
+      // All should agree on converged count
+      expect(cpuResult.converged).toBe(zhuoranResult.converged);
+      expect(cpuResult.converged).toBe(pertResult.converged);
+
+      // Each pixel should agree
+      for (let i = 0; i < cpuResult.totalPixels; i++) {
+        expect(cpuResult.pixelResults[i].converged).toBe(zhuoranResult.pixelResults[i].converged);
+        expect(cpuResult.pixelResults[i].converged).toBe(pertResult.pixelResults[i].converged);
+      }
+    }, TEST_TIMEOUT);
+
+    test('GpuBoard and CpuBoard should produce equivalent results', async () => {
+      const location = TEST_LOCATIONS.outsideSet;
+
+      // Get GpuBoard result
+      const gpuResult = await page.evaluate(async (loc, dims, maxIter) => {
+        const config = {
+          dimsWidth: dims.width,
+          dimsHeight: dims.height,
+          dimsArea: dims.width * dims.height,
+          aspectRatio: dims.width / dims.height,
+          exponent: 2,
+          enableGPU: true
+        };
+
+        const center_re = typeof loc.center[0] === 'number'
+          ? [loc.center[0], 0]
+          : loc.center[0];
+        const center_im = typeof loc.center[1] === 'number'
+          ? [loc.center[1], 0]
+          : loc.center[1];
+
+        if (!navigator.gpu) {
+          return { skipped: true, error: 'WebGPU not available' };
+        }
+
+        let board;
+        try {
+          board = new GpuBoard(0, loc.size, center_re, center_im, config);
+          await board.initGPU();
+        } catch (e) {
+          return { error: `Failed to create GpuBoard: ${e.message}` };
+        }
+
+        let iterCount = 0;
+        const startTime = Date.now();
+        const timeLimit = 15000;
+
+        while (board.un > 0 && iterCount < maxIter && (Date.now() - startTime) < timeLimit) {
+          await board.iterate();
+          iterCount++;
+        }
+
+        const pixelResults = [];
+        for (let i = 0; i < config.dimsArea; i++) {
+          pixelResults.push({
+            diverged: board.nn[i] > 0,
+            converged: board.nn[i] < 0
+          });
+        }
+
+        return {
+          boardType: 'GpuBoard',
+          diverged: board.di,
+          converged: pixelResults.filter(p => p.converged).length,
+          pixelResults: pixelResults
+        };
+      }, location, SMALL_GRID, MAX_ITERATIONS);
+
+      if (gpuResult.skipped) {
+        console.log('Skipping GPU/CPU consistency test:', gpuResult.error);
+        return;
+      }
+
+      // Get CpuBoard result
+      const cpuResult = await page.evaluate(async (loc, dims, maxIter) => {
+        const config = {
+          dimsWidth: dims.width,
+          dimsHeight: dims.height,
+          dimsArea: dims.width * dims.height,
+          aspectRatio: dims.width / dims.height,
+          exponent: 2,
+          enableGPU: false
+        };
+
+        const center_re = typeof loc.center[0] === 'number'
+          ? [loc.center[0], 0]
+          : loc.center[0];
+        const center_im = typeof loc.center[1] === 'number'
+          ? [loc.center[1], 0]
+          : loc.center[1];
+
+        const board = new CpuBoard(0, loc.size, center_re, center_im, config);
+
+        let iterCount = 0;
+        const startTime = Date.now();
+        const timeLimit = 10000;
+
+        while (board.un > 0 && iterCount < maxIter && (Date.now() - startTime) < timeLimit) {
+          board.iterate();
+          iterCount++;
+        }
+
+        const pixelResults = [];
+        for (let i = 0; i < config.dimsArea; i++) {
+          pixelResults.push({
+            diverged: board.nn[i] > 0,
+            converged: board.nn[i] < 0
+          });
+        }
+
+        return {
+          boardType: 'CpuBoard',
+          diverged: board.di,
+          converged: pixelResults.filter(p => p.converged).length,
+          pixelResults: pixelResults
+        };
+      }, location, SMALL_GRID, MAX_ITERATIONS);
+
+      // GPU and CPU should agree
+      expect(gpuResult.error).toBeUndefined();
+      expect(cpuResult.error).toBeUndefined();
+      expect(gpuResult.diverged).toBe(cpuResult.diverged);
+      expect(gpuResult.converged).toBe(cpuResult.converged);
+
+      // Pixel-by-pixel comparison
+      for (let i = 0; i < gpuResult.pixelResults.length; i++) {
+        expect(gpuResult.pixelResults[i].diverged).toBe(cpuResult.pixelResults[i].diverged);
+        expect(gpuResult.pixelResults[i].converged).toBe(cpuResult.pixelResults[i].converged);
+      }
+    }, TEST_TIMEOUT);
+  });
+});
