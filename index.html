@@ -7559,7 +7559,7 @@ function qdSquare(a) {
 function qdcPow(q, n) {
   if (n === 1) return q;
   if (n === 2) return qdcSquare(q);
-  if (n === 3) return qdcMul(qdSquare(q), q);
+  if (n === 3) return qdcMul(qdcSquare(q), q);
   let result = [1, 0, 0, 0];
   let base = q;
   while (n > 0) {
