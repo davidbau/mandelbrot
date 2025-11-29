@@ -10,11 +10,12 @@
     "test:coverage": "jest --coverage",
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
+    "test:stress": "jest --testMatch='**/tests/**/*.stress.js' --verbose",
     "bench": "jest --testMatch='**/tests/**/*.bench.js' --verbose"
   },
   "jest": {
     "testEnvironment": "node",
-    "maxWorkers": 6,
+    "maxWorkers": 5,
     "testMatch": [
       "**/tests/**/*.test.js"
     ],

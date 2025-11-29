@@ -1235,6 +1235,9 @@ class View {
     this.initview(size, re, im);
     this.workerInfo = 'no worker';
     this.boardType = null;
+
+    // Store exponent at creation time - views computed with different exponent are incompatible
+    this.exponent = config.exponent;
   }
 
   // Static helper: lookup histogram fractions for a given iteration count
@@ -1706,9 +1709,10 @@ class Grid {
     this.urlListeners = [];
     this.zoomListeners = [];
     this.scheduler = new Scheduler(this);
-    // Persistent reference to views from the last completed update.
-    // Used by popstate to find views to preserve even after currentUpdateProcess is null.
-    this.lastCompleteViews = [];
+    // Stable views - only populated during an update process.
+    // Holds union of views that can be reused if popstate fires mid-update.
+    // Cleared to null when update completes (this.views is then the stable state).
+    this.stableViews = null;
   }
 
   makeView(k, size, re, im, deferComputation = false) {
@@ -1762,6 +1766,7 @@ class Grid {
   }
 
   updateViewFromWorkerResult(k, data, workerIndex) {
+    // First check current views
     if (this.views[k]) {
       if (this.views[k].id !== data.id) {
         return;
@@ -1781,6 +1786,18 @@ class Grid {
             boardType: data.boardType
           })
         );
+      }
+      return;
+    }
+
+    // If not in current views, check stableViews (may be mid-update)
+    // This ensures we don't lose messages during updateLayout transitions
+    if (this.stableViews) {
+      for (const view of this.stableViews) {
+        if (view && view.id === data.id) {
+          view.updateFromWorkerResult(data);
+          return;
+        }
       }
     }
   }
@@ -1825,17 +1842,18 @@ class Grid {
       this.config.initSizes();
     }
 
-    // IMPORTANT: Capture oldViews before clearing. If popstate fires during async update,
-    // handlePopState needs access to the complete view array from before the update started.
-    // Chain oldViews from previous update if available and non-empty, otherwise use current views.
-    const prevOldViews = this.currentUpdateProcess?.oldViews;
-    const oldViews = (prevOldViews && prevOldViews.length > 0) ? prevOldViews : this.views.slice();
+    // Save current views to stableViews for potential reuse.
+    // This does NOT remove boards from workers - they continue computing.
+    // Boards will be cleaned up at end of update for any views not reused.
+    this.saveViewsToStable();
 
-    // Clear and recreate the grid DOM
+    // Find views to preserve by coordinate matching
+    const preservedViews = this.findPreservableViews(state.sizes);
+
+    // Clear and recreate the grid DOM (views array already cleared by saveViewsToStable)
     const gridElement = document.getElementById('grid');
     gridElement.innerHTML = '';
     this.canvascount = 0;
-    this.truncateviews(0);
 
     // Create canvases for all views in the state
     const {sizes, hidden} = state;
@@ -1849,102 +1867,72 @@ class Grid {
     // Update workers with hidden boards BEFORE creating boards
     // to prevent hidden boards from computing
     this.updateHiddenViews();
-    this.currentUpdateProcess = this.createUpdateProcess(state, oldViews);
+    this.currentUpdateProcess = this.createUpdateProcess(state, preservedViews);
     this.currentUpdateProcess.start();
   }
 
-  // Update layout while preserving specified views (for back/forward navigation)
-  updateLayoutWithPreservedViews(state, preservedViews) {
-    // Abort any current update process
-    if (this.currentUpdateProcess) {
-      this.currentUpdateProcess.abort();
-    }
+  // Find views in stableViews that match target coordinates, dimensions, and exponent
+  // Returns Map of targetIdx -> view
+  findPreservableViews(targetSizes) {
+    const preservedViews = new Map();
+    const targetArea = this.config.dimsWidth * this.config.dimsHeight;
+    const targetExponent = this.config.exponent;
 
-    // Find which current views are NOT being preserved (need to be removed)
-    const preservedCurrentIndices = new Set();
-    for (const [targetIdx, view] of preservedViews) {
-      // Find the current index of this preserved view
-      const currentIdx = this.views.indexOf(view);
-      if (currentIdx >= 0) {
-        preservedCurrentIndices.add(currentIdx);
-      }
-    }
+    // Helper to check if a view matches target coordinates, dimensions, AND exponent
+    const viewMatchesTarget = (view, targetSizes) => {
+      if (!view || !view.sizes || !targetSizes) return false;
 
-    // Remove views that won't be preserved (from workers only, keep View objects)
-    for (let k = 0; k < this.views.length; k++) {
-      if (!preservedCurrentIndices.has(k) && this.views[k]) {
-        this.scheduler.removeBoardFromWorker(k);
-      }
-    }
+      // Check exponent matches (views computed with different exponent are incompatible)
+      if (view.exponent !== targetExponent) return false;
 
-    const gridElement = document.getElementById('grid');
-    const { sizes, hidden } = state;
+      // Check dimensions match
+      const viewArea = view.nn?.length || 0;
+      if (viewArea !== targetArea) return false;
 
-    // Build a map of targetIdx -> existing canvas element (if preserved and same position)
-    const canvasesToKeep = new Map();  // targetIdx -> wrapper element
-    for (const [targetIdx, view] of preservedViews) {
-      const currentIdx = this.views.indexOf(view);
-      if (currentIdx >= 0 && currentIdx === targetIdx && targetIdx < sizes.length) {
-        // Same position and within target size - can reuse the canvas element
-        const canvasWrapper = this.canvas(currentIdx)?.parentElement;
-        if (canvasWrapper) {
-          canvasesToKeep.set(targetIdx, canvasWrapper);
+      const [viewSize, viewRe, viewIm] = view.sizes;
+      const [targetSize, targetRe, targetIm] = targetSizes;
+
+      // Check zoom level - must be within 1%
+      const sizeRatio = targetSize / viewSize;
+      if (sizeRatio < 0.99 || sizeRatio > 1.01) return false;
+
+      // Check coordinates - tolerance is 1% of view extent
+      const tolerance = viewSize * 0.01;
+      const viewReVal = viewRe[0] + (viewRe[1] || 0);
+      const viewImVal = viewIm[0] + (viewIm[1] || 0);
+      const targetReVal = targetRe[0] + (targetRe[1] || 0);
+      const targetImVal = targetIm[0] + (targetIm[1] || 0);
+      return Math.abs(targetReVal - viewReVal) < tolerance &&
+             Math.abs(targetImVal - viewImVal) < tolerance;
+    };
+
+    for (let targetIdx = 0; targetIdx < targetSizes.length; targetIdx++) {
+      const targetSize = targetSizes[targetIdx];
+
+      // Search stableViews for best match (most computed data)
+      let bestView = null;
+      let bestDi = -1;
+
+      for (const view of (this.stableViews || [])) {
+        if (!viewMatchesTarget(view, targetSize)) continue;
+        if (view.di > bestDi) {
+          bestDi = view.di;
+          bestView = view;
         }
       }
-    }
 
-    // Remove ALL view wrappers that won't be in the final state
-    // Wrapper divs have IDs like 'b_0', 'b_1', etc.
-    const childrenToRemove = [];
-    for (let i = 0; i < gridElement.children.length; i++) {
-      const child = gridElement.children[i];
-      const wrapperId = child.id;
-      if (wrapperId && wrapperId.startsWith('b_')) {
-        const idx = parseInt(wrapperId.replace('b_', ''));
-        // Remove if: not in canvasesToKeep OR index is beyond target state size
-        if (!canvasesToKeep.has(idx) || idx >= sizes.length) {
-          childrenToRemove.push(child);
-        }
-      }
-    }
-    childrenToRemove.forEach(child => child.remove());
-
-    // Set canvascount to 0, we'll rebuild it
-    this.canvascount = 0;
-
-    // Create or reuse canvases in order, ensuring correct DOM order
-    for (let k = 0; k < sizes.length; k++) {
-      if (canvasesToKeep.has(k)) {
-        // Reuse existing canvas - move it to correct position in DOM
-        const wrapper = canvasesToKeep.get(k);
-        gridElement.appendChild(wrapper);  // Moves to end (which is correct order)
-        this.canvascount = k + 1;
-      } else {
-        // Create new canvas at this position
-        this.makecanvas(k, sizes[k]);
-      }
-      if (hidden.includes(k)) {
-        this.hidecanvas(k);
-      } else {
-        this.showcanvas(k);
+      if (bestView) {
+        preservedViews.set(targetIdx, bestView);
       }
     }
 
-    // Reset views array but keep preserved view objects
-    // IMPORTANT: If an update is in progress, its oldViews contains the complete view
-    // array from before any updates started. Use that instead of the partially-rebuilt
-    // this.views to ensure we don't lose views during rapid popstate events.
-    const oldViews = this.currentUpdateProcess?.oldViews || this.views;
-    this.views = [];
-
-    // Create update process that reuses preserved views
-    this.currentUpdateProcess = this.createUpdateProcessWithPreserved(state, preservedViews, oldViews);
-    this.currentUpdateProcess.start();
+    return preservedViews;
   }
 
-  createUpdateProcessWithPreserved(state, preservedViews, oldViews) {
+  createUpdateProcess(state, preservedViews) {
     let aborted = false;
     let currentIndex = 0;
+    const usedViewIds = new Set();  // Track which stableView IDs were reused
 
     const processNext = () => {
       if (aborted) {
@@ -1954,8 +1942,8 @@ class Grid {
         this.notifyurl();
         this.notifyzoom();
         this.updateHiddenViews();
-        // Save completed views for popstate lookup
-        this.lastCompleteViews = this.views.slice();
+        // Update complete - clean up boards for any stableViews that weren't reused
+        this.cleanupUnusedStableViews(usedViewIds);
         this.currentUpdateProcess = null;
         return;
       }
@@ -1964,20 +1952,22 @@ class Grid {
       const preserved = preservedViews.get(k);
 
       if (preserved) {
-        // Reuse preserved view - it's still registered with the scheduler
-        // Just update its index and parent relationship
+        // Reuse preserved view - board is still in worker (not removed by saveViewsToStable)
+        usedViewIds.add(preserved.id);
         const oldK = preserved.k;
         preserved.k = k;
         this.views[k] = preserved;
 
-        // If the index changed, we need to update the scheduler
+        // Only need to update scheduler if the index changed
         if (oldK !== k) {
-          // Remove from old index, add at new index
+          // Remove from old index, re-assign at new index
           this.scheduler.removeBoardFromWorker(oldK);
           this.scheduler.assignBoardToWorker(
             k, preserved.sizes[0], preserved.sizes[1], preserved.sizes[2],
             this.config, preserved.id);
         }
+        // If index unchanged, board is already registered at correct index
+        // (or was deleted if finished, which is fine - no more work needed)
 
         // Set up parent-child relationship (view 0 has no parent)
         if (k > 0 && this.views[k - 1]) {
@@ -1988,7 +1978,9 @@ class Grid {
         // Draw the preserved view to the new canvas
         this.views[k].draw(this.canvas(k).getContext('2d'));
       } else {
-        // Create new view
+        // Create new view - the scheduler now tracks boards by ID, so even if
+        // cleanupUnusedStableViews tries to remove the old view's board later,
+        // it will pass the old ID and the scheduler will only remove if the IDs match.
         this.views[k] = this.makeView(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
         this.views[k].draw(this.canvas(k).getContext('2d'));
       }
@@ -2003,57 +1995,7 @@ class Grid {
 
     return {
       targetState: state,
-      oldViews: oldViews,  // Store old views for lookup during popstate
       start: () => processNext(),
-      abort: () => { aborted = true; }
-    };
-  }
-
-  createUpdateProcess(state, oldViews = null) {
-    let aborted = false;
-    let currentIndex = 0;
-
-    const processNext = () => {
-      if (aborted) {
-        // Don't clear currentUpdateProcess - it may have been replaced by a new process
-        return;
-      }
-      if (currentIndex >= state.sizes.length) {
-        this.notifyurl();
-        this.notifyzoom();
-        // Save completed views for popstate lookup
-        this.lastCompleteViews = this.views.slice();
-        this.currentUpdateProcess = null;
-        return;
-      }
-
-      const k = currentIndex;
-      if (!this.views[k]) {
-        this.views[k] = this.makeView(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
-      } else {
-        // View exists - generate new ID and assign new board with new dimensions
-        this.views[k].id = k + Math.random();
-        const [size, re, im] = state.sizes[k];
-        this.views[k].initview(size, re, im);
-        this.scheduler.assignBoardToWorker(k, size, re, im, this.config, this.views[k].id);
-      }
-      this.views[k].draw(this.canvas(k).getContext('2d'));
-      if (state.hidden.indexOf(k) >= 0) { this.hidecanvas(k); }
-      this.updateFullscreenButton();
-      currentIndex++;
-      setTimeout(processNext, 200);
-    };
-
-    return {
-      targetState: state,
-      oldViews: oldViews,  // Store old views for lookup during popstate
-      start: () => {
-        if (this.config.gridcols === 1) {
-          setTimeout(processNext, 100);
-        } else {
-          processNext();
-        }
-      },
       abort: () => { aborted = true; }
     };
   }
@@ -2151,6 +2093,43 @@ class Grid {
       this.canvas(removeIndex)?.parentElement?.remove();
       this.canvascount -= 1;
     }
+  }
+
+  // Save current views to stableViews for potential reuse during navigation.
+  // Unlike truncateviews, this does NOT remove boards from workers - they continue
+  // computing (or stay paused if hidden). The boards will be cleaned up later
+  // when stableViews is discarded.
+  saveViewsToStable() {
+    const viewsToSave = new Map();
+    // Add existing stableViews first
+    for (const view of (this.stableViews || [])) {
+      if (view) viewsToSave.set(view.id, view);
+    }
+    // Add current views (may overlap with stableViews)
+    for (const view of this.views) {
+      if (view) viewsToSave.set(view.id, view);
+    }
+    this.stableViews = Array.from(viewsToSave.values());
+    // Clear views array without removing boards
+    this.views = [];
+  }
+
+  // Clean up boards for stableViews that weren't reused.
+  // Called at the end of a successful update.
+  cleanupUnusedStableViews(usedViewIds) {
+    if (!this.stableViews) return;
+    for (const view of this.stableViews) {
+      if (view && !usedViewIds.has(view.id)) {
+        // This view wasn't reused - remove its board from the worker.
+        // Pass the view's ID so we only remove if the board at that index
+        // still belongs to this view (not a new board created in its place).
+        this.scheduler.removeBoardFromWorker(view.k, view.id);
+      }
+    }
+    this.stableViews = null;
+
+    // Debug check: verify no orphan boards remain after cleanup
+    this.scheduler.checkForOrphanBoards(this.views);
   }
 
   showAllViews() {
@@ -2376,6 +2355,9 @@ class ZoomManager {
     const rectY = cy / this.config.dimsHeight;
     this.showZoomRect(k, rectX, rectY, this.config.zoomfactor);
     this.grid.truncateviews(k + 1);
+    // Update hidden views after truncating - this clears any stale hidden board indices
+    // that no longer exist, preventing them from blocking new boards at those indices
+    this.grid.updateHiddenViews();
     let nsize = osize / this.config.zoomfactor;
     let nre = qdAdd(ore, [((cx / this.config.dimsWidth) - 0.5) * osize, 0]);
     const offsetY = (0.5 - rectY) * (osize / this.config.aspectRatio);
@@ -2446,18 +2428,24 @@ class URLHandler {
     // Initialize from current URL so changes can be detected
     this.lastCenters = this.extractCenters(document.location.search);
     this.lastHidden = this.extractHidden(document.location.search);
+    // Track whether we're processing a popstate event
+    // During popstate, we should NEVER push new history entries
+    this.processingPopState = false;
     this.grid.onurlchange(x => this.updateurl());
     // Handle browser back/forward navigation
     window.addEventListener('popstate', () => this.handlePopState());
   }
 
   handlePopState() {
+    // Mark that we're processing a popstate event
+    // This prevents updateurl() from pushing new history entries
+    this.processingPopState = true;
+
     // If config parameters that require recomputation changed, reload
     if (this.configChangedRequiresRecompute()) {
       window.location.reload();
       return;
     }
-
 
     // Apply display-only config changes (theme, unknowncolor)
     this.applyDisplayConfigFromUrl();
@@ -2470,25 +2458,24 @@ class URLHandler {
       targetState.sizes = [[null, this.config.firstr, this.config.firstj]];
     }
 
-    // Get current state
-    // IMPORTANT: If an update is in progress, use oldViews to build currentState.
-    // oldViews contains the complete view array from before updates started,
-    // and its indices must match what we use for lookup in applyViewTransition.
-    let currentState;
-    if (this.grid.currentUpdateProcess && this.grid.currentUpdateProcess.oldViews) {
-      // Build currentState from oldViews to ensure index consistency
-      const oldViews = this.grid.currentUpdateProcess.oldViews;
-      currentState = { hidden: [], sizes: [] };
-      for (let k = 0; k < oldViews.length; k++) {
-        if (oldViews[k]) {
-          currentState.sizes.push(oldViews[k].sizes);
-          if (this.grid.hiddencanvas(k)) {
-            currentState.hidden.push(k);
-          }
-        }
-      }
-    } else {
-      currentState = this.grid.currentGridState();
+    // Build pool of all reusable views (union of stableViews and current views)
+    // Use a Map to dedupe by id, then convert to array for consistent indexing
+    // Add stableViews first (they have computed data we want to preserve)
+    // then current views (may have newer data for same coordinates)
+    const viewsById = new Map();  // id -> view
+    for (const view of (this.grid.stableViews || [])) {
+      if (view) viewsById.set(view.id, view);
+    }
+    for (const view of this.grid.views) {
+      if (view) viewsById.set(view.id, view);
+    }
+    const reusableViews = Array.from(viewsById.values());
+
+    // Build currentState from reusable views array
+    // The indices here must match reusableViews array indices
+    const currentState = { hidden: [], sizes: [] };
+    for (const view of reusableViews) {
+      currentState.sizes.push(view.sizes);
     }
 
     // Find views to keep vs recreate by comparing coordinates
@@ -2500,8 +2487,11 @@ class URLHandler {
       return;
     }
 
-    // Apply the optimized transition
-    this.applyViewTransition(viewsToKeep, newState);
+    // Apply the optimized transition, passing the pool of reusable views
+    // Note: applyViewTransition triggers updateLayout which is async.
+    // processingPopState stays > 0 until the update completes and calls notifyurl().
+    // We decrement it in updateurl() after the update completes.
+    this.applyViewTransition(viewsToKeep, newState, reusableViews);
   }
 
   // Check if config parameters require full recomputation (not just redraw)
@@ -2588,12 +2578,14 @@ class URLHandler {
 
     // Match target views against current views by coordinates AND zoom level
     // A view is defined by both its center and its size (zoom level)
+    // Uses full quad-double precision with 1% tolerance thresholds
     const viewsMatch = (targetSize, targetRe, targetIm, currentSize, currentRe, currentIm) => {
-      // Check zoom level first - must be within 10% of each other
+      // Check zoom level first - must be within 1% of each other
       const sizeRatio = targetSize / currentSize;
-      if (sizeRatio < 0.9 || sizeRatio > 1.1) return false;
+      if (sizeRatio < 0.99 || sizeRatio > 1.01) return false;
 
       // Check coordinates - tolerance is 1% of the view's visible extent
+      // Use full quad-double precision by adding high and low parts
       const tolerance = currentSize * 0.01;
       const targetReVal = targetRe[0] + (targetRe[1] || 0);
       const targetImVal = targetIm[0] + (targetIm[1] || 0);
@@ -2653,37 +2645,26 @@ class URLHandler {
     return 1.0;
   }
 
-  // Apply the transition, preserving views that match
-  applyViewTransition(viewsToKeep, newState) {
-    // Build a map of which current views to preserve
-    const preserveMap = new Map();  // currentIdx -> targetIdx
-    for (const { targetIdx, currentIdx } of viewsToKeep) {
-      preserveMap.set(currentIdx, targetIdx);
-    }
-
-    // Determine which view array to use for lookup.
-    // If an update is in progress, the this.grid.views array is partially populated
-    // (cleared and being rebuilt async). Use oldViews from the update process instead.
-    const viewsSource = this.grid.currentUpdateProcess?.oldViews || this.grid.views;
-
-    // Collect views to preserve before modifying the grid
-    const preservedViews = new Map();  // targetIdx -> view
-    for (const [currentIdx, targetIdx] of preserveMap) {
-      if (viewsSource[currentIdx]) {
-        preservedViews.set(targetIdx, viewsSource[currentIdx]);
-      }
-    }
-
-    // Update the grid with the new state, but inject preserved views
-    this.grid.updateLayoutWithPreservedViews(newState, preservedViews);
-
-    // Update lastCenters and lastHidden to reflect new URL
-    this.lastCenters = this.extractCenters(document.location.search);
-    this.lastHidden = this.extractHidden(document.location.search);
+  // Apply the transition - updateLayout will automatically preserve matching views
+  applyViewTransition(viewsToKeep, newState, reusableViews) {
+    // Note: processingPopState counter is set in handlePopState and decremented in updateurl()
+    // This ensures that the notifyurl() call at the end of updateLayout doesn't push history
+    this.grid.updateLayout(newState);
   }
 
   updateurl() {
     if (!history.replaceState) return;
+
+    // NEVER push history during popstate processing - this would destroy forward history
+    if (this.processingPopState) {
+      // Clear the flag - this update was triggered by a popstate
+      this.processingPopState = false;
+      // Just update lastCenters/lastHidden to match current URL, no history change
+      this.lastCenters = this.extractCenters(document.location.search);
+      this.lastHidden = this.extractHidden(document.location.search);
+      // Don't call replaceState - the URL is already correct from the popstate
+      return;
+    }
 
     const newUrl = this.currenturl();
     const newCenters = this.extractCenters(newUrl);
@@ -3791,6 +3772,7 @@ class Scheduler {
     this.grid = grid;
     this.workers = [];
     this.boardEfforts = new Map();
+    this.boardIds = new Map();  // Track board ID at each index k
     this.assignments = {};
     this.gpuBoards = new Set(); // Track GPU boards that cannot be transferred
     this.lastBalanceTime = 0;
@@ -3856,6 +3838,7 @@ class Scheduler {
     const worker = this.workers[workerNumber];
     const estimatedWork = config.dimsArea * ((size / config.dimsWidth < 1e-15) ? 7 : 1);
     this.boardEfforts.set(k, estimatedWork);
+    this.boardIds.set(k, id);  // Track which board ID is at this index
     this.assignments[k] = workerNumber;
 
     worker.postMessage({
@@ -3880,8 +3863,18 @@ class Scheduler {
     });
   }
 
-  removeBoardFromWorker(k) {
+  // Remove board at index k. If expectedId is provided, only remove if the
+  // current board at k has that ID. This prevents removing a newer board
+  // when an old view tries to clean up.
+  removeBoardFromWorker(k, expectedId = null) {
+    // If expectedId is provided, verify it matches before removing
+    if (expectedId !== null && this.boardIds.get(k) !== expectedId) {
+      // Board at this index has a different ID - don't remove it
+      return;
+    }
+
     this.boardEfforts.set(k, 0);
+    this.boardIds.delete(k);
     this.gpuBoards.delete(k);
     this.workers.forEach(worker => {
       worker.postMessage({
@@ -3907,6 +3900,29 @@ class Scheduler {
         data: { hiddenBoards }
       });
     });
+  }
+
+  // Debug method: check for orphan boards (boards without matching views).
+  // Call this after stableViews cleanup to detect board management bugs.
+  checkForOrphanBoards(views) {
+    const activeViewIds = new Set();
+    for (const view of views) {
+      if (view && view.id !== undefined) {
+        activeViewIds.add(view.id);
+      }
+    }
+
+    let orphanCount = 0;
+    for (const [k, boardId] of this.boardIds.entries()) {
+      if (!activeViewIds.has(boardId)) {
+        console.warn(`Orphan board at k=${k} with id=${boardId} - no matching active view`);
+        orphanCount++;
+      }
+    }
+
+    if (orphanCount > 0) {
+      console.warn(`Found ${orphanCount} orphan board(s). Active views: ${views.length}, tracked boards: ${this.boardIds.size}`);
+    }
   }
 
   pauseComputation(pause) {

@@ -135,6 +135,75 @@ describe('Mouse UI Tests', () => {
       const afterRestore2 = await page.evaluate(() => window.explorer.grid.hiddencanvas(0));
       expect(afterRestore2).toBe(false);
     }, TEST_TIMEOUT);
+
+    test('Click after hiding middle view should compute new view', async () => {
+      // This test reproduces a bug where hiding a view and then clicking to create
+      // a new view at the same index would fail to compute because the hidden board
+      // index was still in the worker's hiddenBoards set.
+
+      // Start with 3 views
+      await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-1.4012+0i,-1.40120+0i`);
+      await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 15000 });
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 });
+
+      // Wait for initial computation to make progress
+      await page.waitForFunction(() => {
+        const view = window.explorer.grid.views[0];
+        return view && view.di > 100;
+      }, { timeout: 15000 });
+
+      // Hide the middle view (index 1) via closebox
+      const closeboxes = await page.$$('#grid .closebox');
+      expect(closeboxes.length).toBeGreaterThanOrEqual(2);
+      await closeboxes[1].click();  // Click closebox on view 1
+      await page.waitForTimeout(300);
+
+      // Verify view 1 is hidden
+      const isHidden = await page.evaluate(() => window.explorer.grid.hiddencanvas(1));
+      expect(isHidden).toBe(true);
+
+      // Click on view 0 to create a new view - this will truncate and create at index 1
+      const canvas = await page.$('#grid canvas');
+      const box = await canvas.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+      // Wait for new view to be created
+      await page.waitForFunction(() => {
+        const grid = window.explorer.grid;
+        // Should have 2 views now (0 and the new 1)
+        return grid.views.length === 2 && grid.views[1] !== null;
+      }, { timeout: 5000 });
+
+      // The critical check: the new view at index 1 should compute
+      // If the bug exists, di will stay at 0 because the worker thinks board 1 is hidden
+      const computeResult = await page.evaluate(async () => {
+        const view = window.explorer.grid.views[1];
+        if (!view) return { error: 'No view at index 1' };
+
+        const startDi = view.di;
+        const startTime = Date.now();
+        const timeout = 5000;
+
+        // Wait for some computation to happen
+        while (view.di === startDi && (Date.now() - startTime) < timeout) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        return {
+          startDi,
+          endDi: view.di,
+          computed: view.di > startDi,
+          hiddenBoards: window.explorer.grid.getHiddenViews()
+        };
+      });
+
+      // New view should have started computing (di should increase)
+      expect(computeResult.error).toBeUndefined();
+      expect(computeResult.computed).toBe(true);
+      // There should be no hidden views after the click
+      expect(computeResult.hiddenBoards.length).toBe(0);
+    }, TEST_TIMEOUT);
   }, TEST_TIMEOUT);
 
   describe('Computation and URL', () => {

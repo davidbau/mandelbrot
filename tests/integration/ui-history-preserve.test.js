@@ -67,7 +67,7 @@ describe('Browser History View Preservation Tests', () => {
     expect(beforeState.computedCount).toBeGreaterThan(1000);
     expect(beforeState.divergedPixels).toBeGreaterThan(0);
 
-    // Create a new history entry by replacing the deepest view
+    // Create a new history entry by adding a 4th view (deeper zoom)
     await page.evaluate(() => {
       const grid = window.explorer.grid;
       const config = window.explorer.config;
@@ -75,11 +75,12 @@ describe('Browser History View Preservation Tests', () => {
       // Push current state
       history.pushState(null, '', location.href);
 
+      // Use the ACTUAL coordinates from existing views to ensure exact match
       const state = {
         sizes: [
-          [config.firstsize, config.firstr, config.firstj],
-          [config.firstsize / config.zoomfactor, [-0.6, 0], [0.2, 0]],
-          [config.firstsize / config.zoomfactor / config.zoomfactor, [-0.65, 0], [0.25, 0]],
+          grid.views[0].sizes,  // Preserve exact quad-double coords
+          grid.views[1].sizes,  // Preserve exact quad-double coords
+          grid.views[2].sizes,  // Preserve exact quad-double coords
           [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.66, 0], [0.26, 0]]  // NEW 4th view
         ],
         hidden: []
@@ -93,6 +94,27 @@ describe('Browser History View Preservation Tests', () => {
       window.explorer.grid.views.every(v => v !== null),
       { timeout: 5000 }
     );
+
+    // Log state before popstate for debugging
+    const stateBeforePopstate = await page.evaluate((origId) => {
+      const grid = window.explorer.grid;
+      return {
+        // Is update still in progress?
+        updateInProgress: !!grid.currentUpdateProcess,
+        // What's in stableViews?
+        stableViewsLen: grid.stableViews?.length,
+        stableView2Id: grid.stableViews?.[2]?.id,
+        stableView2MatchesOriginal: grid.stableViews?.[2]?.id === origId,
+        // Original ID for reference
+        originalId: origId
+      };
+    }, beforeState.viewId);
+    console.log('State before popstate:', JSON.stringify(stateBeforePopstate));
+
+    // Key invariant: original view 2 must be in stableViews
+    if (!stateBeforePopstate.stableView2MatchesOriginal) {
+      console.log('WARNING: Original view 2 is not in stableViews!');
+    }
 
     // Update URL and set lastCenters for popstate detection
     await page.evaluate(() => {
