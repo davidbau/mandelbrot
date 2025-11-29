@@ -1,5 +1,6 @@
 /**
  * Integration tests for URL parameters
+ * Tests parsing and applying URL parameters for view configuration
  */
 
 const path = require('path');
@@ -78,75 +79,43 @@ describe('URL Parameter Tests', () => {
     }
   }, TEST_TIMEOUT);
 
-  test('centersWereLost should detect when center points are removed or replaced', async () => {
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i`);
+  test('URL encoding: c parameter correctly represents view centers', async () => {
+    // Test 1: c=-0.6+0.2i means SINGLE view at that location (not default + zoomed)
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.6+0.2i`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(200);
 
-    // Test centersWereLost logic directly (it's now a standalone function)
-    const testResults = await page.evaluate(() => {
+    const singleViewData = await page.evaluate(() => ({
+      viewCount: window.explorer.grid.views.length,
+      view0Re: window.explorer.grid.views[0].sizes[1][0],
+      view0Im: window.explorer.grid.views[0].sizes[2][0]
+    }));
+    expect(singleViewData.viewCount).toBe(1);
+    expect(singleViewData.view0Re).toBeCloseTo(-0.6, 5);
+    expect(singleViewData.view0Im).toBeCloseTo(0.2, 5);
+
+    // Test 2: c=,-0.6+0.2i means TWO views - first at default (comma=inherit), second explicit
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=,-0.6+0.2i`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    // Wait for 2nd view to be created
+    await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+
+    const twoViewData = await page.evaluate(() => {
+      const views = window.explorer.grid.views;
       return {
-        // Same centers - no loss
-        sameExact: centersWereLost('-0.5+0i', '-0.5+0i'),
-        // Adding centers (zooming deeper) - no loss
-        addingCenters: centersWereLost('-0.5+0i', '-0.5+0i,-0.6+0.2i'),
-        // Removing centers - loss
-        removingCenters: centersWereLost('-0.5+0i,-0.6+0.2i', '-0.5+0i'),
-        // Replacing center - loss
-        replacingCenter: centersWereLost('-0.5+0i', '-0.7+0.1i'),
-        // Empty to something - no loss
-        emptyToSomething: centersWereLost('', '-0.5+0i'),
-        // Something to empty - loss
-        somethingToEmpty: centersWereLost('-0.5+0i', ''),
-        // Changing deeper center - loss
-        changingDeeper: centersWereLost('-0.5+0i,-0.6+0.2i', '-0.5+0i,-0.7+0.3i'),
+        viewCount: views.length,
+        view0Re: views[0] ? views[0].sizes[1][0] : null,
+        view0Im: views[0] ? views[0].sizes[2][0] : null,
+        view1Re: views[1] ? views[1].sizes[1][0] : null,
+        view1Im: views[1] ? views[1].sizes[2][0] : null
       };
     });
-
-    expect(testResults.sameExact).toBe(false);
-    expect(testResults.addingCenters).toBe(false);
-    expect(testResults.removingCenters).toBe(true);
-    expect(testResults.replacingCenter).toBe(true);
-    expect(testResults.emptyToSomething).toBe(false);
-    expect(testResults.somethingToEmpty).toBe(true);
-    expect(testResults.changingDeeper).toBe(true);
-  }, TEST_TIMEOUT);
-
-  test('Should use pushState when centers are replaced via updateurl', async () => {
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
-
-    // Get initial history length and current centers from URL
-    const { initialLength, currentCenters } = await page.evaluate(() => ({
-      initialLength: history.length,
-      currentCenters: window.explorer.urlHandler.extractCenters(window.explorer.urlHandler.currenturl())
-    }));
-
-    // Initialize lastCenters to match current URL
-    await page.evaluate((centers) => {
-      window.explorer.urlHandler.lastCenters = centers;
-    }, currentCenters);
-
-    // Trigger a URL update - since centers haven't changed, should use replaceState
-    await page.evaluate(() => {
-      window.explorer.grid.notifyurl();
-    });
-    await page.waitForTimeout(100);
-
-    const afterSameLength = await page.evaluate(() => history.length);
-    // Same centers should NOT push (replaceState)
-    expect(afterSameLength).toBe(initialLength);
-
-    // Now simulate that we previously had more centers (user will lose them)
-    await page.evaluate((centers) => {
-      window.explorer.urlHandler.lastCenters = centers + ',-0.6+0.2i,-0.7+0.3i';
-      window.explorer.grid.notifyurl();
-    }, currentCenters);
-    await page.waitForTimeout(100);
-
-    const afterReplaceLength = await page.evaluate(() => history.length);
-    // Removing centers should push to history
-    expect(afterReplaceLength).toBeGreaterThan(initialLength);
+    expect(twoViewData.viewCount).toBe(2);
+    // View 0 inherits from default (firstr=-0.5, firstj=0)
+    expect(twoViewData.view0Re).toBeCloseTo(-0.5, 5);
+    expect(twoViewData.view0Im).toBeCloseTo(0.0, 5);
+    // View 1 is at explicit center
+    expect(twoViewData.view1Re).toBeCloseTo(-0.6, 5);
+    expect(twoViewData.view1Im).toBeCloseTo(0.2, 5);
   }, TEST_TIMEOUT);
 });

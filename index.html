@@ -1824,31 +1824,86 @@ class Grid {
       this.currentUpdateProcess.abort();
     }
 
-    // Clear the grid DOM
-    const gridElement = document.getElementById('grid');
-    gridElement.innerHTML = '';
-    this.canvascount = 0;
-
-    this.truncateviews(0);
-
-    // Create canvases for all views in the state
-    const { sizes, hidden } = state;
-    for (let k = 0; k < sizes.length; k++) {
-      this.makecanvas(k, sizes[k]);
-      if (hidden.includes(k)) {
-        this.hidecanvas(k);
+    // Find which current views are NOT being preserved (need to be removed)
+    const preservedCurrentIndices = new Set();
+    for (const [targetIdx, view] of preservedViews) {
+      // Find the current index of this preserved view
+      const currentIdx = this.views.indexOf(view);
+      if (currentIdx >= 0) {
+        preservedCurrentIndices.add(currentIdx);
       }
     }
 
-    // Update workers with hidden boards
-    this.updateHiddenViews();
+    // Remove views that won't be preserved (from workers only, keep View objects)
+    for (let k = 0; k < this.views.length; k++) {
+      if (!preservedCurrentIndices.has(k) && this.views[k]) {
+        this.scheduler.removeBoardFromWorker(k);
+      }
+    }
+
+    const gridElement = document.getElementById('grid');
+    const { sizes, hidden } = state;
+
+    // Build a map of targetIdx -> existing canvas element (if preserved and same position)
+    const canvasesToKeep = new Map();  // targetIdx -> wrapper element
+    for (const [targetIdx, view] of preservedViews) {
+      const currentIdx = this.views.indexOf(view);
+      if (currentIdx >= 0 && currentIdx === targetIdx && targetIdx < sizes.length) {
+        // Same position and within target size - can reuse the canvas element
+        const canvasWrapper = this.canvas(currentIdx)?.parentElement;
+        if (canvasWrapper) {
+          canvasesToKeep.set(targetIdx, canvasWrapper);
+        }
+      }
+    }
+
+    // Remove ALL view wrappers that won't be in the final state
+    // Wrapper divs have IDs like 'b_0', 'b_1', etc.
+    const childrenToRemove = [];
+    for (let i = 0; i < gridElement.children.length; i++) {
+      const child = gridElement.children[i];
+      const wrapperId = child.id;
+      if (wrapperId && wrapperId.startsWith('b_')) {
+        const idx = parseInt(wrapperId.replace('b_', ''));
+        // Remove if: not in canvasesToKeep OR index is beyond target state size
+        if (!canvasesToKeep.has(idx) || idx >= sizes.length) {
+          childrenToRemove.push(child);
+        }
+      }
+    }
+    childrenToRemove.forEach(child => child.remove());
+
+    // Set canvascount to 0, we'll rebuild it
+    this.canvascount = 0;
+
+    // Create or reuse canvases in order, ensuring correct DOM order
+    for (let k = 0; k < sizes.length; k++) {
+      if (canvasesToKeep.has(k)) {
+        // Reuse existing canvas - move it to correct position in DOM
+        const wrapper = canvasesToKeep.get(k);
+        gridElement.appendChild(wrapper);  // Moves to end (which is correct order)
+        this.canvascount = k + 1;
+      } else {
+        // Create new canvas at this position
+        this.makecanvas(k, sizes[k]);
+      }
+      if (hidden.includes(k)) {
+        this.hidecanvas(k);
+      } else {
+        this.showcanvas(k);
+      }
+    }
+
+    // Reset views array but keep preserved view objects
+    const oldViews = this.views;
+    this.views = [];
 
     // Create update process that reuses preserved views
-    this.currentUpdateProcess = this.createUpdateProcessWithPreserved(state, preservedViews);
+    this.currentUpdateProcess = this.createUpdateProcessWithPreserved(state, preservedViews, oldViews);
     this.currentUpdateProcess.start();
   }
 
-  createUpdateProcessWithPreserved(state, preservedViews) {
+  createUpdateProcessWithPreserved(state, preservedViews, oldViews) {
     let aborted = false;
     let currentIndex = 0;
 
@@ -1857,6 +1912,7 @@ class Grid {
       if (currentIndex >= state.sizes.length) {
         this.notifyurl();
         this.notifyzoom();
+        this.updateHiddenViews();
         this.currentUpdateProcess = null;
         return;
       }
@@ -1865,9 +1921,25 @@ class Grid {
       const preserved = preservedViews.get(k);
 
       if (preserved) {
-        // Reuse preserved view - just update its index and redraw
+        // Reuse preserved view - it's still registered with the scheduler
+        // Just update its index and parent relationship
+        const oldK = preserved.k;
         preserved.k = k;
         this.views[k] = preserved;
+
+        // If the index changed, we need to update the scheduler
+        if (oldK !== k) {
+          // Remove from old index, add at new index
+          this.scheduler.removeBoardFromWorker(oldK);
+          this.scheduler.assignBoardToWorker(
+            k, preserved.sizes[0], preserved.sizes[1], preserved.sizes[2],
+            this.config, preserved.id);
+        }
+
+        // Set up parent-child relationship
+        if (k > 0 && this.views[k - 1]) {
+          preserved.setParentView(this.views[k - 1]);
+        }
         // Draw the preserved view to the new canvas
         this.views[k].draw(this.canvas(k).getContext('2d'));
       } else {
@@ -2392,28 +2464,39 @@ class URLHandler {
   }
 
   // Apply display-only config changes (theme, unknowncolor) without recomputing
+  // Also restores defaults when parameters are missing from URL
   applyDisplayConfigFromUrl() {
     const params = new URLSearchParams(document.location.search);
+    let needsRedraw = false;
 
+    // Theme: use URL value or default to 'warm'
     const theme = params.get('theme');
-    if (theme && this.config.colorThemes.all.includes(theme) && theme !== this.config.theme) {
-      this.store.dispatch(this.store.actions.updateConfig({ theme }));
-      // Redraw all views with new theme
+    const targetTheme = (theme && this.config.colorThemes.all.includes(theme)) ? theme : 'warm';
+    if (targetTheme !== this.config.theme) {
+      this.store.dispatch(this.store.actions.updateConfig({ theme: targetTheme }));
+      needsRedraw = true;
+    }
+
+    // Unknown color: use URL value or default to '#000'
+    const unk = params.get('unk');
+    let targetColor = '#000';  // default
+    if (unk) {
+      targetColor = decodeURIComponent(unk);
+      if (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(targetColor)) {
+        targetColor = `#${targetColor}`;
+      }
+    }
+    if (targetColor !== this.config.unknowncolor) {
+      this.store.dispatch(this.store.actions.updateConfig({ unknowncolor: targetColor }));
+      needsRedraw = true;
+    }
+
+    // Redraw all views if display config changed
+    if (needsRedraw) {
       for (let k = 0; k < this.grid.views.length; k++) {
         if (this.grid.views[k]) {
           this.grid.views[k].draw(this.grid.canvas(k).getContext('2d'));
         }
-      }
-    }
-
-    const unk = params.get('unk');
-    if (unk) {
-      let color = decodeURIComponent(unk);
-      if (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(color)) {
-        color = `#${color}`;
-      }
-      if (color !== this.config.unknowncolor) {
-        this.store.dispatch(this.store.actions.updateConfig({ unknowncolor: color }));
       }
     }
   }
@@ -2433,18 +2516,42 @@ class URLHandler {
       targetState.sizes[i][0] = size;
     }
 
-    // Match target views against current views by coordinates
+    // Match target views against current views by coordinates AND zoom level
+    // A view is defined by both its center and its size (zoom level)
+    const viewsMatch = (targetSize, targetRe, targetIm, currentSize, currentRe, currentIm) => {
+      // Check zoom level first - must be within 10% of each other
+      const sizeRatio = targetSize / currentSize;
+      if (sizeRatio < 0.9 || sizeRatio > 1.1) return false;
+
+      // Check coordinates - tolerance is 1% of the view's visible extent
+      const tolerance = currentSize * 0.01;
+      const targetReVal = targetRe[0] + (targetRe[1] || 0);
+      const targetImVal = targetIm[0] + (targetIm[1] || 0);
+      const currentReVal = currentRe[0] + (currentRe[1] || 0);
+      const currentImVal = currentIm[0] + (currentIm[1] || 0);
+      const reDiff = Math.abs(targetReVal - currentReVal);
+      const imDiff = Math.abs(targetImVal - currentImVal);
+      return reDiff < tolerance && imDiff < tolerance;
+    };
+
+    // Track which current views have been matched (can't reuse same view twice)
+    const usedCurrentIndices = new Set();
+
     for (let targetIdx = 0; targetIdx < targetState.sizes.length; targetIdx++) {
       const [targetSize, targetRe, targetIm] = targetState.sizes[targetIdx];
       let foundMatch = false;
 
       for (let currentIdx = 0; currentIdx < currentState.sizes.length; currentIdx++) {
-        const [, currentRe, currentIm] = currentState.sizes[currentIdx];
+        // Skip if this current view was already matched to a previous target
+        if (usedCurrentIndices.has(currentIdx)) continue;
 
-        // Compare coordinates (using quad-double comparison)
-        if (!qdCompare(targetRe, currentRe) && !qdCompare(targetIm, currentIm)) {
-          // Coordinates match - reuse this view
+        const [currentSize, currentRe, currentIm] = currentState.sizes[currentIdx];
+
+        // Compare both coordinates and zoom level
+        if (viewsMatch(targetSize, targetRe, targetIm, currentSize, currentRe, currentIm)) {
+          // View matches - reuse it
           viewsToKeep.push({ targetIdx, currentIdx });
+          usedCurrentIndices.add(currentIdx);
           // Use current view's size (preserves computation state)
           newState.sizes.push(currentState.sizes[currentIdx]);
           foundMatch = true;

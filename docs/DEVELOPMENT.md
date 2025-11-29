@@ -56,6 +56,20 @@ npm run test:coverage # Generate coverage report
 Unit tests verify the math (quad-precision arithmetic, board computations).
 Integration tests use Puppeteer to click around in the actual explorer.
 
+Test suites include:
+- `ui-commands.test.js` - Keyboard commands (zoom, grid, colors)
+- `ui-url.test.js` - URL parameter parsing (zoom, center, theme, grid)
+- `ui-history.test.js` - Browser history navigation and view preservation
+- `ui-keyboard-nav.test.js` - Arrow key navigation between views
+- `ui-mouse.test.js` - Click and drag interactions
+- `ui-movie.test.js` - Movie mode and video export
+- `ui-fullscreen.test.js` - Fullscreen mode
+- `ui-language.test.js` - Internationalization
+
+The `ui-history.test.js` tests cover browser back/forward integration,
+including the view preservation optimization that keeps computed views intact
+when navigating between similar states.
+
 See [tests/README.md](../tests/README.md) for details on writing tests.
 
 ## Project Structure

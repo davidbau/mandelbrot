@@ -227,6 +227,37 @@ Supported URL parameters:
 - `lang`: interface language
 - `a`: aspect ratio (e.g., `16:9`)
 
+### Browser History and View Preservation
+
+The application uses `pushState`/`replaceState` for browser history integration:
+
+- **pushState**: When zoom centers are replaced (clicking B, C, or typing new centers),
+  a new history entry is created, allowing browser back/forward navigation.
+- **replaceState**: When zoom centers are extended (clicking A to zoom in), the URL
+  is updated without creating a new history entry.
+
+The `handlePopState` handler implements smart view preservation when navigating
+browser history. Instead of reloading the entire page, it:
+
+1. Compares target state (from URL) with current state
+2. Matches views by **coordinates AND zoom level** (within tolerance)
+3. Preserves matching views (keeping their computation progress)
+4. Creates only the views that actually changed
+
+This is crucial for a good user experience because:
+- Computed fractal detail is preserved (no visual flash/reset)
+- Only changed views restart computation
+- Theme changes just redraw existing views (no recomputation)
+- Grid/aspect ratio changes trigger full reload (unavoidable)
+
+The matching algorithm uses tolerances because URL encoding loses precision:
+- Coordinates match within 1% of the view's visible extent
+- Zoom levels match within 10% of each other
+
+This tolerance-based matching handles the precision loss from URL encoding
+(which typically has 4-5 significant digits) while avoiding false matches
+between views at the same coordinates but different zoom levels.
+
 ## Worker Communication
 
 Workers communicate with the main thread via structured messages:
