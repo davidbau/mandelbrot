@@ -155,7 +155,10 @@ This keeps memory usage reasonable and iteration loops tight.
 
 ## Data Structures
 
-Each Board maintains several arrays that work together:
+Each Board maintains several arrays that work together. Typed arrays are 10-100x
+faster to iterate than objects, and they transfer directly to GPU buffers without
+conversion. The separation also enables selective updates: when a pixel diverges,
+only `nn` changes; we don't touch the other arrays.
 
 ### Core Arrays
 
@@ -185,7 +188,10 @@ GPU boards use WebGPU buffers for parallel computation:
 
 ## Worker Pool Management
 
-The Scheduler maintains multiple workers for parallel computation:
+The Scheduler maintains multiple workers for parallel computation. Multiple
+workers let us compute several zoom levels simultaneously: while you're looking
+at one view, deeper views are already computing in other workers. The pool size
+matches CPU core count (up to 8) to maximize throughput without oversubscription.
 
 ```javascript
 class Scheduler {
@@ -200,7 +206,9 @@ class Scheduler {
 
 ### Load Balancing
 
-Workers can be idle, busy, or overloaded. The scheduler redistributes:
+Workers can be idle, busy, or overloaded. As computation progresses, some boards
+finish quickly (mostly divergent pixels) while others take much longer (near the
+set boundary). The scheduler redistributes boards to keep all workers busy:
 
 ```javascript
 handleWorkerMessage(worker, message) {
@@ -315,7 +323,9 @@ createBuffers() {
 
 ## Change Lists
 
-Rather than sending entire pixel arrays, boards send change lists:
+Rather than sending entire pixel arrays, boards send change lists. A 1000×1000
+image has a million pixels, but in any batch only thousands finish. Sending the
+full array wastes bandwidth and triggers expensive memory copies:
 
 ```javascript
 {
@@ -358,6 +368,10 @@ The scheduler prioritizes boards based on:
 1. **Visibility**: Visible views compute before hidden ones
 2. **Unfinished count**: Views with more unknowns get more time
 3. **Recency**: Recently clicked views get priority
+
+You expect the view you just clicked to compute first. But older views still need
+cycles to finish their remaining pixels. The priority system balances immediate
+responsiveness with background completion.
 
 ## Performance Optimizations
 

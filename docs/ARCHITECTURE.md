@@ -67,6 +67,12 @@ class MandelbrotExplorer {
 A Redux-inspired state container. All state changes flow through here via
 `dispatch(action)`, which makes mutations predictable and debuggable.
 
+Fractal exploration involves complex state interactions: clicking creates views,
+views trigger computation, computation updates pixels, pixels affect colors.
+Without centralized state, these interactions create spaghetti. The store
+provides a single source of truth: easy to serialize to URLs, easy to debug,
+and components stay synchronized without effort.
+
 The state is organized into four domains:
 
 ```javascript
@@ -106,6 +112,11 @@ Configuration management with property getters/setters that delegate to StateSto
 This maintains backward compatibility while ensuring all config changes go through
 the state system.
 
+The StateStore holds raw state, but components need convenient access. Config
+provides computed properties (like `dimsArea` from width × height), validation
+(clamping exponent to valid ranges), and a familiar getter/setter interface.
+It's the ergonomic layer over the raw store.
+
 Key configuration categories:
 - **Viewport**: canvas dimensions, pixel ratio, grid columns
 - **Computation**: exponent (z^n), GPU enable/disable, algorithm forcing
@@ -118,6 +129,11 @@ Manages the collection of View objects and their corresponding DOM elements.
 Handles layout changes, view creation/deletion, and coordinates the visual
 representation of the zoom hierarchy.
 
+A View knows how to render itself but doesn't know about other Views or the DOM.
+Grid handles the "many views" concerns: arranging them in columns, deciding when
+to show or hide views, managing the parent-child relationships for composite
+rendering. Views focus on pixels; Grid focuses on layout.
+
 ### View
 
 Each View represents one zoom level in the explorer. Views maintain:
@@ -129,6 +145,11 @@ Each View represents one zoom level in the explorer. Views maintain:
 Views handle their own rendering, including the clever composite drawing that
 shows the parent's zoomed region as a background while local pixels compute.
 
+Pixel arrays are large (megabytes) and updated frequently. Keeping them in the
+View avoids copying data through the state system on every update. The StateStore
+tracks view metadata (coordinates, visibility), while Views own the heavy pixel
+data directly.
+
 ### Scheduler
 
 The traffic controller for computation. Manages a pool of Web Workers,
@@ -136,6 +157,12 @@ distributes work across them, and handles:
 - Creating and destroying workers
 - Transferring boards between workers for load balancing
 - Collecting results and updating views
+
+Mandelbrot computation is CPU-intensive, requiring millions of iterations per
+second. Running this on the main thread would freeze the UI. Workers run in
+separate threads, keeping the interface responsive while computation happens
+in the background. The Scheduler abstracts this complexity, presenting a simple
+"create board, receive updates" interface to the rest of the application.
 
 ### Board Classes (in Workers)
 
@@ -145,6 +172,13 @@ The actual computation happens in Web Workers, which run Board objects:
 - **PerturbationBoard**: High-precision reference orbit with double perturbations
 - **ZhuoranBoard**: Quad-double reference with rebasing (CPU)
 - **GpuZhuoranBoard**: Quad-double reference with float32 perturbations (GPU)
+
+Different zoom depths have different computational requirements. At shallow zoom,
+double precision suffices and GPU parallelism dominates, making GpuBoard fastest.
+At deep zoom (10^15 and beyond), double precision fails, requiring perturbation
+theory with high-precision reference orbits. The Scheduler automatically selects
+the appropriate Board type based on zoom depth, giving optimal performance at
+every scale.
 
 See [ALGORITHMS.md](ALGORITHMS.md) for details on the mathematical algorithms.
 
