@@ -2,8 +2,10 @@
 
 const fs = require('fs');
 
-const htmlLines = fs.readFileSync('index.html', 'utf8').split('\n');
-const template = fs.readFileSync('benchmark-template.html', 'utf8');
+const path = require('path');
+const rootDir = path.join(__dirname, '..');
+const htmlLines = fs.readFileSync(path.join(rootDir, 'index.html'), 'utf8').split('\n');
+const template = fs.readFileSync(path.join(__dirname, 'benchmark-template.html'), 'utf8');
 
 // Line 2177: <script id="workerCode">
 // Lines 2178-3413: code
@@ -31,7 +33,7 @@ if (!quadCode.includes('function toQd')) {
 let benchmark = template.replace('QUAD_CODE_PLACEHOLDER', quadCode);
 benchmark = benchmark.replace('WORKER_CODE_PLACEHOLDER', workerCode);
 
-fs.writeFileSync('benchmark.html', benchmark);
+fs.writeFileSync(path.join(rootDir, 'benchmark.html'), benchmark);
 
 console.log('✓ Created benchmark.html');
 console.log('✓ Open benchmark.html in your browser to test the optimized code.');

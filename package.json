@@ -4,7 +4,7 @@
   "description": "Build process for Mandelbrot explorer",
   "private": true,
   "scripts": {
-    "build": "./build.sh",
+    "build": "./build/build.sh",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

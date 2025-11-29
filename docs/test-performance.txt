@@ -1,0 +1,8 @@
+To isolate the performance issue, try commenting out line that calls addOrbitPoint:
+
+In both CPU ZhuoranBoard.extendReferenceOrbit and GPU GpuZhuoranBoard.extendReferenceOrbit,
+temporarily comment out:
+  this.threading.addOrbitPoint(this.refIterations, re, im, getPoint);
+
+If performance returns to ~2 seconds, then we know the threading computation is the bottleneck
+and can optimize it further. If it's still slow, the issue is elsewhere.
