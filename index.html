@@ -4988,9 +4988,8 @@ class ZhuoranBoard extends Board {
         const dr = this.dz[index2];
         const di = this.dz[index2 + 1];
         // Set dz to current total position (Imagina's VecResetAndSync)
-        // TESTING: Use Math.fround to simulate float32 precision like GPU
-        this.dz[index2] = Math.fround(lastRefR + dr);
-        this.dz[index2 + 1] = Math.fround(lastRefI + di);
+        this.dz[index2] = lastRefR + dr;
+        this.dz[index2 + 1] = lastRefI + di;
         // Restart from iteration 0 (where z_ref = 0)
         this.refIter[index] = 0;
         refIter = 0;
@@ -5013,9 +5012,8 @@ class ZhuoranBoard extends Board {
       const dr = this.dz[index2];
       const di = this.dz[index2 + 1];
       // Set dz to current total position (z_ref + dz)
-      // TESTING: Use Math.fround to simulate float32 precision like GPU
-      this.dz[index2] = Math.fround(refR + dr);
-      this.dz[index2 + 1] = Math.fround(refI + di);
+      this.dz[index2] = refR + dr;
+      this.dz[index2 + 1] = refI + di;
       // Restart from iteration 0 (where z_ref = 0)
       this.refIter[index] = 0;
       refIter = 0;
@@ -5042,7 +5040,6 @@ class ZhuoranBoard extends Board {
     const oldZR = refR + dr;
     const oldZI = refI + di;
 
-    // TESTING: Use Math.fround to simulate float32 precision like GPU
     const exponent = this.config.exponent || 2;
 
     // Build binomial powers: coeff * z_ref^power for each term
@@ -5059,17 +5056,17 @@ class ZhuoranBoard extends Board {
       // Add coeff * z_ref^power term
       const termR = coeff * zPowR;
       const termI = coeff * zPowI;
-      resultR = Math.fround(resultR + termR);
-      resultI = Math.fround(resultI + termI);
+      resultR = resultR + termR;
+      resultI = resultI + termI;
 
       // Multiply by dz (complex multiplication)
-      const tempR = Math.fround(Math.fround(resultR * dr) - Math.fround(resultI * di));
-      resultI = Math.fround(Math.fround(resultR * di) + Math.fround(resultI * dr));
+      const tempR = resultR * dr - resultI * di;
+      resultI = resultR * di + resultI * dr;
       resultR = tempR;
 
       // Update z_ref power: z_pow = z_pow * z_ref
-      const newZPowR = Math.fround(Math.fround(zPowR * refR) - Math.fround(zPowI * refI));
-      zPowI = Math.fround(Math.fround(zPowR * refI) + Math.fround(zPowI * refR));
+      const newZPowR = zPowR * refR - zPowI * refI;
+      zPowI = zPowR * refI + zPowI * refR;
       zPowR = newZPowR;
 
       // Update coefficient: coeff *= (n-k) / (k+1)
@@ -5077,8 +5074,8 @@ class ZhuoranBoard extends Board {
     }
 
     // Add perturbation in c
-    const newDr = Math.fround(resultR + this.dc[index2]);
-    const newDi = Math.fround(resultI + this.dc[index2 + 1]);
+    const newDr = resultR + this.dc[index2];
+    const newDi = resultI + this.dc[index2 + 1];
     // Update dz first before checking divergence
     this.dz[index2] = newDr;
     this.dz[index2 + 1] = newDi;
@@ -5111,9 +5108,8 @@ class ZhuoranBoard extends Board {
       // Store dz (perturbation) and which reference iteration we're at
       // This allows precise difference computation:
       // (ref[current] - ref[checkpoint]) + (dz[current] - dz[checkpoint])
-      // TESTING: Use Math.fround to simulate float32 precision like GPU
-      this.bb[index2] = Math.fround(dr);  // dz real at checkpoint (BEFORE iteration)
-      this.bb[index2 + 1] = Math.fround(di);  // dz imag at checkpoint
+      this.bb[index2] = dr;  // dz real at checkpoint (BEFORE iteration)
+      this.bb[index2 + 1] = di;  // dz imag at checkpoint
       this.hasCheckpoint[index] = true;
       this.checkpointIter[index] = refIter;  // Which reference iteration (not this.it!)
       this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
@@ -5134,9 +5130,8 @@ class ZhuoranBoard extends Board {
         // INPUT dz and checkpoint dz
         // Both are at the same refIter position, so we're comparing
         // the same point in the orbit cycle
-        // TESTING: Use Math.fround to simulate float32 precision like GPU
-        const dzDiffR = Math.fround(Math.fround(dr) - Math.fround(checkpoint_dr));
-        const dzDiffI = Math.fround(Math.fround(di) - Math.fround(checkpoint_di));
+        const dzDiffR = dr - checkpoint_dr;
+        const dzDiffI = di - checkpoint_di;
         const db = Math.max(Math.abs(dzDiffR), Math.abs(dzDiffI));
 
         if (db <= this.epsilon2) {
@@ -5174,8 +5169,8 @@ class ZhuoranBoard extends Board {
             if (Math.abs(current - refIter) <= 10) {
               const checkpoint_dr = this.bb[index2];
               const checkpoint_di = this.bb[index2 + 1];
-              const dzDiffR = Math.fround(Math.fround(dr) - Math.fround(checkpoint_dr));
-              const dzDiffI = Math.fround(Math.fround(di) - Math.fround(checkpoint_di));
+              const dzDiffR = dr - checkpoint_dr;
+              const dzDiffI = di - checkpoint_di;
               const totalDiffR = deltaRe + dzDiffR;
               const totalDiffI = deltaIm + dzDiffI;
               const db = Math.max(Math.abs(totalDiffR), Math.abs(totalDiffI));

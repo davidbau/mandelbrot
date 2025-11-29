@@ -6,59 +6,58 @@ to create the final image.
 ## The Three-Tier Pipeline
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              MAIN THREAD                                    │
-│                                                                             │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
-│  │    Grid     │    │  Scheduler  │    │    View     │    │   Canvas    │  │
-│  │  (manages   │───►│  (assigns   │    │  (pixels,   │───►│  (display)  │  │
-│  │   views)    │    │   work)     │    │  histogram) │    │             │  │
-│  └─────────────┘    └──────┬──────┘    └──────▲──────┘    └─────────────┘  │
-│                            │                  │                             │
-└────────────────────────────┼──────────────────┼─────────────────────────────┘
-                             │                  │
-          createBoard        │                  │  changeList
-          {k, size, re, im}  │                  │  {nn, pp}
-                             ▼                  │
-┌────────────────────────────────────────────────────────────────────────────┐
-│                            WEB WORKERS                                     │
-│                                                                            │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                            Board                                     │  │
-│  │                                                                      │  │
-│  │   Arrays:  nn (iterations)  pp (periods)  zz (current z)            │  │
-│  │            cc (c values)    bb (checkpoints)                        │  │
-│  │                                                                      │  │
-│  │   Perturbation (deep zoom):  dc, dz, refIter, refOrbit              │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                            │                                               │
-│              GPU available │                                               │
-│              & shallow zoom│                                               │
-│                            ▼                                               │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                         GpuBoard                                     │  │
-│  │                                                                      │  │
-│  │   Buffers:  iterations (read/write)    staging (for readback)       │  │
-│  │             zValues, cValues           uniforms (params)            │  │
-│  └─────────────────────────────┬────────────────────────────────────────┘  │
-│                                │                                           │
-└────────────────────────────────┼───────────────────────────────────────────┘
-                                 │
-           dispatch + readback   │
-                                 ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│                            GPU SHADER                                      │
-│                                                                            │
-│   @compute @workgroup_size(64)                                             │
-│   fn main(index):                                                          │
-│       if iterations[index] != 0: return     // skip finished               │
-│       z = zValues[index]                                                   │
-│       for batch_size iterations:                                           │
-│           z = z² + c                                                       │
-│           if |z| > 2: iterations[index] = i; return                        │
-│       zValues[index] = z                    // continue next batch         │
-│                                                                            │
-└────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                             MAIN THREAD                              │
+│                                                                      │
+│  ┌───────────┐  ┌───────────┐  ┌─────────────┐  ┌─────────────────┐  │
+│  │   Grid    │  │ Scheduler │  │    View     │  │     Canvas      │  │
+│  │ (manages  │─►│ (assigns  │  │  (pixels,   │─►│    (display)    │  │
+│  │  views)   │  │  work)    │  │  histogram) │  │                 │  │
+│  └───────────┘  └─────┬─────┘  └──────▲──────┘  └─────────────────┘  │
+│                       │               │                              │
+└───────────────────────┼───────────────┼──────────────────────────────┘
+                        │               │
+     createBoard        │               │  changeList
+     {k, size, re, im}  │               │  {nn, pp}
+                        ▼               │
+┌──────────────────────────────────────────────────────────────────────┐
+│                            WEB WORKERS                               │
+│                                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                           Board                                │  │
+│  │                                                                │  │
+│  │  Arrays:  nn (iterations)  pp (periods)  zz (current z)        │  │
+│  │           cc (c values)    bb (checkpoints)                    │  │
+│  │                                                                │  │
+│  │  Perturbation (deep zoom):  dc, dz, refIter, refOrbit          │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+│                     │                                                │
+│       GPU available │                                                │
+│                     ▼                                                │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                        GpuBoard                                │  │
+│  │                                                                │  │
+│  │  Buffers:  iterations (read/write)    staging (for readback)   │  │
+│  │            zValues, cValues           uniforms (params)        │  │
+│  └────────────────────────┬───────────────────────────────────────┘  │
+│                           │                                          │
+└───────────────────────────┼──────────────────────────────────────────┘
+                            │
+       dispatch + readback  │
+                            ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                           GPU SHADER                                 │
+│                                                                      │
+│  @compute @workgroup_size(64)                                        │
+│  fn main(index):                                                     │
+│      if iterations[index] != 0: return     // skip finished          │
+│      z = zValues[index]                                              │
+│      for batch_size iterations:                                      │
+│          z = z² + c                                                  │
+│          if |z| > 2: iterations[index] = i; return                   │
+│      zValues[index] = z                    // continue next batch    │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 **Data flow summary:**
@@ -69,29 +68,28 @@ to create the final image.
 
 ## Sparse, Infinite Computation
 
-The explorer computes forever, refining as you watch. The trick: be smart
+The explorer computes forever, refining as you watch. The trick is to be smart
 about what to compute.
 
-After the first pass, many pixels are already "done":
-- **Diverged**: escaped to infinity (we know the escape iteration)
-- **Converged**: detected a periodic cycle (definitely in the set)
+After the first pass, many pixels are already done:
+- **Diverged**: escaped to infinity, so we know the escape iteration
+- **Converged**: detected a periodic cycle, definitely in the set
 - **Chaotic**: still unknown, needs more iterations
 
 The sparse computation only iterates pixels that are still chaotic. This means
 90% of the work might be done after 1000 iterations, but we can continue to
 1 million iterations for the remaining 10% without wasting time on known pixels.
 
-Why is sparsity essential? Consider a 1000×1000 image: one million pixels. Without
-sparsity, computing 1 million iterations means 10^12 operations - one trillion.
-With sparsity, after early divergers finish (say 90% by iteration 1000), we have
-only 100,000 active pixels. The next million iterations cost 10^11 operations.
-As more pixels finish, cost drops further. Sparsity makes infinite refinement
-practical instead of theoretical.
+Consider a 1000×1000 image with one million pixels. Without sparsity, computing
+1 million iterations means 10^12 operations. With sparsity, after early divergers
+finish (say 90% by iteration 1000), we have only 100,000 active pixels. The next
+million iterations cost 10^11 operations. As more pixels finish, cost drops
+further. Sparsity makes infinite refinement practical.
 
 ## Board Lifecycle
 
-A "Board" is the computational unit - it represents one zoom level's worth of
-pixel data and knows how to compute iterations for those pixels.
+A "Board" is the computational unit, representing one zoom level's worth of
+pixel data. It knows how to compute iterations for those pixels.
 
 ### Creation
 
@@ -99,17 +97,26 @@ When you click to zoom, the flow is:
 
 1. **Main thread**: Grid creates a new View at the click location
 2. **Scheduler**: Picks a worker and sends `createBoard` message
-3. **Worker**: Creates appropriate Board type based on zoom depth:
-   - Shallow zoom (pixelSize > 1e-6): `GpuBoard` or `CpuBoard`
-   - Deep zoom (pixelSize ≤ 1e-6): `GpuZhuoranBoard` or `ZhuoranBoard`
+3. **Worker**: Creates appropriate Board type based on zoom depth and GPU availability
+
+**With GPU enabled:**
+- Shallow zoom (pixelSize > 1e-6): `GpuBoard` using float32
+- Deep zoom (pixelSize ≤ 1e-6): `GpuZhuoranBoard` with perturbation theory
+
+**Without GPU (CPU fallback):**
+- Shallow zoom (pixelSize > 1e-12): `CpuBoard` using float64
+- Deep zoom (pixelSize ≤ 1e-12): `PerturbationBoard` with quad-double reference
+
+The thresholds differ because GPU uses float32 (loses precision around 1e-6) while
+CPU uses float64 (good to about 1e-15). Both switch to perturbation theory when
+standard precision fails.
 
 ```javascript
-// Scheduler selecting board type
-const pixelSize = data.size / data.config.dims;
-if (pixelSize > 1e-6) {
-  board = config.enableGPU ? new GpuBoard(...) : new CpuBoard(...);
+// Worker selecting board type
+if (gpuAvailable) {
+  board = pixelSize > 1e-6 ? new GpuBoard(...) : new GpuZhuoranBoard(...);
 } else {
-  board = config.enableGPU ? new GpuZhuoranBoard(...) : new ZhuoranBoard(...);
+  board = pixelSize > 1e-12 ? new CpuBoard(...) : new PerturbationBoard(...);
 }
 ```
 
@@ -158,7 +165,7 @@ This keeps memory usage reasonable and iteration loops tight.
 Each Board maintains several arrays that work together. Typed arrays are 10-100x
 faster to iterate than objects, and they transfer directly to GPU buffers without
 conversion. The separation also enables selective updates: when a pixel diverges,
-only `nn` changes; we don't touch the other arrays.
+only `nn` changes and we don't touch the other arrays.
 
 ### Core Arrays
 
@@ -188,10 +195,10 @@ GPU boards use WebGPU buffers for parallel computation:
 
 ## Worker Pool Management
 
-The Scheduler maintains multiple workers for parallel computation. Multiple
-workers let us compute several zoom levels simultaneously: while you're looking
-at one view, deeper views are already computing in other workers. The pool size
-matches CPU core count (up to 8) to maximize throughput without oversubscription.
+The Scheduler maintains multiple workers for parallel computation. This lets us
+compute several zoom levels simultaneously: while you're looking at one view,
+deeper views are already computing in other workers. The pool size matches CPU
+core count (up to 8) to maximize throughput without oversubscription.
 
 ```javascript
 class Scheduler {
@@ -295,17 +302,17 @@ const iterationsPerBatch = Math.min(1000, Math.max(100,
   Math.floor(1111211 / Math.max(this.un, 1))));
 ```
 
-Why this formula? There is a tradeoff between GPU efficiency and UI responsiveness.
-Large batches use the GPU efficiently (less dispatch overhead per iteration), but
-they block the CPU from updating the display. Small batches update frequently but
-waste time on dispatch overhead.
+There is a tradeoff between GPU efficiency and UI responsiveness. Large batches
+use the GPU efficiently with less dispatch overhead per iteration, but they block
+the CPU from updating the display. Small batches update frequently but waste time
+on dispatch overhead.
 
 The constant 1111211 targets roughly 1 million pixel-iterations per batch. With
-500,000 active pixels, that means ~2 iterations per batch. With 1000 active pixels,
-that means ~1000 iterations per batch. The formula automatically shifts from
-"stay responsive" (many pixels, small batches) to "maximize throughput" (few
-pixels, large batches) as computation progresses. The min/max bounds (100-1000)
-prevent extreme values.
+500,000 active pixels, that means about 2 iterations per batch. With 1000 active
+pixels, that means about 1000 iterations per batch. The formula automatically
+shifts from "stay responsive" (many pixels, small batches) to "maximize throughput"
+(few pixels, large batches) as computation progresses. The min/max bounds of
+100-1000 prevent extreme values.
 
 ### Buffer Management
 
@@ -325,7 +332,7 @@ createBuffers() {
 
 Rather than sending entire pixel arrays, boards send change lists. A 1000×1000
 image has a million pixels, but in any batch only thousands finish. Sending the
-full array wastes bandwidth and triggers expensive memory copies:
+full array would waste bandwidth and trigger expensive memory copies:
 
 ```javascript
 {
@@ -369,7 +376,7 @@ The scheduler prioritizes boards based on:
 2. **Unfinished count**: Views with more unknowns get more time
 3. **Recency**: Recently clicked views get priority
 
-You expect the view you just clicked to compute first. But older views still need
+The view you just clicked should compute first, but older views still need
 cycles to finish their remaining pixels. The priority system balances immediate
 responsiveness with background completion.
 
@@ -430,17 +437,17 @@ if (this.un < this.config.dimsArea / 2) {
 
 When compositing child views over parents, coordinate calculations must be
 precise. At zoom 10^25, the child's center differs from the parent's by perhaps
-10^-20 in absolute terms - far below double precision's ~10^-15 relative accuracy.
+10^-20 in absolute terms, far below double precision's ~10^-15 relative accuracy.
 
-Why does this matter for screen coordinates? The child and parent centers are
-both stored in double-double precision, accurate to 31 digits. But to composite,
-we need the *offset* between them - and subtracting two nearly-equal numbers
-loses precision catastrophically. If parentCenter = 0.123456789012345678901234567890
-and childCenter = 0.123456789012345678901234567891, the difference is 10^-30 - but
-double precision only sees them as equal. Without extended precision arithmetic,
+The child and parent centers are both stored in double-double precision, accurate
+to 31 digits. But to composite, we need the *offset* between them, and subtracting
+two nearly-equal numbers loses precision catastrophically. If
+parentCenter = 0.123456789012345678901234567890 and
+childCenter = 0.123456789012345678901234567891, the difference is 10^-30, but
+double precision sees them as equal. Without extended precision arithmetic,
 the child would appear at the wrong position.
 
-The solution: use double-double arithmetic for the coordinate mapping, even
+The solution is to use double-double arithmetic for the coordinate mapping, even
 though the final pixel positions are screen-resolution integers:
 
 ```javascript
@@ -465,17 +472,15 @@ calculateParentMapping() {
 ```
 
 The final subtraction `childLeft - parentLeft` would cause catastrophic
-cancellation in double precision (subtracting nearly equal large numbers).
+cancellation in double precision when subtracting nearly equal large numbers.
 By carrying the computation in double-double until the last step, we preserve
 enough precision to get correct pixel alignment. The result is then converted
-to a screen coordinate, which only needs ~10 bits of precision.
-
-This is a case where the intermediate precision matters far more than the
-output precision.
+to a screen coordinate, which only needs about 10 bits of precision. The
+intermediate precision matters far more than the output precision.
 
 ## Error Handling
 
-Workers can crash or WebGPU can fail. The scheduler handles gracefully:
+Workers can crash or WebGPU can fail. The scheduler handles this gracefully:
 
 ```javascript
 worker.onerror = (error) => {
