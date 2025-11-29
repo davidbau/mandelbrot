@@ -1,57 +1,53 @@
 # Architecture Overview
 
-This document describes the high-level architecture of the Mandelbrot Set Fractal Explorer,
-a single-page web application that renders the Mandelbrot set with arbitrary precision
-and infinite iteration refinement.
-
 ## Philosophy: One HTML File
 
-The entire application lives in `index.html`. It's intentional: a single file
-means you can save the page, email it to a friend, or host it anywhere without
-worrying about build systems, CDNs, or broken dependencies. The fractal explorer
-should be as timeless and self-contained as the mathematics it visualizes.
+The entire application lives in `index.html`. A single file means you can save
+the page, email it to a friend, or host it anywhere without worrying about build
+systems or CDNs. The fractal explorer should be as self-contained as the
+mathematics it visualizes.
 
-That said, the code inside is organized into clear sections with well-defined
-responsibilities. Think of it as a carefully structured monolith rather than chaos.
+The code inside is organized into clear sections with well-defined responsibilities.
+A structured monolith.
 
 ## The Big Picture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        MandelbrotExplorer                           │
-│  (The application root - coordinates everything)                    │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
-│  │   Config     │  │  StateStore  │  │   Grid       │              │
-│  │  (settings)  │◄─┤   (state)    │─►│  (views)     │              │
-│  └──────────────┘  └──────────────┘  └──────────────┘              │
-│         │                 ▲                  │                      │
-│         ▼                 │                  ▼                      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
-│  │ URLHandler   │  │ EventHandler │  │  Scheduler   │              │
-│  │  (URL sync)  │  │  (input)     │  │  (workers)   │              │
-│  └──────────────┘  └──────────────┘  └──────────────┘              │
-│                                              │                      │
-│  ┌──────────────┐  ┌──────────────┐         │                      │
-│  │  MovieMode   │  │ ZoomManager  │         ▼                      │
-│  │  (video)     │  │  (zoom UI)   │    Web Workers                 │
-│  └──────────────┘  └──────────────┘    ┌─────────┐                 │
-│                                        │ Board 1 │                 │
-│                                        ├─────────┤                 │
-│                                        │ Board 2 │                 │
-│                                        ├─────────┤                 │
-│                                        │   ...   │                 │
-│                                        └─────────┘                 │
-└─────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                        MandelbrotExplorer                         │
+│  (The application root - coordinates everything)                  │
+├───────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│  │    Config    │  │  StateStore  │  │     Grid     │             │
+│  │  (settings)  │◄─┤   (state)    ├─►│   (views)    │             │
+│  └──────────────┘  └──────────────┘  └──────────────┘             │
+│         │                 ▲                  │                    │
+│         ▼                 │                  ▼                    │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│  │  URLHandler  │  │ EventHandler │  │  Scheduler   │             │
+│  │  (URL sync)  │  │   (input)    │  │  (workers)   │             │
+│  └──────────────┘  └──────────────┘  └──────────────┘             │
+│                                             │                     │
+│  ┌──────────────┐  ┌──────────────┐         │                     │
+│  │  MovieMode   │  │ ZoomManager  │         ▼                     │
+│  │   (video)    │  │  (zoom UI)   │    Web Workers                │
+│  └──────────────┘  └──────────────┘    ┌─────────┐                │
+│                                        │ Board 1 │                │
+│                                        ├─────────┤                │
+│                                        │ Board 2 │                │
+│                                        ├─────────┤                │
+│                                        │   ...   │                │
+│                                        └─────────┘                │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 ## Core Classes
 
 ### MandelbrotExplorer
 
-The application root. It creates and wires together all the other components.
-When you load the page, `MandelbrotExplorer` is instantiated, which triggers
+The application root. Creates and wires together all the other components.
+When you load the page, `MandelbrotExplorer` gets instantiated, triggering
 the cascade that initializes everything else.
 
 ```javascript
@@ -68,9 +64,8 @@ class MandelbrotExplorer {
 
 ### StateStore
 
-A Redux-inspired state container that holds the application's truth. All state
-changes flow through here via `dispatch(action)`, making state mutations
-predictable and debuggable.
+A Redux-inspired state container. All state changes flow through here via
+`dispatch(action)`, which makes mutations predictable and debuggable.
 
 The state is organized into four domains:
 
@@ -136,8 +131,8 @@ shows the parent's zoomed region as a background while local pixels compute.
 
 ### Scheduler
 
-The traffic controller for computation. Manages a pool of Web Workers and
-distributes computation work across them. Handles:
+The traffic controller for computation. Manages a pool of Web Workers,
+distributes work across them, and handles:
 - Creating and destroying workers
 - Transferring boards between workers for load balancing
 - Collecting results and updating views
