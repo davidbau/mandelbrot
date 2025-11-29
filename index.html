@@ -269,6 +269,7 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 //
 // =============================================================================
 
+// Main application controller that coordinates all subsystems.
 class MandelbrotExplorer {
   constructor() {
     // Create unified state store
@@ -514,6 +515,7 @@ class MandelbrotExplorer {
   }
 }
 
+// Centralized state management with action dispatch pattern.
 class StateStore {
   constructor() {
     this.state = this.createInitialState();
@@ -958,6 +960,7 @@ class StateStore {
   };
 }
 
+// Global configuration: display dimensions, palettes, and render settings.
 class Config {
   // Constants for iteration and convergence
   static MAX_CHAOTIC_ITERATIONS = 100000;
@@ -1216,6 +1219,7 @@ class Config {
   }
 }
 
+// Rendering layer that draws computed pixel data to canvas.
 class View {
   constructor(k, size, re, im, config, id, grid = null) {
     this.k = k;
@@ -1664,6 +1668,7 @@ class View {
   }
 }
 
+// Manages the array of views and their layout in the grid.
 class Grid {
   constructor(config, store = null) {
     this.config = config;
@@ -2065,6 +2070,7 @@ class Grid {
   }
 }
 
+// Draws zoom preview rectangles and handles zoom factor UI.
 class ZoomManager {
   constructor(config, grid) {
     this.config = config;
@@ -2236,6 +2242,7 @@ class ZoomManager {
   }
 }
 
+// Synchronizes view state with URL parameters for bookmarking and sharing.
 class URLHandler {
   constructor(config, grid, store = null) {
     this.config = config;
@@ -2462,6 +2469,7 @@ class URLHandler {
   }
 }
 
+// Handles mouse clicks, keyboard commands, and touch events.
 class EventHandler {
   constructor(explorer) {
     this.explorer = explorer;
@@ -2781,6 +2789,7 @@ class EventHandler {
   }
 }
 
+// Renders smooth zoom animations and encodes them as MP4 video.
 class MovieMode {
   constructor(explorer) {
     this.explorer = explorer;
@@ -3318,6 +3327,7 @@ class MovieMode {
   }
 }
 
+// Distributes computation work across web workers and balances load.
 class Scheduler {
   constructor(grid) {
     this.grid = grid;
@@ -3607,6 +3617,7 @@ class Scheduler {
   }
 }
 
+// Computes and displays iteration orbits when hovering over points.
 class OrbitComputer {
   constructor(explorer) {
     this.explorer = explorer;
@@ -3770,6 +3781,7 @@ class OrbitComputer {
   }
 }
 
+// Coordinates progressive canvas redraws as computation results arrive.
 class RedrawProcess {
   constructor(explorer) {
     this.views = explorer.grid.views;
@@ -3875,6 +3887,7 @@ function formatLargeInt(i) {
   return Intl.NumberFormat().format(i);
 }
 
+// Catmull-Rom spline interpolation for smooth movie camera paths.
 function catmullRom1D(p0, p1, p2, p3, t) {
   const t2 = t * t;
   const t3 = t2 * t;
@@ -3932,6 +3945,7 @@ function gammaCorrect(channel) {
   }
 }
 
+// Converts normalized [0,1] float to 8-bit color string.
 function intcolor(n) {
   if (n <= 0) { return "0"; }
   if (n >= 1) { return "255"; }
@@ -3981,6 +3995,7 @@ const lastScriptLineNumber = parseInt(new Error().stack.match(/(:[\d]+)/)[0].rep
 // Constants
 const MAX_CHAOTIC_ITERATIONS = 100000;
 
+// Abstract base class for Mandelbrot computation backends.
 class Board {
   constructor(k, size, re, im, config, id) {
     this.k = k;    // Number in explorer
@@ -4073,6 +4088,7 @@ class Board {
   }
 }
 
+// CPU board using double precision arithmetic for shallow zoom depths.
 class CpuBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
@@ -4265,6 +4281,7 @@ class CpuBoard extends Board {
 
 }
 
+// CPU board using perturbation theory with sparse quad precision anchors.
 class PerturbationBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
@@ -5502,6 +5519,7 @@ class GpuBaseBoard extends Board {
   }
 }
 
+// WebGPU board using float32 arithmetic for shallow zoom depths.
 class GpuBoard extends GpuBaseBoard {
   static BYTES_PER_PIXEL = 8;  // 2x vec2<f32> (zValues or baseValues buffer)
 
