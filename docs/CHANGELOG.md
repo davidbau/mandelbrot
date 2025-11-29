@@ -1,23 +1,24 @@
 # Changelog
 
-A history of the Mandelbrot Set Fractal Explorer, from its origins as a table-cell
-experiment in 2009 to the GPU-accelerated, infinitely-refining explorer of today.
-
 ## Origins: September 27, 2009
 
-The original version was [posted as a JavaScript example](http://davidbau.com/archives/2009/09/27/mandelbrot.html)
+I [posted the original version](http://davidbau.com/archives/2009/09/27/mandelbrot.html)
 in September 2009. It came with some nostalgia: in the pre-XGA graphics days,
-you couldn't render a very good-looking Mandelbrot set on a computer screen, so
-the author used to write programs that rendered on laser printers. Clusters of
-word processing computers in a school's English building basement would chug
-away through the night, iterating polynomials to generate fractal images.
+you could not render a very good-looking Mandelbrot set on a computer screen, so
+I used to write programs that rendered on laser printers. Clusters of word
+processing computers in a school's English building basement would chug away
+through the night, iterating polynomials to generate fractal images.
 
-The 2009 JavaScript version used colored **table cells** as pixels - each `<td>`
+The first 2009 JavaScript version used colored **table cells** as pixels - each `<td>`
 element with class "c" was a tiny colored square, assembled into a 180×180 grid
 (32,400 table cells!). You can still see this version at
 [davidbau.com/mandelbrot/oldversion.html](https://davidbau.com/mandelbrot/oldversion.html).
-This approach predated widespread browser support for the HTML canvas element
-(which Apple had introduced in 2004 but wasn't universally available until later).
+
+A canvas-based version followed shortly after, taking advantage of HTML5 canvas
+support in Chrome and Safari. This version is preserved at
+[davidbau.com/mandelbrot/new.html](https://davidbau.com/mandelbrot/new.html).
+The canvas approach was more efficient and allowed dynamic sizing based on
+window dimensions.
 
 The core algorithm was already interesting: rather than stopping at a fixed
 iteration count, the code identified both divergent points (escaping to infinity)
@@ -25,17 +26,20 @@ and convergent points (settling into periodic cycles). This allowed the fractal
 to refine indefinitely as you watched.
 
 Key features from 2009:
-- Table-cell rendering (pre-canvas era)
+- Table-cell rendering (oldversion.html) and canvas rendering (new.html)
 - Click to zoom
 - Cycle detection for convergent points
 - Sparse computation (skip finished pixels)
 - Adaptive iteration refinement
 
-## 2020: Major Refresh
+## October 2020: GitHub and Major Refresh
 
-A major update modernized the codebase for contemporary browsers:
+The project moved to GitHub in October 2020, starting fresh with a modernized codebase.
+You can see the state of the code at that time at
+[davidbau.com/mandelbrot/version-2020.html](https://davidbau.com/mandelbrot/version-2020.html).
 
-- **Canvas rendering**: Replaced table cells with HTML5 canvas
+New features in the 2020 version:
+
 - **High DPI support**: Proper handling of Retina and high-resolution displays
 - **Orbit visualization**: Yellow dots showing the iteration path for each point
 - **Periodicity display**: Red dots marking limit cycles
@@ -66,15 +70,16 @@ the unevaluated sum of two doubles, providing about 31 decimal digits of precisi
 
 Added perturbation-based computation: compute one reference orbit at high
 precision, then calculate each pixel as a small perturbation from that reference.
-This technique, pioneered by K.I. Martin and others in the fractal community,
-dramatically speeds up deep zoom rendering.
+This technique was pioneered by K.I. Martin in [SuperFractalThing](https://fractalwiki.org/wiki/SuperFractalThing)
+(2013) and dramatically speeds up deep zoom rendering.
 
 ### Zhuoran's Rebasing
 
-Implemented the rebasing technique proposed by Zhuoran on fractalforums.org.
-When pixel orbits approach critical points, they "rebase" to restart from the
-reference, avoiding the numerical glitches that plague traditional perturbation
-methods. This eliminated visual artifacts at extreme zoom depths.
+Implemented the rebasing technique [proposed by Zhuoran](https://fractalforums.org/fractal-mathematics-and-new-theories/28/another-solution-to-perturbation-glitches/4360)
+on fractalforums.org in December 2021. When pixel orbits approach critical points,
+they "rebase" to restart from the reference, avoiding the numerical glitches that
+plague traditional perturbation methods. This eliminated visual artifacts at
+extreme zoom depths.
 
 ### Movie Mode
 
@@ -100,9 +105,15 @@ calculations. Multiple workers enable parallel computation across CPU cores.
 - Internationalization (11 languages)
 - URL parameters for sharing specific locations and settings
 
-## 2025: GPU Acceleration
+## 2025: GPU Acceleration with Claude
 
-WebGPU support added with help from Claude, enabling massive parallelism:
+Most of the 2025 work happened in collaboration with Claude (Anthropic's AI).
+Working with an AI pair programmer changed the pace entirely - features that
+would have taken me weeks to research and implement came together in days.
+We debugged WebGPU shader issues, optimized buffer management, tracked down
+precision bugs in cycle detection, and refactored the codebase together.
+
+The result: WebGPU support with massive parallelism.
 
 ### GPU Computation
 
@@ -130,8 +141,8 @@ WebGPU support added with help from Claude, enabling massive parallelism:
 
 | Year | Milestone |
 |------|-----------|
-| 2009 | Table-cell rendering, cycle detection |
-| 2020 | Canvas rendering, orbit visualization |
+| 2009 | Table-cell and canvas rendering, cycle detection |
+| 2020 | High DPI, orbit visualization |
 | 2022 | Keyboard controls |
 | 2024 | Quad precision, perturbation, movies |
 | 2025 | WebGPU acceleration |
@@ -148,5 +159,5 @@ Mandelbrot set are timeless; the viewer should be too.
 - [Live explorer](https://mandelbrot.page/)
 - [GitHub repository](https://github.com/davidbau/mandelbrot)
 - [Deep zoom theory](https://mathr.co.uk/blog/2021-05-14_deep_zoom_theory_and_practice.html) - Claude Heiland-Allen
-- [Zhuoran's rebasing](https://mathr.co.uk/blog/2022-02-21_deep_zoom_theory_and_practice_again.html)
+- [Zhuoran's rebasing](https://fractalforums.org/fractal-mathematics-and-new-theories/28/another-solution-to-perturbation-glitches/4360) - The original forum post
 - [Canvas element history](https://en.wikipedia.org/wiki/Canvas_element)

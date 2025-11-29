@@ -1,8 +1,7 @@
 # Movie Mode and Smooth Animation
 
-The explorer can create smooth zoom animations following your exploration path.
-Press 'M' to enter movie mode, and the explorer renders and encodes a video
-you can download and share.
+Press 'M' and the explorer creates a smooth zoom animation following your
+exploration path - rendered, encoded, and downloadable as an MP4.
 
 ## The Animation Challenge
 
@@ -15,9 +14,10 @@ A Mandelbrot zoom video needs to solve several problems:
 
 ## Catmull-Rom Splines
 
-The camera path uses Catmull-Rom splines for smooth interpolation between
-zoom checkpoints. Given four control points (P0, P1, P2, P3), the spline
-passes through P1 and P2 with tangents influenced by P0 and P3.
+The camera path uses Catmull-Rom splines, developed by Edwin Catmull and
+Raphael Rom at the University of Utah in 1974. Given four control points
+(P0, P1, P2, P3), the spline passes through P1 and P2 with tangents
+automatically computed from the neighboring points.
 
 ```javascript
 function catmullRom1D(p0, p1, p2, p3, t) {
@@ -147,8 +147,8 @@ async encodeVideo(frames) {
 }
 ```
 
-The output is muxed into an MP4 container using mp4-muxer, which is bundled
-into the HTML file during the build process.
+The output is muxed into an MP4 container using [mp4-muxer](https://github.com/Vanilagy/mp4-muxer),
+a pure TypeScript library that is bundled into the HTML file during the build process.
 
 ## Frame Rate and Timing
 
@@ -164,7 +164,7 @@ For a path with 5 zoom levels, the video is 12 seconds (4 transitions × 3 secon
 
 ## Progressive Display
 
-While encoding, the explorer shows frames as they're rendered:
+While encoding, the explorer shows frames as they are rendered:
 
 ```javascript
 async renderMovie() {
@@ -198,7 +198,7 @@ Click the download button to save the MP4 file.
 
 ## Unknown Pixel Handling
 
-Movie frames can't show parent views as background (there's only one canvas),
+Movie frames cannot show parent views as background (there is only one canvas),
 so unfinished pixels default to black:
 
 ```javascript
@@ -266,6 +266,13 @@ toggle() {
 ```
 
 Partial encodes produce valid (but truncated) video files.
+
+## References
+
+- [Catmull-Rom splines](https://en.wikipedia.org/wiki/Centripetal_Catmull–Rom_spline) - The interpolation algorithm
+- [WebCodecs API](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API) - Hardware-accelerated video encoding
+- [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) - The MP4 multiplexer library
+- [H.264 codec strings](https://developer.mozilla.org/en-US/docs/Web/Media/Formats/codecs_parameter) - Understanding "avc1.640028"
 
 ## Next Steps
 

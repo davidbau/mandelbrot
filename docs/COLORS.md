@@ -1,13 +1,13 @@
 # Color and Histogram System
 
-The Mandelbrot explorer uses a histogram-based coloring system that produces
-consistent, beautiful colors across different zoom levels. This document
-explains how iteration counts become colors.
+How do colors stay consistent as you zoom deeper? The iteration counts change
+by orders of magnitude, yet the palette remains coherent. This is the histogram
+system at work.
 
 ## The Problem with Direct Iteration Mapping
 
-A simple approach would map iterations directly to colors: iteration 1 = red,
-iteration 100 = blue, iteration 1000 = green, etc. But this breaks down:
+Map iterations directly to colors - iteration 1 = red, iteration 100 = blue,
+iteration 1000 = green - and you get chaos:
 
 - At shallow zoom, most pixels diverge between iterations 1-50
 - At deep zoom, most pixels diverge between iterations 1,000,000-1,000,100
@@ -31,15 +31,26 @@ this.hi = [
 ```
 
 The histogram tracks, for various iteration thresholds:
-- `fracUnfinished`: What fraction of pixels haven't finished by this iteration?
+- `fracUnfinished`: What fraction of pixels have not finished by this iteration?
 - `fracDiverged`: What fraction have diverged by this iteration?
 - `fracEstimatedLimit`: Predicted asymptotic fraction that will ultimately diverge
 
 ### Lineweaver-Burk Estimation
 
-The estimated limit uses a Lineweaver-Burk regression to predict how many
-pixels will eventually diverge (vs. stay black). This is the same technique
-used in enzyme kinetics to find limiting rates:
+The estimated limit uses Lineweaver-Burk regression to predict how many pixels
+will eventually diverge. This technique comes from an unexpected source: enzyme
+kinetics.
+
+In biochemistry, Lineweaver and Burk (1934) transformed the Michaelis-Menten
+equation by plotting 1/v against 1/[S]. The y-intercept of this linear plot
+gives the maximum reaction velocity as substrate concentration approaches
+infinity.
+
+The same idea works for fractal computation. We want to know: as iterations
+approach infinity, what fraction of pixels will have diverged? Plotting
+diverged fraction against iteration gives a curve that approaches an asymptote.
+By plotting against 1/iteration^0.75 (the exponent was found empirically),
+we get something approximately linear, and the y-intercept estimates the limit:
 
 ```javascript
 function estimateLimit(data) {
@@ -50,11 +61,18 @@ function estimateLimit(data) {
     weight: point.weight
   }));
 
-  // Linear regression in transformed space
+  // Weighted linear regression in transformed space
+  // ...calculate slope and intercept...
+
   // Intercept (at x→0, i.e., iteration→∞) gives asymptotic limit
   return intercept;
 }
 ```
+
+The 0.75 exponent is empirical - it produces better predictions than 1.0 for
+typical Mandelbrot computation patterns. The estimate updates as computation
+proceeds, giving increasingly accurate predictions of the final black-pixel
+fraction.
 
 ## From Histogram to Color
 
@@ -85,7 +103,30 @@ raw iteration count differs by factors of 1000.
 
 ## Color Themes
 
-Each theme is a function that takes statistical position and returns a CSS color:
+Each theme is a function that takes statistical position and returns a CSS color.
+
+### Design Philosophy
+
+The palettes are designed with two goals in tension:
+
+1. **Hue from iteration count**: The color (hue) comes from the logarithm of the
+   iteration count. This creates the characteristic color bands of Mandelbrot
+   images - each band represents a range of escape times.
+
+2. **Brightness from distribution**: The brightness (luminance) comes from where
+   the pixel sits in the histogram. Early divergers are darker; late divergers
+   are brighter.
+
+Why logarithm for hue? Iteration counts span orders of magnitude. Linear mapping
+would compress most colors into a tiny range. Log scaling spreads them evenly
+across the spectrum.
+
+Why separate hue from brightness? This is the key to smooth movie animations.
+As you zoom, the iteration counts change, but if a pixel stays at the 90th
+percentile of the distribution, its brightness stays roughly constant. The hue
+shifts gradually as iteration counts increase, but the overall luminance
+structure remains stable. This prevents jarring brightness flickers during
+zoom transitions.
 
 ### Warm Theme (Default)
 
@@ -107,10 +148,11 @@ warm: (i, frac, fracD, fracL, s) => {
 }
 ```
 
-The warm theme produces:
-- Dark reds/oranges for early divergers
-- Bright yellows/cyans for late divergers
-- Smooth color bands due to log scaling
+The warm theme produces dark reds and oranges for early divergers, bright yellows
+and cyans for late divergers. The `Math.log(i + 20) * 200` creates smooth color
+bands - each doubling of iteration count shifts the hue by a consistent amount.
+The `frac ** 5` term in the luminance formula keeps early divergers quite dark,
+with brightness increasing rapidly only for the latest divergers.
 
 ### Neon Theme
 
@@ -141,7 +183,11 @@ neon: (i, frac, fracD, fracL, s) => {
 }
 ```
 
-The neon theme maintains high saturation throughout, creating vibrant electric colors.
+The neon theme uses sine waves cycling through RGB, with the log of iteration
+count controlling the angle. Suppressing the minimum channel boosts saturation -
+at any moment, at least one channel is near zero, creating pure, vibrant colors.
+The brightness still depends on `frac`, so the luminance structure remains
+stable during zoom animations even as the specific hues shift.
 
 ### Ice Blue Theme
 
@@ -160,7 +206,10 @@ iceblue: (i, frac, fracD, fracL, s) => {
 }
 ```
 
-The ice blue theme creates cool, crystalline appearances with blue dominance.
+The ice blue theme takes a different approach: the blue channel dominates
+(`ff / 3 + 0.667` is always high), while red and green add subtle warmth
+based on both iteration count and zoom scale. This creates a cool, crystalline
+appearance that varies subtly with depth.
 
 ### Tie-Dye Theme
 
@@ -174,7 +223,10 @@ tiedye: (i, frac, fracD, fracL, s) => {
 }
 ```
 
-The tie-dye theme cycles through hues rapidly, creating psychedelic patterns.
+The tie-dye theme uses the same formula as warm but with 5x faster hue cycling
+(`* 1000` instead of `* 200`). This creates rapid color transitions that
+emphasize the fine structure of iteration bands. The psychedelic effect comes
+from adjacent iteration counts mapping to very different hues.
 
 ### Grayscale Theme
 
@@ -190,7 +242,12 @@ The grayscale theme shows structure without color, useful for print or accessibi
 
 ## HCL Color Space
 
-Most themes use HCL (Hue, Chroma, Luminance) rather than RGB or HSL:
+Most themes use HCL (Hue, Chroma, Luminance) rather than RGB or HSL. Why?
+
+RGB and HSL distort perception: a step from 50% to 60% saturation in yellow
+looks very different from the same step in blue. HCL, based on the CIE 1976
+color standards, attempts to make equal numerical steps produce equal
+perceived changes.
 
 ```javascript
 function hclColor(h, c, l) {
@@ -207,8 +264,10 @@ function hclColor(h, c, l) {
 }
 ```
 
-HCL is perceptually uniform: equal steps in L produce equal perceived brightness
-changes. This makes the color gradients feel natural to human vision.
+The conversion path is HCL → CIELAB → XYZ → linear RGB → sRGB (with gamma).
+This is more expensive than HSL, but the perceptual uniformity makes color
+gradients feel natural. For fractal visualization, where subtle iteration
+differences should map to subtle color differences, this matters.
 
 ## Gamma Correction
 
@@ -228,7 +287,7 @@ This matches the sRGB standard that monitors expect.
 
 ## The Unknown Pixel Color
 
-Pixels that haven't finished computing need a placeholder color. The default
+Pixels that have not finished computing need a placeholder color. The default
 is transparent (showing the parent view beneath), but users can override:
 
 - `?unk=000`: Black unfinished pixels
@@ -293,6 +352,14 @@ renderHiGraph(width, height) {
 
 This appears in the tooltip when hovering over the zoom number, helping
 debug color mapping issues.
+
+## References
+
+- [HCL color space](https://en.wikipedia.org/wiki/HCL_color_space) - The cylindrical representation of CIELUV
+- [LCH is the best color space for UI](https://atmos.style/blog/lch-color-space) - Why perceptual uniformity matters
+- [Lineweaver-Burk plot](https://en.wikipedia.org/wiki/Lineweaver–Burk_plot) - The 1934 technique borrowed from enzyme kinetics
+- [CIELAB color space](https://en.wikipedia.org/wiki/CIELAB_color_space) - The 1976 CIE standard
+- [sRGB gamma](https://en.wikipedia.org/wiki/SRGB) - The transfer function monitors expect
 
 ## Next Steps
 

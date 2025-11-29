@@ -1,13 +1,12 @@
 # Computation Architecture
 
-The Mandelbrot explorer computes fractals incrementally, sparsely, and in parallel.
-This document explains how work is distributed across threads and GPUs, how boards
-manage their lifecycle, and how results flow back to create the final image.
+How work is distributed across threads and GPUs, and how results flow back
+to create the final image.
 
-## The Core Insight: Sparse, Infinite Computation
+## Sparse, Infinite Computation
 
-This explorer computes forever, refining the image as you watch. The trick
-is being smart about what to compute.
+The explorer computes forever, refining as you watch. The trick: be smart
+about what to compute.
 
 After the first pass, many pixels are already "done":
 - **Diverged**: escaped to infinity (we know the escape iteration)
@@ -329,6 +328,45 @@ if (this.un < this.config.dimsArea / 2) {
   }
 }
 ```
+
+### Quad-Precision Compositing Coordinates
+
+When compositing child views over parents, coordinate calculations must be
+precise. At zoom 10^25, the child's center differs from the parent's by perhaps
+10^-20 in absolute terms - far below double precision's ~10^-15 relative accuracy.
+
+The solution: use double-double arithmetic for the coordinate mapping, even
+though the final pixel positions are screen-resolution integers:
+
+```javascript
+calculateParentMapping() {
+  const temp = new Float64Array(4);
+
+  // childLeft = childCenterR - childSize / 2
+  // Using quad-double addition for precision
+  AqdAdd(temp, 0, childCenterR[0], childCenterR[1], -childSize / 2, 0);
+  const childLeft = [temp[0], temp[1]];
+
+  // parentLeft = parentCenterR - parentSize / 2
+  AqdAdd(temp, 0, parentCenterR[0], parentCenterR[1], -parentSize / 2, 0);
+  const parentLeft = [temp[0], temp[1]];
+
+  // sx = ((childLeft - parentLeft) / parentSize) * dimsWidth
+  AqdAdd(temp, 0, childLeft[0], childLeft[1], -parentLeft[0], -parentLeft[1]);
+  const sx = ((temp[0] + temp[1]) / parentSize) * dimsWidth;
+
+  return { sx, sy, sw, sh };
+}
+```
+
+The final subtraction `childLeft - parentLeft` would cause catastrophic
+cancellation in double precision (subtracting nearly equal large numbers).
+By carrying the computation in double-double until the last step, we preserve
+enough precision to get correct pixel alignment. The result is then converted
+to a screen coordinate, which only needs ~10 bits of precision.
+
+This is a case where the intermediate precision matters far more than the
+output precision.
 
 ## Error Handling
 
