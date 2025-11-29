@@ -136,5 +136,39 @@ describe('Keyboard Navigation Tests', () => {
       const finalCols = await page.evaluate(() => window.explorer.config.gridcols);
       expect(finalCols).toBe(initialCols + 3);
     }, TEST_TIMEOUT);
+
+    test('H key should resize canvases correctly', async () => {
+      // Wait for initial layout to complete
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+
+      // Get initial canvas dimensions
+      const initialState = await page.evaluate(() => ({
+        gridcols: window.explorer.config.gridcols,
+        cssDimsWidth: window.explorer.config.cssDimsWidth,
+        canvasWidth: window.explorer.grid.canvas(0)?.width,
+        canvasStyleWidth: window.explorer.grid.canvas(0)?.style.width
+      }));
+
+      // Press H to increase grid columns
+      await page.keyboard.press('h');
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+
+      // Get new canvas dimensions
+      const newState = await page.evaluate(() => ({
+        gridcols: window.explorer.config.gridcols,
+        cssDimsWidth: window.explorer.config.cssDimsWidth,
+        canvasWidth: window.explorer.grid.canvas(0)?.width,
+        canvasStyleWidth: window.explorer.grid.canvas(0)?.style.width
+      }));
+
+      // Grid columns should have increased
+      expect(newState.gridcols).toBe(initialState.gridcols + 1);
+
+      // Canvas should have shrunk (more columns = smaller individual canvases)
+      expect(newState.cssDimsWidth).toBeLessThan(initialState.cssDimsWidth);
+
+      // Canvas element dimensions should match config
+      expect(newState.canvasStyleWidth).toBe(newState.cssDimsWidth + 'px');
+    }, TEST_TIMEOUT);
   }, TEST_TIMEOUT);
 }, TEST_TIMEOUT);

@@ -1706,6 +1706,9 @@ class Grid {
     this.urlListeners = [];
     this.zoomListeners = [];
     this.scheduler = new Scheduler(this);
+    // Persistent reference to views from the last completed update.
+    // Used by popstate to find views to preserve even after currentUpdateProcess is null.
+    this.lastCompleteViews = [];
   }
 
   makeView(k, size, re, im, deferComputation = false) {
@@ -1951,6 +1954,8 @@ class Grid {
         this.notifyurl();
         this.notifyzoom();
         this.updateHiddenViews();
+        // Save completed views for popstate lookup
+        this.lastCompleteViews = this.views.slice();
         this.currentUpdateProcess = null;
         return;
       }
@@ -2016,6 +2021,8 @@ class Grid {
       if (currentIndex >= state.sizes.length) {
         this.notifyurl();
         this.notifyzoom();
+        // Save completed views for popstate lookup
+        this.lastCompleteViews = this.views.slice();
         this.currentUpdateProcess = null;
         return;
       }
