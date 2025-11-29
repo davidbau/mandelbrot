@@ -77,4 +77,76 @@ describe('URL Parameter Tests', () => {
       expect(canvasDims.width / canvasDims.height).toBeCloseTo(16/9, 1);
     }
   }, TEST_TIMEOUT);
+
+  test('centersWereLost should detect when center points are removed or replaced', async () => {
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForTimeout(300);
+
+    // Test centersWereLost logic directly (it's now a standalone function)
+    const testResults = await page.evaluate(() => {
+      return {
+        // Same centers - no loss
+        sameExact: centersWereLost('-0.5+0i', '-0.5+0i'),
+        // Adding centers (zooming deeper) - no loss
+        addingCenters: centersWereLost('-0.5+0i', '-0.5+0i,-0.6+0.2i'),
+        // Removing centers - loss
+        removingCenters: centersWereLost('-0.5+0i,-0.6+0.2i', '-0.5+0i'),
+        // Replacing center - loss
+        replacingCenter: centersWereLost('-0.5+0i', '-0.7+0.1i'),
+        // Empty to something - no loss
+        emptyToSomething: centersWereLost('', '-0.5+0i'),
+        // Something to empty - loss
+        somethingToEmpty: centersWereLost('-0.5+0i', ''),
+        // Changing deeper center - loss
+        changingDeeper: centersWereLost('-0.5+0i,-0.6+0.2i', '-0.5+0i,-0.7+0.3i'),
+      };
+    });
+
+    expect(testResults.sameExact).toBe(false);
+    expect(testResults.addingCenters).toBe(false);
+    expect(testResults.removingCenters).toBe(true);
+    expect(testResults.replacingCenter).toBe(true);
+    expect(testResults.emptyToSomething).toBe(false);
+    expect(testResults.somethingToEmpty).toBe(true);
+    expect(testResults.changingDeeper).toBe(true);
+  }, TEST_TIMEOUT);
+
+  test('Should use pushState when centers are replaced via updateurl', async () => {
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForTimeout(300);
+
+    // Get initial history length and current centers from URL
+    const { initialLength, currentCenters } = await page.evaluate(() => ({
+      initialLength: history.length,
+      currentCenters: window.explorer.urlHandler.extractCenters(window.explorer.urlHandler.currenturl())
+    }));
+
+    // Initialize lastCenters to match current URL
+    await page.evaluate((centers) => {
+      window.explorer.urlHandler.lastCenters = centers;
+    }, currentCenters);
+
+    // Trigger a URL update - since centers haven't changed, should use replaceState
+    await page.evaluate(() => {
+      window.explorer.grid.notifyurl();
+    });
+    await page.waitForTimeout(100);
+
+    const afterSameLength = await page.evaluate(() => history.length);
+    // Same centers should NOT push (replaceState)
+    expect(afterSameLength).toBe(initialLength);
+
+    // Now simulate that we previously had more centers (user will lose them)
+    await page.evaluate((centers) => {
+      window.explorer.urlHandler.lastCenters = centers + ',-0.6+0.2i,-0.7+0.3i';
+      window.explorer.grid.notifyurl();
+    }, currentCenters);
+    await page.waitForTimeout(100);
+
+    const afterReplaceLength = await page.evaluate(() => history.length);
+    // Removing centers should push to history
+    expect(afterReplaceLength).toBeGreaterThan(initialLength);
+  }, TEST_TIMEOUT);
 });

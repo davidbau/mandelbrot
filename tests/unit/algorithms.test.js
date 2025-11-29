@@ -8,7 +8,8 @@ const { createTestEnvironment } = require('../utils/extract-code');
 // Extract algorithm functions from index.html
 const algos = createTestEnvironment([
   'fibonacciPeriod',
-  'toSimpleFraction'
+  'toSimpleFraction',
+  'centersWereLost'
 ]);
 
 // Extract quad-double functions with all their dependencies
@@ -499,6 +500,44 @@ describe('Complex Quad-Double Arithmetic', () => {
       z = qdFuncs.qdcAdd(qdFuncs.qdcSquare(z), c);  // z3 = 0 + (-1) = -1
       expect(z[0]).toBeCloseTo(-1, 10);
     });
+  });
+});
+
+describe('URL History - centersWereLost', () => {
+  test('should return false for identical centers', () => {
+    expect(algos.centersWereLost('-0.5+0i', '-0.5+0i')).toBe(false);
+    expect(algos.centersWereLost('-0.5+0i,-0.6+0.2i', '-0.5+0i,-0.6+0.2i')).toBe(false);
+  });
+
+  test('should return false when adding centers (zooming deeper)', () => {
+    expect(algos.centersWereLost('-0.5+0i', '-0.5+0i,-0.6+0.2i')).toBe(false);
+    expect(algos.centersWereLost('-0.5+0i,-0.6+0.2i', '-0.5+0i,-0.6+0.2i,-0.7+0.3i')).toBe(false);
+  });
+
+  test('should return true when removing centers', () => {
+    expect(algos.centersWereLost('-0.5+0i,-0.6+0.2i', '-0.5+0i')).toBe(true);
+    expect(algos.centersWereLost('-0.5+0i,-0.6+0.2i,-0.7+0.3i', '-0.5+0i,-0.6+0.2i')).toBe(true);
+  });
+
+  test('should return true when replacing a center', () => {
+    expect(algos.centersWereLost('-0.5+0i', '-0.7+0.1i')).toBe(true);
+    expect(algos.centersWereLost('-0.5+0i,-0.6+0.2i', '-0.5+0i,-0.7+0.3i')).toBe(true);
+  });
+
+  test('should return false for empty to something', () => {
+    expect(algos.centersWereLost('', '-0.5+0i')).toBe(false);
+    expect(algos.centersWereLost(null, '-0.5+0i')).toBe(false);
+  });
+
+  test('should return true for something to empty', () => {
+    expect(algos.centersWereLost('-0.5+0i', '')).toBe(true);
+  });
+
+  test('should handle complex coordinate formats', () => {
+    // Scientific notation
+    expect(algos.centersWereLost('1.23e-5+4.56e-7i', '1.23e-5+4.56e-7i')).toBe(false);
+    // Negative imaginary
+    expect(algos.centersWereLost('-0.5-0.3i', '-0.5-0.3i')).toBe(false);
   });
 });
 

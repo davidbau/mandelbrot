@@ -1817,6 +1817,80 @@ class Grid {
     this.currentUpdateProcess.start();
   }
 
+  // Update layout while preserving specified views (for back/forward navigation)
+  updateLayoutWithPreservedViews(state, preservedViews) {
+    // Abort any current update process
+    if (this.currentUpdateProcess) {
+      this.currentUpdateProcess.abort();
+    }
+
+    // Clear the grid DOM
+    const gridElement = document.getElementById('grid');
+    gridElement.innerHTML = '';
+    this.canvascount = 0;
+
+    this.truncateviews(0);
+
+    // Create canvases for all views in the state
+    const { sizes, hidden } = state;
+    for (let k = 0; k < sizes.length; k++) {
+      this.makecanvas(k, sizes[k]);
+      if (hidden.includes(k)) {
+        this.hidecanvas(k);
+      }
+    }
+
+    // Update workers with hidden boards
+    this.updateHiddenViews();
+
+    // Create update process that reuses preserved views
+    this.currentUpdateProcess = this.createUpdateProcessWithPreserved(state, preservedViews);
+    this.currentUpdateProcess.start();
+  }
+
+  createUpdateProcessWithPreserved(state, preservedViews) {
+    let aborted = false;
+    let currentIndex = 0;
+
+    const processNext = () => {
+      if (aborted) return;
+      if (currentIndex >= state.sizes.length) {
+        this.notifyurl();
+        this.notifyzoom();
+        this.currentUpdateProcess = null;
+        return;
+      }
+
+      const k = currentIndex;
+      const preserved = preservedViews.get(k);
+
+      if (preserved) {
+        // Reuse preserved view - just update its index and redraw
+        preserved.k = k;
+        this.views[k] = preserved;
+        // Draw the preserved view to the new canvas
+        this.views[k].draw(this.canvas(k).getContext('2d'));
+      } else {
+        // Create new view
+        this.views[k] = this.makeView(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
+        this.views[k].draw(this.canvas(k).getContext('2d'));
+      }
+
+      if (state.hidden.indexOf(k) >= 0) {
+        this.hidecanvas(k);
+      }
+      this.updateFullscreenButton();
+      currentIndex++;
+      setTimeout(processNext, 50);  // Faster since some views are preserved
+    };
+
+    return {
+      targetState: state,
+      start: () => processNext(),
+      abort: () => { aborted = true; }
+    };
+  }
+
   createUpdateProcess(state) {
     let aborted = false;
     let currentIndex = 0;
@@ -2248,13 +2322,203 @@ class URLHandler {
     this.config = config;
     this.grid = grid;
     this.store = store;
+    this.lastCenters = null;  // Track previous center points for history management
     this.grid.onurlchange(x => this.updateurl());
+    // Handle browser back/forward navigation
+    window.addEventListener('popstate', () => this.handlePopState());
+  }
+
+  handlePopState() {
+    // If config parameters that require recomputation changed, reload
+    if (this.configChangedRequiresRecompute()) {
+      window.location.reload();
+      return;
+    }
+
+    // Apply display-only config changes (theme, unknowncolor)
+    this.applyDisplayConfigFromUrl();
+
+    // Parse the URL from history to get target state
+    const targetState = this.parseUrl();
+
+    // Fill in default base view if no centers specified in URL
+    if (targetState.sizes.length === 0) {
+      targetState.sizes = [[null, this.config.firstr, this.config.firstj]];
+    }
+
+    // Get current state
+    const currentState = this.grid.currentGridState();
+
+    // Find views to keep vs recreate by comparing coordinates
+    const { viewsToKeep, newState } = this.computeViewTransition(currentState, targetState);
+
+    if (viewsToKeep.length === 0) {
+      // No views can be reused, just reload
+      window.location.reload();
+      return;
+    }
+
+    // Apply the optimized transition
+    this.applyViewTransition(viewsToKeep, newState);
+  }
+
+  // Check if config parameters require full recomputation (not just redraw)
+  configChangedRequiresRecompute() {
+    const params = new URLSearchParams(document.location.search);
+
+    // Parameters that require full recomputation
+    const exponent = params.get('exponent');
+    if (exponent && parseInt(exponent) !== this.config.exponent) return true;
+
+    const gpu = params.get('gpu');
+    if (gpu !== null && (parseInt(gpu) !== 0) !== this.config.enableGPU) return true;
+
+    const aspectRatio = params.get('a');
+    if (aspectRatio) {
+      const m = aspectRatio.match(/(\d+):(\d+)/);
+      if (m) {
+        const ratio = parseInt(m[1]) / parseInt(m[2]);
+        if (Math.abs(ratio - this.config.aspectRatio) > 0.01) return true;
+      }
+    }
+
+    const pixelRatio = params.get('pixelratio');
+    if (pixelRatio && parseInt(pixelRatio) !== this.config.pixelRatio) return true;
+
+    const grid = params.get('grid');
+    if (grid && parseInt(grid) !== this.config.gridcols) return true;
+
+    return false;
+  }
+
+  // Apply display-only config changes (theme, unknowncolor) without recomputing
+  applyDisplayConfigFromUrl() {
+    const params = new URLSearchParams(document.location.search);
+
+    const theme = params.get('theme');
+    if (theme && this.config.colorThemes.all.includes(theme) && theme !== this.config.theme) {
+      this.store.dispatch(this.store.actions.updateConfig({ theme }));
+      // Redraw all views with new theme
+      for (let k = 0; k < this.grid.views.length; k++) {
+        if (this.grid.views[k]) {
+          this.grid.views[k].draw(this.grid.canvas(k).getContext('2d'));
+        }
+      }
+    }
+
+    const unk = params.get('unk');
+    if (unk) {
+      let color = decodeURIComponent(unk);
+      if (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(color)) {
+        color = `#${color}`;
+      }
+      if (color !== this.config.unknowncolor) {
+        this.store.dispatch(this.store.actions.updateConfig({ unknowncolor: color }));
+      }
+    }
+  }
+
+  // Compare current and target states, find which views can be reused
+  computeViewTransition(currentState, targetState) {
+    const viewsToKeep = [];  // Indices of current views to preserve
+    const newState = { sizes: [], hidden: targetState.hidden };
+
+    // Fill in sizes for target state (parseUrl leaves size as null)
+    const zoomFactor = this.getZoomFactorFromUrl();
+    let size = this.config.firstsize / zoomFactor;
+    for (let i = 0; i < targetState.sizes.length; i++) {
+      if (i > 0) {
+        size = size / this.config.zoomfactor;
+      }
+      targetState.sizes[i][0] = size;
+    }
+
+    // Match target views against current views by coordinates
+    for (let targetIdx = 0; targetIdx < targetState.sizes.length; targetIdx++) {
+      const [targetSize, targetRe, targetIm] = targetState.sizes[targetIdx];
+      let foundMatch = false;
+
+      for (let currentIdx = 0; currentIdx < currentState.sizes.length; currentIdx++) {
+        const [, currentRe, currentIm] = currentState.sizes[currentIdx];
+
+        // Compare coordinates (using quad-double comparison)
+        if (!qdCompare(targetRe, currentRe) && !qdCompare(targetIm, currentIm)) {
+          // Coordinates match - reuse this view
+          viewsToKeep.push({ targetIdx, currentIdx });
+          // Use current view's size (preserves computation state)
+          newState.sizes.push(currentState.sizes[currentIdx]);
+          foundMatch = true;
+          break;
+        }
+      }
+
+      if (!foundMatch) {
+        // No match - need to create new view
+        newState.sizes.push(targetState.sizes[targetIdx]);
+      }
+    }
+
+    return { viewsToKeep, newState };
+  }
+
+  getZoomFactorFromUrl() {
+    const params = new URLSearchParams(document.location.search);
+    let zVal = params.get('z');
+    if (zVal) {
+      zVal = zVal.replace(/ /g, '+');
+      return parseFloat(zVal);
+    }
+    let sVal = params.get('s');
+    if (sVal) {
+      sVal = sVal.replace(/ /g, '+');
+      return 3.0 / parseFloat(sVal);
+    }
+    return 1.0;
+  }
+
+  // Apply the transition, preserving views that match
+  applyViewTransition(viewsToKeep, newState) {
+    // Build a map of which current views to preserve
+    const preserveMap = new Map();  // currentIdx -> targetIdx
+    for (const { targetIdx, currentIdx } of viewsToKeep) {
+      preserveMap.set(currentIdx, targetIdx);
+    }
+
+    // Collect views to preserve before modifying the grid
+    const preservedViews = new Map();  // targetIdx -> view
+    for (const [currentIdx, targetIdx] of preserveMap) {
+      if (this.grid.views[currentIdx]) {
+        preservedViews.set(targetIdx, this.grid.views[currentIdx]);
+      }
+    }
+
+    // Update the grid with the new state, but inject preserved views
+    this.grid.updateLayoutWithPreservedViews(newState, preservedViews);
+
+    // Update lastCenters to reflect new URL
+    this.lastCenters = this.extractCenters(document.location.search);
   }
 
   updateurl() {
-    if (history.replaceState) {
-      history.replaceState(null, '', this.currenturl());
+    if (!history.replaceState) return;
+
+    const newUrl = this.currenturl();
+    const newCenters = this.extractCenters(newUrl);
+
+    // Use pushState if centers were removed or replaced (user might want to go back)
+    if (this.lastCenters !== null && centersWereLost(this.lastCenters, newCenters)) {
+      history.pushState(null, '', newUrl);
+    } else {
+      history.replaceState(null, '', newUrl);
     }
+
+    this.lastCenters = newCenters;
+  }
+
+  // Extract the c parameter value from a URL string
+  extractCenters(url) {
+    const match = url.match(/[?&]c=([^&]*)/);
+    return match ? match[1] : '';
   }
 
   setupUrlParameters() {
@@ -3820,6 +4084,31 @@ class RedrawProcess {
 }
 
 // Utility functions
+
+// Check if any center points from oldCenters are missing in newCenters.
+// Used to determine when to push to browser history (for back button support).
+function centersWereLost(oldCenters, newCenters) {
+  if (!oldCenters) return false;
+  if (oldCenters === newCenters) return false;
+
+  // Parse centers into arrays of coordinate strings
+  const oldParts = oldCenters.split(',').filter(s => s.length > 0);
+  const newParts = newCenters.split(',').filter(s => s.length > 0);
+
+  // If old had more centers, some were lost
+  if (oldParts.length > newParts.length) return true;
+
+  // Check if all old centers are present in new (in order, as prefix)
+  // This handles the case of zooming deeper (adding centers) vs clicking elsewhere
+  for (let i = 0; i < oldParts.length; i++) {
+    if (i >= newParts.length || oldParts[i] !== newParts[i]) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function formatScale(scale) {
   if (scale < 10) {
     return +scale.toFixed(1) + 'x';
