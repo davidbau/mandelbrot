@@ -2497,6 +2497,14 @@ class EventHandler {
         this.explorer.urlHandler.updateurl();
       }
     });
+
+    // Handle closebox click on help text
+    const textClosebox = document.querySelector('#text .closebox');
+    if (textClosebox) {
+      textClosebox.addEventListener('click', () => {
+        document.getElementById('text').style.display = 'none';
+      });
+    }
   }
 
   onmousedown(e) {
@@ -2624,7 +2632,7 @@ class EventHandler {
       }],
       ['?', {
         action: () => {
-          document.getElementById('text').style.display = 'block';
+          document.getElementById('text').style.display = '';
           document.getElementById('text').scrollIntoView({ behavior: 'smooth' });
         }
       }],
