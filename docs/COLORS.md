@@ -70,9 +70,17 @@ function estimateLimit(data) {
 ```
 
 The 0.75 exponent is empirical - it produces better predictions than 1.0 for
-typical Mandelbrot computation patterns. The estimate updates as computation
-proceeds, giving increasingly accurate predictions of the final black-pixel
-fraction.
+typical Mandelbrot computation patterns. Why does enzyme kinetics apply to fractals?
+Both systems have a characteristic shape: rapid initial progress that slows as you
+approach a limit. In enzymes, the limit is maximum reaction velocity. In fractals,
+the limit is the fraction of pixels that will ever diverge. The mathematical form
+of the approach-to-limit is similar enough that the same linearization trick works.
+
+Why 0.75 instead of 1.0? With exponent 1.0 (standard Lineweaver-Burk), the plot
+curves slightly. The 0.75 was found by trial and error - it straightens the curve
+for typical Mandelbrot divergence patterns, giving better extrapolation. The
+estimate updates as computation proceeds, giving increasingly accurate predictions
+of the final black-pixel fraction.
 
 ## From Histogram to Color
 
@@ -127,6 +135,13 @@ percentile of the distribution, its brightness stays roughly constant. The hue
 shifts gradually as iteration counts increase, but the overall luminance
 structure remains stable. This prevents jarring brightness flickers during
 zoom transitions.
+
+What happens without this separation? If brightness came from iteration count
+directly, a pixel that goes from iteration 1000 to iteration 10000 (same relative
+position, deeper zoom) would jump in brightness. The image would flash and flicker
+as you zoom. By tying brightness to histogram position instead, we decouple the
+visual structure from the absolute iteration numbers. The boundary between light
+and dark stays at the boundary of the set, where it belongs.
 
 ### Warm Theme (Default)
 

@@ -27,6 +27,12 @@ The explorer supports higher exponents: z^n + c where n ≥ 2. The classic
 Mandelbrot set uses n=2, but n=3 (Multibrot) and higher create different
 fractal shapes with (n-1)-fold rotational symmetry.
 
+Why explore different exponents? The n=2 case is mathematically special - it is
+the only exponent where the Mandelbrot set is connected. Higher exponents produce
+sets that break into separate pieces, each with its own intricate structure. The
+explorer lets you see how the familiar Mandelbrot shapes generalize: the main
+cardioid becomes a multi-lobed figure, and the branching patterns change character.
+
 ## Cycle Detection: Finding Convergent Points
 
 The key idea in this explorer: detect not just divergence but *convergence*.
@@ -36,9 +42,18 @@ Many points in the Mandelbrot set converge to periodic cycles:
 - Period 2: z → z' → z (alternating)
 - Period n: z returns to itself after n iterations
 
+Why bother detecting convergence? Without it, points inside the set would iterate
+forever, never finishing. The naive approach - iterate to some fixed maximum and
+give up - leaves large regions marked "unknown" and wastes computation on points
+that settled into cycles long ago. By detecting convergence, we can mark these
+points as definitively inside the set, stop wasting iterations on them, and
+concentrate computation on the genuinely undecided pixels at the boundary.
+
 ### The Checkpoint Method
 
-We detect cycles using checkpoints at Fibonacci iteration numbers:
+We detect cycles using checkpoints at Fibonacci iteration numbers. The idea is
+simple: periodically save the current z value, then check if later z values
+return to that checkpoint. If z comes back to where it was, we have found a cycle.
 
 ```javascript
 // At iterations 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, ...
@@ -77,6 +92,18 @@ this.epsilon2 = Math.min(1e-9, pixelSize * 10);   // Loose: probable convergence
 When `|z - checkpoint| < epsilon2`, we note the iteration as a candidate period.
 When it drops below `epsilon`, we confirm convergence and stop iterating.
 
+Why two thresholds? Convergence to a cycle is gradual - the orbit spirals inward,
+getting closer each time. A single tight threshold would miss early detection
+opportunities. The loose threshold (`epsilon2`) lets us notice "this point is
+probably converging" and record the likely period. The strict threshold (`epsilon`)
+confirms it. This two-stage approach catches convergence earlier while avoiding
+false positives from orbits that happen to pass near a checkpoint once.
+
+The thresholds also scale with pixel size. At deep zoom, adjacent pixels represent
+points that differ by 10^-20 or less. Using a fixed epsilon like 1e-12 would be
+far too loose - every pixel would appear to converge to the same cycle. Scaling
+epsilon with pixel size keeps detection meaningful at any zoom level.
+
 ## Perturbation Theory: Breaking the Precision Barrier
 
 Standard 64-bit floating point breaks down around 10^15 magnification. Beyond
@@ -108,6 +135,13 @@ So: `dz_next = 2·Z·dz + dz² + dc`
 The magic: even though `dc` and `dz` are tiny (10^-30 or smaller), we only need
 enough precision to track their *relative* differences. The reference orbit `Z`
 handles the large-scale structure.
+
+Why does this work? The key insight is that neighboring pixels follow nearly
+identical orbits - they start close together and stay close together (until one
+escapes). Rather than computing each orbit independently to 30+ digits of precision,
+we compute one reference orbit accurately and track how the others deviate from it.
+The deviations are small numbers that standard double precision can handle, even
+when the absolute positions would require extended precision.
 
 ### Binomial Expansion for Higher Exponents
 
@@ -149,6 +183,12 @@ sequence is: 4, 6, 4, 1 - exactly `(4 choose 1)`, `(4 choose 2)`, etc.
 This cache is rebuilt only when the reference pixel changes, avoiding redundant
 computation when iterating thousands of perturbation pixels that share the same
 reference.
+
+Why precompute? The binomial expansion has n-1 terms for exponent n. Computing
+Z^k and the binomial coefficients from scratch each iteration would multiply the
+work by a factor of n. Since all pixels share the same reference Z at each iteration,
+we compute the Z powers and coefficients once and reuse them across all pixels.
+This keeps the cost of higher exponents manageable.
 
 ### PerturbationBoard (Double Precision)
 
@@ -209,6 +249,13 @@ For the reference orbit, we use "double-double" precision: each number is stored
 as the unevaluated sum of two IEEE doubles, giving about 31 decimal digits of
 precision. This is enough for zooms to around 10^30.
 
+Why 31 digits? A single IEEE double has a 53-bit mantissa, giving about 15-16
+decimal digits. Two doubles together have 106 bits of mantissa, but the
+double-double representation does not pack them perfectly - there is some overlap
+and the low word has reduced range. The effective precision works out to roughly
+2 × 53 - 22 ≈ 84 bits, or about 31 decimal digits. This is not arbitrary-precision
+arithmetic, but it is enough to push the zoom limit from 10^15 to 10^30.
+
 ```javascript
 // Double-double: [high, low] where value = high + low
 function qdAdd(a, b) {
@@ -242,10 +289,13 @@ function qdSplit(a) {
 }
 ```
 
-Why this specific constant? IEEE 754 doubles have 53-bit mantissas. Multiplying
-by `2^27 + 1` shifts the high 27 bits up, and the subtraction sequence isolates
-them. The split produces two non-overlapping parts whose sum exactly equals the
-original - no information lost. This technique dates to T.J. Dekker's 1971 paper
+Why this specific constant? IEEE 754 doubles have 53-bit mantissas. We need to
+split a into two parts that do not overlap - the high part gets roughly half the
+bits, the low part gets the rest. Multiplying by `2^27 + 1` and then subtracting
+cleverly exploits floating-point rounding to isolate the high 27 bits. The number
+27 is chosen because 27 + 26 = 53, exactly filling the mantissa. With 27 bits in
+the high part and 26 in the low part, the two pieces do not overlap and their sum
+exactly equals the original. This technique dates to T.J. Dekker's 1971 paper
 "A floating-point technique for extending the available precision."
 
 The `twoProduct` function then uses these splits to compute the exact product
@@ -270,9 +320,18 @@ When pixels rebase (restart from the beginning of the reference), naive
 cycle detection breaks - the pixel's iteration count no longer matches
 the reference orbit position.
 
+Why is rebasing a problem for cycle detection? Without rebasing, pixel iteration
+count and reference iteration stay synchronized - if a pixel is at iteration 5000,
+it is comparing against reference iteration 5000. But after rebasing, a pixel might
+be at iteration 5000 while following reference iteration 200. If we only save
+checkpoints at the pixel's iteration count, we miss cycles that the reference
+orbit reveals.
+
 The solution is "thread following" - tracking which reference orbit positions
-are close to each other. When point at iteration 1000 is close to where the
-reference was at iteration 200, we record a "thread" linking them.
+are close to each other. When the reference at iteration 1000 is close to where
+it was at iteration 200, we record a "thread" linking them. Later, when a pixel
+rebases and finds itself near iteration 200 of the reference, we know it will
+soon be near iteration 1000 as well - the thread tells us the orbit's future.
 
 ### Spatial Bucketing
 
@@ -317,8 +376,13 @@ class ReferenceOrbitThreading {
 ```
 
 The bucket size is `2 * epsilon`, so any two points within epsilon of each
-other are guaranteed to be in the same bucket or adjacent buckets. Checking
-9 buckets instead of the entire history transforms O(n²) into O(n).
+other are guaranteed to be in the same bucket or adjacent buckets. Why 2×epsilon?
+A point at the edge of a bucket might have a neighbor just across the boundary.
+With bucket size 2×epsilon, even the worst case - two points epsilon apart,
+straddling a boundary - puts them in adjacent buckets. Checking 9 buckets (3×3)
+covers all possible positions of a neighbor within epsilon distance.
+
+Checking 9 buckets instead of the entire history transforms O(n²) into O(n).
 
 The sliding window (default 1024 iterations) limits memory growth. Points
 older than the window are removed from the spatial index. This means we

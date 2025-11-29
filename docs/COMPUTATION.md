@@ -81,6 +81,13 @@ The sparse computation only iterates pixels that are still chaotic. This means
 90% of the work might be done after 1000 iterations, but we can continue to
 1 million iterations for the remaining 10% without wasting time on known pixels.
 
+Why is sparsity essential? Consider a 1000×1000 image: one million pixels. Without
+sparsity, computing 1 million iterations means 10^12 operations - one trillion.
+With sparsity, after early divergers finish (say 90% by iteration 1000), we have
+only 100,000 active pixels. The next million iterations cost 10^11 operations.
+As more pixels finish, cost drops further. Sparsity makes infinite refinement
+practical instead of theoretical.
+
 ## Board Lifecycle
 
 A "Board" is the computational unit - it represents one zoom level's worth of
@@ -280,6 +287,18 @@ const iterationsPerBatch = Math.min(1000, Math.max(100,
   Math.floor(1111211 / Math.max(this.un, 1))));
 ```
 
+Why this formula? There is a tradeoff between GPU efficiency and UI responsiveness.
+Large batches use the GPU efficiently (less dispatch overhead per iteration), but
+they block the CPU from updating the display. Small batches update frequently but
+waste time on dispatch overhead.
+
+The constant 1111211 targets roughly 1 million pixel-iterations per batch. With
+500,000 active pixels, that means ~2 iterations per batch. With 1000 active pixels,
+that means ~1000 iterations per batch. The formula automatically shifts from
+"stay responsive" (many pixels, small batches) to "maximize throughput" (few
+pixels, large batches) as computation progresses. The min/max bounds (100-1000)
+prevent extreme values.
+
 ### Buffer Management
 
 GPU boards use persistent staging buffers to avoid allocation overhead:
@@ -398,6 +417,14 @@ if (this.un < this.config.dimsArea / 2) {
 When compositing child views over parents, coordinate calculations must be
 precise. At zoom 10^25, the child's center differs from the parent's by perhaps
 10^-20 in absolute terms - far below double precision's ~10^-15 relative accuracy.
+
+Why does this matter for screen coordinates? The child and parent centers are
+both stored in double-double precision, accurate to 31 digits. But to composite,
+we need the *offset* between them - and subtracting two nearly-equal numbers
+loses precision catastrophically. If parentCenter = 0.123456789012345678901234567890
+and childCenter = 0.123456789012345678901234567891, the difference is 10^-30 - but
+double precision only sees them as equal. Without extended precision arithmetic,
+the child would appear at the wrong position.
 
 The solution: use double-double arithmetic for the coordinate mapping, even
 though the final pixel positions are screen-resolution integers:

@@ -64,6 +64,16 @@ const interpolatedSize = sourceSize * Math.pow(targetSize / sourceSize, t);
 This creates constant *relative* zoom rate: the image shrinks by the same
 percentage each frame, which feels natural to human perception.
 
+Why logarithmic instead of linear? Human perception of size is roughly logarithmic -
+we perceive the jump from 1× to 2× as similar to the jump from 2× to 4×. Linear
+interpolation (constant absolute change) would feel like it starts fast and slows
+down as you zoom deeper. Logarithmic interpolation (constant relative change)
+maintains a steady perceived zoom speed throughout.
+
+Mathematically: if we zoom from 10^0 to 10^30, linear interpolation spends 99.9999%
+of the time in the final decade. Logarithmic interpolation spends equal time in
+each decade of zoom.
+
 ## Frame Rendering
 
 Each frame is rendered by scaling and compositing the source view:
