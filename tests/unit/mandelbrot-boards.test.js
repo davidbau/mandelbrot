@@ -876,7 +876,7 @@ describe('Mandelbrot Board Computations', () => {
       }, location, SMALL_GRID, MAX_ITERATIONS);
     }
 
-    test('CpuBoard and ZhuoranBoard should agree on divergence/convergence', async () => {
+    test('CpuBoard and ZhuoranBoard should agree on divergence/convergence and iteration counts', async () => {
       const location = TEST_LOCATIONS.outsideSet; // All diverge - clear case
       const results = await computeAllBoards(location);
 
@@ -899,14 +899,18 @@ describe('Mandelbrot Board Computations', () => {
       expect(cpuResult.diverged).toBe(zhuoranResult.diverged);
       expect(cpuResult.converged).toBe(zhuoranResult.converged);
 
-      // Each pixel should agree on diverged vs converged
+      // Each pixel should agree on diverged vs converged and iteration counts
       for (let i = 0; i < cpuResult.totalPixels; i++) {
         expect(cpuResult.pixelResults[i].diverged).toBe(zhuoranResult.pixelResults[i].diverged);
         expect(cpuResult.pixelResults[i].converged).toBe(zhuoranResult.pixelResults[i].converged);
+        // Iteration counts should match for diverged pixels
+        if (cpuResult.pixelResults[i].diverged) {
+          expect(cpuResult.pixelResults[i].nn).toBe(zhuoranResult.pixelResults[i].nn);
+        }
       }
     }, TEST_TIMEOUT);
 
-    test('CpuBoard and PerturbationBoard should agree on divergence/convergence', async () => {
+    test('CpuBoard and PerturbationBoard should agree on divergence/convergence and iteration counts', async () => {
       const location = TEST_LOCATIONS.outsideSet; // All diverge - clear case
       const results = await computeAllBoards(location);
 
@@ -926,10 +930,14 @@ describe('Mandelbrot Board Computations', () => {
       expect(cpuResult.diverged).toBe(pertResult.diverged);
       expect(cpuResult.converged).toBe(pertResult.converged);
 
-      // Each pixel should agree on diverged vs converged
+      // Each pixel should agree on diverged vs converged and iteration counts
       for (let i = 0; i < cpuResult.totalPixels; i++) {
         expect(cpuResult.pixelResults[i].diverged).toBe(pertResult.pixelResults[i].diverged);
         expect(cpuResult.pixelResults[i].converged).toBe(pertResult.pixelResults[i].converged);
+        // Iteration counts should match for diverged pixels
+        if (cpuResult.pixelResults[i].diverged) {
+          expect(cpuResult.pixelResults[i].nn).toBe(pertResult.pixelResults[i].nn);
+        }
       }
     }, TEST_TIMEOUT);
 
@@ -1008,6 +1016,7 @@ describe('Mandelbrot Board Computations', () => {
         const pixelResults = [];
         for (let i = 0; i < config.dimsArea; i++) {
           pixelResults.push({
+            nn: board.nn[i],
             diverged: board.nn[i] > 0,
             converged: board.nn[i] < 0
           });
@@ -1058,6 +1067,7 @@ describe('Mandelbrot Board Computations', () => {
         const pixelResults = [];
         for (let i = 0; i < config.dimsArea; i++) {
           pixelResults.push({
+            nn: board.nn[i],
             diverged: board.nn[i] > 0,
             converged: board.nn[i] < 0
           });
@@ -1077,10 +1087,14 @@ describe('Mandelbrot Board Computations', () => {
       expect(gpuResult.diverged).toBe(cpuResult.diverged);
       expect(gpuResult.converged).toBe(cpuResult.converged);
 
-      // Pixel-by-pixel comparison
+      // Pixel-by-pixel comparison including iteration counts
       for (let i = 0; i < gpuResult.pixelResults.length; i++) {
         expect(gpuResult.pixelResults[i].diverged).toBe(cpuResult.pixelResults[i].diverged);
         expect(gpuResult.pixelResults[i].converged).toBe(cpuResult.pixelResults[i].converged);
+        // Iteration counts should match (nn value) for diverged pixels
+        if (gpuResult.pixelResults[i].diverged) {
+          expect(gpuResult.pixelResults[i].nn).toBe(cpuResult.pixelResults[i].nn);
+        }
       }
     }, TEST_TIMEOUT);
   });

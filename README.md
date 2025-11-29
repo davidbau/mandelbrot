@@ -20,8 +20,9 @@ periodicity. Updated again in 2024 to add double-double quad precision.
 And updated in 2025 to add GPU support.
 
 URL parameter options: use `?grid=3` to select 3-column view,
-                   `c=-0.14-0.65ii` to set center,
-               and `s=0.5` to set viewed size.
+                   `c=-0.14-0.65i` to set center,
+               and `z=5.0` to set zoom level.
+See [docs/URL-PARAMETERS.md](docs/URL-PARAMETERS.md) for the full list.
 
 Implementation notes.  To minimize computation, the code identifies both
 points that diverge and points that converge.  The algorithm can

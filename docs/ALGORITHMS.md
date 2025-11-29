@@ -69,16 +69,17 @@ if (delta < epsilon) {
 }
 ```
 
-### Why Fibonacci Numbers?
+### Fibonacci Checkpoint Intervals
 
-Originally I used powers of 2 (1, 2, 4, 8, 16...). But this has a problem: if a
-point has period 30, we detect it at iteration 60 (multiple of both 30 and the
-checkpoint interval). We report "period 60" instead of the true fundamental
-period 30.
+Originally I used powers of 2 (1, 2, 4, 8, 16...) for checkpoint intervals. The
+problem was that orbits could go undetected for too long between checkpoints,
+and when I tried more frequent checkpoints, the GPU computation became very slow.
 
-Fibonacci numbers (1, 1, 2, 3, 5, 8, 13, 21, 34, 55...) have the beautiful property
-that consecutive Fibonacci numbers are coprime, so we are more likely to catch
-the fundamental period rather than a harmonic.
+Fibonacci numbers (1, 1, 2, 3, 5, 8, 13, 21, 34, 55...) solve both problems.
+The intervals grow slowly enough to catch cycles quickly, yet the pattern is
+GPU-friendly with minimal branching overhead. As a bonus, consecutive Fibonacci
+numbers are coprime, which avoids periodic coincidences that might otherwise
+prevent cycle detection.
 
 ### Epsilon Thresholds
 
@@ -147,11 +148,17 @@ when the absolute positions would require extended precision.
 
 For the classic z² + c, the perturbation formula is simple. But what about
 z³ + c or z⁴ + c? The explorer supports arbitrary exponents using the binomial
-expansion:
+expansion. This formulation also avoids catastrophic subtraction, enabling
+higher-precision calculations that are especially important on the GPU:
 
 ```
 (Z + dz)^n - Z^n = n·Z^(n-1)·dz + (n choose 2)·Z^(n-2)·dz² + ... + dz^n
 ```
+
+The GPU shader evaluates this polynomial efficiently using
+[Horner's method](https://en.wikipedia.org/wiki/Horner%27s_method), which
+restructures the sum as nested multiplications to minimize operations and
+improve numerical stability.
 
 Rather than computing the full expansion each iteration, the code precomputes
 the coefficients and powers of Z:
@@ -190,9 +197,23 @@ work by a factor of n. Since all pixels share the same reference Z at each itera
 we compute the Z powers and coefficients once and reuse them across all pixels.
 This keeps the cost of higher exponents manageable.
 
-### PerturbationBoard (Double Precision)
+### PerturbationBoard (Quad Precision)
 
-For moderate deep zooms, double-precision perturbations suffice:
+PerturbationBoard uses a grid of reference points rather than a single reference.
+Each reference point is computed in quad precision (about 31 decimal digits),
+and nearby pixels use double-precision perturbations relative to their assigned
+reference. When a pixel's perturbation grows too large (indicating the reference
+is no longer a good approximation), the pixel switches to full quad-precision
+iteration for the remainder of its computation.
+
+This multi-reference approach handles regions where orbits diverge significantly
+from any single reference. The disadvantage compared to ZhuoranBoard's single-
+reference rebasing is the overhead of computing many reference orbits. However,
+PerturbationBoard turns out to be faster on CPU for several reasons: the grid
+of references avoids the per-pixel rebasing checks that ZhuoranBoard requires,
+the memory access pattern is more cache-friendly, and pixels that exceed the
+perturbation threshold can switch to straight quad-precision iteration without
+the bookkeeping of tracking reference positions:
 
 ```javascript
 class PerturbationBoard extends Board {
@@ -205,6 +226,12 @@ class PerturbationBoard extends Board {
     // dz_next = 2*Z*dz + dz² + dc
     const new_dr = 2 * (Zr * dr - Zi * di) + dr*dr - di*di + this.dc[index * 2];
     const new_di = 2 * (Zr * di + Zi * dr) + 2*dr*di + this.dc[index * 2 + 1];
+
+    // If perturbation grows too large, switch to quad precision
+    if (new_dr * new_dr + new_di * new_di > this.perturbationLimit) {
+      this.switchToFullPrecision(index);
+      return;
+    }
 
     this.dz[index * 2] = new_dr;
     this.dz[index * 2 + 1] = new_di;
@@ -243,21 +270,22 @@ The beauty of rebasing is that it *avoids* glitches rather than detecting and
 correcting them. You only need one reference orbit (computed once at the center),
 and all pixels can rebase as needed.
 
-### Double-Double Precision
+## Quad Precision Arithmetic
 
-For the reference orbit, we use "double-double" precision: each number is stored
-as the unevaluated sum of two IEEE doubles, giving about 31 decimal digits of
-precision. This is enough for zooms to around 10^30.
+Both PerturbationBoard and ZhuoranBoard use quad precision for reference orbit
+computation. Each number is stored as the unevaluated sum of two IEEE doubles,
+giving about 31 decimal digits of precision. This is enough for zooms to around
+10^30.
 
-Why 31 digits? A single IEEE double has a 53-bit mantissa, giving about 15-16
-decimal digits. Two doubles together have 106 bits of mantissa, but the
-double-double representation does not pack them perfectly - there is some overlap
-and the low word has reduced range. The effective precision works out to roughly
-2 × 53 - 22 ≈ 84 bits, or about 31 decimal digits. This is not arbitrary-precision
-arithmetic, but it is enough to push the zoom limit from 10^15 to 10^30.
+A single IEEE double has a 53-bit mantissa, giving about 15-16 decimal digits.
+Two doubles together have 106 bits of mantissa, but the representation does not
+pack them perfectly since there is some overlap and the low word has reduced
+range. The effective precision works out to roughly 2 × 53 - 22 ≈ 84 bits, or
+about 31 decimal digits. This is not arbitrary-precision arithmetic, but it is
+enough to push the zoom limit from 10^15 to 10^30.
 
 ```javascript
-// Double-double: [high, low] where value = high + low
+// Quad: [high, low] where value = high + low
 function qdAdd(a, b) {
   let [s1, s0] = twoSum(a[0], b[0]);
   s0 += a[1] + b[1];
@@ -289,17 +317,17 @@ function qdSplit(a) {
 }
 ```
 
-Why this specific constant? IEEE 754 doubles have 53-bit mantissas. We need to
-split a into two parts that do not overlap - the high part gets roughly half the
-bits, the low part gets the rest. Multiplying by `2^27 + 1` and then subtracting
-cleverly exploits floating-point rounding to isolate the high 27 bits. The number
-27 is chosen because 27 + 26 = 53, exactly filling the mantissa. With 27 bits in
-the high part and 26 in the low part, the two pieces do not overlap and their sum
-exactly equals the original. This technique dates to T.J. Dekker's 1971 paper
-"A floating-point technique for extending the available precision."
+IEEE 754 doubles have 53-bit mantissas. We need to split a into two parts that
+do not overlap, with the high part getting roughly half the bits and the low
+part the rest. Multiplying by `2^27 + 1` and then subtracting cleverly exploits
+floating-point rounding to isolate the high 27 bits. The number 27 is chosen
+because 27 + 26 = 53, exactly filling the mantissa. With 27 bits in the high
+part and 26 in the low part, the two pieces do not overlap and their sum exactly
+equals the original. This technique dates to T.J. Dekker's 1971 paper "A
+floating-point technique for extending the available precision."
 
 The `twoProduct` function then uses these splits to compute the exact product
-of two doubles as the sum of two doubles - the rounded result plus the rounding
+of two doubles as the sum of two doubles, the rounded result plus the rounding
 error:
 
 ```javascript
@@ -404,7 +432,7 @@ float32 min ≈ 1.4e-45  (minimum representable)
 → dz² = 0 in GPU!
 ```
 
-Solution: Fall back to CPU (ZhuoranBoard) at extreme zoom depths where GPU
+Solution: Fall back to PerturbationBoard on CPU at extreme zoom depths where GPU
 precision fails.
 
 ### The Checkpoint Comparison Problem
@@ -439,15 +467,18 @@ relative precision better than position subtraction.
 
 ## Board Selection
 
-The Scheduler chooses algorithms based on zoom depth:
+The Scheduler chooses algorithms based on zoom depth and GPU availability:
 
 | Pixel Size | GPU Available | Board Type |
 |------------|---------------|------------|
-| > 1e-6 | Yes | GpuBoard |
-| > 1e-6 | No | CpuBoard |
-| ≤ 1e-6, > 1e-24 | Yes | GpuZhuoranBoard |
-| ≤ 1e-6, > 1e-24 | No | ZhuoranBoard |
-| ≤ 1e-24 | Any | ZhuoranBoard (CPU only) |
+| > 1e-6 | Yes | GpuBoard (float32) |
+| > 1e-12 | No | CpuBoard (float64) |
+| ≤ 1e-6 | Yes | GpuZhuoranBoard (quad reference, float32 perturbations) |
+| ≤ 1e-12 | No | PerturbationBoard (quad precision) |
+
+The GPU threshold (1e-6) is higher than the CPU threshold (1e-12) because float32
+loses precision earlier than float64. At extreme depths where GPU float32
+perturbations underflow, computation falls back to PerturbationBoard on CPU.
 
 ## Unsolved Problems
 
@@ -466,11 +497,22 @@ Points can have periods of millions of iterations. With Fibonacci checkpoints,
 detecting period 1,000,000 requires reaching iteration ~1,600,000 (the nearest
 larger Fibonacci). This is correct but slow.
 
+### Period Harmonics
+
+The checkpoint method can report a multiple of the true period. If a point has
+period p, we detect convergence when the orbit returns to a checkpoint position.
+But if the checkpoint was set at iteration n and the orbit returns at iteration
+n + kp for some integer k > 1, we report period kp instead of the fundamental
+period p. Fibonacci checkpoint intervals reduce but don't eliminate this since
+consecutive Fibonacci numbers are coprime, making harmonic coincidences less
+likely. The reported period is still correct in the sense that the orbit does
+repeat every kp iterations, but it may not be the smallest such period.
+
 ### Precision at Extreme Depths
 
-Beyond 10^30 magnification, even double-double precision starts to degrade.
-The theoretical limit is around 10^31 (the precision of double-double arithmetic).
-For deeper zooms, quad-double (four doubles, ~62 digits) or arbitrary-precision
+Beyond 10^30 magnification, even quad precision starts to degrade.
+The theoretical limit is around 10^31 (the precision of quad arithmetic).
+For deeper zooms, oct precision (4-double, ~62 digits) or arbitrary-precision
 arithmetic would be needed.
 
 ## References

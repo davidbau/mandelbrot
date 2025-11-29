@@ -105,7 +105,7 @@ When you click to zoom, the flow is:
 
 **Without GPU (CPU fallback):**
 - Shallow zoom (pixelSize > 1e-12): `CpuBoard` using float64
-- Deep zoom (pixelSize ≤ 1e-12): `PerturbationBoard` with quad-double reference
+- Deep zoom (pixelSize ≤ 1e-12): `PerturbationBoard` with quad-precision reference
 
 The thresholds differ because GPU uses float32 (loses precision around 1e-6) while
 CPU uses float64 (good to about 1e-15). Both switch to perturbation theory when
@@ -439,7 +439,7 @@ When compositing child views over parents, coordinate calculations must be
 precise. At zoom 10^25, the child's center differs from the parent's by perhaps
 10^-20 in absolute terms, far below double precision's ~10^-15 relative accuracy.
 
-The child and parent centers are both stored in double-double precision, accurate
+The child and parent centers are both stored in quad precision, accurate
 to 31 digits. But to composite, we need the *offset* between them, and subtracting
 two nearly-equal numbers loses precision catastrophically. If
 parentCenter = 0.123456789012345678901234567890 and
@@ -447,7 +447,7 @@ childCenter = 0.123456789012345678901234567891, the difference is 10^-30, but
 double precision sees them as equal. Without extended precision arithmetic,
 the child would appear at the wrong position.
 
-The solution is to use double-double arithmetic for the coordinate mapping, even
+The solution is to use quad-precision arithmetic for the coordinate mapping, even
 though the final pixel positions are screen-resolution integers:
 
 ```javascript
@@ -455,7 +455,7 @@ calculateParentMapping() {
   const temp = new Float64Array(4);
 
   // childLeft = childCenterR - childSize / 2
-  // Using quad-double addition for precision
+  // Using quad-precision addition
   AqdAdd(temp, 0, childCenterR[0], childCenterR[1], -childSize / 2, 0);
   const childLeft = [temp[0], temp[1]];
 
@@ -473,7 +473,7 @@ calculateParentMapping() {
 
 The final subtraction `childLeft - parentLeft` would cause catastrophic
 cancellation in double precision when subtracting nearly equal large numbers.
-By carrying the computation in double-double until the last step, we preserve
+By carrying the computation in quad precision until the last step, we preserve
 enough precision to get correct pixel alignment. The result is then converted
 to a screen coordinate, which only needs about 10 bits of precision. The
 intermediate precision matters far more than the output precision.

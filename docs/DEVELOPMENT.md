@@ -53,7 +53,7 @@ npm run test:watch    # Re-run on changes
 npm run test:coverage # Generate coverage report
 ```
 
-Unit tests verify the math (quad-double arithmetic, board computations).
+Unit tests verify the math (quad-precision arithmetic, board computations).
 Integration tests use Puppeteer to click around in the actual explorer.
 
 See [tests/README.md](../tests/README.md) for details on writing tests.
@@ -99,8 +99,8 @@ Open the browser console to see:
 The `?board=` URL parameter forces a specific algorithm:
 - `?board=cpu` - CpuBoard (double precision)
 - `?board=gpu` - GpuBoard (WebGPU)
-- `?board=zhuoran` - ZhuoranBoard (quad-double CPU)
-- `?board=gpuzhuoran` - GpuZhuoranBoard (quad-double GPU)
+- `?board=zhuoran` - ZhuoranBoard (quad-precision CPU)
+- `?board=gpuzhuoran` - GpuZhuoranBoard (quad-precision GPU)
 
 ## Contributing
 

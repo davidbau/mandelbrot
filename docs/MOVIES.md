@@ -126,7 +126,13 @@ map to similar colors.
 
 ## Video Encoding
 
-The explorer uses the WebCodecs API for hardware-accelerated video encoding:
+The explorer uses the WebCodecs API rather than the older MediaRecorder API.
+MediaRecorder is designed for recording live streams and provides limited control
+over encoding parameters. WebCodecs gives direct access to hardware video encoders,
+allowing precise control over codec selection, bitrate, and keyframe placement.
+This produces higher quality output at smaller file sizes, and the frame-by-frame
+encoding model fits naturally with the explorer's approach of rendering each
+frame from computed fractal data:
 
 ```javascript
 async encodeVideo(frames) {
@@ -157,8 +163,9 @@ async encodeVideo(frames) {
 }
 ```
 
-The output is muxed into an MP4 container using [mp4-muxer](https://github.com/Vanilagy/mp4-muxer),
-a pure TypeScript library that is bundled into the HTML file during the build process.
+The output is muxed into an MP4 container using [mp4-muxer](https://github.com/Vanilagy/mp4-muxer)
+by Vanilagy, a pure TypeScript library that is bundled into the HTML file during
+the build process.
 
 ## Frame Rate and Timing
 

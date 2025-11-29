@@ -60,9 +60,9 @@ Added keyboard shortcuts for power users:
 
 The biggest technical leap, enabling exploration beyond 10^30 magnification:
 
-### Quad-Double Precision
+### Quad Precision
 
-Implemented double-double arithmetic (quad precision) for coordinates, enabling
+Implemented quad-precision arithmetic for coordinates, enabling
 zoom depths far beyond standard 64-bit float limits. Each number is stored as
 the unevaluated sum of two doubles, providing about 31 decimal digits of precision.
 
@@ -72,14 +72,6 @@ Added perturbation-based computation: compute one reference orbit at high
 precision, then calculate each pixel as a small perturbation from that reference.
 This technique was pioneered by K.I. Martin in [SuperFractalThing](https://fractalwiki.org/wiki/SuperFractalThing)
 (2013) and dramatically speeds up deep zoom rendering.
-
-### Zhuoran's Rebasing
-
-Implemented the rebasing technique [proposed by Zhuoran](https://fractalforums.org/fractal-mathematics-and-new-theories/28/another-solution-to-perturbation-glitches/4360)
-on fractalforums.org in December 2021. When pixel orbits approach critical points,
-they "rebase" to restart from the reference, avoiding the numerical glitches that
-plague traditional perturbation methods. This eliminated visual artifacts at
-extreme zoom depths.
 
 ### Movie Mode
 
@@ -100,27 +92,40 @@ calculations. Multiple workers enable parallel computation across CPU cores.
 - Higher exponents (z^3, z^4, etc.) for Multibrot sets
 - Multiple color themes (warm, neon, ice blue, tie-dye, grayscale)
 - User-adjustable subpixel resolution
+- URL parameters for sharing specific locations and settings
+
+In 2024 I began coding with Claude as a chatbot, copying code back and forth.
+Features that would have taken weeks to research and implement came together
+in days. We debugged precision bugs, optimized buffer management, and added:
+
 - Aspect ratio support (16:9 and other ratios)
 - Fullscreen mode with viewport-adaptive layout
 - Internationalization (11 languages)
-- URL parameters for sharing specific locations and settings
 
-## 2025: GPU Acceleration with Claude
+## 2025: Claude Code
 
-Most of the 2025 work happened in collaboration with Claude (Anthropic's AI).
-Working with an AI pair programmer changed the pace entirely - features that
-would have taken me weeks to research and implement came together in days.
-We debugged WebGPU shader issues, optimized buffer management, tracked down
-precision bugs in cycle detection, and refactored the codebase together.
+In 2025 I switched to Claude Code, using Claude as an autonomous agent that
+edits files directly, runs tests, and commits code. This changed the workflow
+entirely - instead of copying snippets, Claude works in the codebase alongside
+me. Claude also drafted this documentation.
 
 The result: WebGPU support with massive parallelism.
 
 ### GPU Computation
 
 - **GpuBoard**: WebGPU compute shaders for shallow zooms (pixel size > 10^-6)
-- **GpuZhuoranBoard**: GPU perturbation with quad-double reference orbits for
-  deep zooms, falling back to CPU-only at extreme depths where float32 precision
-  fails
+- **GpuZhuoranBoard**: GPU perturbation with quad-precision reference orbits for
+  deep zooms, falling back to PerturbationBoard on CPU at extreme depths where
+  float32 precision fails
+
+### Zhuoran's Rebasing
+
+To support GPU at higher zoom depths, implemented the rebasing technique
+[proposed by Zhuoran](https://fractalforums.org/fractal-mathematics-and-new-theories/28/another-solution-to-perturbation-glitches/4360)
+on fractalforums.org in December 2021. When pixel orbits approach critical points,
+they "rebase" to restart from the reference, avoiding the numerical glitches that
+plague traditional perturbation methods. This eliminated visual artifacts at
+extreme zoom depths.
 
 ### Performance Optimizations
 
@@ -132,8 +137,7 @@ The result: WebGPU support with massive parallelism.
 ### Bug Fixes and Refinements
 
 - Float32 precision handling for deep zoom cycle detection
-- Magnitude-based convergence comparison (more stable than position subtraction)
-- Fibonacci checkpoint intervals (better fundamental period detection)
+- Fibonacci checkpoint intervals (faster period detection)
 - Unified state management with Redux-style patterns
 - Comprehensive test suite with Jest and Puppeteer
 

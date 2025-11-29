@@ -137,7 +137,7 @@ rendering. Views focus on pixels; Grid focuses on layout.
 ### View
 
 Each View represents one zoom level in the explorer. Views maintain:
-- **Coordinates**: center position (quad-double precision) and size
+- **Coordinates**: center position (quad precision) and size
 - **Pixel data**: iteration counts (`nn`), periods (`pp`)
 - **Histogram**: distribution of iteration values for color mapping
 - **Parent reference**: for composite rendering (zoomed region from parent)

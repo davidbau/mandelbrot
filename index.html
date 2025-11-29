@@ -113,6 +113,7 @@ body.starting div#b_0:after { display: flex; position: absolute;
 </style>
 </head>
 <body class="starting">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none"><symbol id="github-icon" viewBox="0 0 512 512"><circle cx="256" cy="256" r="256" fill="#181717"/><path fill="#fff" d="M335 499c-13 0-16-6-16-12l1-70c0-24-8-40-18-48 57-6 117-28 117-126 0-28-10-51-26-69 3-6 11-32-3-67 0 0-21-7-70 26-42-12-86-12-128 0-49-33-70-26-70-26-14 35-6 61-3 67-16 18-26 41-26 69 0 98 59 120 116 126-7 7-14 18-16 35-15 6-52 17-74-22 0 0-14-24-40-26 0 0-25 0-1 16 0 0 16 7 28 37 0 0 15 50 86 34l1 44c0 6-3 12-16 12-14 0-12 17-12 17H347s2-17-12-17Z"/></symbol></svg>
 <div id=movie></div>
 <div id=grid></div>
 <div id=fullscreen-button title="Enter fullscreen (Enter)">⛶</div>
@@ -191,7 +192,7 @@ to create more precise displays</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
 <script>
@@ -546,8 +547,8 @@ class StateStore {
         aspectRatio: 1.0,         // Default aspect ratio
 
         // Initial view parameters
-        firstr: [-0.5, 0],        // Initial center real (quad-double)
-        firstj: [0.0, 0],         // Initial center imaginary (quad-double)
+        firstr: [-0.5, 0],        // Initial center real (quad precision)
+        firstj: [0.0, 0],         // Initial center imaginary (quad precision)
         firstsize: 3.0,           // Initial view size
 
         // Platform detection
@@ -1384,7 +1385,7 @@ class View {
     const [parentSize, parentCenterR, parentCenterI] = parent.sizes;
     const { dimsWidth, dimsHeight, aspectRatio } = this.config;
 
-    // Use quad-double precision for coordinate calculations at deep zoom
+    // Use quad precision for coordinate calculations at deep zoom
     const temp = new Float64Array(4);
 
     // childLeft = childCenterR - childSize / 2
@@ -2590,7 +2591,7 @@ class EventHandler {
     const { grid, config, movieMode, zoomManager, urlHandler } = this.explorer;
 
     this.keyCommands = new Map([
-      ['backspace', {
+      ['backspace', { // Close the deepest zoom view
         condition: () => grid.views.length > 1 && !grid.currentUpdateProcess,
         action: () => {
           const k = grid.views.length - 1;
@@ -2599,11 +2600,11 @@ class EventHandler {
           urlHandler.updateurl();
         }
       }],
-      ['c', {
+      ['c', { // Center all views on the deepest zoom
         condition: () => grid.views.length > 1,
         action: (e) => zoomManager.centerViews(e.metaKey || e.ctrlKey)
       }],
-      ['a', {
+      ['a', { // Toggle aspect ratio (1:1 ↔ 16:9)
         condition: () => !grid.currentUpdateProcess,
         action: () => {
           const oldFirstsize = config.firstsize;
@@ -2621,35 +2622,35 @@ class EventHandler {
           grid.updateLayout(state);
         }
       }],
-      ['t', {
+      ['t', { // Cycle color theme (Shift for reverse)
         action: (e) => this.explorer.cycleColorTheme(e.shiftKey)
       }],
-      ['u', {
+      ['u', { // Cycle unknown pixel color (Shift for reverse)
         action: (e) => this.explorer.cycleUnknownColor(e.shiftKey)
       }],
-      ['i', {
+      ['i', { // Zoom in at center of deepest view
         action: (e) => zoomManager.zoomInAtCurrentPosition(e.metaKey || e.ctrlKey)
       }],
-      ['?', {
+      ['?', { // Show help
         action: () => {
           document.getElementById('text').style.display = '';
           document.getElementById('text').scrollIntoView({ behavior: 'smooth' });
         }
       }],
-      ['g', {
+      ['g', { // Shrink grid (fewer columns)
         condition: () => config.gridcols > 1,
         action: () => {
           config.setGridcols(config.gridcols - 1);
           grid.updateLayout();
         }
       }],
-      ['h', {
+      ['h', { // Grow grid (more columns)
         action: () => {
           config.setGridcols(config.gridcols + 1);
           grid.updateLayout();
         }
       }],
-      ['r', {
+      ['r', { // Restore all hidden views
         condition: () => !grid.currentUpdateProcess,
         action: () => {
           grid.showAllViews();
@@ -2657,43 +2658,43 @@ class EventHandler {
           grid.updateHiddenViews();
         }
       }],
-      ['x', {
+      ['x', { // Increase exponent (z² → z³ → z⁴...)
         action: () => {
           config.updateExponent(config.exponent + 1);
           grid.updateLayout(config.firststate());
         }
       }],
-      ['z', {
+      ['z', { // Decrease exponent (z⁴ → z³ → z²)
         condition: () => config.exponent > 2,
         action: () => {
           config.updateExponent(config.exponent - 1);
           grid.updateLayout(config.firststate());
         }
       }],
-      ['f', {
+      ['f', { // Increase pixel resolution (finer)
         action: () => {
           config.setPixelRatio(config.pixelRatio + 1);
           grid.updateLayout();
         }
       }],
-      ['d', {
+      ['d', { // Decrease pixel resolution (coarser)
         condition: () => config.pixelRatio > 1,
         action: () => {
           config.setPixelRatio(config.pixelRatio - 1);
           grid.updateLayout();
         }
       }],
-      ['m', {
+      ['m', { // Toggle movie mode
         condition: () => grid.views.length > 1,
         action: () => movieMode.toggle()
       }],
-      ['enter', {
+      ['enter', { // Toggle fullscreen
         action: (e) => {
           e.preventDefault();
           this.explorer.toggleFullscreen();
         }
       }],
-      ['escape', {
+      ['escape', { // Exit fullscreen
         condition: () => document.fullscreenElement,
         action: () => this.explorer.toggleFullscreen()
       }]
@@ -4075,7 +4076,7 @@ class Board {
 class CpuBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    // Convert re and im to quad-double if they're scalars
+    // Convert re and im to quad precision if they're scalars
     if (typeof re === 'number') re = toQd(re);
     if (typeof im === 'number') im = toQd(im);
     // Initialize board: cc = c values, zz = current z, bb = checkpoint z, ss = active pixel indices
@@ -4267,9 +4268,9 @@ class CpuBoard extends Board {
 class PerturbationBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    this.quadIndexes = [];   // Pixels computed in quad-double precision
+    this.quadIndexes = [];   // Pixels computed in quad precision
     this.pertIndexes = [];   // Pixels computed as perturbations from quad points
-    this.tt = [];            // Working array for quad-double operations
+    this.tt = [];            // Working array for quad precision operations
     this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dimsWidth)));
     this.effort = 3;
     this.initPerturbationBoard(size, re, im);
@@ -4514,7 +4515,7 @@ class PerturbationBoard extends Board {
     const cr2 = this.cc[m4+1];
     const cj1 = this.cc[m4+2];
     const cj2 = this.cc[m4+3];
-    const br1 = this.bb[m4];  // bb = checkpoint z (quad-double)
+    const br1 = this.bb[m4];  // bb = checkpoint z (quad precision)
     const br2 = this.bb[m4+1];
     const bj1 = this.bb[m4+2];
     const bj2 = this.bb[m4+3];
@@ -4739,7 +4740,7 @@ class ReferenceOrbitThreading {
 class ZhuoranBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    // Reference orbit data (quad-double precision)
+    // Reference orbit data (quad precision)
     this.maxRefIterations = 10000;  // Will grow dynamically
     this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low] for each iteration
     this.refOrbitEscaped = false;
@@ -4754,7 +4755,7 @@ class ZhuoranBoard extends Board {
     this.refIter = [];  // Which iteration of reference each pixel is following
     this.pixelIndexes = [];  // Active pixel indices
     this.maxRefIter = 1;  // Track maximum refIter to avoid scanning all pixels
-    // Working array for quad-double operations
+    // Working array for quad precision operations
     this.tt = new Array(16);
     // Threading for robust cycle detection
     this.threading = new ReferenceOrbitThreading(this.epsilon);
@@ -4775,7 +4776,7 @@ class ZhuoranBoard extends Board {
     const dimsHeight = this.config.dimsHeight;
     const refRe = this.refC[0] + this.refC[1];
     const refIm = this.refC[2] + this.refC[3];
-    // BUG FIX: re and im might be quad-double arrays, convert to regular doubles
+    // Convert quad precision arrays to doubles for perturbation deltas
     const re_double = Array.isArray(re) ? (re[0] + re[1]) : re;
     const im_double = Array.isArray(im) ? (im[0] + im[1]) : im;
     // Initialize all pixels as perturbations from the reference point
@@ -4861,9 +4862,9 @@ class ZhuoranBoard extends Board {
           changes = { iter: this.it, nn: [], vv: [] };
         }
         if (result > 0) {
-          // Diverged
+          // Diverged: result=1 means before iteration, result=2 means after
           changes.nn.push(index);
-          this.nn[index] = this.it;
+          this.nn[index] = (result === 1) ? this.it : this.it + 1;
           this.di += 1;
           this.un -= 1;
         } else {
@@ -4906,7 +4907,7 @@ class ZhuoranBoard extends Board {
   }
 
   extendReferenceOrbit() {
-    // Compute one more iteration of the reference orbit in quad-double precision
+    // Compute one more iteration of the reference orbit in quad precision
     const lastIndex = this.refIterations;
     const last = this.refOrbit[lastIndex];
     const tt = this.tt;
@@ -4951,9 +4952,7 @@ class ZhuoranBoard extends Board {
     this.refOrbit.push(newZ);
     this.refIterations++;
 
-    // Threading: add new orbit point
-    // PERFORMANCE: Only compute threading after settling period (first 2000 iterations)
-    // This avoids overhead during early orbit computation when threading is poor anyway
+    // Build thread-following map after the orbit settles (first 2000 iterations)
     if (this.refIterations >= 2000) {
       const re = newZ[0] + newZ[1];
       const im = newZ[2] + newZ[3];
@@ -4974,6 +4973,23 @@ class ZhuoranBoard extends Board {
   iteratePixel(index) {
     const index2 = index * 2;
     let refIter = this.refIter[index];
+
+    // Check if current z has escaped BEFORE doing iteration (matches CpuBoard behavior)
+    // This check must happen before any rebasing logic
+    if (refIter < this.refOrbit.length) {
+      const ref = this.refOrbit[refIter];
+      const refR = ref[0] + ref[1];
+      const refI = ref[2] + ref[3];
+      const dr = this.dz[index2];
+      const di = this.dz[index2 + 1];
+      const currentZR = refR + dr;
+      const currentZI = refI + di;
+      const currentMag2 = currentZR * currentZR + currentZI * currentZI;
+      if (currentMag2 > 4) {
+        return 1;  // Diverged before iteration: report this.it
+      }
+    }
+
     // Ensure reference orbit exists for this iteration
     if (refIter >= this.refOrbit.length) {
       // Need more reference orbit iterations
@@ -5018,9 +5034,7 @@ class ZhuoranBoard extends Board {
       this.refIter[index] = 0;
       refIter = 0;
 
-      // NOTE: We do NOT modify the checkpoint here
-      // The difference-based comparison works across rebases:
-      // z_current - z_checkpoint = [ref[0] - ref[ckpt_ref_iter]] + [dz_absolute - dz_ckpt]
+      // Keep the checkpoint unchanged; difference-based comparison works across rebases
     }
     // Get reference orbit value for current iteration
     const ref = this.refOrbit[refIter];
@@ -5031,6 +5045,7 @@ class ZhuoranBoard extends Board {
     }
     const refR = ref[0] + ref[1];  // Convert quad to double
     const refI = ref[2] + ref[3];
+
     // Perturbation iteration using binomial expansion (Horner's method)
     // (z_ref+dz)^n - z_ref^n = sum(k=1 to n) C(n,k) * z_ref^(n-k) * dz^k
     const dr = this.dz[index2];
@@ -5079,11 +5094,7 @@ class ZhuoranBoard extends Board {
     // Update dz first before checking divergence
     this.dz[index2] = newDr;
     this.dz[index2 + 1] = newDi;
-    // Now check for divergence with the updated values
-    // IMPORTANT: The new z value is refOrbit[refIter+1] + newDz,
-    // not refOrbit[refIter] + newDz!
-    // We used refOrbit[refIter] to COMPUTE newDz, but the result
-    // corresponds to the NEXT reference iteration
+    // Check divergence using the next reference iteration (refOrbit[refIter+1] + newDz)
     const nextRefIter = refIter + 1;
     if (nextRefIter >= this.refOrbit.length) {
       // This shouldn't happen because we extend the reference orbit beforehand
@@ -5098,7 +5109,7 @@ class ZhuoranBoard extends Board {
     const totalI = nextRefI + newDi;
     const totalMag2 = totalR * totalR + totalI * totalI;
     if (totalMag2 > 4) {
-      return 1;  // Diverged
+      return 2;  // Diverged after iteration: report this.it + 1
     }
 
     // CONVERGENCE DETECTION: fibonacciPeriod returns 1 at Fibonacci checkpoints
@@ -5118,10 +5129,9 @@ class ZhuoranBoard extends Board {
     if (this.hasCheckpoint[index] && !justUpdatedCheckpoint) {
       const checkpointRefIter = this.checkpointIter[index];
 
-      // NEW APPROACH: Check if we're at the same reference iteration
-      // If refIter matches checkpointRefIter, we're at the same point in the reference orbit cycle
-      // In that case, we only need to check if the perturbation dz is close to the checkpoint dz
-      // This works even across rebases: after rebase, we wait for refIter to cycle back to match
+      // When refIter matches checkpointRefIter, both are at the same point in the reference
+      // orbit cycle and we only need to check if the perturbation dz is close to checkpoint dz.
+      // This works across rebases: after rebase, we wait for refIter to cycle back to match.
       if (refIter === checkpointRefIter) {
         const checkpoint_dr = this.bb[index2];
         const checkpoint_di = this.bb[index2 + 1];
@@ -5144,8 +5154,8 @@ class ZhuoranBoard extends Board {
         }
       }
 
-      // THREAD-FOLLOWING & FALLBACK: Only after enough iterations
-      // Activate after 2584 iterations (Fibonacci F(18)) to match GPU behavior
+      // Thread-following and fallback convergence checks activate after 2584 iterations
+      // (Fibonacci F(18)) to match GPU behavior
       if (this.it > 2584) {
         // First try thread-following (more precise than absolute position comparison)
         if (checkpointRefIter < this.refOrbit.length) {
@@ -5189,10 +5199,8 @@ class ZhuoranBoard extends Board {
           }
         }
 
-        // FALLBACK: If thread-following didn't help, use absolute
-        // position comparison
-        // This handles orbits that never rebase (staying close to
-        // reference but never triggering rebase)
+        // If thread-following didn't help, fall back to absolute position comparison.
+        // This handles orbits that stay close to reference but never trigger rebase.
         const checkpoint_dr = this.bb[index2];
         const checkpoint_di = this.bb[index2 + 1];
 
@@ -6109,7 +6117,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     this.effort = 2;  // Same as ZhuoranBoard
 
-    // Reference orbit for perturbation theory (computed on CPU in quad-double)
+    // Reference orbit for perturbation theory (computed on CPU in quad precision)
     this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low]
     this.refOrbitEscaped = false;
     this.refIterations = 0;
@@ -6125,7 +6133,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.refOrbit.push(this.refC.slice());
     this.refIterations = 1;
 
-    // Working array for quad-double operations
+    // Working array for quad precision operations
     this.tt = new Array(16);
 
     // Threading for robust cycle detection
@@ -6145,7 +6153,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const dimsHeight = this.config.dimsHeight;
     const dimsArea = this.config.dimsArea;
 
-    // Convert re/im to quad-double if needed
+    // Convert re/im to quad precision if needed
     const re_qd = Array.isArray(re) ? re : toQd(re);
     const im_qd = Array.isArray(im) ? im : toQd(im);
     const size_qd = toQd(size);
@@ -6156,7 +6164,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.dz = new Float32Array(dimsArea * 2);  // Current perturbation delta [real, imag] pairs
     this.refIter = new Uint32Array(dimsArea);  // Which iteration of reference each pixel is following
 
-    // Working arrays for quad-double arithmetic
+    // Working arrays for quad precision arithmetic
     const cr_qd = new Array(4);
     const ci_qd = new Array(4);
     const dcr_qd = new Array(4);
@@ -6168,7 +6176,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       // Use integer arithmetic to avoid float64 rounding: (dims/2 - y) / dims
       const yFrac = (dimsHeight / 2 - y) / dimsHeight;
 
-      // ci_qd = im_qd + yFrac * sizeY_qd (in quad-double)
+      // ci_qd = im_qd + yFrac * sizeY_qd (in quad precision)
       AqdMul(temp, 0, toQd(yFrac)[0], toQd(yFrac)[1], sizeY_qd[0], sizeY_qd[1]);
       AqdAdd(ci_qd, 0, im_qd[0], im_qd[1], temp[0], temp[1]);
 
@@ -6179,7 +6187,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         // Use integer arithmetic to avoid float64 rounding: (x - dims/2) / dims
         const xFrac = (x - dimsWidth / 2) / dimsWidth;
 
-        // cr_qd = re_qd + xFrac * size_qd (in quad-double)
+        // cr_qd = re_qd + xFrac * size_qd (in quad precision)
         AqdMul(temp, 0, toQd(xFrac)[0], toQd(xFrac)[1], size_qd[0], size_qd[1]);
         AqdAdd(cr_qd, 0, re_qd[0], re_qd[1], temp[0], temp[1]);
 
@@ -6189,8 +6197,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         const index = y * dimsWidth + x;
         const index2 = index * 2;
 
-        // Convert quad-double deltas to float32
-        // TESTING: Use Math.fround to simulate float32 precision like GPU
+        // Convert quad precision deltas to float32 (Math.fround simulates GPU precision)
         this.dc[index2] = Math.fround(dcr_qd[0] + dcr_qd[1]);
         this.dc[index2 + 1] = Math.fround(dci_qd[0] + dci_qd[1]);
 
@@ -6360,7 +6367,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
   // Copy extendReferenceOrbit from ZhuoranBoard
   extendReferenceOrbit() {
-    // Compute one more iteration of the reference orbit in quad-double precision
+    // Compute one more iteration of the reference orbit in quad precision
     const lastIndex = this.refIterations;
     const last = this.refOrbit[lastIndex];
     const tt = this.tt;
@@ -6381,7 +6388,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       return;
     }
 
-    // Compute z^exponent using quad-double
+    // Compute z^exponent using quad precision
     AqdSet(tt, 8, r1, r2);  // ra = r
     AqdSet(tt, 6, j1, j2);  // ja = j
     for (let ex = 1; ex < this.config.exponent; ex++) {
@@ -6453,7 +6460,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       }
     }
 
-    // Compute delta in quad-double precision
+    // Compute delta in quad precision
     const closestPt = this.refOrbit[closestIter];
     const tt = this.tt;
     AqdAdd(tt, 0, endpoint[0], endpoint[1], -closestPt[0], -closestPt[1]); // real delta
@@ -6609,8 +6616,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             break;
           }
 
-          // BUG FIX: Check rebasing BEFORE loading reference orbit (matches CPU ZhuoranBoard)
-          // The old code loaded refr/refi first, then rebased, then used stale refr/refi
+          // Check rebasing before loading reference orbit values to avoid using stale data
           let dz_norm = max(abs(dzr), abs(dzi));
 
           // Peek at reference orbit to check rebasing condition
@@ -6628,13 +6634,11 @@ class GpuZhuoranBoard extends GpuBaseBoard {
               dzi = total_i_pre;
               ref_iter = 0u;  // Restart from beginning of reference orbit
 
-              // NOTE: We do NOT modify the checkpoint here
-              // The difference-based comparison works across rebases:
-              // z_current - z_checkpoint = [ref[0] - ref[ckpt_ref_iter]] + [dz_absolute - dz_ckpt]
+              // Keep the checkpoint unchanged; difference-based comparison works across rebases
             }
           }
 
-          // NOW load reference orbit values for current (possibly rebased) ref_iter
+          // Load reference orbit values for current (possibly rebased) ref_iter
           let ref_offset = ref_iter * 2u;
           if (ref_offset + 1u >= params.ref_orbit_length * 2u) {
             break;  // Reference orbit too short
@@ -7291,7 +7295,7 @@ self.onmessage = async function(e) {
       } else if (enableGPU && webGPUAvailable && gpuSafe) {
         // Two-tier strategy with WebGPU:
         // - Shallow zooms: GpuBoard with simple float32 iteration
-        // - Deep zooms: GpuZhuoranBoard with quad-double reference + float32 perturbations
+        // - Deep zooms: GpuZhuoranBoard with quad precision reference + float32 perturbations
         board = new GpuBoardClass(data.k, data.size, data.re, data.im, data.config, data.id);
       } else {
         if (enableGPU && webGPUAvailable && !gpuSafe) {
@@ -8013,7 +8017,7 @@ aumentarse para crear visualizaciones más precisas</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="zh" style="display:none">
@@ -8082,7 +8086,7 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="zh-TW" style="display:none">
@@ -8151,7 +8155,7 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="ar" style="display:none;direction:rtl;text-align:right">
@@ -8226,7 +8230,7 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <p style="margin-top:8px;margin-bottom:0;text-align:left">
 <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> -</p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a> -</p>
 </div>
 
 <div lang="id" style="display:none">
@@ -8302,7 +8306,7 @@ ditingkatkan untuk membuat tampilan yang lebih presisi</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="pt" style="display:none">
@@ -8378,7 +8382,7 @@ ser aumentado para criar exibições mais precisas</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="fr" style="display:none">
@@ -8455,7 +8459,7 @@ cela peut être augmenté pour créer des affichages plus précis</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="ja" style="display:none">
@@ -8526,7 +8530,7 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="ru" style="display:none">
@@ -8604,7 +8608,7 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="de" style="display:none">
@@ -8681,7 +8685,7 @@ und dies kann erhöht werden, um präzisere Anzeigen zu erstellen</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a></p>
+>David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
 <script>
