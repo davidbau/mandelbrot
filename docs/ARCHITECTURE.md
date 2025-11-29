@@ -1,0 +1,256 @@
+# Architecture Overview
+
+This document describes the high-level architecture of the Mandelbrot Set Fractal Explorer,
+a single-page web application that renders the Mandelbrot set with arbitrary precision
+and infinite iteration refinement.
+
+## Philosophy: One HTML File
+
+The entire application lives in `index.html`. It's intentional: a single file
+means you can save the page, email it to a friend, or host it anywhere without
+worrying about build systems, CDNs, or broken dependencies. The fractal explorer
+should be as timeless and self-contained as the mathematics it visualizes.
+
+That said, the code inside is organized into clear sections with well-defined
+responsibilities. Think of it as a carefully structured monolith rather than chaos.
+
+## The Big Picture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        MandelbrotExplorer                           │
+│  (The application root - coordinates everything)                    │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
+│  │   Config     │  │  StateStore  │  │   Grid       │              │
+│  │  (settings)  │◄─┤   (state)    │─►│  (views)     │              │
+│  └──────────────┘  └──────────────┘  └──────────────┘              │
+│         │                 ▲                  │                      │
+│         ▼                 │                  ▼                      │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
+│  │ URLHandler   │  │ EventHandler │  │  Scheduler   │              │
+│  │  (URL sync)  │  │  (input)     │  │  (workers)   │              │
+│  └──────────────┘  └──────────────┘  └──────────────┘              │
+│                                              │                      │
+│  ┌──────────────┐  ┌──────────────┐         │                      │
+│  │  MovieMode   │  │ ZoomManager  │         ▼                      │
+│  │  (video)     │  │  (zoom UI)   │    Web Workers                 │
+│  └──────────────┘  └──────────────┘    ┌─────────┐                 │
+│                                        │ Board 1 │                 │
+│                                        ├─────────┤                 │
+│                                        │ Board 2 │                 │
+│                                        ├─────────┤                 │
+│                                        │   ...   │                 │
+│                                        └─────────┘                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Core Classes
+
+### MandelbrotExplorer
+
+The application root. It creates and wires together all the other components.
+When you load the page, `MandelbrotExplorer` is instantiated, which triggers
+the cascade that initializes everything else.
+
+```javascript
+class MandelbrotExplorer {
+  constructor() {
+    this.store = new StateStore();
+    this.config = new Config(this.store);
+    this.grid = new Grid(this.config, this.store);
+    this.scheduler = new Scheduler(this.grid, this.config);
+    // ... and so on
+  }
+}
+```
+
+### StateStore
+
+A Redux-inspired state container that holds the application's truth. All state
+changes flow through here via `dispatch(action)`, making state mutations
+predictable and debuggable.
+
+The state is organized into four domains:
+
+```javascript
+{
+  config: {
+    // Display settings: dimensions, pixel ratio, theme, etc.
+    dimsWidth: 960,
+    dimsHeight: 540,
+    pixelRatio: 2,
+    theme: 'warm',
+    exponent: 2,
+    enableGPU: true,
+    // ...
+  },
+  views: [
+    // Array of zoom levels, each with coordinates
+    { k: 0, sizes: [3.0, [-0.5, 0], [0, 0]], hidden: false },
+    // ...
+  ],
+  ui: {
+    // Mouse state, focused view, movie mode, fullscreen
+    mouseDown: false,
+    focusedView: 0,
+    movieMode: { active: false, progress: 0 },
+    fullscreen: false
+  },
+  computation: {
+    // Per-view computation progress
+    views: { 0: { un: 1000, di: 45000, ch: 100, it: 500 } }
+  }
+}
+```
+
+### Config
+
+Configuration management with property getters/setters that delegate to StateStore.
+This maintains backward compatibility while ensuring all config changes go through
+the state system.
+
+Key configuration categories:
+- **Viewport**: canvas dimensions, pixel ratio, grid columns
+- **Computation**: exponent (z^n), GPU enable/disable, algorithm forcing
+- **Display**: color theme, unknown pixel color, zoom factor
+- **Initial view**: starting coordinates and size
+
+### Grid
+
+Manages the collection of View objects and their corresponding DOM elements.
+Handles layout changes, view creation/deletion, and coordinates the visual
+representation of the zoom hierarchy.
+
+### View
+
+Each View represents one zoom level in the explorer. Views maintain:
+- **Coordinates**: center position (quad-double precision) and size
+- **Pixel data**: iteration counts (`nn`), periods (`pp`)
+- **Histogram**: distribution of iteration values for color mapping
+- **Parent reference**: for composite rendering (zoomed region from parent)
+
+Views handle their own rendering, including the clever composite drawing that
+shows the parent's zoomed region as a background while local pixels compute.
+
+### Scheduler
+
+The traffic controller for computation. Manages a pool of Web Workers and
+distributes computation work across them. Handles:
+- Creating and destroying workers
+- Transferring boards between workers for load balancing
+- Collecting results and updating views
+
+### Board Classes (in Workers)
+
+The actual computation happens in Web Workers, which run Board objects:
+- **CpuBoard**: Simple double-precision iteration
+- **GpuBoard**: WebGPU-accelerated for shallow zooms
+- **PerturbationBoard**: High-precision reference orbit with double perturbations
+- **ZhuoranBoard**: Quad-double reference with rebasing (CPU)
+- **GpuZhuoranBoard**: Quad-double reference with float32 perturbations (GPU)
+
+See [ALGORITHMS.md](ALGORITHMS.md) for details on the mathematical algorithms.
+
+## State Management Flow
+
+The application follows a unidirectional data flow pattern:
+
+```
+User Interaction
+       │
+       ▼
+Event Handler ──► dispatch(action) ──► StateStore.reducer()
+                                              │
+                                              ▼
+                                        New State
+                                              │
+                                              ▼
+                                    Component Updates
+```
+
+For example, when you press 'T' to change the color theme:
+
+1. `EventHandler.onkeydown()` detects the 'T' key
+2. Calls `explorer.cycleColorTheme()`
+3. Which calls `config.setTheme(nextTheme)`
+4. Which dispatches `CONFIG_SET_THEME` action
+5. StateStore reducer creates new state with updated theme
+6. RedrawProcess redraws all views with new colors
+
+## URL Synchronization
+
+The URL is the bookmark. `URLHandler` maintains bidirectional sync:
+
+- **Parse on load**: URL parameters → initial state
+- **Update on change**: state changes → URL update
+
+Supported URL parameters:
+- `c`: coordinates (can chain multiple: `c=re+im,re+im,...`)
+- `z`: zoom level (alternative to `s` for size)
+- `s`: view size in complex plane
+- `grid`: number of columns
+- `exponent`: z^n exponent (default 2)
+- `theme`: color theme name
+- `gpu`: enable/disable GPU
+- `board`: force specific algorithm
+- `lang`: interface language
+- `a`: aspect ratio (e.g., `16:9`)
+
+## Worker Communication
+
+Workers communicate with the main thread via structured messages:
+
+```javascript
+// Main → Worker
+{ type: 'createBoard', k: 0, size: 3.0, re: [-0.5, 0], im: [0, 0] }
+
+// Worker → Main
+{ type: 'update', k: 0, changeList: [...], un: 500, di: 46000, it: 1000 }
+```
+
+The Scheduler maintains a pool of workers and handles board transfers:
+- Workers request boards when idle
+- Scheduler can transfer boards between workers for load balancing
+- Results stream back as computation progresses
+
+## Rendering Pipeline
+
+Views are rendered in layers:
+
+1. **Clear**: Start with transparent/black background
+2. **Parent composite**: Scale and draw parent's relevant region
+3. **Local pixels**: Draw computed pixels on top
+4. **Overlay**: Yellow zoom rectangles, orbit dots (optional)
+
+The composite rendering creates the smooth zoom experience - you see the
+zoomed parent while waiting for child pixels to compute.
+
+## Memory Considerations
+
+Pixel data stays in workers to avoid main-thread GC pressure. Only change
+lists (newly computed pixels) transfer to the main thread. Views maintain
+their own `nn` (iteration) and `pp` (period) arrays for rendering.
+
+The histogram (`hi`) summarizes iteration distribution without storing
+individual values, enabling efficient color palette computation.
+
+## File Organization
+
+Within `index.html`:
+- Lines 1-120: HTML structure and CSS
+- Lines 120-200: Application overview comment
+- Lines 200-2000: Main thread classes (Config, View, Grid, etc.)
+- Lines 2000-2800: UI classes (URLHandler, EventHandler, MovieMode)
+- Lines 2800-4000: Utility functions and color themes
+- Lines 4000-7500: Worker code (Board classes, algorithms)
+- Lines 7500-8000: Quad-double math library
+- Lines 8000+: Internationalization messages
+
+## Next Steps
+
+- [COMPUTATION.md](COMPUTATION.md): How computation is managed across threads
+- [ALGORITHMS.md](ALGORITHMS.md): The mathematical algorithms
+- [COLORS.md](COLORS.md): Histogram-based coloring
+- [MOVIES.md](MOVIES.md): Smooth animation and video export
