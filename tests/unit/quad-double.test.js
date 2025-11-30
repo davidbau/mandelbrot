@@ -7,16 +7,14 @@
  * - Utility functions (fibonacciPeriod, qdFixed, qdFloor, comparisons)
  */
 
-const { createFullTestEnvironment } = require('../utils/extract-code');
-const fs = require('fs');
-const path = require('path');
+const { loadScript } = require('../utils/extract-scripts');
 
-// Extract all quad-double arithmetic functions from index.html
-// Include helper functions that are dependencies
-const qd = createFullTestEnvironment('quadCode', [
+// Load quad-double functions from the extracted script
+// This uses require() so V8 can track coverage properly
+const qd = loadScript('quadCode', [
   // Low-level helpers (pure)
   'fast2Sum', 'slow2Sum', 'qdSplit', 'twoProduct', 'twoSquare',
-  
+
   // Low-level helpers (array in-place)
   'Afast2Sum', 'Aslow2Sum', 'AqdSplit', 'AtwoProduct', 'AtwoSquare',
 
@@ -38,24 +36,10 @@ const qd = createFullTestEnvironment('quadCode', [
 // Helper to check if a qd is NaN (pure math format)
 const isQdNaN = (q) => isNaN(q[0]);
 
-// Save coverage data after tests
-afterAll(() => {
-  if (global.__coverage__) {
-    const coverageDir = path.join(__dirname, '../../.nyc_output');
-    if (!fs.existsSync(coverageDir)) {
-      fs.mkdirSync(coverageDir, { recursive: true });
-    }
-    fs.writeFileSync(
-      path.join(coverageDir, 'unit-coverage-quad.json'), 
-      JSON.stringify(global.__coverage__)
-    );
-  }
-});
-
 describe('Quad-Double Arithmetic', () => {
-  
+
   // --- Array-based In-Place Operations ---
-  
+
   describe('Two-Sum operations', () => {
     test('Afast2Sum should compute exact sum of two floats', () => {
       const result = new Float64Array(2);
@@ -303,7 +287,7 @@ describe('Quad-Double Arithmetic', () => {
         expect(isQdNaN(qd.qdDiv(one, posInf))).toBe(true);
         expect(isQdNaN(qd.qdDiv(one, negInf))).toBe(true);
         expect(isQdNaN(qd.qdDiv(posInf, one))).toBe(true);
-        
+
         // Division by zero also results in NaN.
         expect(isQdNaN(qd.qdDiv(one, zero))).toBe(true);
         expect(isQdNaN(qd.qdDiv(negOne, zero))).toBe(true);
@@ -388,7 +372,7 @@ describe('Quad-Double Arithmetic', () => {
         const floored = qd.qdFloor(num);
         expect(floored[0]).toBe(3);
         expect(floored[1]).toBe(0);
-        
+
         const negNum = qd.toQd(-3.1);
         const negFloored = qd.qdFloor(negNum);
         expect(negFloored[0]).toBe(-4);
@@ -411,7 +395,7 @@ describe('Quad-Double Arithmetic', () => {
     // Helpers for constructing complex quads
     const cOne = [1, 0, 0, 0]; // 1 + 0i
     const cI = [0, 0, 1, 0];   // 0 + 1i
-    
+
     test('toQdc should convert scalars/arrays to complex quad', () => {
       const c = qd.toQdc([1, 2]);
       expect(c).toHaveLength(4);
@@ -476,7 +460,7 @@ describe('Quad-Double Arithmetic', () => {
       const res0 = qd.qdcPow(onePlusI, 0);
       expect(res0[0]).toBe(1);
       expect(res0[2]).toBe(0);
-      
+
       // Power of 1
       const res1 = qd.qdcPow(onePlusI, 1);
       expect(res1[0]).toBe(1);
@@ -500,10 +484,10 @@ describe('Quad-Double Arithmetic', () => {
       // Fibonacci: 1, 2, 3, 5, 8
       // Iteration 4: Prev Fib is 3. Distance = 4 - 3 + 1 = 2.
       expect(qd.fibonacciPeriod(4)).toBe(2); // 4-3+1
-      
+
       // Iteration 6: Prev Fib is 5. Distance = 6 - 5 + 1 = 2.
       expect(qd.fibonacciPeriod(6)).toBe(2);
-      
+
       // Iteration 7: Prev Fib is 5. Distance = 7 - 5 + 1 = 3.
       expect(qd.fibonacciPeriod(7)).toBe(3);
     });

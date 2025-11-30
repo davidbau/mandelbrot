@@ -1,20 +1,14 @@
 /**
  * Utility to extract JavaScript code from index.html for testing.
  * This allows tests to remain synchronized with the main codebase.
+ *
+ * Note: For coverage collection, use extract-scripts.js instead,
+ * which works with V8 coverage (c8) for proper merging with
+ * integration test coverage.
  */
 
 const fs = require('fs');
 const path = require('path');
-let instrumenter = null;
-
-if (process.env.COLLECT_COVERAGE) {
-  try {
-    const { createInstrumenter } = require('istanbul-lib-instrument');
-    instrumenter = createInstrumenter({ esModules: false, compact: false });
-  } catch (e) {
-    console.warn('istanbul-lib-instrument not found, skipping instrumentation');
-  }
-}
 
 // Cache the HTML content
 let htmlContent = null;
@@ -258,33 +252,10 @@ function createTestEnvironment(names) {
 
   // Evaluate all code in a shared scope
   const allCode = codeBodies.join('\n\n');
-  let codeToEval = allCode;
-
-  if (process.env.COLLECT_COVERAGE && instrumenter) {
-    // Instrument the code as a virtual file 'quadCode.js' to match the report
-    // We wrap it in a way that preserves the return statement logic of the Function constructor
-    // Actually, istanbul puts coverage data in global variable.
-    try {
-      const coverageDir = path.join(__dirname, '../../.nyc_output/scripts');
-      if (!fs.existsSync(coverageDir)) {
-        fs.mkdirSync(coverageDir, { recursive: true });
-      }
-      const virtualPath = path.join(coverageDir, 'quadCode.js');
-      codeToEval = instrumenter.instrumentSync(allCode, virtualPath);
-      
-      if (process.env.DEBUG_INSTRUMENTATION) {
-        console.log('--- INSTRUMENTED CODE START ---');
-        console.log(codeToEval);
-        console.log('--- INSTRUMENTED CODE END ---');
-      }
-    } catch (e) {
-      console.warn('Failed to instrument code:', e.message);
-    }
-  }
 
   // eslint-disable-next-line no-new-func
   const evalFunction = new Function(`
-    ${codeToEval}
+    ${allCode}
     return {${foundNames.join(', ')}};
   `);
 
@@ -332,23 +303,6 @@ function createFullTestEnvironment(scriptId, exposedNames) {
   }
 
   const code = match[1];
-  let codeToEval = code;
-
-  if (process.env.COLLECT_COVERAGE && instrumenter) {
-    try {
-      const coverageDir = path.join(__dirname, '../../.nyc_output/scripts');
-      if (!fs.existsSync(coverageDir)) {
-        fs.mkdirSync(coverageDir, { recursive: true });
-      }
-      // Use the same virtual filename as the integration tests
-      const virtualPath = path.join(coverageDir, `${scriptId}.js`);
-      
-      // We must ensure the code is instrumented exactly as it appears
-      codeToEval = instrumenter.instrumentSync(code, virtualPath);
-    } catch (e) {
-      console.warn('Failed to instrument code:', e.message);
-    }
-  }
 
   // Evaluate in a new function scope
   // We prepend variable declarations for the names we want to expose, 
@@ -358,7 +312,7 @@ function createFullTestEnvironment(scriptId, exposedNames) {
   
   // Note: The script content might assume global scope.
   const wrappedCode = `
-    ${codeToEval}
+    ${code}
     return {${exposedNames.join(', ')}};
   `;
 
