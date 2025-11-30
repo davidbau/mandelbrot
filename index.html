@@ -2293,10 +2293,23 @@ class ZoomManager {
       cssClass = 'circle';
     }
     this.grid.rect(k).parentElement.className = cssClass;
-    s.top = `${y * this.config.cssDimsHeight - this.config.cssDimsHeight / 2 / zf - border}px`;
-    s.left = `${x * this.config.cssDimsWidth - this.config.cssDimsWidth / 2 / zf - border}px`;
-    s.width = `${this.config.cssDimsWidth / zf + 2 * border}px`;
-    s.height = `${this.config.cssDimsHeight / zf + 2 * border}px`;
+
+    if (cssClass === 'circle') {
+      // To make a circle, width and height must be equal.
+      // We use the average of the would-be width and height for the diameter.
+      const diameter = (this.config.cssDimsWidth + this.config.cssDimsHeight) / 2 / zf;
+      s.width = `${diameter + 2 * border}px`;
+      s.height = `${diameter + 2 * border}px`;
+      s.left = `${x * this.config.cssDimsWidth - diameter / 2 - border}px`;
+      s.top = `${y * this.config.cssDimsHeight - diameter / 2 - border}px`;
+    } else {
+      const rectWidth = this.config.cssDimsWidth / zf;
+      const rectHeight = this.config.cssDimsHeight / zf;
+      s.width = `${rectWidth + 2 * border}px`;
+      s.height = `${rectHeight + 2 * border}px`;
+      s.left = `${x * this.config.cssDimsWidth - rectWidth / 2 - border}px`;
+      s.top = `${y * this.config.cssDimsHeight - rectHeight / 2 - border}px`;
+    }
   }
 
   removeZoomRect(k) {
@@ -2313,7 +2326,8 @@ class ZoomManager {
       let currView = this.grid.views[k].sizes;
       if (prevView !== null) {
         let x = qdSub(currView[1], prevView[1])[0] / prevView[0] + 0.5;
-        let y = 0.5 - qdSub(currView[2], prevView[2])[0] / prevView[0];
+        let y = 0.5 - qdSub(currView[2], prevView[2])[0] / (prevView[0] / this.config.aspectRatio);
+
         let zf = prevView[0] / currView[0];
         this.showZoomRect(prevK, x, y, zf);
       }
