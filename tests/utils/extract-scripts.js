@@ -79,20 +79,64 @@ function getScriptPath(scriptId) {
   return scriptPath;
 }
 
+// JavaScript reserved words that cannot be exported
+const RESERVED_WORDS = new Set([
+  'break', 'case', 'catch', 'continue', 'debugger', 'default', 'delete', 'do',
+  'else', 'finally', 'for', 'function', 'if', 'in', 'instanceof', 'new',
+  'return', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while',
+  'with', 'class', 'const', 'enum', 'export', 'extends', 'import', 'super',
+  'implements', 'interface', 'let', 'package', 'private', 'protected', 'public',
+  'static', 'yield', 'await', 'null', 'true', 'false', 'undefined', 'NaN', 'Infinity'
+]);
+
 /**
- * Load an extracted script and return specified exports.
+ * Extract all top-level function and class names from JavaScript code.
+ * Filters out reserved words and local variables.
+ * @param {string} code - JavaScript source code
+ * @returns {Array<string>} Array of function/class names
+ */
+function extractExportNames(code) {
+  const names = [];
+
+  // Match function declarations: function name(
+  const funcPattern = /\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+  let match;
+  while ((match = funcPattern.exec(code)) !== null) {
+    const name = match[1];
+    if (!RESERVED_WORDS.has(name)) {
+      names.push(name);
+    }
+  }
+
+  // Match class declarations: class Name
+  const classPattern = /\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+  while ((match = classPattern.exec(code)) !== null) {
+    const name = match[1];
+    if (!RESERVED_WORDS.has(name)) {
+      names.push(name);
+    }
+  }
+
+  return [...new Set(names)]; // Remove duplicates
+}
+
+/**
+ * Load an extracted script and return all exports.
+ * Auto-detects function and class names to export.
  * Appends module.exports to the base .js file so both unit tests (c8) and
  * integration tests (Puppeteer) use the exact same file, enabling coverage merge.
  *
  * @param {string} scriptId - The script ID to load
- * @param {Array<string>} exportNames - Names to export from the script
- * @returns {Object} Object with the requested exports
+ * @returns {Object} Object with all detected exports
  */
-function loadScript(scriptId, exportNames) {
+function loadScript(scriptId) {
   const scriptPath = getScriptPath(scriptId);
 
   // Read the script content
   const code = fs.readFileSync(scriptPath, 'utf-8');
+
+  // Auto-detect exports
+  const exportNames = extractExportNames(code);
 
   // Append module.exports to the base file (not a separate .module.js)
   // This ensures both unit and integration tests use identical file content,
@@ -109,11 +153,76 @@ function loadScript(scriptId, exportNames) {
   return require(scriptPath);
 }
 
+/**
+ * Find the line number where a script tag starts in index.html
+ * @param {string} scriptId - The script ID to find
+ * @returns {number} Line number (1-based)
+ */
+function findScriptLineNumber(scriptId) {
+  const html = fs.readFileSync(HTML_PATH, 'utf-8');
+  const pattern = new RegExp(`^\\s*<script id="${scriptId}"`, 'm');
+  const match = pattern.exec(html);
+  if (!match) return 0;
+  return html.substring(0, match.index).split('\n').length;
+}
+
+/**
+ * Create and load the combined worker blob (workerCode + quadCode).
+ * Matches the exact format created by assembleWorkerCode() in index.html,
+ * including line number padding for accurate stack traces.
+ * Auto-detects all function and class names to export.
+ *
+ * @returns {Object} Object with all detected exports
+ */
+function loadWorkerBlob() {
+  // Get paths to source scripts (extract if needed)
+  const workerCodePath = getScriptPath('workerCode');
+  const quadCodePath = getScriptPath('quadCode');
+
+  // Read source files
+  const workerCode = fs.readFileSync(workerCodePath, 'utf-8');
+  const quadCode = fs.readFileSync(quadCodePath, 'utf-8');
+
+  // Find the line number where workerCode starts (matches lastScriptLineNumber in browser)
+  // The browser uses the line of the mainCode closing tag, which is 1 line before workerCode starts
+  const workerCodeLineNum = findScriptLineNumber('workerCode');
+  const lastScriptLineNumber = workerCodeLineNum > 0 ? workerCodeLineNum - 1 : 0;
+
+  // Build worker blob matching browser's assembleWorkerCode() format exactly
+  // This enables coverage byte offsets to match between browser and unit tests
+  const combinedCode = '// Linefeeds to align line numbers with HTML.\n' +
+                       ''.padStart(lastScriptLineNumber, '\n') +
+                       '// <script id="workerCode">' +
+                       workerCode +
+                       '// </script>\n' +
+                       '// <script id="quadCode">' +
+                       quadCode +
+                       '// </script>\n';
+
+  // Auto-detect exports from combined code
+  const exportNames = extractExportNames(combinedCode);
+
+  // Ensure output directory exists
+  if (!fs.existsSync(SCRIPTS_DIR)) {
+    fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
+  }
+
+  // Write combined file
+  const blobPath = path.join(SCRIPTS_DIR, 'workerBlob.js');
+  const exportLine = `\nif (typeof module !== 'undefined') module.exports = { ${exportNames.join(', ')} };`;
+  fs.writeFileSync(blobPath, combinedCode + exportLine);
+
+  // Clear require cache and load
+  delete require.cache[require.resolve(blobPath)];
+  return require(blobPath);
+}
+
 module.exports = {
   extractScript,
   extractAllScripts,
   getScriptPath,
   loadScript,
+  loadWorkerBlob,
   SCRIPTS_DIR,
   SCRIPT_IDS
 };

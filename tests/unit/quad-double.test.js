@@ -1,37 +1,14 @@
 /**
  * Unit tests for quad-double precision arithmetic.
- * Covers:
- * - Low-level helpers (pure & array)
- * - Quad scalar arithmetic (pure & array)
- * - Quad complex arithmetic (pure)
- * - Utility functions (fibonacciPeriod, qdFixed, qdFloor, comparisons)
+ * Uses workerBlob.js (workerCode + quadCode combined) which matches
+ * the browser's worker blob format for coverage merge.
  */
 
-const { loadScript } = require('../utils/extract-scripts');
+const { loadWorkerBlob } = require('../utils/extract-scripts');
 
-// Load quad-double functions from the extracted script
-// This uses require() so V8 can track coverage properly
-const qd = loadScript('quadCode', [
-  // Low-level helpers (pure)
-  'fast2Sum', 'slow2Sum', 'qdSplit', 'twoProduct', 'twoSquare',
-
-  // Low-level helpers (array in-place)
-  'Afast2Sum', 'Aslow2Sum', 'AqdSplit', 'AtwoProduct', 'AtwoSquare',
-
-  // Pure math functions (Scalar)
-  'toQd', 'qdAdd', 'qdMul', 'qdDouble', 'qdScale', 'qdSquare', 'qdNegate', 'qdSub',
-  'qdDiv', 'qdReciprocal', 'qdParse', 'qdPow10', 'qdFloor', 'qdCompare',
-  'qdLt', 'qdEq', 'qdAbs', 'qdFixed', 'qdFormat', 'qdTen',
-
-  // Array-based in-place functions (Scalar)
-  'AqdAdd', 'AqdMul', 'AqdSquare', 'AqdAbsSub', 'AqdSet', 'AqdcCopy', 'AqdcGet',
-
-  // Complex quad functions (Pure)
-  'toQdc', 'qdcAdd', 'qdcSub', 'qdcMul', 'qdcDouble', 'qdcSquare', 'qdcAbs', 'qdcPow',
-
-  // Utilities
-  'fibonacciPeriod'
-]);
+// Mock worker environment and load combined worker blob
+global.self = global;
+const qd = loadWorkerBlob();
 
 // Helper to check if a qd is NaN (pure math format)
 const isQdNaN = (q) => isNaN(q[0]);
