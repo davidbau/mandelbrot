@@ -4534,7 +4534,7 @@ function estimateLimit(data) {
 
 const lastScriptLineNumber = parseInt(new Error().stack.match(/(:[\d]+)/)[0].replace(':',''));
 </script>
-<script id="workerCode" type="text/javascript">
+<script id="workerCode" type="text/webworker">
 // Constants
 const MAX_CHAOTIC_ITERATIONS = 100000;
 

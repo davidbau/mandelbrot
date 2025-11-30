@@ -20,8 +20,9 @@ const SCRIPT_IDS = ['quadCode', 'mainCode', 'workerCode', 'i18nCode'];
  */
 function extractScript(scriptId) {
   const html = fs.readFileSync(HTML_PATH, 'utf-8');
-  // Match script tag at start of line (with optional leading whitespace) to avoid matching strings inside JS code
-  const scriptPattern = new RegExp(`^\\s*<script id="${scriptId}">([\\s\\S]*?)^\\s*<\\/script>`, 'm');
+  // Match script tag at start of line (with optional leading whitespace)
+  // Allow optional attributes after the ID (e.g. type="text/javascript")
+  const scriptPattern = new RegExp(`^\\s*<script id="${scriptId}"[^>]*>([\\s\\S]*?)^\\s*<\\/script>`, 'm');
   const match = scriptPattern.exec(html);
 
   if (!match) {
