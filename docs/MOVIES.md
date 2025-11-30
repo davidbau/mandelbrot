@@ -15,14 +15,33 @@ A compelling Mandelbrot zoom video needs to solve several problems:
 
 The camera path is generated using Catmull-Rom splines. Developed by Edwin Catmull (later president of Pixar) and Raphael Rom, this technique creates a smooth curve that passes through a sequence of control points. Given four points (P0, P1, P2, P3), the spline travels from P1 to P2, with its tangents at those points determined by the neighboring points (P0 and P3). This guarantees C1 continuity (a smooth, continuous velocity), which makes the camera motion feel natural and cinematic.
 
-The implementation uses quad-precision arithmetic to ensure the path is accurate even at extreme zoom depths where the control points are numerically very close together.
+The implementation uses quad-precision arithmetic to ensure the path is accurate even at extreme zoom depths where the control points are numerically very close together:
 
 ```javascript
-// A simplified conceptual view
+function catmullRom1D(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const c0 = (-t3 + 2*t2 - t) / 2;
+  // c1 = (3*t3 - 5*t2 + 2) / 2; // unneeded since p1 = 0 in offset form
+  const c2 = (-3*t3 + 4*t2 + t) / 2;
+  const c3 = (t3 - t2) / 2;
+  // Compute offsets from p1 for numerical stability
+  const s0 = qdSub(p0, p1);
+  const s2 = qdSub(p2, p1);
+  const s3 = qdSub(p3, p1);
+  return qdAdd(qdAdd(qdAdd(qdScale(s0, c0),
+           qdScale(s3, c3)), qdScale(s2, c2)), p1);
+}
+```
+
+For 2D complex coordinates:
+
+```javascript
 function catmullRomSpline(p0, p1, p2, p3, t) {
-  const re = catmullRom1D(p0.re, p1.re, p2.re, p3.re, t);    // Real part
-  const im = catmullRom1D(p0.im, p1.im, p2.im, p3.im, t);    // Imaginary part
-  return { re, im };
+  return [
+    catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),  // Real part
+    catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)   // Imaginary part
+  ];
 }
 ```
 
@@ -36,6 +55,10 @@ const interpolatedSize = sourceSize * Math.pow(targetSize / sourceSize, t);
 ```
 
 This creates a constant *relative* zoom rate. Why does this matter? Human perception of scale is logarithmic; we perceive the jump from 1x to 2x zoom as being similar in "distance" to the jump from 50x to 100x zoom. A linear interpolation of size would feel like it starts fast and slows down dramatically, whereas logarithmic interpolation provides a steady, constant perceived zoom speed.
+
+**Example:** Zooming from 1× to 1000× with 30 frames.
+- **Linear** adds ~33× per frame: 1, 34, 67, 100, ..., 1000. Most frames show the final approach.
+- **Logarithmic** multiplies by ~1.26× per frame: 1, 1.26, 1.58, 2, ..., 1000. Equal frames per "doubling."
 
 ## Frame Rendering and Compositing
 

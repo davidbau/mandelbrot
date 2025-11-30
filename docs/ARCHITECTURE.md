@@ -87,12 +87,28 @@ The actual computation happens inside `Board` objects within the workers. Differ
 
 ## State Management and URL Synchronization
 
-The application uses a unidirectional data flow (`Interaction -> Action -> Reducer -> New State -> Re-render`). The `URLHandler` maintains a bidirectional sync between the state and the URL, making any view bookmarkable.
+The application uses a unidirectional data flow:
+
+```
+User Interaction
+       │
+       ▼
+Event Handler ──► dispatch(action) ──► StateStore.reducer()
+                                              │
+                                              ▼
+                                        New State
+                                              │
+                                              ▼
+                                    Component Updates
+```
+
+The `URLHandler` maintains a bidirectional sync between the state and the URL, making any view bookmarkable.
 
 A key challenge is handling browser history navigation without discarding computed fractal detail. The `handlePopState` handler implements a **view preservation** system: it compares the state from the new URL with the current state, matches views by coordinates and zoom level, and preserves any unchanged views, keeping their computed data intact.
 
 ### The `stableViews` System
-A race condition can occur if a history navigation event arrives while the app is already processing a new view from a user click. The `stableViews` system solves this. When a layout change begins, the current views are moved to a temporary `stableViews` holding area. Workers continue computing for these views. As the new layout is constructed, views from `stableViews` are matched and reused. Any views left over are safely discarded. This ensures that no worker messages are lost and no computation is wasted during the transition.
+
+A race condition can occur if a history navigation event arrives while the app is already processing a new view from a user click. The `stableViews` system solves this:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -115,6 +131,8 @@ A race condition can occur if a history navigation event arrives while the app i
 └─────────────────────────────────────────────────────────────┘
 ```
 
+When a layout change begins, current views move to `stableViews`. Workers continue computing for these views. As the new layout is constructed, views from `stableViews` are matched and reused. Any views left over are safely discarded. This ensures no worker messages are lost and no computation is wasted during the transition.
+
 ## Rendering, Communication, and Memory
 
 - **Rendering Pipeline:** Views are rendered in layers: 1. Clear, 2. Parent composite, 3. Local pixels, 4. UI Overlay. The composite rendering provides a smooth zoom experience.
@@ -122,12 +140,19 @@ A race condition can occur if a history navigation event arrives while the app i
 - **Memory:** Heavy pixel data stays in workers to avoid main-thread GC pressure. The `changeList` system ensures only minimal data is transferred.
 
 ## Code Organization in `index.html`
-The application's JavaScript is contained within `<script>` tags inside `index.html`, organized conceptually as follows:
-1.  **Main Application Code:** Core classes like `MandelbrotExplorer`, `StateStore`, `Config`, `View`, and `Grid`.
-2.  **UI and Interaction Code:** `URLHandler`, `EventHandler`, `MovieMode`, etc.
-3.  **Worker Code:** The `Board` classes and computational algorithms.
-4.  **Quad-Precision Math:** The library for quad-double arithmetic.
-5.  **Bundled Libraries & Utilities:** The MP4 muxer, i18n strings, and startup script.
+
+The application's JavaScript is contained within `<script>` tags inside `index.html`:
+
+| Script ID | Approx Lines | Contents |
+|-----------|-------------|----------|
+| `mainCode` | 198-4520 | Core classes (MandelbrotExplorer, StateStore, Config, View, Grid, ZoomManager), UI classes (URLHandler, EventHandler, MovieMode), Scheduler |
+| `workerCode` | 4523-8020 | Board classes and computational algorithms |
+| `quadCode` | 8025-9235 | Quad-double precision math library |
+| `i18nCode` | 9238-9413 | Internationalization messages |
+| `mp4Muxer` | 9416-9720 | Bundled mp4-muxer library |
+| `startApp` | 9722-9728 | Application startup |
+
+The line numbers are approximate and shift as the code evolves. The script IDs are used for code coverage reporting.
 
 ## Next Steps
 

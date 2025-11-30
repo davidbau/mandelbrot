@@ -28,7 +28,26 @@ When a pixel's color is calculated, its iteration count is looked up in this his
 
 The histogram also stores an estimate of the final fraction of pixels that will diverge. This is calculated using a **Lineweaver-Burk plot**, a technique borrowed from 1930s enzyme kinetics.
 
-Why does a concept from biochemistry apply to fractals? Both systems describe a process that approaches a limit. In enzymes, it's reaction velocity approaching a maximum. In fractals, it's the fraction of diverging pixels approaching a final value. By plotting the data in a transformed space (e.g., `1/diverged_fraction` vs `1/iterations`), the relationship becomes linear, and the y-intercept of a regression line gives a robust estimate of the limit. This helps the color palettes normalize brightness correctly even before the image is fully computed.
+Why does a concept from biochemistry apply to fractals? Both systems describe a process that approaches a limit. In enzymes, it's reaction velocity approaching a maximum. In fractals, it's the fraction of diverging pixels approaching a final value. By plotting the data in a transformed space, the relationship becomes linear:
+
+```javascript
+function estimateLimit(data) {
+  // Transform: x → 1/x^0.75
+  const transformed = data.map(point => ({
+    x: 1 / (point.x ** 0.75),
+    y: point.y,
+    weight: point.weight
+  }));
+
+  // Weighted linear regression in transformed space
+  // ...calculate slope and intercept...
+
+  // Intercept (at x→0, i.e., iteration→∞) gives asymptotic limit
+  return intercept;
+}
+```
+
+The 0.75 exponent is empirical—with exponent 1.0 (standard Lineweaver-Burk), the plot curves slightly. The 0.75 was found by trial and error to straighten the curve for typical Mandelbrot divergence patterns, giving better extrapolation. The estimate updates as computation proceeds, providing increasingly accurate predictions of the final black-pixel fraction.
 
 ## From Histogram to Color
 
@@ -63,15 +82,51 @@ Most themes use the **HCL (Hue, Chroma, Luminance)** color space instead of the 
 
 ### Example Themes
 
-- **`warm` (Default):** Uses a logarithmic spiral through the HCL color space to produce bands of dark reds, oranges, and bright yellows. The luminance is calculated with `15 * frac + 85 * frac ** 5`, a curve that keeps early divergers very dark and allows brightness to increase rapidly only for the last few percent of pixels near the set boundary.
+**`warm` (Default):** Uses a logarithmic spiral through the HCL color space to produce bands of dark reds, oranges, and bright yellows. The luminance is calculated with `15 * frac + 85 * frac ** 5`, a curve that keeps early divergers very dark and allows brightness to increase rapidly only for the last few percent of pixels near the set boundary.
 
-- **`neon`:** Generates vibrant, saturated colors by cycling three sine waves for the R, G, and B channels, offset by 120 degrees. It actively suppresses the minimum channel to boost saturation, ensuring that at least one channel is always near zero, creating pure, intense hues.
+```javascript
+warm: (i, frac, fracD, fracL, s) => {
+  frac = Math.max(frac, Math.min(0.99, fracD / Math.max(1e-3, fracL)));
+  let hue = (Math.log(i + 20) * 200) % 360;
+  let chroma = 100;
+  let light = 15 * frac + 85 * frac ** 5;
+  return hclColor(hue, chroma, light);
+}
+```
 
-- **`iceblue`:** Creates a cool, crystalline appearance where the blue channel is dominant, and the red and green channels add subtle warmth based on both iteration count and the zoom scale (`s`), making the palette evolve slightly as you zoom deeper.
+**`neon`:** Generates vibrant, saturated colors by cycling three sine waves for the R, G, and B channels, offset by 120 degrees. It actively suppresses the minimum channel to boost saturation, ensuring that at least one channel is always near zero, creating pure, intense hues.
+
+```javascript
+neon: (i, frac, fracD, fracL, s) => {
+  let angle = (Math.log(i + 10) * 0.8) * Math.PI;
+  let r = Math.abs(Math.sin(angle));
+  let g = Math.abs(Math.sin(angle + Math.PI * 2/3));
+  let b = Math.abs(Math.sin(angle + Math.PI * 4/3));
+  // Suppress minimum channel to boost saturation
+  let minChannel = Math.min(r, g, b);
+  r = Math.max(0, r - minChannel * 2/3);
+  g = Math.max(0, g - minChannel * 2/3);
+  b = Math.max(0, b - minChannel * 2/3);
+  // Normalize and apply brightness from histogram rank
+  let maxChannel = Math.max(r, g, b);
+  if (maxChannel > 0) { r /= maxChannel; g /= maxChannel; b /= maxChannel; }
+  let brightness = 0.5 + 0.4 * frac;
+  return `rgb(${r*brightness*255|0},${g*brightness*255|0},${b*brightness*255|0})`;
+}
+```
+
+**`iceblue`:** Creates a cool, crystalline appearance where the blue channel is dominant, and the red and green channels add subtle warmth based on both iteration count and the zoom scale (`s`), making the palette evolve slightly as you zoom deeper.
 
 ## Rendering Optimization
 
 To minimize expensive `fillStyle` changes, pixels are rendered in sorted order based on their iteration count. This allows the renderer to set the color once and then draw all pixels that share that color, rather than setting the color for every single pixel. For a one-megapixel image with only a few hundred unique iteration values, this is a major performance win.
+
+## References
+
+- [HCL color space](https://en.wikipedia.org/wiki/HCL_color_space) - The cylindrical representation of CIELUV
+- [Lineweaver-Burk plot](https://en.wikipedia.org/wiki/Lineweaver–Burk_plot) - The 1934 technique from enzyme kinetics
+- [CIELAB color space](https://en.wikipedia.org/wiki/CIELAB_color_space) - The 1976 CIE standard
+- [sRGB gamma](https://en.wikipedia.org/wiki/SRGB) - The transfer function monitors expect
 
 ## Next Steps
 

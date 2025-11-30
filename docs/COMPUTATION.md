@@ -95,8 +95,45 @@ Each Board maintains several `TypedArray`s for performance. These map directly t
 
 The `pp` array lives only in the worker. When a pixel's convergence is reported to the main thread, its period is sent as part of the `changeList` and stored in the `View`'s `convergedData` map.
 
+### Perturbation Arrays (Deep Zoom)
+
+| Array | Type | Purpose |
+|-------|------|---------|
+| `dc` | Float64 | Delta c from reference point |
+| `dz` | Float64 | Current perturbation delta |
+| `refIter` | Int32 | Which reference iteration each pixel follows |
+| `refOrbit` | Float64×4 | Quad precision reference orbit values |
+
+### Compaction
+
+As pixels finish, boards "compact" to only track active pixels:
+
+```javascript
+compact() {
+  // When more than half are done, rebuild active list
+  if (this.un < this.pixelIndexes.length / 2) {
+    this.pixelIndexes = this.pixelIndexes.filter(i => this.nn[i] === 0);
+  }
+}
+```
+
+This keeps memory usage reasonable and iteration loops tight.
+
 ## Worker Pool and Load Balancing
-The `Scheduler` maintains a pool of Web Workers, typically matching the CPU core count. This allows multiple zoom levels to be computed in parallel. If one worker finishes its board early while another is still busy, the Scheduler can transfer boards between them to balance the load and maximize throughput.
+
+The `Scheduler` maintains a pool of Web Workers to compute multiple zoom levels in parallel. The pool size matches CPU core count (up to 8) to maximize throughput without oversubscription:
+
+```javascript
+class Scheduler {
+  constructor() {
+    this.numWorkers = Math.min(navigator.hardwareConcurrency || 4, 8);
+    this.workers = [];
+    this.workerBoards = new Map(); // worker -> Set of board keys
+  }
+}
+```
+
+If one worker finishes its board early while another is still busy, the Scheduler can transfer boards between them to balance the load.
 
 ## GPU Computation Strategy
 
@@ -107,7 +144,43 @@ The number of iterations per GPU batch is tuned dynamically to balance efficienc
 This automatically shifts priority from responsiveness to throughput as the image fills in.
 
 ### Change Lists and View Updates
-To minimize data transfer, workers send a `changeList` containing only the pixels that finished in the last batch. On the main thread, `updateViewFromWorkerResult` applies these sparse changes to the `View`'s local data and updates the color histogram.
+
+To minimize data transfer, workers send a `changeList` containing only the pixels that finished in the last batch. The format groups pixels by iteration:
+
+```javascript
+changeList: [
+  {
+    iter: 1000,              // Iteration count when these pixels finished
+    nn: [index1, index2],    // Pixel indices that diverged
+    vv: [                    // Pixels that converged
+      { index: i1, z: [re, im], p: period1 },
+      { index: i2, z: [re, im], p: period2 }
+    ]
+  },
+  { iter: 1001, nn: [...], vv: [...] }
+]
+```
+
+On the main thread, `updateViewFromWorkerResult` applies these sparse changes:
+
+```javascript
+updateFromWorkerResult(data) {
+  for (const { nn, vv, iter } of data.changeList) {
+    // Mark diverged pixels with positive iteration count
+    for (const index of nn) {
+      this.nn[index] = iter;
+    }
+    // Mark converged pixels with negative iteration count
+    for (const { index, z, p } of vv) {
+      this.nn[index] = -iter;
+      this.convergedData.set(index, { z, p });
+    }
+    this.updateHistogram(data.un, data.di, iter);
+  }
+}
+```
+
+The View's `nn` array uses sign to distinguish pixel states: `nn[i] > 0` means diverged, `nn[i] < 0` means converged, `nn[i] === 0` means still computing.
 
 ## The Quad-Precision Compositing Problem
 A subtle but critical challenge arises when drawing a new, high-zoom view on top of its parent. At a zoom of 10^25, the child view's center might differ from the parent's by only 10^-20. Standard `Float64` precision is only ~10^-15. Subtracting the two centers to find the offset would result in zero—an effect called **catastrophic cancellation**.
