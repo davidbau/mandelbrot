@@ -492,4 +492,108 @@ describe('Quad-Double Arithmetic', () => {
       expect(qd.fibonacciPeriod(7)).toBe(3);
     });
   });
+
+  // --- High-Precision & Correctness Verification ---
+
+  describe('High-Precision & Correctness Verification', () => {
+    // Veltkamp-Dekker Split verification
+    test('qdSplit should decompose a double into hi + lo exactly', () => {
+      // Use a number with full 53 bits of precision
+      const a = 1.2345678901234567;
+      const [hi, lo] = qd.qdSplit(a);
+
+      // 1. Exact reconstruction
+      expect(hi + lo).toBe(a);
+
+      // 2. 'hi' should have at most 26 bits of significand (Veltkamp split property)
+      // This means hi should be exactly representable with fewer bits.
+      // A quick check: lo should be much smaller than hi
+      expect(Math.abs(lo)).toBeLessThan(Math.abs(hi) * 1e-7);
+      
+      // 3. Verify overlap property: lo should be the "error" of approximating a with hi
+      // This is implicit in hi + lo = a.
+    });
+
+    test('Double-Double should handle 1 + 2^-53 (precision boundary)', () => {
+      // 2^-53 is approx 1.11e-16, just below machine epsilon (2^-52)
+      // In standard double, 1 + 2^-53 === 1.
+      const epsBoundary = Math.pow(2, -53);
+      const one = qd.toQd(1);
+      const small = qd.toQd(epsBoundary);
+      
+      const sum = qd.qdAdd(one, small);
+      
+      // sum[0] should be 1 (standard double result)
+      expect(sum[0]).toBe(1);
+      // sum[1] should capture the lost bit
+      expect(sum[1]).toBe(epsBoundary);
+      
+      // Verify that we can retrieve it back
+      const diff = qd.qdSub(sum, one);
+      expect(diff[0]).toBe(epsBoundary);
+    });
+
+    test('Should handle cancellation: (1 + e)^2 - (1 + 2e) = e^2', () => {
+      // Let e = 2^-27 (approx 7.45e-9).
+      // (1 + e)^2 = 1 + 2e + e^2.
+      // In standard double:
+      // 1 is bit 0.
+      // 2e is bit -26.
+      // e^2 is bit -54.
+      // Since double has 53 bits, e^2 (bit -54) is lost relative to 1 (bit 0).
+      
+      const eVal = Math.pow(2, -27);
+      const onePlusE = qd.qdAdd(qd.toQd(1), qd.toQd(eVal));
+      
+      // Square it
+      const squared = qd.qdSquare(onePlusE);
+      
+      // Construct 1 + 2e
+      const onePlus2E = qd.qdAdd(qd.toQd(1), qd.toQd(2 * eVal));
+      
+      // Subtract: (1 + 2e + e^2) - (1 + 2e)
+      const result = qd.qdSub(squared, onePlus2E);
+      
+      // Expected: e^2 = 2^-54
+      const expected = Math.pow(2, -54);
+      
+      // result[0] should be approx e^2
+      // Since e^2 is ~ 5.55e-17, it fits in a double easily on its own.
+      // The key is that it was preserved during the squaring of (1+e).
+      expect(result[0]).toBeCloseTo(expected, 30);
+    });
+
+    test('Associativity extended range: (A + B) + C', () => {
+      // A = 1
+      // B = 2^-50 (fits in double with 1)
+      // C = 2^-100 (vanishes in double w.r.t 1, but fits in DD w.r.t B?)
+      // Wait, DD is ~106 bits. 1 is bit 0. 2^-100 is bit -100.
+      // This is within the 106 bit range? 
+      // 0 to -52 (Hi), -53 to -105 (Lo).
+      // -100 falls in the Lo part range. So it *should* work.
+      
+      const A = qd.toQd(1);
+      const B = qd.toQd(Math.pow(2, -50));
+      const C = qd.toQd(Math.pow(2, -100));
+      
+      // (A + B) + C
+      const sum1 = qd.qdAdd(qd.qdAdd(A, B), C);
+      
+      // Check if C is present. 
+      // sum1 should be roughly [1, 2^-50]. 
+      // 2^-100 is likely lost even in DD because 2^-50 takes up the 'Lo' double's significant bits?
+      // Hi: 1 (exponent 0). Lo: 2^-50 (exponent -50).
+      // The Lo double has precision starting at -50 going down to -102.
+      // So 2^-100 IS representable in the Lo double alongside 2^-50.
+      // (2^-50 + 2^-100) is a valid double?
+      // 2^-50 is ~1e-15. 2^-100 is ~1e-30.
+      // Ratio is 1e-15. Double precision handles 1e-16.
+      // So yes, (2^-50 + 2^-100) fits in a standard double.
+      
+      // Subtract A and B to see if C remains
+      const rem = qd.qdSub(qd.qdSub(sum1, A), B);
+      
+      expect(rem[0]).toBeCloseTo(Math.pow(2, -100), 110); // e-30 level
+    });
+  });
 });
