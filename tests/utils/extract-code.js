@@ -5,6 +5,16 @@
 
 const fs = require('fs');
 const path = require('path');
+let instrumenter = null;
+
+if (process.env.COLLECT_COVERAGE) {
+  try {
+    const { createInstrumenter } = require('istanbul-lib-instrument');
+    instrumenter = createInstrumenter({ esModules: false, compact: false });
+  } catch (e) {
+    console.warn('istanbul-lib-instrument not found, skipping instrumentation');
+  }
+}
 
 // Cache the HTML content
 let htmlContent = null;
@@ -248,10 +258,33 @@ function createTestEnvironment(names) {
 
   // Evaluate all code in a shared scope
   const allCode = codeBodies.join('\n\n');
+  let codeToEval = allCode;
+
+  if (process.env.COLLECT_COVERAGE && instrumenter) {
+    // Instrument the code as a virtual file 'quadCode.js' to match the report
+    // We wrap it in a way that preserves the return statement logic of the Function constructor
+    // Actually, istanbul puts coverage data in global variable.
+    try {
+      const coverageDir = path.join(__dirname, '../../.nyc_output/scripts');
+      if (!fs.existsSync(coverageDir)) {
+        fs.mkdirSync(coverageDir, { recursive: true });
+      }
+      const virtualPath = path.join(coverageDir, 'quadCode.js');
+      codeToEval = instrumenter.instrumentSync(allCode, virtualPath);
+      
+      if (process.env.DEBUG_INSTRUMENTATION) {
+        console.log('--- INSTRUMENTED CODE START ---');
+        console.log(codeToEval);
+        console.log('--- INSTRUMENTED CODE END ---');
+      }
+    } catch (e) {
+      console.warn('Failed to instrument code:', e.message);
+    }
+  }
 
   // eslint-disable-next-line no-new-func
   const evalFunction = new Function(`
-    ${allCode}
+    ${codeToEval}
     return {${foundNames.join(', ')}};
   `);
 
@@ -281,10 +314,70 @@ function extractAllJavaScript() {
   return allCode;
 }
 
+/**
+ * Create a test environment by extracting a full script block by ID
+ * This preserves line numbers and content for accurate coverage merging
+ * @param {string} scriptId - The id of the script tag in index.html
+ * @param {Array<string>} exposedNames - Names of variables to expose from the scope
+ * @returns {Object} Object with exposed variables
+ */
+function createFullTestEnvironment(scriptId, exposedNames) {
+  const html = getHtmlContent();
+  // Match script tag at start of line (allowing for indentation) to avoid matching strings in JS
+  const scriptPattern = new RegExp(`(?:^|\\n)[ \\t]*<script id="${scriptId}">([\\s\\S]*?)<\\/script>`);
+  const match = scriptPattern.exec(html);
+
+  if (!match) {
+    throw new Error(`Script with id "${scriptId}" not found`);
+  }
+
+  const code = match[1];
+  let codeToEval = code;
+
+  if (process.env.COLLECT_COVERAGE && instrumenter) {
+    try {
+      const coverageDir = path.join(__dirname, '../../.nyc_output/scripts');
+      if (!fs.existsSync(coverageDir)) {
+        fs.mkdirSync(coverageDir, { recursive: true });
+      }
+      // Use the same virtual filename as the integration tests
+      const virtualPath = path.join(coverageDir, `${scriptId}.js`);
+      
+      // We must ensure the code is instrumented exactly as it appears
+      codeToEval = instrumenter.instrumentSync(code, virtualPath);
+    } catch (e) {
+      console.warn('Failed to instrument code:', e.message);
+    }
+  }
+
+  // Evaluate in a new function scope
+  // We prepend variable declarations for the names we want to expose, 
+  // then return them at the end.
+  // Since the script content is just function declarations and definitions,
+  // we can wrap it.
+  
+  // Note: The script content might assume global scope.
+  const wrappedCode = `
+    ${codeToEval}
+    return {${exposedNames.join(', ')}};
+  `;
+
+  // eslint-disable-next-line no-new-func
+  const evalFunction = new Function(wrappedCode);
+
+  try {
+    return evalFunction();
+  } catch (e) {
+    console.error('Error evaluating full code:', e.message);
+    throw e;
+  }
+}
+
 module.exports = {
   extractFunction,
   extractFunctions,
   extractClass,
   createTestEnvironment,
+  createFullTestEnvironment, // Export new function
   extractAllJavaScript
 };

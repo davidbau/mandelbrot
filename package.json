@@ -10,7 +10,7 @@
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
     "test:stress": "jest --testMatch='**/tests/**/*.stress.js' --verbose",
-    "test:coverage": "COLLECT_COVERAGE=1 jest tests/integration --runInBand --globalSetup ./tests/global-setup.js --globalTeardown ./tests/global-teardown.js && nyc report --extension=.html --reporter=html --reporter=text",
+    "test:coverage": "COLLECT_COVERAGE=1 jest --runInBand --globalSetup ./tests/global-setup.js --globalTeardown ./tests/global-teardown.js && nyc report --extension=.html --reporter=html --reporter=text",
     "bench": "jest --testMatch='**/tests/**/*.bench.js' --verbose"
   },
   "jest": {
