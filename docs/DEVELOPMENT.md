@@ -2,13 +2,11 @@
 
 ## Prerequisites
 
-The explorer itself needs no build step: just open `index.html` in a browser.
-The build tools are only needed for updating the bundled mp4-muxer library
-or running tests.
+The explorer itself needs no build step to run: just open `index.html` in a modern browser. The build tools are only needed for updating the bundled `mp4-muxer` library or for running the automated test suite.
 
-**Node.js**: Version 18+ recommended. If you use nvm:
+**Node.js**: Version 18+ is recommended. If you use `nvm`:
 ```bash
-nvm use node
+nvm use
 ```
 
 **npm dependencies**:
@@ -16,29 +14,23 @@ nvm use node
 npm install
 ```
 
-This installs:
-- `esbuild` - Bundles mp4-muxer into index.html
-- `mp4-muxer` - Video encoding library
-- `jest` - Test framework
-- `puppeteer` - Headless browser for integration tests
-- `nyc` - Code coverage reporting
-- `v8-to-istanbul` - Converts V8 coverage to Istanbul format
+This installs development dependencies, including:
+- `jest`: The test framework.
+- `puppeteer`: For headless browser-based integration tests.
+- `esbuild`: Bundles the `mp4-muxer` library.
+- `mp4-muxer`: The video encoding library.
+- `nyc` & `v8-to-istanbul`: For code coverage reporting.
 
 ## The Build Process
 
-The mp4-muxer library is bundled directly into index.html so the page remains
-a single self-contained file. When the library updates:
+The `mp4-muxer` library is bundled directly into `index.html` so the page remains a single self-contained file. If you update the library version in `package.json`, you must run the build to inject the new version into the main HTML file.
 
 ```bash
 npm run build
 ```
 
-This runs `build/build.sh`, which:
-1. Bundles mp4-muxer with esbuild (tree-shaking unused code)
-2. Minifies the result (~40KB)
-3. Injects it between sentinel comments in index.html
+This runs `build/build.sh`, which uses `esbuild` to tree-shake and minify the `mp4-muxer` code, then injects the minified bundle between two sentinel comments in `index.html`:
 
-The sentinels look like:
 ```html
 <!-- BEGIN_MP4MUXER_LIBRARY -->
 ...bundled code...
@@ -47,63 +39,30 @@ The sentinels look like:
 
 ## Running Tests
 
+The project has a comprehensive test suite covering mathematical correctness, UI behavior, and race conditions.
+
 ```bash
-npm test              # Run all tests
-npm run test:unit     # Unit tests only
-npm run test:integration  # Browser tests only
-npm run test:stress   # Stress tests for race conditions
-npm run test:watch    # Re-run on changes
-npm run test:coverage # Generate coverage report
+npm test              # Run all unit and integration tests
+npm run test:unit     # Run only unit tests (fast, no browser)
+npm run test:integration  # Run only integration tests (headless Chrome)
+npm run test:stress   # Run longer stress tests to find race conditions
+npm run test:watch    # Re-run tests on file changes
+npm run test:coverage # Generate a code coverage report
 ```
 
-Unit tests verify the math (quad-precision arithmetic, board computations).
-Integration tests use Puppeteer to click around in the actual explorer.
-Stress tests run extended fuzzing of browser history navigation, hide/unhide
-cycling, and mixed random operations to catch race conditions in view
-lifecycle management. They take about 90 seconds to run.
+- **Unit tests** verify the mathematical components, such as quad-precision arithmetic and algorithm logic.
+- **Integration tests** use Puppeteer to simulate user interactions in a headless browser, testing everything from keyboard commands and URL parsing to movie mode and fullscreen behavior.
+- **Stress tests** run extended, randomized sequences of operations (like history navigation and view toggling) to uncover subtle race conditions in the asynchronous view lifecycle.
 
-Test suites include:
-- `ui-commands.test.js` - Keyboard commands (zoom, grid, colors)
-- `ui-url.test.js` - URL parameter parsing (zoom, center, theme, grid)
-- `ui-history.test.js` - Browser history navigation and view preservation
-- `ui-keyboard-nav.test.js` - Arrow key navigation between views
-- `ui-mouse.test.js` - Click and drag interactions
-- `ui-movie.test.js` - Movie mode and video export
-- `ui-fullscreen.test.js` - Fullscreen mode
-- `ui-language.test.js` - Internationalization
-
-The `ui-history.test.js` tests cover browser back/forward integration,
-including the view preservation optimization that keeps computed views intact
-when navigating between similar states.
-
-See [tests/README.md](../tests/README.md) for details on writing tests.
+See `tests/README.md` for more details on the test structure.
 
 ## Code Coverage
 
-Run `npm run test:coverage` to generate a coverage report. This uses
-Puppeteer's V8 coverage API to track which code paths are exercised by
-the integration tests.
+Run `npm run test:coverage` to generate a coverage report. This command runs the integration test suite while using Puppeteer's V8 coverage tools to track which code paths are exercised.
 
-Coverage reports are written to the `coverage/` directory. Open
-`coverage/index.html` in a browser to see an interactive report showing
-covered and uncovered lines.
+The report is written to the `coverage/` directory. Open `coverage/index.html` in a browser to see an interactive report showing covered and uncovered lines for each script section within `index.html`.
 
-Since `index.html` contains multiple `<script>` blocks, coverage is reported
-separately for each:
-
-| Script | Description |
-|--------|-------------|
-| mainCode.js | Main application (~82% coverage) |
-| workerCode.js | Web worker algorithms |
-| quadCode.js | Quad-double precision math |
-| mp4Muxer.js | Video encoding library |
-| i18nCode.js | Internationalization |
-| startApp.js | Application startup |
-| analytics.js | Google Analytics |
-
-Note: Worker code runs in a separate blob URL context, so its coverage
-reflects parse-time execution in the main thread rather than actual
-worker execution.
+**Note on Worker Coverage:** Worker code is executed in a context (a `blob:` URL) that is separate from the main page. Because of this, standard coverage tools cannot fully track its execution. The coverage report for worker code may only reflect the main thread's initial parsing of the script, not the actual computation performed within the worker.
 
 ## Project Structure
 
@@ -112,10 +71,10 @@ mandelbrot/
 ├── index.html          # The entire application
 ├── package.json        # Node dependencies and scripts
 ├── build/
-│   ├── build.sh        # Build script
-│   └── build-mp4-muxer.js  # esbuild entry point
+│   ├── build.sh        # The build script
+│   └── build-mp4-muxer.js # esbuild configuration
 ├── tests/
-│   ├── unit/           # Arithmetic and algorithm tests
+│   ├── unit/           # Math and algorithm tests
 │   ├── integration/    # Browser interaction tests
 │   └── utils/          # Test helpers
 └── docs/               # Documentation
@@ -123,40 +82,32 @@ mandelbrot/
 
 ## Code Organization in index.html
 
-The code is organized into sections (line numbers approximate):
+The application's JavaScript is contained within `<script>` tags inside `index.html`, organized conceptually as follows:
 
-| Lines | Section |
-|-------|---------|
-| 1-120 | HTML structure and CSS |
-| 120-200 | Application overview comment |
-| 200-2000 | Main thread classes (Config, View, Grid, Scheduler) |
-| 2000-2800 | UI classes (URLHandler, EventHandler, MovieMode) |
-| 2800-4000 | Utility functions and color themes |
-| 4000-7500 | Worker code (Board classes, algorithms) |
-| 7500-8000 | Quad precision math library |
-| 8000+ | Internationalization messages |
+1.  **Main Application Code (`mainCode`):** Contains the core application logic and classes that run on the main thread, including `MandelbrotExplorer`, `StateStore`, `Config`, `View`, `Grid`, and `ZoomManager`.
+2.  **UI and Interaction Code:** Includes classes for handling user input and browser integration, such as `URLHandler`, `EventHandler`, and `MovieMode`.
+3.  **Worker Code (`workerCode`):** Contains the `Board` classes and all the computational algorithms. This code is loaded into Web Workers to run off the main thread.
+4.  **Quad-Precision Math (`quadCode`):** The library for quad-double arithmetic.
+5.  **Bundled MP4 Muxer:** The minified `mp4-muxer` library, injected by the build script.
+6.  **Internationalization (i18n):** Contains the translated strings for the UI.
+7.  **Startup Script:** A final small script that instantiates `MandelbrotExplorer` to start the application.
 
 ## Debugging
 
-Open the browser console to see:
-- Computation progress (iterations, diverged/converged counts)
-- Worker messages
-- GPU initialization status
+You can use the browser's developer console to observe computation progress, worker messages, and GPU status. The `?board=` URL parameter is invaluable for forcing a specific algorithm for testing:
 
-The `?board=` URL parameter forces a specific algorithm:
-- `?board=cpu` - CpuBoard (double precision)
-- `?board=gpu` - GpuBoard (WebGPU)
-- `?board=zhuoran` - ZhuoranBoard (quad-precision CPU)
-- `?board=gpuzhuoran` - GpuZhuoranBoard (quad-precision GPU)
+- `?board=cpu`: Force the simple double-precision CPU board.
+- `?board=gpu`: Force the WebGPU float32 board.
+- `?board=zhuoran`: Force the quad-precision CPU board with rebasing.
+- `?board=gpuzhuoran`: Force the quad-precision GPU board with rebasing.
+- `?board=perturbation`: Force the quad-precision CPU board (alternative to Zhuoran).
 
 ## Contributing
 
-The philosophy: keep it in one file. Before adding dependencies, consider
-whether the feature justifies the complexity. The fractal explorer should
-remain something you can save and share without a build pipeline.
+The project's philosophy is to maintain simplicity and portability by keeping the application within a single, self-contained HTML file. Before adding a new dependency or build step, consider if the added complexity is justified.
 
 When making changes:
-1. Test in multiple browsers (Chrome, Firefox, Safari)
-2. Verify GPU and CPU paths both work
-3. Check deep zoom (10^20+) still renders correctly
-4. Run the test suite
+1. Test in multiple modern browsers (e.g., Chrome, Firefox, Safari).
+2. Verify that both GPU and CPU computation paths function correctly.
+3. Check that deep zooms (e.g., to 10^20 magnification) still render correctly.
+4. Run the full test suite (`npm test`) to ensure no regressions were introduced.

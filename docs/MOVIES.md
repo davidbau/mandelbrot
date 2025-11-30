@@ -1,104 +1,60 @@
 # Movie Mode and Smooth Animation
 
-Press 'M' and the explorer creates a smooth zoom animation following your
-exploration path - rendered, encoded, and downloadable as an MP4.
+Press 'M' and the explorer creates a smooth zoom animation following your exploration path—rendered, encoded, and downloadable as an MP4, all within the browser.
 
 ## The Animation Challenge
 
-A Mandelbrot zoom video needs to solve several problems:
+A compelling Mandelbrot zoom video needs to solve several problems:
 
-1. **Smooth camera path**: Zoom checkpoints may be scattered; the path should flow
-2. **Consistent colors**: Colors should transition smoothly between zoom levels
-3. **Progressive rendering**: Show frames as they compute, refine over time
-4. **Video encoding**: Produce a downloadable MP4 file
+1.  **Smooth Camera Path**: The user's zoom path is a series of discrete points. The animation must create a fluid, continuous path between them.
+2.  **Consistent Colors**: The color palette must not flicker or jump jarringly between zoom levels.
+3.  **UI Responsiveness**: Rendering and encoding a video is a heavy task; it must not freeze the browser.
+4.  **Video Encoding**: The final output must be a standard, downloadable MP4 file.
 
-## Catmull-Rom Splines
+## Camera Path: Catmull-Rom Splines
 
-The camera path uses Catmull-Rom splines, developed by Edwin Catmull and
-Raphael Rom at the University of Utah in 1974. Given four control points
-(P0, P1, P2, P3), the spline passes through P1 and P2 with tangents
-automatically computed from the neighboring points.
+The camera path is generated using Catmull-Rom splines. Developed by Edwin Catmull (later president of Pixar) and Raphael Rom, this technique creates a smooth curve that passes through a sequence of control points. Given four points (P0, P1, P2, P3), the spline travels from P1 to P2, with its tangents at those points determined by the neighboring points (P0 and P3). This guarantees C1 continuity (a smooth, continuous velocity), which makes the camera motion feel natural and cinematic.
 
-```javascript
-function catmullRom1D(p0, p1, p2, p3, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const c0 = (-t3 + 2*t2 - t) / 2;
-  // c1 = (3*t3 - 5*t2 + 2) / 2; // unneeded since p1 = 0 in offset form
-  const c2 = (-3*t3 + 4*t2 + t) / 2;
-  const c3 = (t3 - t2) / 2;
-  // Compute offsets from p1 for numerical stability.
-  const s0 = qdSub(p0, p1);
-  const s2 = qdSub(p2, p1);
-  const s3 = qdSub(p3, p1);
-  return qdAdd(qdAdd(qdAdd(qdScale(s0, c0),
-           qdScale(s3, c3)), qdScale(s2, c2)), p1);
-}
-```
-
-For 2D complex coordinates:
+The implementation uses quad-precision arithmetic to ensure the path is accurate even at extreme zoom depths where the control points are numerically very close together.
 
 ```javascript
+// A simplified conceptual view
 function catmullRomSpline(p0, p1, p2, p3, t) {
-  return [
-    catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),  // Real part
-    catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)   // Imaginary part
-  ];
+  const re = catmullRom1D(p0.re, p1.re, p2.re, p3.re, t);    // Real part
+  const im = catmullRom1D(p0.im, p1.im, p2.im, p3.im, t);    // Imaginary part
+  return { re, im };
 }
 ```
 
-The spline produces C1 continuity (smooth first derivatives) at control points,
-making the zoom feel natural rather than jerky.
+## Zoom Speed: Logarithmic Interpolation
 
-## Zoom Size Interpolation
-
-While position uses splines, zoom size uses logarithmic interpolation:
+While the camera's position follows a spline, its zoom level is interpolated logarithmically.
 
 ```javascript
 // Linear interpolation in log space = exponential in real space
 const interpolatedSize = sourceSize * Math.pow(targetSize / sourceSize, t);
 ```
 
-This creates constant *relative* zoom rate: the image shrinks by the same
-percentage each frame, which feels natural to human perception.
+This creates a constant *relative* zoom rate. Why does this matter? Human perception of scale is logarithmic; we perceive the jump from 1x to 2x zoom as being similar in "distance" to the jump from 50x to 100x zoom. A linear interpolation of size would feel like it starts fast and slows down dramatically, whereas logarithmic interpolation provides a steady, constant perceived zoom speed.
 
-Why logarithmic instead of linear? Human perception of size is roughly logarithmic -
-we perceive the jump from 1× to 2× as similar to the jump from 2× to 4×. Linear
-interpolation (constant absolute change) would feel like it starts fast and slows
-down as you zoom deeper. Logarithmic interpolation (constant relative change)
-maintains a steady perceived zoom speed throughout.
+## Frame Rendering and Compositing
 
-Example: zooming from 1× to 1000× with 30 frames. Linear interpolation adds
-~33× per frame (1, 34, 67, 100, ..., 1000), so most frames show the final
-approach to 1000×. Logarithmic interpolation multiplies by ~1.26× per frame
-(1, 1.26, 1.58, 2, ..., 1000), spending equal frames on each "doubling" of zoom.
-
-## Frame Rendering
-
-Each frame is rendered by scaling and compositing the source view:
+Each frame of the animation is rendered by taking the fully-computed canvas of a keyframe (one of the user's views) and applying a transformation.
 
 ```javascript
 renderFrame(k, t) {
-  // Get source and target views
-  const sourceSize = this.explorer.grid.views[k].sizes[0];
-  const targetSize = this.explorer.grid.views[k+1].sizes[0];
-
-  // Interpolate position with spline (using 4 control points)
-  const p0 = k > 0 ? getCenter(k-1) : getCenter(k);
-  const p1 = getCenter(k);
-  const p2 = getCenter(k+1);
-  const p3 = k+2 < views.length ? getCenter(k+2) : getCenter(k+1);
+  // 1. Interpolate center position using the spline
   const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
 
-  // Interpolate size (logarithmic)
+  // 2. Interpolate view size logarithmically
   const interpolatedSize = sourceSize * Math.pow(targetSize / sourceSize, t);
 
-  // Calculate transform
+  // 3. Calculate the scale and offset transform
   const scale = sourceSize / interpolatedSize;
   const offsetX = (interpolatedCenter.re - sourceCenter.re) * dimsWidth / sourceSize;
   const offsetY = (sourceCenter.im - interpolatedCenter.im) * dimsHeight / sourceHeight;
 
-  // Draw scaled and translated source view
+  // 4. Draw the source canvas with the transform applied
   ctx.save();
   ctx.translate(dimsWidth/2, dimsHeight/2);
   ctx.scale(scale, scale);
@@ -108,42 +64,20 @@ renderFrame(k, t) {
 }
 ```
 
-## Color Palette Transitions
+To maintain color consistency during a transition (e.g., between view `k` and `k+1`), all intermediate frames are rendered using the color histogram from the source view (`k`). This prevents the palette from shifting abruptly mid-animation.
 
-To maintain color consistency, movie frames use the source view's histogram
-for coloring. As we zoom from view k to view k+1:
+## In-Browser Video Encoding
 
-```javascript
-// Use view k's color palette throughout the transition
-const colorview = this.explorer.grid.views[k];
-this.movieView.draw(this.movieCtx, colorview, 'black');
-```
+The explorer uses the modern **WebCodecs API** to encode the rendered frames into a video stream. This API provides direct access to the browser's underlying hardware video encoders (like H.264), offering far more control than the older `MediaRecorder` API. This allows for precise configuration of bitrate, quality, and keyframes, resulting in a higher-quality MP4 file.
 
-This prevents jarring color shifts mid-transition. When we reach the next
-keyframe, colors transition naturally because similar iteration values
-map to similar colors.
-
-## Video Encoding
-
-The explorer uses the WebCodecs API rather than the older MediaRecorder API.
-MediaRecorder is designed for recording live streams and provides limited control
-over encoding parameters. WebCodecs gives direct access to hardware video encoders,
-allowing precise control over codec selection, bitrate, and keyframe placement.
-This produces higher quality output at smaller file sizes, and the frame-by-frame
-encoding model fits naturally with the explorer's approach of rendering each
-frame from computed fractal data:
+The encoded video chunks are then assembled into a valid MP4 container using [mp4-muxer](https://github.com/Vanilagy/mp4-muxer), a lightweight, pure-TypeScript library that is bundled directly into `index.html`.
 
 ```javascript
 async encodeVideo(frames) {
-  const encoder = new VideoEncoder({
-    output: (chunk, meta) => {
-      this.muxer.addVideoChunk(chunk, meta);
-    },
-    error: (e) => console.error('Encoding error:', e)
-  });
+  const encoder = new VideoEncoder(...);
 
   encoder.configure({
-    codec: 'avc1.640028',  // H.264 High Profile Level 4.0
+    codec: 'avc1.640028',  // H.264 High Profile, Level 4.0
     width: this.width,
     height: this.height,
     bitrate: 8_000_000,    // 8 Mbps
@@ -151,146 +85,48 @@ async encodeVideo(frames) {
   });
 
   for (const frame of frames) {
-    const videoFrame = new VideoFrame(frame.canvas, {
-      timestamp: frame.time * 1_000_000
-    });
+    const videoFrame = new VideoFrame(frame.canvas, { timestamp: ... });
+    // Encode the frame, marking keyframes for segment starts
     encoder.encode(videoFrame, { keyFrame: frame.isKeyframe });
-    videoFrame.close();
+    videoFrame.close(); // Release the frame's memory immediately
   }
 
   await encoder.flush();
 }
 ```
+The codec string `avc1.640028` specifies the H.264 (AVC) standard, `6400` indicates "High Profile" (good quality and compression), and `28` is the level (4.0 in hex), which defines constraints like maximum resolution and bitrate, easily met here.
 
-The output is muxed into an MP4 container using [mp4-muxer](https://github.com/Vanilagy/mp4-muxer)
-by Vanilagy, a pure TypeScript library that is bundled into the HTML file during
-the build process.
+## Maintaining UI Responsiveness
 
-## Frame Rate and Timing
-
-Movies render at 60 FPS with zoom speed tuned for visual appeal:
-
-```javascript
-const FPS = 60;
-const ZOOM_DURATION = 3.0;  // Seconds per zoom level
-const FRAMES_PER_ZOOM = FPS * ZOOM_DURATION;  // 180 frames per level
-```
-
-For a path with 5 zoom levels, the video is 12 seconds (4 transitions × 3 seconds).
-
-## Progressive Display
-
-While encoding, the explorer shows frames as they are rendered:
+Rendering and encoding hundreds of frames is a blocking operation that could freeze the UI. To prevent this, the render loop voluntarily yields control back to the browser's event loop after each frame is processed.
 
 ```javascript
 async renderMovie() {
   for (let frame = 0; frame < totalFrames; frame++) {
-    // Render frame
     this.renderFrame(frame);
-
-    // Update progress display
     this.updateProgress(frame / totalFrames);
 
-    // Let browser update UI
+    // Yield to the event loop to allow UI updates and prevent freezing
     await new Promise(r => setTimeout(r, 0));
   }
 }
 ```
+This small `await` on a zero-delay timeout gives the browser a chance to repaint the screen (showing the latest rendered frame) and handle any user input, keeping the application responsive.
 
-The `setTimeout(r, 0)` yields to the browser's event loop, keeping the UI
-responsive during the long encoding process.
+## Final Touches
 
-## Looping Playback
-
-After encoding completes, the video loops indefinitely in preview:
-
-```javascript
-this.videoElement.loop = true;
-this.videoElement.autoplay = true;
-this.videoElement.muted = true;  // Required for autoplay
-```
-
-Click the download button to save the MP4 file.
-
-## Unknown Pixel Handling
-
-Movie frames cannot show parent views as background (there is only one canvas),
-so unfinished pixels default to black:
-
-```javascript
-// Fill with black before drawing
-this.movieCtx.fillStyle = 'black';
-this.movieCtx.fillRect(0, 0, width, height);
-
-// Draw computed pixels
-this.movieView.drawLocal(this.movieCtx, colorview, 'black');
-```
-
-This means movies look best when the source views are well-computed. The
-explorer waits for views to stabilize before including them as keyframes.
-
-## Aspect Ratio Considerations
-
-Movies respect the current aspect ratio setting. In fullscreen mode with
-16:9 aspect ratio, the movie matches. The H.264 encoder handles non-square
-pixels correctly.
-
-## Memory Management
-
-Video frames are large (1920×1080 = 8MB per RGBA frame). The encoder processes
-frames one at a time and releases them immediately:
-
-```javascript
-const videoFrame = new VideoFrame(canvas, { timestamp });
-encoder.encode(videoFrame);
-videoFrame.close();  // Release immediately
-```
-
-The mp4-muxer buffers encoded chunks (much smaller than raw frames) until
-the final mux produces the downloadable file.
-
-## Browser Compatibility
-
-WebCodecs is required for video encoding. On browsers without WebCodecs
-support (Safari before 16.4, Firefox without flags), movie mode is disabled.
-
-The feature check:
-
-```javascript
-if (!('VideoEncoder' in window)) {
-  console.warn('WebCodecs not available, movie mode disabled');
-  return;
-}
-```
-
-## Interruption Handling
-
-If the user presses 'M' again or navigates away, encoding stops gracefully:
-
-```javascript
-toggle() {
-  if (this.active) {
-    // Abort current encoding
-    this.abortController.abort();
-    this.cleanup();
-    this.active = false;
-  } else {
-    this.active = true;
-    this.startRendering();
-  }
-}
-```
-
-Partial encodes produce valid (but truncated) video files.
+- **Frame Rate:** Movies render at 60 FPS, with each zoom transition taking 3 seconds by default, resulting in 180 interpolated frames between each of the user's chosen views.
+- **Unknown Pixels:** Since there is no parent view to show through during movie rendering, unfinished pixels are rendered as black.
+- **Memory Management:** `VideoFrame` objects are explicitly closed after being sent to the encoder to free up the significant memory they occupy, preventing the browser from running out of memory during long renders.
+- **Browser Compatibility:** Movie mode is only enabled in browsers that support the WebCodecs API (e.g., Chrome, Edge, and Safari 16.4+).
 
 ## References
 
-- [Catmull-Rom splines](https://en.wikipedia.org/wiki/Centripetal_Catmull–Rom_spline) - The interpolation algorithm
-- [WebCodecs API](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API) - Hardware-accelerated video encoding
-- [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) - The MP4 multiplexer library
-- [H.264 codec strings](https://developer.mozilla.org/en-US/docs/Web/Media/Formats/codecs_parameter) - Understanding "avc1.640028"
+- [Catmull-Rom splines](https://en.wikipedia.org/wiki/Centripetal_Catmull–Rom_spline) - The interpolation algorithm.
+- [WebCodecs API](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API) - MDN documentation for hardware-accelerated video encoding.
+- [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) - The MP4 multiplexer library.
 
 ## Next Steps
 
-- [COLORS.md](COLORS.md): How colors are computed for each frame
-- [COMPUTATION.md](COMPUTATION.md): How keyframe views are computed
+- [COLORS.md](COLORS.md): How colors are computed for each frame.
+- [COMPUTATION.md](COMPUTATION.md): How the keyframe views are computed before animation begins.

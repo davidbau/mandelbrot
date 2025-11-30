@@ -16,34 +16,41 @@ Sets the center of the view in the complex plane.
 ```
 
 The format is `real+imag*i` or `real-imag*i`. When chaining multiple centers
-with commas, each becomes a separate zoom level.
+with commas, each becomes a separate zoom level, creating a path.
 
 ### `z` - Zoom Level
 
-Sets the zoom magnification. Default is 1.0 (showing the full set from -2 to 1).
+Sets the zoom magnification factor. Default is 1.0.
 
 ```
-?z=5        # 5x zoom
-?z=100      # 100x zoom
+?z=25        # 25x zoom
 ?z=1e15     # Quadrillion-fold zoom (scientific notation)
 ```
 
-Higher values mean more magnification. The zoom is applied to the center
-specified by `c`, or to the default center if `c` is not provided.
+Higher values mean more magnification. This is an intuitive way to specify zoom,
+but for precision, `s` is sometimes more direct.
+
+### `s` - View Size
+
+Sets the width of the view in complex-plane coordinates. This is an alternative
+to `z` for specifying zoom level. A smaller size means higher magnification.
+
+```
+?s=0.01      # A view that is 0.01 units wide
+```
 
 ### `grid` - Grid Layout
 
-Sets the number of columns in the view grid.
+Sets the number of columns for the view grid.
 
 ```
-?grid=1     # Single view
-?grid=3     # 3-column grid (default)
-?grid=5     # 5-column grid
+?grid=1     # Single column of views
+?grid=3     # 3-column grid
 ```
 
 ### `h` - Hide Views
 
-Hides specific views by index (0-based, comma-separated).
+Hides specific views by their 0-based index, separated by commas.
 
 ```
 ?h=0        # Hide the first (outermost) view
@@ -60,7 +67,7 @@ Sets the aspect ratio of each view.
 ?a=16:9     # Widescreen
 ?a=4:3      # Traditional
 ?a=1:1      # Square (default)
-?a=2:1      # Ultra-wide
+?a=9:16     # Portrait
 ```
 
 ### `theme` - Color Theme
@@ -68,45 +75,43 @@ Sets the aspect ratio of each view.
 Sets the color palette for rendering.
 
 ```
-?theme=fire       # Warm oranges and reds
-?theme=ocean      # Blues and cyans
-?theme=forest     # Greens
-?theme=purple     # Purples and magentas
-?theme=grayscale  # Black and white
-?theme=neon       # High saturation
-?theme=tiedye     # Psychedelic
-?theme=ice        # Cool blues
+?theme=warm      # Warm oranges and reds (default)
+?theme=neon      # High-saturation, vibrant colors
+?theme=iceblue   # Crystalline blues and whites
+?theme=tiedye    # Psychedelic, rapid-cycling hues
+?theme=gray      # Grayscale for print or structural analysis
 ```
 
 ### `unk` - Unknown Pixel Color
 
-Sets the color for pixels still being computed (unknown status).
+Sets the color for pixels that are still being computed.
 
 ```
 ?unk=000          # Black (hex)
 ?unk=fff          # White (hex)
 ?unk=red          # CSS color name
-?unk=transparent  # Transparent
+?unk=transparent  # Transparent (default)
 ```
 
 ### `pixelratio` - Subpixel Resolution
 
-Sets the rendering resolution multiplier.
+Sets the rendering resolution multiplier. A higher ratio produces sharper images
+at the cost of performance, as it increases the number of pixels to compute.
 
 ```
-?pixelratio=1     # 1:1 pixels (fastest)
-?pixelratio=2     # 2x resolution (default on high-DPI displays)
-?pixelratio=4     # 4x resolution (highest quality, slower)
+?pixelratio=1     # 1:1 pixels (fastest, but may look blurry on high-DPI screens)
+?pixelratio=2     # 2x resolution (default on most high-DPI displays)
+?pixelratio=4     # 4x resolution (best quality, 16x the pixels of ratio 1)
 ```
 
 ## Computation Parameters
 
 ### `exponent` - Iteration Exponent
 
-Sets the exponent in the iteration formula z → z^n + c.
+Sets the exponent `n` in the iteration formula z → z^n + c.
 
 ```
-?exponent=2       # Classic Mandelbrot (default)
+?exponent=2       # Classic Mandelbrot set (default)
 ?exponent=3       # Cubic Multibrot
 ?exponent=4       # Quartic Multibrot
 ```
@@ -117,12 +122,13 @@ Controls WebGPU acceleration.
 
 ```
 ?gpu=1            # Enable GPU (default if available)
-?gpu=0            # Disable GPU (force CPU computation)
+?gpu=0            # Disable GPU (force all computation onto the CPU)
 ```
 
 ### `board` - Algorithm Selection
 
-Forces a specific computation algorithm. Useful for testing and debugging.
+Forces a specific computation algorithm. This is primarily useful for testing
+and debugging the different computation engines.
 
 ```
 ?board=cpu          # CpuBoard (double precision, no perturbation)
@@ -136,13 +142,13 @@ Forces a specific computation algorithm. Useful for testing and debugging.
 
 ### `lang` - Language
 
-Sets the UI language for help text.
+Sets the UI language for help text and other interface elements.
 
 ```
 ?lang=en      # English (default)
 ?lang=es      # Spanish
 ?lang=zh      # Chinese (Simplified)
-?lang=zh-tw   # Chinese (Traditional)
+?lang=zh-tw   # Chinese (Traditional, e.g., as used in Taiwan)
 ?lang=ar      # Arabic
 ?lang=id      # Indonesian
 ?lang=pt      # Portuguese
@@ -166,7 +172,7 @@ Sets the UI language for help text.
 
 **Cubic Multibrot in grayscale:**
 ```
-?exponent=3&theme=grayscale
+?exponent=3&theme=gray
 ```
 
 **Force CPU computation for debugging:**
