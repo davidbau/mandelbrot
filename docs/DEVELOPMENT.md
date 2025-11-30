@@ -49,12 +49,16 @@ The sentinels look like:
 npm test              # Run all tests
 npm run test:unit     # Unit tests only
 npm run test:integration  # Browser tests only
+npm run test:stress   # Stress tests for race conditions
 npm run test:watch    # Re-run on changes
 npm run test:coverage # Generate coverage report
 ```
 
 Unit tests verify the math (quad-precision arithmetic, board computations).
 Integration tests use Puppeteer to click around in the actual explorer.
+Stress tests run extended fuzzing of browser history navigation, hide/unhide
+cycling, and mixed random operations to catch race conditions in view
+lifecycle management. They take about 90 seconds to run.
 
 Test suites include:
 - `ui-commands.test.js` - Keyboard commands (zoom, grid, colors)
@@ -100,7 +104,7 @@ The code is organized into sections (line numbers approximate):
 | 2000-2800 | UI classes (URLHandler, EventHandler, MovieMode) |
 | 2800-4000 | Utility functions and color themes |
 | 4000-7500 | Worker code (Board classes, algorithms) |
-| 7500-8000 | Quad-double math library |
+| 7500-8000 | Quad precision math library |
 | 8000+ | Internationalization messages |
 
 ## Debugging

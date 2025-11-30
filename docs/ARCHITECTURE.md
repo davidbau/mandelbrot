@@ -170,8 +170,8 @@ The actual computation happens in Web Workers, which run Board objects:
 - **CpuBoard**: Simple double-precision iteration
 - **GpuBoard**: WebGPU-accelerated for shallow zooms
 - **PerturbationBoard**: High-precision reference orbit with double perturbations
-- **ZhuoranBoard**: Quad-double reference with rebasing (CPU)
-- **GpuZhuoranBoard**: Quad-double reference with float32 perturbations (GPU)
+- **ZhuoranBoard**: Quad precision reference with rebasing (CPU)
+- **GpuZhuoranBoard**: Quad precision reference with float32 perturbations (GPU)
 
 Different zoom depths have different computational requirements. At shallow zoom,
 double precision suffices and GPU parallelism dominates, making GpuBoard fastest.
@@ -331,15 +331,14 @@ individual values, enabling efficient color palette computation.
 
 ## File Organization
 
-Within `index.html`:
-- Lines 1-120: HTML structure and CSS
-- Lines 120-200: Application overview comment
-- Lines 200-2000: Main thread classes (Config, View, Grid, etc.)
-- Lines 2000-2800: UI classes (URLHandler, EventHandler, MovieMode)
-- Lines 2800-4000: Utility functions and color themes
-- Lines 4000-7500: Worker code (Board classes, algorithms)
-- Lines 7500-8000: Quad-double math library
-- Lines 8000+: Internationalization messages
+Within `index.html` (line numbers approximate):
+- Lines 1-200: HTML structure, CSS, and help text
+- Lines 200-2280: Main thread classes (MandelbrotExplorer, StateStore, Config, View, Grid, ZoomManager)
+- Lines 2280-3800: UI classes (URLHandler, EventHandler, MovieMode)
+- Lines 3800-4520: Scheduler, OrbitComputer, RedrawProcess, utility functions
+- Lines 4520-8020: Worker code (Board classes, algorithms)
+- Lines 8020-8490: Quad precision math library
+- Lines 8490+: Internationalization (non-English help text)
 
 ## Next Steps
 

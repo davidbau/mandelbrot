@@ -184,7 +184,7 @@ only `nn` changes and we don't touch the other arrays.
 | `dc` | Float64 | Delta c from reference point |
 | `dz` | Float64 | Current perturbation delta |
 | `refIter` | Int32 | Which reference iteration each pixel follows |
-| `refOrbit` | Float64×4 | Quad-double reference orbit values |
+| `refOrbit` | Float64×4 | Quad precision reference orbit values |
 
 ### GPU Buffers (GpuBoard)
 
@@ -332,41 +332,77 @@ createBuffers() {
 
 Rather than sending entire pixel arrays, boards send change lists. A 1000×1000
 image has a million pixels, but in any batch only thousands finish. Sending the
-full array would waste bandwidth and trigger expensive memory copies:
+full array would waste bandwidth and trigger expensive memory copies.
+
+The `changeList` is an array of change objects, grouped by iteration:
 
 ```javascript
-{
-  nn: [index1, value1, index2, value2, ...],  // Iteration changes
-  vv: [index1, period1, index2, period2, ...]  // Period changes
-}
+changeList: [
+  {
+    iter: 1000,                    // Iteration count when these pixels finished
+    nn: [index1, index2, ...],     // Pixel indices that diverged at this iteration
+    vv: [                          // Pixels that converged at this iteration
+      { index: i1, z: [re, im], p: period1 },
+      { index: i2, z: [re, im], p: period2 },
+      ...
+    ]
+  },
+  { iter: 1001, nn: [...], vv: [...] },
+  ...
+]
 ```
+
+Each change object contains:
+- `iter`: The iteration count when these pixels finished
+- `nn`: Array of pixel indices that diverged (escaped to infinity)
+- `vv`: Array of convergence data for pixels that entered periodic cycles:
+  - `index`: Pixel index
+  - `z`: Final z value as `[re, im]` or quad precision `[re_hi, re_lo, im_hi, im_lo]`
+  - `p`: Period length of the cycle
+
+The z value may arrive as double or quad precision depending on the board type.
+The View normalizes it to quad precision (4 doubles) via `toQdc()` for consistent
+storage, enabling precise orbit display even at extreme zoom depths.
 
 This minimizes transfer overhead, especially late in computation when
 changes are sparse.
 
 ## View Updates
 
-When changes arrive on the main thread:
+When changes arrive on the main thread, `updateViewFromWorkerResult` processes them:
 
 ```javascript
-updateViewFromWorkerResult(result) {
-  const view = this.views[result.k];
-  if (!view) return;
+updateFromWorkerResult(data) {
+  const { changeList, un, di, ch, it } = data;
 
-  // Apply iteration changes
-  for (let i = 0; i < result.changeList.nn.length; i += 2) {
-    const index = result.changeList.nn[i];
-    const value = result.changeList.nn[i + 1];
-    view.nn[index] = value;
+  for (const { nn, vv, iter } of changeList) {
+    // Mark diverged pixels with positive iteration count
+    for (const index of nn) {
+      this.nn[index] = iter;
+    }
+
+    // Mark converged pixels with negative iteration count, store z and period
+    for (const { index, z, p } of vv) {
+      this.nn[index] = -iter;
+      this.convergedData.set(index, { z, p });
+    }
+
+    // Update histogram for coloring
+    this.updateHistogram(un, di, iter);
   }
 
-  // Update histogram
-  view.updateHistogram();
-
-  // Trigger redraw
-  this.redrawProcess.requestRedraw(view.k);
+  // Update counts
+  this.un = un;  // Unfinished pixel count
+  this.di = di;  // Diverged pixel count
+  this.ch = ch;  // Converged pixel count
+  this.it = it;  // Current iteration
 }
 ```
+
+The View's `nn` array uses sign to distinguish pixel states:
+- `nn[i] > 0`: Pixel diverged at iteration `nn[i]`
+- `nn[i] < 0`: Pixel converged at iteration `-nn[i]`
+- `nn[i] === 0`: Pixel still computing
 
 ## Computation Priority
 
@@ -477,34 +513,6 @@ By carrying the computation in quad precision until the last step, we preserve
 enough precision to get correct pixel alignment. The result is then converted
 to a screen coordinate, which only needs about 10 bits of precision. The
 intermediate precision matters far more than the output precision.
-
-## Error Handling
-
-Workers can crash or WebGPU can fail. The scheduler handles this gracefully:
-
-```javascript
-worker.onerror = (error) => {
-  console.error('Worker error:', error);
-  // Recreate worker
-  this.replaceWorker(worker);
-  // Redistribute its boards
-  for (const k of this.workerBoards.get(worker)) {
-    this.reassignBoard(k);
-  }
-};
-```
-
-GPU failures fall back to CPU:
-
-```javascript
-try {
-  board = new GpuBoard(...);
-  await board.init();
-} catch (e) {
-  console.warn('GPU failed, falling back to CPU');
-  board = new CpuBoard(...);
-}
-```
 
 ## Next Steps
 

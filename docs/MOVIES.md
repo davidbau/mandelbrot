@@ -23,18 +23,16 @@ automatically computed from the neighboring points.
 function catmullRom1D(p0, p1, p2, p3, t) {
   const t2 = t * t;
   const t3 = t2 * t;
-
-  // Catmull-Rom basis functions
   const c0 = (-t3 + 2*t2 - t) / 2;
+  // c1 = (3*t3 - 5*t2 + 2) / 2; // unneeded since p1 = 0 in offset form
   const c2 = (-3*t3 + 4*t2 + t) / 2;
   const c3 = (t3 - t2) / 2;
-
-  // Compute offsets from p1 for numerical stability
+  // Compute offsets from p1 for numerical stability.
   const s0 = qdSub(p0, p1);
   const s2 = qdSub(p2, p1);
   const s3 = qdSub(p3, p1);
-
-  return qdAdd(p1, qdAdd(qdMul(s0, c0), qdAdd(qdMul(s2, c2), qdMul(s3, c3))));
+  return qdAdd(qdAdd(qdAdd(qdScale(s0, c0),
+           qdScale(s3, c3)), qdScale(s2, c2)), p1);
 }
 ```
 
@@ -70,9 +68,10 @@ interpolation (constant absolute change) would feel like it starts fast and slow
 down as you zoom deeper. Logarithmic interpolation (constant relative change)
 maintains a steady perceived zoom speed throughout.
 
-Mathematically: if we zoom from 10^0 to 10^30, linear interpolation spends 99.9999%
-of the time in the final decade. Logarithmic interpolation spends equal time in
-each decade of zoom.
+Example: zooming from 1× to 1000× with 30 frames. Linear interpolation adds
+~33× per frame (1, 34, 67, 100, ..., 1000), so most frames show the final
+approach to 1000×. Logarithmic interpolation multiplies by ~1.26× per frame
+(1, 1.26, 1.58, 2, ..., 1000), spending equal frames on each "doubling" of zoom.
 
 ## Frame Rendering
 

@@ -185,9 +185,9 @@ The URL updates automatically as you explore. You can bookmark or share your
 current URL to save your exact view, including:
 - All zoom levels in your path
 - Color theme and aspect ratio
-- Computation progress (views continue from where they left off when reloaded)
+- Hidden view state
 
 ## Next Steps
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): How URL parameters are parsed and applied
-- [COMPUTATION.md](COMPUTATION.md): How board selection works
+- [COMPUTATION.md](COMPUTATION.md): How computational work is distributed
