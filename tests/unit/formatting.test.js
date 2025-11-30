@@ -7,7 +7,7 @@ const { createTestEnvironment } = require('../utils/extract-code');
 // Extract formatting functions
 const formatFuncs = createTestEnvironment([
   'formatScale',
-  'formatSize',
+  'formatZoom',
   'formatLargeInt'
 ]);
 
@@ -50,23 +50,26 @@ describe('formatScale', () => {
   });
 });
 
-describe('formatSize', () => {
-  test('should format small sizes with appropriate precision', () => {
-    const result = formatFuncs.formatSize(0.001);
-    expect(typeof result).toBe('number');
-    expect(result).toBeCloseTo(0.001, 3);
+describe('formatZoom', () => {
+  test('should format in scientific notation with 3 significant digits', () => {
+    expect(formatFuncs.formatZoom(0.001)).toBe('1.00e-3');
+    expect(formatFuncs.formatZoom(1.2345e-10)).toBe('1.23e-10');
+    expect(formatFuncs.formatZoom(1.25e+10)).toBe('1.25e+10');
   });
 
-  test('should format medium sizes', () => {
-    const result = formatFuncs.formatSize(3.14159);
-    expect(typeof result).toBe('number');
-    expect(result).toBeCloseTo(3.1, 1);
+  test('should format medium zoom levels in scientific notation', () => {
+    expect(formatFuncs.formatZoom(3.14159)).toBe('3.14e+0');
+    expect(formatFuncs.formatZoom(1)).toBe('1.00e+0');
   });
 
-  test('should format very small sizes', () => {
-    const result = formatFuncs.formatSize(1e-10);
-    expect(typeof result).toBe('number');
-    expect(result).toBeCloseTo(1e-10, 15);
+  test('should format very small zoom levels', () => {
+    expect(formatFuncs.formatZoom(1e-10)).toBe('1.00e-10');
+    expect(formatFuncs.formatZoom(5.67e-15)).toBe('5.67e-15');
+  });
+
+  test('should format large zoom levels', () => {
+    expect(formatFuncs.formatZoom(1e10)).toBe('1.00e+10');
+    expect(formatFuncs.formatZoom(1.25e10)).toBe('1.25e+10');
   });
 });
 

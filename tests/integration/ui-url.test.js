@@ -79,6 +79,29 @@ describe('URL Parameter Tests', () => {
     }
   }, TEST_TIMEOUT);
 
+  test('URL encoding: z parameter uses scientific notation format', async () => {
+    // Load page with a high zoom level
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i&z=1e10`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+
+    // Trigger URL update
+    await page.evaluate(() => window.explorer.urlHandler.updateurl());
+
+    // Check that the URL uses scientific notation with 3 significant digits
+    const url = await page.evaluate(() => location.search);
+    expect(url).toMatch(/z=\d\.\d{2}e[+-]\d+/);  // Format like 1.00e+10
+
+    // Also test with a different zoom level to verify consistent formatting
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i&z=12500`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+    await page.evaluate(() => window.explorer.urlHandler.updateurl());
+
+    const url2 = await page.evaluate(() => location.search);
+    expect(url2).toMatch(/z=\d\.\d{2}e[+-]\d+/);  // Format like 1.25e+4
+  }, TEST_TIMEOUT);
+
   test('URL encoding: c parameter correctly represents view centers', async () => {
     // Test 1: c=-0.6+0.2i means SINGLE view at that location (not default + zoomed)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.6+0.2i`);

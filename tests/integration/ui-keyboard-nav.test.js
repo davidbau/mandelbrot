@@ -58,6 +58,65 @@ describe('Keyboard Navigation Tests', () => {
       expect(newTheme).not.toBe(initialTheme);
     }, TEST_TIMEOUT);
 
+    test('T key should actually redraw the canvas with new colors', async () => {
+      // Wait for some computation to occur so we have pixels to compare
+      await waitForViewReady(page);
+      await page.waitForFunction(() => {
+        const view = window.explorer.grid.views[0];
+        return view && view.di > 100;
+      }, { timeout: 10000 });
+
+      // Get canvas pixel data before theme change
+      const beforePixels = await page.evaluate(() => {
+        const canvas = window.explorer.grid.canvas(0);
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Sample some pixels from different locations
+        const samples = [];
+        for (let i = 0; i < 5; i++) {
+          const idx = Math.floor(imageData.data.length / 5 * i);
+          samples.push([
+            imageData.data[idx],
+            imageData.data[idx + 1],
+            imageData.data[idx + 2]
+          ]);
+        }
+        return samples;
+      });
+
+      // Change theme
+      await page.keyboard.press('t');
+      await page.waitForTimeout(200);  // Wait for redraw to complete
+
+      // Get canvas pixel data after theme change
+      const afterPixels = await page.evaluate(() => {
+        const canvas = window.explorer.grid.canvas(0);
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const samples = [];
+        for (let i = 0; i < 5; i++) {
+          const idx = Math.floor(imageData.data.length / 5 * i);
+          samples.push([
+            imageData.data[idx],
+            imageData.data[idx + 1],
+            imageData.data[idx + 2]
+          ]);
+        }
+        return samples;
+      });
+
+      // At least some pixels should have changed color
+      let changedCount = 0;
+      for (let i = 0; i < beforePixels.length; i++) {
+        const before = beforePixels[i];
+        const after = afterPixels[i];
+        if (before[0] !== after[0] || before[1] !== after[1] || before[2] !== after[2]) {
+          changedCount++;
+        }
+      }
+      expect(changedCount).toBeGreaterThan(0);
+    }, TEST_TIMEOUT);
+
     test('U key should cycle unknown color', async () => {
       const initialColor = await page.evaluate(() => window.explorer.config.unknowncolor);
       await page.keyboard.press('u');

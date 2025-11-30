@@ -2233,7 +2233,7 @@ class Grid {
     const exponentParam = this.config.exponent !== 2 ? `&exponent=${this.config.exponent}` : '';
     const themeParam = this.config.theme !== 'warm' ? `&theme=${this.config.theme}` : '';
     const coords = formatcomplex(k, ore, oim);
-    return `?z=${formatSize(zoomFactor)}${exponentParam}&c=${coords}${themeParam}`;
+    return `?z=${formatZoom(zoomFactor)}${exponentParam}&c=${coords}${themeParam}`;
   }
 
   clearseq(k) {
@@ -2918,7 +2918,7 @@ class URLHandler {
     }
 
     const url =
-           (Math.abs(zoomFactor - 1.0) > 0.01 ? `&z=${formatSize(zoomFactor)}` : '') +
+           (Math.abs(zoomFactor - 1.0) > 0.01 ? `&z=${formatZoom(zoomFactor)}` : '') +
            aspectRatioParam +
            (this.config.exponent !== 2 ? `&exponent=${this.config.exponent}` : '') +
            (!this.config.enableGPU ? '&gpu=0' : '') +
@@ -4289,16 +4289,15 @@ class OrbitComputer {
 // Coordinates progressive canvas redraws as computation results arrive.
 class RedrawProcess {
   constructor(explorer) {
-    this.views = explorer.grid.views;
-    this.canvasGetter = (index) => explorer.grid.canvas(index);
-    this.orderFactory = () => explorer.grid.views.map((b, i) => i).sort(
-       (a, b) => (explorer.grid.hiddencanvas(a) * 1 - explorer.grid.hiddencanvas(b) * 1)
-                 * explorer.grid.views.length + (b - a));
+    this.grid = explorer.grid;
     this.timer = null;
   }
   start() {
     this.stop();  // Ensure any existing cycle is stopped
-    this.canvasOrder = this.orderFactory();
+    // Get current views and sort order (visible views first, then by index descending)
+    this.canvasOrder = this.grid.views.map((b, i) => i).sort(
+       (a, b) => (this.grid.hiddencanvas(a) * 1 - this.grid.hiddencanvas(b) * 1)
+                 * this.grid.views.length + (b - a));
     this.drawNext();
   }
   stop() {
@@ -4310,13 +4309,12 @@ class RedrawProcess {
   drawNext() {
     if (this.canvasOrder.length) {
       const index = this.canvasOrder.shift();
-      const view = this.views[index];
-      const canvas = this.canvasGetter(index);
+      const view = this.grid.views[index];  // Always get current view from grid
+      const canvas = this.grid.canvas(index);
       if (canvas && view) {
         const ctx = canvas.getContext('2d');
         view.draw(ctx);
       }
-      this.currentIndex++;
       this.timer = setTimeout(() => this.drawNext(), 0);
     } else {
       this.stop();
@@ -4350,6 +4348,12 @@ function centersWereLost(oldCenters, newCenters) {
   return false;
 }
 
+// Format zoom level for URL (z parameter) - always scientific notation
+function formatZoom(z) {
+  return z.toExponential(2);
+}
+
+// Format scale for human-readable display (e.g., "2.5x", "100x", or scientific for large)
 function formatScale(scale) {
   if (scale < 10) {
     return +scale.toFixed(1) + 'x';
@@ -4358,11 +4362,6 @@ function formatScale(scale) {
   } else {
     return scale.toExponential(2);
   }
-}
-
-function formatSize(s) {
-  return parseFloat(s.toPrecision(
-              Math.max(2, -Math.ceil(Math.log(s)/2.5))));
 }
 
 function toSimpleFraction(decimal, maxDenominator = 100) {
