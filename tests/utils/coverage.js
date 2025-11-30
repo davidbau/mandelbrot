@@ -130,11 +130,18 @@ async function writeCoverageReport() {
         fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
       }
       const scriptPath = path.join(SCRIPTS_DIR, `${scriptName}.js`);
-      fs.writeFileSync(scriptPath, entry.text);
+
+      // Append module.exports to match what unit tests use, enabling coverage merge
+      // The export names match those used in loadScript() for quadCode
+      const exportLine = scriptName === 'quadCode'
+        ? `\nif (typeof module !== 'undefined') module.exports = { fast2Sum, slow2Sum, qdSplit, twoProduct, twoSquare, Afast2Sum, Aslow2Sum, AqdSplit, AtwoProduct, AtwoSquare, toQd, qdAdd, qdMul, qdDouble, qdScale, qdSquare, qdNegate, qdSub, qdAbs, qdDiv, qdLt, qdGt, qdLe, qdGe, qdIsZero, qdFloor, qdMod, qdPow, qdSqrt, qdLog, qdExp, qdSin, qdCos, qdTan, qdAtan, qdAtan2, qdPi, qdE, quadFloat64ArrayToString, fibonacciPeriod };`
+        : '';
+      const sourceWithExports = entry.text + exportLine;
+      fs.writeFileSync(scriptPath, sourceWithExports);
 
       // Use wrapperLength=0 since we're treating it as a standalone script
       const converter = v8toIstanbul(scriptPath, 0, {
-        source: entry.text
+        source: sourceWithExports
       });
       await converter.load();
       converter.applyCoverage(entry.rawScriptCoverage.functions);

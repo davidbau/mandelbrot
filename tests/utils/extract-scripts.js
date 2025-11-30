@@ -79,11 +79,9 @@ function getScriptPath(scriptId) {
 }
 
 /**
- * Load an extracted script and return specified exports
- * Uses vm.runInThisContext to execute the script, then extracts the requested names.
- *
- * Note: This approach doesn't work well with c8 coverage since c8 tracks file-based coverage.
- * For coverage collection, we need to use the module wrapper approach.
+ * Load an extracted script and return specified exports.
+ * Appends module.exports to the base .js file so both unit tests (c8) and
+ * integration tests (Puppeteer) use the exact same file, enabling coverage merge.
  *
  * @param {string} scriptId - The script ID to load
  * @param {Array<string>} exportNames - Names to export from the script
@@ -95,19 +93,19 @@ function loadScript(scriptId, exportNames) {
   // Read the script content
   const code = fs.readFileSync(scriptPath, 'utf-8');
 
-  // For coverage collection, we need to require() a file so c8 can track it.
-  // Create a module wrapper file that exports the requested names.
-  // This will have different statement maps than the browser version,
-  // but we handle this by running unit tests separately with c8.
-  const wrappedCode = `${code}\nmodule.exports = { ${exportNames.join(', ')} };`;
-
-  const tempPath = path.join(SCRIPTS_DIR, `${scriptId}.module.js`);
-  fs.writeFileSync(tempPath, wrappedCode);
+  // Append module.exports to the base file (not a separate .module.js)
+  // This ensures both unit and integration tests use identical file content,
+  // allowing coverage data to be properly merged.
+  // The module.exports line is harmless in browser context.
+  const exportLine = `\nif (typeof module !== 'undefined') module.exports = { ${exportNames.join(', ')} };`;
+  if (!code.includes('module.exports')) {
+    fs.writeFileSync(scriptPath, code + exportLine);
+  }
 
   // Clear require cache to ensure fresh load
-  delete require.cache[require.resolve(tempPath)];
+  delete require.cache[require.resolve(scriptPath)];
 
-  return require(tempPath);
+  return require(scriptPath);
 }
 
 module.exports = {
