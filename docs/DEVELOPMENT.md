@@ -21,6 +21,8 @@ This installs:
 - `mp4-muxer` - Video encoding library
 - `jest` - Test framework
 - `puppeteer` - Headless browser for integration tests
+- `nyc` - Code coverage reporting
+- `v8-to-istanbul` - Converts V8 coverage to Istanbul format
 
 ## The Build Process
 
@@ -75,6 +77,33 @@ including the view preservation optimization that keeps computed views intact
 when navigating between similar states.
 
 See [tests/README.md](../tests/README.md) for details on writing tests.
+
+## Code Coverage
+
+Run `npm run test:coverage` to generate a coverage report. This uses
+Puppeteer's V8 coverage API to track which code paths are exercised by
+the integration tests.
+
+Coverage reports are written to the `coverage/` directory. Open
+`coverage/index.html` in a browser to see an interactive report showing
+covered and uncovered lines.
+
+Since `index.html` contains multiple `<script>` blocks, coverage is reported
+separately for each:
+
+| Script | Description |
+|--------|-------------|
+| mainCode.js | Main application (~82% coverage) |
+| workerCode.js | Web worker algorithms |
+| quadCode.js | Quad-double precision math |
+| mp4Muxer.js | Video encoding library |
+| i18nCode.js | Internationalization |
+| startApp.js | Application startup |
+| analytics.js | Google Analytics |
+
+Note: Worker code runs in a separate blob URL context, so its coverage
+reflects parse-time execution in the main thread rather than actual
+worker execution.
 
 ## Project Structure
 

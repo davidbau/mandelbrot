@@ -195,7 +195,7 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 >David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
-<script>
+<script id="mainCode">
 // =============================================================================
 // MANDELBROT FRACTAL EXPLORER - APPLICATION ARCHITECTURE
 // =============================================================================
@@ -9235,7 +9235,7 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 >David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
 </div>
 
-<script>
+<script id="i18nCode">
 // Internationalization Messages
 const Messages = {
   en: {
@@ -9413,7 +9413,7 @@ let LANG_FROM_URL = false;
 <!-- mp4-muxer library (tree-shaken, 31505 bytes) -->
 <!-- Source: https://www.npmjs.com/package/mp4-muxer -->
 <!-- Built with: ./build/build.sh -->
-<script>
+<script id="mp4Muxer">
 (()=>{var Ee=(e,t,s)=>{if(!t.has(e))throw TypeError("Cannot "+s)},i=(e,t,s)=>(Ee(e,t,"read from private fi\
 eld"),s?s.call(e):t.get(e)),d=(e,t,s)=>{if(t.has(e))throw TypeError("Cannot add the same private mem\
 ber more than once");t instanceof WeakSet?t.add(e):t.set(e,s)},T=(e,t,s,r)=>(Ee(e,t,"write to privat\
@@ -9719,7 +9719,7 @@ i(this,u)instanceof Ie&&i(this,u).flush()};he=new WeakSet;_e=function(){if(i(thi
 "Cannot add new video or audio chunks after the file has been finalized.")};window.Mp4Muxer={Muxer:it,ArrayBufferTarget:Oe};})();
 </script>
 <!-- END_MP4MUXER_LIBRARY -->
-<script>
+<script id="startApp">
 // Start the application
 window.explorer = new MandelbrotExplorer();
 window.explorer.start();
@@ -9727,7 +9727,7 @@ window.explorer.start();
 </div> <!-- closes id=text -->
 </body>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-W8X6PWJH83"></script>
-<script>
+<script id="analytics">
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());

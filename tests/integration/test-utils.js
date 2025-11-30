@@ -5,6 +5,7 @@
 const puppeteer = require('puppeteer');
 const path = require('path');
 const fs = require('fs');
+const { startCoverage, stopCoverage, clearCoverage, isCoverageEnabled } = require('../utils/coverage');
 
 const TEST_TIMEOUT = 60000; // 60 seconds for integration tests
 const TEST_VIEWPORT = { width: 400, height: 400 };
@@ -61,6 +62,18 @@ async function setupPage(browser, options = {}) {
   const page = await browser.newPage();
   await page.setViewport(TEST_VIEWPORT);
 
+  // Start coverage collection if enabled
+  if (isCoverageEnabled()) {
+    await startCoverage(page);
+
+    // Wrap page.close to collect coverage before closing
+    const originalClose = page.close.bind(page);
+    page.close = async function() {
+      await stopCoverage(page);
+      return originalClose();
+    };
+  }
+
   // Capture console messages (optional, can be noisy)
   if (options.captureConsole) {
     page.on('console', msg => {
@@ -69,6 +82,11 @@ async function setupPage(browser, options = {}) {
   }
 
   return page;
+}
+
+// Clean up page and collect coverage (for explicit use if needed)
+async function teardownPage(page) {
+  await page.close();
 }
 
 // Navigate to the app and wait for explorer to initialize
@@ -86,5 +104,8 @@ module.exports = {
   waitForViewReady,
   setupBrowser,
   setupPage,
-  navigateToApp
+  teardownPage,
+  navigateToApp,
+  clearCoverage,
+  isCoverageEnabled
 };
