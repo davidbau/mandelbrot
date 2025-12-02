@@ -1,10 +1,11 @@
 /**
  * Coverage collection utilities for Puppeteer integration tests
- * Uses V8 coverage and converts to Istanbul format for reporting
- * Supports both main thread and Web Worker coverage
+ * Uses V8 coverage and converts to Istanbul format via monocart-coverage-reports
+ * for accurate line number mapping (avoiding v8-to-istanbul issues).
+ * Supports both main thread and Web Worker coverage.
  */
 
-const v8toIstanbul = require('v8-to-istanbul');
+const CoverageReport = require('monocart-coverage-reports');
 const fs = require('fs');
 const path = require('path');
 
@@ -157,39 +158,67 @@ function clearCoverage() {
   workerSessions.clear();
 }
 
-// Script block names matching script ids in index.html
-// Note: workerCode and quadCode are excluded from main thread coverage
-// since they're covered via workerBlob.js (combined file used by workers)
-const SCRIPT_NAMES = {
-  198: 'mainCode',     // Main application code (lines 198-4522)
-  // 4523: 'workerCode' - covered via workerBlob.js
-  // 8025: 'quadCode'   - covered via workerBlob.js
-  9238: 'i18nCode',    // Internationalization messages
-  9416: 'mp4Muxer',    // MP4 muxer library
-  9722: 'startApp',    // Application startup
-  9730: 'analytics'    // Google Analytics
-};
-
 // Directory to store extracted scripts for coverage reporting
 const SCRIPTS_DIR = path.join(COVERAGE_DIR, 'scripts');
+const HTML_PATH = path.join(__dirname, '../../index.html');
+
+// Scripts to track for main thread coverage
+// Note: workerCode is excluded (type="text/webworker", only used in worker blob)
+// quadCode is included because it's used in both main thread AND worker blob
+const MAIN_THREAD_SCRIPTS = ['mainCode', 'quadCode', 'i18nCode', 'mp4Muxer', 'startApp', 'analytics'];
+
+/**
+ * Parse index.html to find script block line numbers dynamically.
+ * Returns a map of line number -> script name.
+ */
+function getScriptLineNumbers() {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  const lines = html.split('\n');
+  const scriptLines = {};
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Match <script id="scriptName"> but exclude type="text/webworker"
+    const match = line.match(/<script\s+id="([^"]+)"(?:\s+[^>]*)?>/)
+    if (match) {
+      const scriptId = match[1];
+      // Skip workerCode (it's type="text/webworker", only used in worker blob)
+      if (scriptId === 'workerCode') continue;
+      // Only track scripts we care about
+      if (MAIN_THREAD_SCRIPTS.includes(scriptId)) {
+        scriptLines[i + 1] = scriptId;  // 1-based line number
+      }
+    }
+  }
+
+  return scriptLines;
+}
+
+// Cache the script line numbers (parsed once per process)
+let cachedScriptNames = null;
 
 /**
  * Get a descriptive name for a script based on its line number
  */
 function getScriptName(lineNum) {
+  // Parse script line numbers from HTML on first call
+  if (cachedScriptNames === null) {
+    cachedScriptNames = getScriptLineNumbers();
+  }
+
   // Find the closest matching line number
-  const lines = Object.keys(SCRIPT_NAMES).map(Number).sort((a, b) => a - b);
+  const lines = Object.keys(cachedScriptNames).map(Number).sort((a, b) => a - b);
   for (let i = lines.length - 1; i >= 0; i--) {
     if (lineNum >= lines[i]) {
-      return SCRIPT_NAMES[lines[i]];
+      return cachedScriptNames[lines[i]];
     }
   }
   return 'unknown';
 }
 
 /**
- * Convert raw V8 coverage to Istanbul format for reporting
- * Call this once at the end of all tests
+ * Convert raw V8 coverage to Istanbul format for reporting using monocart.
+ * Call this once at the end of all tests.
  */
 async function writeCoverageReport() {
   if (!fs.existsSync(RAW_COVERAGE_FILE)) {
@@ -203,8 +232,15 @@ async function writeCoverageReport() {
     return;
   }
 
-  const mergedCoverage = {};
+  // Prepare V8 coverage data for monocart
+  const v8CoverageList = [];
 
+  // Create scripts directory
+  if (!fs.existsSync(SCRIPTS_DIR)) {
+    fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
+  }
+
+  // Process main thread scripts from index.html
   for (const entry of coverageData) {
     // Only collect coverage for index.html (main thread scripts)
     if (!entry.url.includes('index.html')) continue;
@@ -213,7 +249,7 @@ async function writeCoverageReport() {
     if (!entry.rawScriptCoverage || !entry.rawScriptCoverage.functions) continue;
 
     try {
-      // v8-to-istanbul needs a file path, extract from URL and strip query params
+      // Extract file path from URL and strip query params
       let filePath = entry.url.replace('file://', '');
       const queryIndex = filePath.indexOf('?');
       if (queryIndex !== -1) {
@@ -227,57 +263,18 @@ async function writeCoverageReport() {
 
       const lineNum = fileContent.substring(0, scriptStart).split('\n').length;
       const scriptName = getScriptName(lineNum);
-
-      // Create a real file for this script block so nyc can read it
-      if (!fs.existsSync(SCRIPTS_DIR)) {
-        fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
-      }
       const scriptPath = path.join(SCRIPTS_DIR, `${scriptName}.js`);
 
-      // Write the script content without hardcoded exports
-      // Unit tests use loadScript() which adds the correct exports dynamically
+      // Write the script content
       fs.writeFileSync(scriptPath, entry.text);
 
-      // Use wrapperLength=0 since we're treating it as a standalone script
-      const converter = v8toIstanbul(scriptPath, 0, {
-        source: entry.text
+      // Add to V8 coverage list for monocart
+      v8CoverageList.push({
+        url: scriptPath,
+        scriptId: entry.rawScriptCoverage.scriptId,
+        source: entry.text,
+        functions: entry.rawScriptCoverage.functions
       });
-      await converter.load();
-      converter.applyCoverage(entry.rawScriptCoverage.functions);
-      const istanbulCoverage = converter.toIstanbul();
-
-      // Merge coverage data (keyed by script path)
-      for (const [file, data] of Object.entries(istanbulCoverage)) {
-        const key = scriptPath;
-        if (mergedCoverage[key]) {
-          // Merge statement hit counts (only for statements that exist in statementMap)
-          for (const [stmt, count] of Object.entries(data.s)) {
-            if (mergedCoverage[key].statementMap[stmt]) {
-              mergedCoverage[key].s[stmt] = (mergedCoverage[key].s[stmt] || 0) + count;
-            }
-          }
-          // Merge branch hit counts (only for branches that exist in branchMap)
-          for (const [branch, count] of Object.entries(data.b)) {
-            if (mergedCoverage[key].branchMap[branch]) {
-              if (!mergedCoverage[key].b[branch]) {
-                mergedCoverage[key].b[branch] = count;
-              } else {
-                mergedCoverage[key].b[branch] = mergedCoverage[key].b[branch].map(
-                  (c, i) => c + (count[i] || 0)
-                );
-              }
-            }
-          }
-          // Merge function hit counts (only for functions that exist in fnMap)
-          for (const [fn, count] of Object.entries(data.f)) {
-            if (mergedCoverage[key].fnMap[fn]) {
-              mergedCoverage[key].f[fn] = (mergedCoverage[key].f[fn] || 0) + count;
-            }
-          }
-        } else {
-          mergedCoverage[key] = data;
-        }
-      }
     } catch (err) {
       console.warn(`Warning: Could not process coverage for ${entry.url}:`, err.message);
     }
@@ -288,66 +285,23 @@ async function writeCoverageReport() {
     const workerCoverageData = JSON.parse(fs.readFileSync(WORKER_COVERAGE_FILE, 'utf8'));
     console.log(`Processing ${workerCoverageData.length} worker coverage entries`);
 
-    // Read the extracted script files to build the combined source
-    const workerCodePath = path.join(SCRIPTS_DIR, 'workerCode.js');
-    const quadCodePath = path.join(SCRIPTS_DIR, 'quadCode.js');
+    // Use extract-scripts to get/regenerate workerBlob.js
+    const { getWorkerBlobSource } = require('./extract-scripts');
+    const combinedSource = getWorkerBlobSource();
+    const workerBlobPath = path.join(SCRIPTS_DIR, 'workerBlob.js');
 
-    if (fs.existsSync(workerCodePath) && fs.existsSync(quadCodePath)) {
-      const workerCodeSource = fs.readFileSync(workerCodePath, 'utf8');
-      const quadCodeSource = fs.readFileSync(quadCodePath, 'utf8');
-      const combinedSource = workerCodeSource + quadCodeSource;
-
-      // Create a combined worker blob file for coverage reporting
-      const workerBlobPath = path.join(SCRIPTS_DIR, 'workerBlob.js');
-      fs.writeFileSync(workerBlobPath, combinedSource);
-
+    if (combinedSource) {
       // Process each worker coverage entry
       for (const entry of workerCoverageData) {
         if (!entry.functions || entry.functions.length === 0) continue;
 
-        try {
-          const converter = v8toIstanbul(workerBlobPath, 0, {
-            source: combinedSource
-          });
-          await converter.load();
-          converter.applyCoverage(entry.functions);
-          const istanbulCoverage = converter.toIstanbul();
-
-          // Merge worker coverage with existing coverage data
-          for (const [file, data] of Object.entries(istanbulCoverage)) {
-            const key = workerBlobPath;
-            if (mergedCoverage[key]) {
-              // Merge statement hit counts
-              for (const [stmt, count] of Object.entries(data.s)) {
-                if (mergedCoverage[key].statementMap[stmt]) {
-                  mergedCoverage[key].s[stmt] = (mergedCoverage[key].s[stmt] || 0) + count;
-                }
-              }
-              // Merge branch hit counts
-              for (const [branch, count] of Object.entries(data.b)) {
-                if (mergedCoverage[key].branchMap[branch]) {
-                  if (!mergedCoverage[key].b[branch]) {
-                    mergedCoverage[key].b[branch] = count;
-                  } else {
-                    mergedCoverage[key].b[branch] = mergedCoverage[key].b[branch].map(
-                      (c, i) => c + (count[i] || 0)
-                    );
-                  }
-                }
-              }
-              // Merge function hit counts
-              for (const [fn, count] of Object.entries(data.f)) {
-                if (mergedCoverage[key].fnMap[fn]) {
-                  mergedCoverage[key].f[fn] = (mergedCoverage[key].f[fn] || 0) + count;
-                }
-              }
-            } else {
-              mergedCoverage[key] = data;
-            }
-          }
-        } catch (err) {
-          console.warn('Warning: Could not process worker coverage:', err.message);
-        }
+        // Add to V8 coverage list for monocart
+        v8CoverageList.push({
+          url: workerBlobPath,
+          scriptId: entry.scriptId,
+          source: combinedSource,
+          functions: entry.functions
+        });
       }
     } else {
       console.log('Worker coverage skipped: extracted scripts not found');
@@ -356,10 +310,46 @@ async function writeCoverageReport() {
     fs.unlinkSync(WORKER_COVERAGE_FILE);
   }
 
-  // Write merged coverage
-  const outputFile = path.join(COVERAGE_DIR, 'coverage.json');
-  fs.writeFileSync(outputFile, JSON.stringify(mergedCoverage, null, 2));
-  console.log(`Coverage data written to ${outputFile}`);
+  // Use monocart to convert V8 coverage to Istanbul format
+  // Use a separate temp directory so monocart doesn't clean up our scripts
+  const monocartDir = path.join(COVERAGE_DIR, '.monocart-temp');
+  const mcr = CoverageReport({
+    name: 'Integration Coverage',
+    outputDir: monocartDir,
+    reports: ['json'],  // Generate Istanbul JSON
+    cleanCache: true,
+    logging: 'error'  // Suppress info logging
+  });
+
+  // Add all V8 coverage data
+  await mcr.add(v8CoverageList);
+
+  // Generate report (creates coverage-final.json)
+  await mcr.generate();
+
+  // Read the generated Istanbul coverage and rewrite with clean keys
+  const istanbulPath = path.join(monocartDir, 'coverage-final.json');
+  if (fs.existsSync(istanbulPath)) {
+    const istanbulData = JSON.parse(fs.readFileSync(istanbulPath, 'utf8'));
+    const cleanedData = {};
+
+    for (const [filePath, coverage] of Object.entries(istanbulData)) {
+      // Use just the filename as key for clean reports
+      const fileName = path.basename(filePath);
+      cleanedData[fileName] = coverage;
+    }
+
+    // Write to coverage.json (the file that run-coverage.js expects)
+    fs.writeFileSync(
+      path.join(COVERAGE_DIR, 'coverage.json'),
+      JSON.stringify(cleanedData, null, 2)
+    );
+
+    // Clean up monocart's temp directory
+    fs.rmSync(monocartDir, { recursive: true, force: true });
+  }
+
+  console.log(`Coverage data written to ${path.join(COVERAGE_DIR, 'coverage.json')}`);
 
   // Clean up raw data
   if (fs.existsSync(RAW_COVERAGE_FILE)) {

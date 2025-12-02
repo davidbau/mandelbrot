@@ -1,14 +1,12 @@
 /**
  * Unit tests for quad-double precision arithmetic.
- * Uses workerBlob.js (workerCode + quadCode combined) which matches
- * the browser's worker blob format for coverage merge.
+ * Loads quadCode.js directly for accurate coverage reporting.
  */
 
-const { loadWorkerBlob } = require('../utils/extract-scripts');
+const { loadScript } = require('../utils/extract-scripts');
 
-// Mock worker environment and load combined worker blob
-global.self = global;
-const qd = loadWorkerBlob();
+// Load quadCode directly (no worker environment needed for pure math functions)
+const qd = loadScript('quadCode');
 
 // Helper to check if a qd is NaN (pure math format)
 const isQdNaN = (q) => isNaN(q[0]);

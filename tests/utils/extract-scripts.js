@@ -154,27 +154,13 @@ function loadScript(scriptId) {
 }
 
 /**
- * Find the line number where a script tag starts in index.html
- * @param {string} scriptId - The script ID to find
- * @returns {number} Line number (1-based)
- */
-function findScriptLineNumber(scriptId) {
-  const html = fs.readFileSync(HTML_PATH, 'utf-8');
-  const pattern = new RegExp(`^\\s*<script id="${scriptId}"`, 'm');
-  const match = pattern.exec(html);
-  if (!match) return 0;
-  return html.substring(0, match.index).split('\n').length;
-}
-
-/**
- * Create and load the combined worker blob (workerCode + quadCode).
- * Matches the exact format created by assembleWorkerCode() in index.html,
- * including line number padding for accurate stack traces.
- * Auto-detects all function and class names to export.
+ * Get the combined worker blob source (workerCode + quadCode) without loading.
+ * Matches the exact format created by assembleWorkerCode() in index.html
+ * when running under Puppeteer (no line padding, for coverage alignment).
  *
- * @returns {Object} Object with all detected exports
+ * @returns {string} The combined source code
  */
-function loadWorkerBlob() {
+function getWorkerBlobSource() {
   // Get paths to source scripts (extract if needed)
   const workerCodePath = getScriptPath('workerCode');
   const quadCodePath = getScriptPath('quadCode');
@@ -183,15 +169,9 @@ function loadWorkerBlob() {
   const workerCode = fs.readFileSync(workerCodePath, 'utf-8');
   const quadCode = fs.readFileSync(quadCodePath, 'utf-8');
 
-  // Find the line number where workerCode starts (matches lastScriptLineNumber in browser)
-  // The browser uses the line of the mainCode closing tag, which is 1 line before workerCode starts
-  const workerCodeLineNum = findScriptLineNumber('workerCode');
-  const lastScriptLineNumber = workerCodeLineNum > 0 ? workerCodeLineNum - 1 : 0;
-
-  // Build worker blob matching browser's assembleWorkerCode() format exactly
-  // This enables coverage byte offsets to match between browser and unit tests
+  // Build worker blob matching browser's assembleWorkerCode() format under Puppeteer
+  // (no line padding - navigator.webdriver sets lastScriptLineNumber to 0)
   const combinedCode = '// Linefeeds to align line numbers with HTML.\n' +
-                       ''.padStart(lastScriptLineNumber, '\n') +
                        '// <script id="workerCode">' +
                        workerCode +
                        '// </script>\n' +
@@ -201,6 +181,8 @@ function loadWorkerBlob() {
 
   // Auto-detect exports from combined code
   const exportNames = extractExportNames(combinedCode);
+  const exportLine = `\nif (typeof module !== 'undefined') ` +
+                     `module.exports = { ${exportNames.join(', ')} };`;
 
   // Ensure output directory exists
   if (!fs.existsSync(SCRIPTS_DIR)) {
@@ -209,10 +191,22 @@ function loadWorkerBlob() {
 
   // Write combined file
   const blobPath = path.join(SCRIPTS_DIR, 'workerBlob.js');
-  const exportLine = `\nif (typeof module !== 'undefined') module.exports = { ${exportNames.join(', ')} };`;
   fs.writeFileSync(blobPath, combinedCode + exportLine);
 
+  return combinedCode + exportLine;
+}
+
+/**
+ * Create and load the combined worker blob (workerCode + quadCode).
+ * Requires mocking global.self = global before calling.
+ *
+ * @returns {Object} Object with all detected exports
+ */
+function loadWorkerBlob() {
+  getWorkerBlobSource();  // Ensure file is written
+
   // Clear require cache and load
+  const blobPath = path.join(SCRIPTS_DIR, 'workerBlob.js');
   delete require.cache[require.resolve(blobPath)];
   return require(blobPath);
 }
@@ -222,6 +216,7 @@ module.exports = {
   extractAllScripts,
   getScriptPath,
   loadScript,
+  getWorkerBlobSource,
   loadWorkerBlob,
   SCRIPTS_DIR,
   SCRIPT_IDS

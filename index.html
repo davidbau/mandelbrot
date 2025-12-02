@@ -4532,9 +4532,20 @@ function estimateLimit(data) {
   return intercept;
 }
 
-const lastScriptLineNumber = parseInt(new Error().stack.match(/(:[\d]+)/)[0].replace(':',''));
+// Under Puppeteer, use 0 so worker blob has no line padding (for coverage alignment).
+var lastScriptLineNumber = navigator.webdriver ? 0 : new Error().stack.match(/:(\d+)/)[1] | 0;
 </script>
 <script id="workerCode" type="text/webworker">
+// COVERAGE TEST: Simple function to verify line number alignment
+// This function should appear at a known line in coverage reports
+function coverageTestDummy(x) {
+  if (x > 0) {
+    return x * 2;  // branch: x > 0
+  } else {
+    return x * 3;  // branch: x <= 0
+  }
+}
+
 // Constants
 const MAX_CHAOTIC_ITERATIONS = 100000;
 
