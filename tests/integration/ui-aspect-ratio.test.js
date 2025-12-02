@@ -78,4 +78,27 @@ describe('Aspect Ratio Tests', () => {
 
     expect(zoomRectTop).toBeCloseTo(expectedTop, 1);
   });
+
+  test('A key toggles aspect ratio between 1:1 and 16:9', async () => {
+    // Navigate to default page (1:1 aspect ratio)
+    await navigateToApp(page);
+
+    // Verify initial aspect ratio is 1:1
+    const initialRatio = await page.evaluate(() => window.explorer.config.aspectRatio);
+    expect(initialRatio).toBe(1.0);
+
+    // Press 'a' to toggle to 16:9
+    await page.keyboard.press('a');
+    await page.waitForTimeout(300);
+
+    const afterFirstPress = await page.evaluate(() => window.explorer.config.aspectRatio);
+    expect(afterFirstPress).toBeCloseTo(16/9, 5);
+
+    // Press 'a' again to toggle back to 1:1
+    await page.keyboard.press('a');
+    await page.waitForTimeout(300);
+
+    const afterSecondPress = await page.evaluate(() => window.explorer.config.aspectRatio);
+    expect(afterSecondPress).toBe(1.0);
+  }, TEST_TIMEOUT);
 });

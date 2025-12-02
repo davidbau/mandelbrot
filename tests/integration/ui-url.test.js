@@ -102,6 +102,68 @@ describe('URL Parameter Tests', () => {
     expect(url2).toMatch(/z=\d\.\d{2}e[+-]\d+/);  // Format like 1.25e+4
   }, TEST_TIMEOUT);
 
+  test('Should load with additional color themes (iceblue, tiedye)', async () => {
+    // Test iceblue theme
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?theme=iceblue`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const iceblueTheme = await page.evaluate(() => window.explorer.config.theme);
+    expect(iceblueTheme).toBe('iceblue');
+
+    // Test tiedye theme
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?theme=tiedye`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const tiedyeTheme = await page.evaluate(() => window.explorer.config.theme);
+    expect(tiedyeTheme).toBe('tiedye');
+  }, TEST_TIMEOUT);
+
+  test('Should load with exponent, gpu, board, and pixelratio parameters', async () => {
+    // Test exponent parameter (z³ instead of z²)
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?exponent=3`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const exponent = await page.evaluate(() => window.explorer.config.exponent);
+    expect(exponent).toBe(3);
+
+    // Test gpu=0 parameter (disable GPU)
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?gpu=0`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const gpuDisabled = await page.evaluate(() => window.explorer.config.enableGPU);
+    expect(gpuDisabled).toBe(false);
+
+    // Test board parameter
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?board=cpu`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const forceBoard = await page.evaluate(() => window.explorer.config.forceBoard);
+    expect(forceBoard).toBe('cpu');
+
+    // Test pixelratio parameter
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?pixelratio=2`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const pixelRatio = await page.evaluate(() => window.explorer.config.pixelRatio);
+    expect(pixelRatio).toBe(2);
+  }, TEST_TIMEOUT);
+
+  test('Should load with unknown color (unk) parameter', async () => {
+    // Test hex color without #
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?unk=888`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const hexColor = await page.evaluate(() => window.explorer.config.unknowncolor);
+    expect(hexColor).toBe('#888');
+
+    // Test named color
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?unk=yellow`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const namedColor = await page.evaluate(() => window.explorer.config.unknowncolor);
+    expect(namedColor).toBe('yellow');
+  }, TEST_TIMEOUT);
+
   test('URL encoding: c parameter correctly represents view centers', async () => {
     // Test 1: c=-0.6+0.2i means SINGLE view at that location (not default + zoomed)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.6+0.2i`);
