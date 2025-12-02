@@ -631,19 +631,6 @@ class StateStore {
         };
       }
 
-      case 'CONFIG_SET_EXPONENT': {
-        const newFireR = action.exponent > 2 ? [0.0, 0] : [-0.5, 0];
-        return {
-          ...state,
-          config: {
-            ...state.config,
-            exponent: action.exponent,
-            firstr: newFireR,
-            firstj: [0.0, 0]
-          }
-        };
-      }
-
       case 'CONFIG_SET_ASPECT_RATIO':
         return {
           ...state,
@@ -654,24 +641,6 @@ class StateStore {
         return {
           ...state,
           config: { ...state.config, theme: action.theme }
-        };
-
-      case 'CONFIG_SET_ZOOM_FACTOR':
-        return {
-          ...state,
-          config: { ...state.config, zoomfactor: action.zoomfactor }
-        };
-
-      case 'CONFIG_SET_GPU':
-        return {
-          ...state,
-          config: { ...state.config, enableGPU: action.enableGPU }
-        };
-
-      case 'CONFIG_SET_FORCE_BOARD':
-        return {
-          ...state,
-          config: { ...state.config, forceBoard: action.forceBoard }
         };
 
       case 'CONFIG_SET_PIXEL_RATIO':
@@ -691,81 +660,6 @@ class StateStore {
           ...state,
           config: { ...state.config, ...action.config }
         };
-
-      // View management
-      case 'VIEWS_SET': {
-        return {
-          ...state,
-          views: action.views.map((v, k) => ({
-            k,
-            sizes: v.sizes,
-            hidden: v.hidden || false,
-            parentK: k > 0 ? k - 1 : null
-          }))
-        };
-      }
-
-      case 'VIEW_ADD': {
-        const k = state.views.length;
-        return {
-          ...state,
-          views: [
-            ...state.views,
-            {
-              k,
-              sizes: action.sizes,
-              hidden: action.hidden || false,
-              parentK: k > 0 ? k - 1 : null
-            }
-          ]
-        };
-      }
-
-      case 'VIEW_UPDATE': {
-        const { k, sizes } = action;
-        return {
-          ...state,
-          views: state.views.map((v, index) =>
-            index === k ? { ...v, sizes } : v
-          )
-        };
-      }
-
-      case 'VIEW_SET_HIDDEN': {
-        const { k, hidden } = action;
-        return {
-          ...state,
-          views: state.views.map((v, index) =>
-            index === k ? { ...v, hidden } : v
-          )
-        };
-      }
-
-      case 'VIEW_REMOVE': {
-        const { k } = action;
-        // Remove view and clean up trailing nulls
-        const newViews = [...state.views];
-        newViews[k] = null;
-        while (newViews.length > 0 && newViews[newViews.length - 1] === null) {
-          newViews.pop();
-        }
-        return {
-          ...state,
-          views: newViews.filter(v => v !== null).map((v, index) => ({
-            ...v,
-            k: index,
-            parentK: index > 0 ? index - 1 : null
-          }))
-        };
-      }
-
-      case 'VIEWS_TRUNCATE': {
-        const { k } = action;
-        return {
-          ...state,
-          views: state.views.slice(0, k)
-        };
-      }
 
       // UI state updates
       case 'UI_MOUSE_DOWN':
@@ -804,30 +698,6 @@ class StateStore {
           ui: { ...state.ui, focusedView: action.k }
         };
 
-      case 'UI_SET_ZOOM_RECTANGLE':
-        return {
-          ...state,
-          ui: { ...state.ui, zoomRectangle: action.rectangle }
-        };
-
-      case 'UI_CLEAR_ZOOM_RECTANGLE':
-        return {
-          ...state,
-          ui: { ...state.ui, zoomRectangle: null }
-        };
-
-      case 'UI_SET_ORBIT_POINT':
-        return {
-          ...state,
-          ui: { ...state.ui, orbitPoint: action.point }
-        };
-
-      case 'UI_CLEAR_ORBIT_POINT':
-        return {
-          ...state,
-          ui: { ...state.ui, orbitPoint: null }
-        };
-
       case 'UI_MOVIE_MODE_TOGGLE':
         return {
           ...state,
@@ -836,30 +706,6 @@ class StateStore {
             movieMode: {
               ...state.ui.movieMode,
               active: !state.ui.movieMode.active
-            }
-          }
-        };
-
-      case 'UI_MOVIE_MODE_SET_PROGRESS':
-        return {
-          ...state,
-          ui: {
-            ...state.ui,
-            movieMode: {
-              ...state.ui.movieMode,
-              progress: action.progress
-            }
-          }
-        };
-
-      case 'UI_MOVIE_MODE_SET_RENDERING':
-        return {
-          ...state,
-          ui: {
-            ...state.ui,
-            movieMode: {
-              ...state.ui.movieMode,
-              rendering: action.rendering
             }
           }
         };
@@ -885,24 +731,6 @@ class StateStore {
         };
       }
 
-      case 'COMPUTATION_SET_COMPUTING':
-        return {
-          ...state,
-          computation: {
-            ...state.computation,
-            isComputing: action.isComputing
-          }
-        };
-
-      case 'COMPUTATION_SET_ALL_COMPLETED':
-        return {
-          ...state,
-          computation: {
-            ...state.computation,
-            allCompleted: action.allCompleted
-          }
-        };
-
       default:
         return state;
     }
@@ -912,36 +740,18 @@ class StateStore {
   actions = {
     // Config actions
     initSizes: (sizes) => ({ type: 'CONFIG_INIT_SIZES', ...sizes }),
-    setExponent: (exponent) => ({ type: 'CONFIG_SET_EXPONENT', exponent }),
     setAspectRatio: (aspectRatio) => ({ type: 'CONFIG_SET_ASPECT_RATIO', aspectRatio }),
     setTheme: (theme) => ({ type: 'CONFIG_SET_THEME', theme }),
-    setZoomFactor: (zoomfactor) => ({ type: 'CONFIG_SET_ZOOM_FACTOR', zoomfactor }),
-    setGPU: (enableGPU) => ({ type: 'CONFIG_SET_GPU', enableGPU }),
-    setForceBoard: (forceBoard) => ({ type: 'CONFIG_SET_FORCE_BOARD', forceBoard }),
     setPixelRatio: (pixelRatio) => ({ type: 'CONFIG_SET_PIXEL_RATIO', pixelRatio }),
     setUnknownColor: (unknowncolor) => ({ type: 'CONFIG_SET_UNKNOWN_COLOR', unknowncolor }),
     updateConfig: (config) => ({ type: 'CONFIG_UPDATE', config }),
-
-    // View actions
-    setViews: (views) => ({ type: 'VIEWS_SET', views }),
-    addView: (sizes, hidden = false) => ({ type: 'VIEW_ADD', sizes, hidden }),
-    updateView: (k, sizes) => ({ type: 'VIEW_UPDATE', k, sizes }),
-    setViewHidden: (k, hidden) => ({ type: 'VIEW_SET_HIDDEN', k, hidden }),
-    removeView: (k) => ({ type: 'VIEW_REMOVE', k }),
-    truncateViews: (k) => ({ type: 'VIEWS_TRUNCATE', k }),
 
     // UI actions
     mouseDown: (button, position) => ({ type: 'UI_MOUSE_DOWN', button, position }),
     mouseUp: () => ({ type: 'UI_MOUSE_UP' }),
     mouseMove: (position) => ({ type: 'UI_MOUSE_MOVE', position }),
     setFocusedView: (k) => ({ type: 'UI_SET_FOCUSED_VIEW', k }),
-    setZoomRectangle: (rectangle) => ({ type: 'UI_SET_ZOOM_RECTANGLE', rectangle }),
-    clearZoomRectangle: () => ({ type: 'UI_CLEAR_ZOOM_RECTANGLE' }),
-    setOrbitPoint: (point) => ({ type: 'UI_SET_ORBIT_POINT', point }),
-    clearOrbitPoint: () => ({ type: 'UI_CLEAR_ORBIT_POINT' }),
     toggleMovieMode: () => ({ type: 'UI_MOVIE_MODE_TOGGLE' }),
-    setMovieModeProgress: (progress) => ({ type: 'UI_MOVIE_MODE_SET_PROGRESS', progress }),
-    setMovieModeRendering: (rendering) => ({ type: 'UI_MOVIE_MODE_SET_RENDERING', rendering }),
     setFullscreen: (fullscreen) => ({ type: 'UI_SET_FULLSCREEN', fullscreen }),
 
     // Computation actions
@@ -954,9 +764,7 @@ class StateStore {
       it: data.it,
       workerInfo: data.workerInfo,
       boardType: data.boardType
-    }),
-    setComputing: (isComputing) => ({ type: 'COMPUTATION_SET_COMPUTING', isComputing }),
-    setAllCompleted: (allCompleted) => ({ type: 'COMPUTATION_SET_ALL_COMPLETED', allCompleted })
+    })
   };
 }
 
@@ -1017,7 +825,6 @@ class Config {
 
   // Read-only property getters (set once in constructor/URL or computed)
   get vw() { return this.store.getState().config.vw; }
-  get cssDims() { return this.store.getState().config.cssDims; }
   get cssDimsWidth() { return this.store.getState().config.cssDimsWidth; }
   get cssDimsHeight() { return this.store.getState().config.cssDimsHeight; }
   get dimsWidth() { return this.store.getState().config.dimsWidth; }
@@ -1584,20 +1391,6 @@ class View {
     }
   }
 
-  drawcolor(ctx, i) {
-    let color = this.makecolor(i);
-    let converged = this.makecolor(-i);
-    let n = this.nn;
-    for (let m = 0; m < this.config.dimsArea; ++m) {
-      if (n[m] === i || n[m] === -i) {
-        let x = m % this.config.dimsWidth;
-        let y = (m - x) / this.config.dimsWidth;
-        ctx.fillStyle = n[m] > 0 ? color : converged;
-        ctx.fillRect(x, y, 1, 1);
-      }
-    }
-  }
-
   makecolor(i, histogram = null, scale = null, unknownColor = 'transparent') {
     if (i === 0) return unknownColor;  // Color for uncomputed pixels
     if (i < 0) return 'black';
@@ -2076,10 +1869,6 @@ class Grid {
 
   canvas(k) {
     return this.container(k)?.firstElementChild;
-  }
-
-  closebutton(k) {
-    return this.container(k)?.firstElementChild?.nextElementSibling;
   }
 
   rect(k) {
