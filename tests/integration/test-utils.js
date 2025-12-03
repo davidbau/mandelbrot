@@ -5,6 +5,7 @@
 const puppeteer = require('puppeteer');
 const path = require('path');
 const fs = require('fs');
+const { setTimeout: sleep } = require('node:timers/promises');
 const { startCoverage, stopCoverage, clearCoverage, isCoverageEnabled } = require('../utils/coverage');
 
 const TEST_TIMEOUT = 60000; // 60 seconds for integration tests
@@ -62,6 +63,11 @@ async function setupPage(browser, options = {}) {
   const page = await browser.newPage();
   await page.setViewport(TEST_VIEWPORT);
 
+  // Polyfill for page.waitForTimeout (removed in Puppeteer v22+)
+  if (!page.waitForTimeout) {
+    page.waitForTimeout = (ms) => sleep(ms);
+  }
+
   // Start coverage collection if enabled
   if (isCoverageEnabled()) {
     await startCoverage(page);
@@ -94,7 +100,7 @@ async function navigateToApp(page, queryParams = '') {
   const htmlPath = `file://${path.join(__dirname, '../../index.html')}${queryParams}`;
   await page.goto(htmlPath, { waitUntil: 'networkidle0' });
   await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-  await page.waitForTimeout(200);
+  await sleep(200);
 }
 
 module.exports = {

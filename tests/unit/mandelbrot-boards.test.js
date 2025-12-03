@@ -9,6 +9,7 @@
 const puppeteer = require('puppeteer');
 const path = require('path');
 const fs = require('fs');
+const { setTimeout: sleep } = require('node:timers/promises');
 
 // Find system Chrome for better headless support
 function findChrome() {
@@ -116,7 +117,7 @@ describe('Mandelbrot Board Computations', () => {
     await page.addScriptTag({ path: workerScriptPath });
 
     // Wait for initialization
-    await page.waitForTimeout(1000);
+    await sleep(1000);
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
