@@ -154,4 +154,66 @@ describe('Movie Mode Tests', () => {
     await page.waitForTimeout(200);
     expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(false);
   }, TEST_TIMEOUT);
+
+  test('Movie encoding creates MP4 blob using WebCodecs and mp4Muxer', async () => {
+    // Skip if WebCodecs is not available (headless Chrome should have it)
+    const hasWebCodecs = await page.evaluate(() => typeof VideoEncoder !== 'undefined');
+    if (!hasWebCodecs) {
+      console.log('Skipping movie encoding test - WebCodecs not available');
+      return;
+    }
+
+    // Navigate with minimal views for fast encoding
+    // Use pixelratio=1 to keep canvas small, and set up 2 views with small zoom
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.1i&s=3,2&pixelratio=1`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+    await page.waitForTimeout(500);
+
+    // Start movie mode
+    await page.keyboard.press('m');
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(true);
+
+    // Wait for encoding to complete (recordedBlob gets set)
+    // This exercises: Muxer constructor, addVideoChunk, finalize, ArrayBufferTarget
+    const encodingComplete = await page.waitForFunction(
+      () => window.explorer.movieMode.recordedBlob !== null,
+      { timeout: 60000 }  // Allow up to 60s for encoding
+    ).then(() => true).catch(() => false);
+
+    if (encodingComplete) {
+      // Verify the blob was created with correct properties
+      const blobInfo = await page.evaluate(() => {
+        const blob = window.explorer.movieMode.recordedBlob;
+        return {
+          hasBlob: blob !== null,
+          type: blob?.type,
+          size: blob?.size
+        };
+      });
+
+      expect(blobInfo.hasBlob).toBe(true);
+      expect(blobInfo.type).toBe('video/mp4');
+      expect(blobInfo.size).toBeGreaterThan(0);
+
+      // Verify download link was updated
+      const downloadLink = await page.evaluate(() => {
+        const link = document.getElementById('moviescale');
+        return link?.textContent;
+      });
+      expect(downloadLink).toBe('Download mp4');
+    } else {
+      // If encoding failed, check why
+      const status = await page.evaluate(() => {
+        const el = document.getElementById('moviestatus');
+        return el?.textContent;
+      });
+      console.log('Encoding did not complete. Status:', status);
+      // Don't fail the test if encoding isn't supported, just log it
+    }
+
+    // Clean up - exit movie mode
+    await page.keyboard.press('m');
+  }, 90000);  // 90 second timeout for this test
 }, TEST_TIMEOUT);

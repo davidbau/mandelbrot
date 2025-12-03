@@ -335,4 +335,100 @@ describe('Mouse UI Tests', () => {
       expect(hasViews).toBe(true);
     }, TEST_TIMEOUT);
   }, TEST_TIMEOUT);
+
+  describe('Tooltip on Anchor Hover', () => {
+    test('Hovering over zoom anchor shows tooltip with coordinates and progress', async () => {
+      await waitForViewReady(page);
+
+      // Create a second view so we have an anchor to hover over
+      const canvas = await page.$('#grid canvas');
+      const box = await canvas.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+      await page.waitForTimeout(500);
+
+      // Find the anchor element (zoomnum) in the second view
+      const anchors = await page.$$('#grid a.zoomnum');
+      expect(anchors.length).toBeGreaterThan(0);
+
+      // Get the bounding box of the last anchor
+      const anchorBox = await anchors[anchors.length - 1].boundingBox();
+      expect(anchorBox).toBeTruthy();
+
+      // Hover over the anchor
+      await page.mouse.move(anchorBox.x + anchorBox.width / 2, anchorBox.y + anchorBox.height / 2);
+      await page.waitForTimeout(500);
+
+      // Check that the status div has content
+      const statusContent = await page.evaluate(() => {
+        const statusDivs = document.querySelectorAll('#grid .status');
+        for (const div of statusDivs) {
+          if (div.textContent && div.textContent.length > 0) {
+            return div.textContent;
+          }
+        }
+        return null;
+      });
+
+      // Status should contain center coordinates and progress percentage
+      expect(statusContent).toBeTruthy();
+      expect(statusContent).toMatch(/center|%/i);
+    }, TEST_TIMEOUT);
+
+    test('Ctrl/Meta+hover shows debug tooltip with extra info', async () => {
+      await waitForViewReady(page);
+
+      // Create a second view
+      const canvas = await page.$('#grid canvas');
+      const box = await canvas.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+      await page.waitForTimeout(500);
+
+      // Find the anchor element
+      const anchors = await page.$$('#grid a.zoomnum');
+      expect(anchors.length).toBeGreaterThan(0);
+      const anchorBox = await anchors[anchors.length - 1].boundingBox();
+
+      // First, hover without Ctrl to get baseline status
+      await page.mouse.move(anchorBox.x + anchorBox.width / 2, anchorBox.y + anchorBox.height / 2);
+      await page.waitForTimeout(300);
+
+      const normalStatus = await page.evaluate(() => {
+        const statusDivs = document.querySelectorAll('#grid .status');
+        for (const div of statusDivs) {
+          if (div.innerHTML && div.innerHTML.length > 0) {
+            return div.innerHTML;
+          }
+        }
+        return null;
+      });
+
+      // Trigger a mouseover with ctrlKey set by dispatching event directly
+      // Since Puppeteer keyboard.down('Control') doesn't propagate to mouse events
+      const debugStatus = await page.evaluate(() => {
+        const anchors = document.querySelectorAll('#grid a.zoomnum');
+        const anchor = anchors[anchors.length - 1];
+        if (!anchor) return null;
+
+        // Manually set showDebug and trigger updateProgress
+        const viewIndex = parseInt(anchor.id.match(/b_(\d+)/)?.[1] || '0');
+        anchor.showDebug = true;
+        window.explorer.grid.updateProgress(anchor, viewIndex);
+
+        // Wait a bit for the status to update
+        return new Promise(resolve => {
+          setTimeout(() => {
+            const statusDiv = anchor.querySelector('.status');
+            resolve(statusDiv ? statusDiv.innerHTML : null);
+          }, 100);
+        });
+      });
+
+      expect(normalStatus).toBeTruthy();
+      expect(debugStatus).toBeTruthy();
+      // Debug status should have more content (includes board type and other debug info)
+      expect(debugStatus.length).toBeGreaterThan(normalStatus.length);
+    }, TEST_TIMEOUT);
+  }, TEST_TIMEOUT);
 }, TEST_TIMEOUT);

@@ -63,7 +63,7 @@ describe('URL Parameter Tests', () => {
     const gridcols = await page.evaluate(() => window.explorer.config.gridcols);
     expect(gridcols).toBe(3);
 
-    // Test 3: Aspect ratio parameter
+    // Test 3: Aspect ratio parameter (widescreen 16:9)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?a=16:9`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
     await page.waitForTimeout(300);
@@ -76,6 +76,21 @@ describe('URL Parameter Tests', () => {
     }, TEST_TIMEOUT);
     if (canvasDims) {
       expect(canvasDims.width / canvasDims.height).toBeCloseTo(16/9, 1);
+    }
+
+    // Test 4: Non-standard aspect ratio (4:3)
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?a=4:3`);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
+    await page.waitForTimeout(300);
+    const aspectRatio43 = await page.evaluate(() => window.explorer.config.aspectRatio);
+    expect(aspectRatio43).toBeCloseTo(4/3, 5);
+    const canvasDims43 = await page.evaluate(() => {
+      const view = window.explorer.grid.views[0];
+      if (!view || !view.canvas) return null;
+      return { width: view.canvas.width, height: view.canvas.height };
+    }, TEST_TIMEOUT);
+    if (canvasDims43) {
+      expect(canvasDims43.width / canvasDims43.height).toBeCloseTo(4/3, 1);
     }
   }, TEST_TIMEOUT);
 

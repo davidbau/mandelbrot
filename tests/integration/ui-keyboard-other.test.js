@@ -86,4 +86,63 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       expect(afterShow.computedDisplay).toBe('inline-block');
     }, TEST_TIMEOUT);
   }, TEST_TIMEOUT);
+
+  describe('Unknown Color Cycling', () => {
+    test('U key cycles unknown color forward, Shift+U cycles backward', async () => {
+      await waitForViewReady(page);
+
+      // Get initial unknown color
+      const initialColor = await page.evaluate(() => window.explorer.config.unknowncolor);
+
+      // Press U to cycle forward
+      await page.keyboard.press('u');
+      await page.waitForTimeout(200);
+      const afterU = await page.evaluate(() => window.explorer.config.unknowncolor);
+      expect(afterU).not.toBe(initialColor);
+
+      // Press Shift+U to cycle backward (should return to initial)
+      await page.keyboard.down('Shift');
+      await page.keyboard.press('u');
+      await page.keyboard.up('Shift');
+      await page.waitForTimeout(200);
+      const afterShiftU = await page.evaluate(() => window.explorer.config.unknowncolor);
+      expect(afterShiftU).toBe(initialColor);
+    }, TEST_TIMEOUT);
+  }, TEST_TIMEOUT);
+
+  describe('Backspace Key', () => {
+    test('Backspace closes deepest view when multiple views exist', async () => {
+      await waitForViewReady(page);
+
+      // Click to create a second view
+      const canvas = await page.$('#grid canvas');
+      const box = await canvas.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+      await page.waitForTimeout(300);
+
+      const viewsBefore = await page.evaluate(() => window.explorer.grid.views.length);
+      expect(viewsBefore).toBeGreaterThanOrEqual(2);
+
+      // Press backspace to close deepest view
+      await page.keyboard.press('Backspace');
+      await page.waitForTimeout(300);
+
+      const viewsAfter = await page.evaluate(() => window.explorer.grid.views.length);
+      expect(viewsAfter).toBe(viewsBefore - 1);
+    }, TEST_TIMEOUT);
+
+    test('Backspace does nothing with only one view', async () => {
+      await waitForViewReady(page);
+
+      const viewsBefore = await page.evaluate(() => window.explorer.grid.views.length);
+      expect(viewsBefore).toBe(1);
+
+      await page.keyboard.press('Backspace');
+      await page.waitForTimeout(200);
+
+      const viewsAfter = await page.evaluate(() => window.explorer.grid.views.length);
+      expect(viewsAfter).toBe(1);
+    }, TEST_TIMEOUT);
+  }, TEST_TIMEOUT);
 }, TEST_TIMEOUT);
