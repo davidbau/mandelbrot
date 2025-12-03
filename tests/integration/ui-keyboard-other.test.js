@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Keyboard Exponent/Resolution/Help Tests', () => {
   let browser;
@@ -24,7 +24,7 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   describe('Exponent and Resolution Commands', () => {
@@ -33,15 +33,16 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       expect(initialExp).toBe(2);
 
       await page.keyboard.press('x');
-      await page.waitForTimeout(300);
+      await page.waitForFunction(() => window.explorer.config.exponent === 3, { timeout: 5000 });
       expect(await page.evaluate(() => window.explorer.config.exponent)).toBe(3);
 
       await page.keyboard.press('z');
-      await page.waitForTimeout(300);
+      await page.waitForFunction(() => window.explorer.config.exponent === 2, { timeout: 5000 });
       expect(await page.evaluate(() => window.explorer.config.exponent)).toBe(2);
 
       await page.keyboard.press('z');
-      await page.waitForTimeout(300);
+      // Wait a moment to ensure exponent stays at 2 (can't go below)
+      await page.waitForFunction(() => window.explorer.config.exponent === 2, { timeout: 1000 });
       expect(await page.evaluate(() => window.explorer.config.exponent)).toBe(2);
     }, TEST_TIMEOUT);
 
@@ -49,11 +50,19 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       const initialRatio = await page.evaluate(() => window.explorer.config.pixelRatio);
 
       await page.keyboard.press('f');
-      await page.waitForTimeout(300);
+      await page.waitForFunction(
+        (init) => window.explorer.config.pixelRatio === init + 1,
+        { timeout: 5000 },
+        initialRatio
+      );
       expect(await page.evaluate(() => window.explorer.config.pixelRatio)).toBe(initialRatio + 1);
 
       await page.keyboard.press('d');
-      await page.waitForTimeout(300);
+      await page.waitForFunction(
+        (init) => window.explorer.config.pixelRatio === init,
+        { timeout: 5000 },
+        initialRatio
+      );
       expect(await page.evaluate(() => window.explorer.config.pixelRatio)).toBe(initialRatio);
     }, TEST_TIMEOUT);
   }, TEST_TIMEOUT);
@@ -63,25 +72,28 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       const initialStyle = await page.evaluate(() => {
         const textEl = document.getElementById('text');
         return window.getComputedStyle(textEl).display;
-      }, TEST_TIMEOUT);
+      });
       expect(initialStyle).toBe('inline-block');
 
       const closebox = await page.$('#text .closebox');
       expect(closebox).toBeTruthy();
       await closebox.click();
-      await page.waitForTimeout(200);
+      await page.waitForFunction(() => document.getElementById('text').style.display === 'none', { timeout: 5000 });
       const hiddenAfter = await page.evaluate(() => document.getElementById('text').style.display);
       expect(hiddenAfter).toBe('none');
 
       await page.keyboard.type('?');
-      await page.waitForTimeout(200);
+      await page.waitForFunction(() => {
+        const textEl = document.getElementById('text');
+        return window.getComputedStyle(textEl).display === 'inline-block';
+      }, { timeout: 5000 });
       const afterShow = await page.evaluate(() => {
         const textEl = document.getElementById('text');
         return {
           styleDisplay: textEl.style.display,
           computedDisplay: window.getComputedStyle(textEl).display
         };
-      }, TEST_TIMEOUT);
+      });
       expect(afterShow.styleDisplay).not.toBe('block');
       expect(afterShow.computedDisplay).toBe('inline-block');
     }, TEST_TIMEOUT);
@@ -96,7 +108,11 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
 
       // Press U to cycle forward
       await page.keyboard.press('u');
-      await page.waitForTimeout(200);
+      await page.waitForFunction(
+        (init) => window.explorer.config.unknowncolor !== init,
+        { timeout: 5000 },
+        initialColor
+      );
       const afterU = await page.evaluate(() => window.explorer.config.unknowncolor);
       expect(afterU).not.toBe(initialColor);
 
@@ -104,7 +120,11 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       await page.keyboard.down('Shift');
       await page.keyboard.press('u');
       await page.keyboard.up('Shift');
-      await page.waitForTimeout(200);
+      await page.waitForFunction(
+        (init) => window.explorer.config.unknowncolor === init,
+        { timeout: 5000 },
+        initialColor
+      );
       const afterShiftU = await page.evaluate(() => window.explorer.config.unknowncolor);
       expect(afterShiftU).toBe(initialColor);
     }, TEST_TIMEOUT);
@@ -119,14 +139,17 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       const box = await canvas.boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
-      await page.waitForTimeout(300);
 
       const viewsBefore = await page.evaluate(() => window.explorer.grid.views.length);
       expect(viewsBefore).toBeGreaterThanOrEqual(2);
 
       // Press backspace to close deepest view
       await page.keyboard.press('Backspace');
-      await page.waitForTimeout(300);
+      await page.waitForFunction(
+        (before) => window.explorer.grid.views.length === before - 1,
+        { timeout: 5000 },
+        viewsBefore
+      );
 
       const viewsAfter = await page.evaluate(() => window.explorer.grid.views.length);
       expect(viewsAfter).toBe(viewsBefore - 1);
@@ -139,7 +162,8 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       expect(viewsBefore).toBe(1);
 
       await page.keyboard.press('Backspace');
-      await page.waitForTimeout(200);
+      // Wait briefly and verify views still 1
+      await page.waitForFunction(() => window.explorer.grid.views.length === 1, { timeout: 1000 });
 
       const viewsAfter = await page.evaluate(() => window.explorer.grid.views.length);
       expect(viewsAfter).toBe(1);

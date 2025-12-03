@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Browser History View Preservation Tests', () => {
   let browser;
@@ -15,7 +15,7 @@ describe('Browser History View Preservation Tests', () => {
   }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await setupPage(browser, {}, TEST_TIMEOUT);
+    page = await setupPage(browser, {});
     await navigateToApp(page);
   }, TEST_TIMEOUT);
 
@@ -24,22 +24,22 @@ describe('Browser History View Preservation Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   test('Preserved views should retain all computed pixels after popstate', async () => {
     // This test reproduces an issue where after popstate, preserved views
     // show parent composite but early iteration child pixels are missing
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 5000 }, TEST_TIMEOUT);
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 }, TEST_TIMEOUT);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 5000 });
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
     // Wait for some computation to occur on view 2 (the child view)
     await page.waitForFunction(() => {
       const view = window.explorer.grid.views[2];
       return view && view.di > 1000;  // Wait for some diverged pixels
-    }, { timeout: 15000 }, TEST_TIMEOUT);
+    }, { timeout: 15000 });
 
     // Record the computed pixels (nn array) for view 2 before popstate
     const beforeState = await page.evaluate(() => {
@@ -62,7 +62,7 @@ describe('Browser History View Preservation Tests', () => {
         it: view.it,
         hiLength: view.hi.length
       };
-    }, TEST_TIMEOUT);
+    });
 
     expect(beforeState.computedCount).toBeGreaterThan(1000);
     expect(beforeState.divergedPixels).toBeGreaterThan(0);
@@ -86,7 +86,7 @@ describe('Browser History View Preservation Tests', () => {
         hidden: []
       };
       grid.updateLayout(state);
-    }, TEST_TIMEOUT);
+    });
 
     // Wait for 4th view to be created
     await page.waitForFunction(() =>
@@ -114,7 +114,7 @@ describe('Browser History View Preservation Tests', () => {
     // Update URL and set lastCenters for popstate detection
     await page.evaluate(() => {
       window.explorer.urlHandler.updateurl();
-    }, TEST_TIMEOUT);
+    });
 
     // Now go back - this should trigger popstate and preserve views 0,1,2
     await page.evaluate(() => history.back());
@@ -144,7 +144,7 @@ describe('Browser History View Preservation Tests', () => {
         it: view.it,
         hiLength: view.hi.length
       };
-    }, TEST_TIMEOUT);
+    });
 
     // View should still have its computed pixels
     // Note: If view ID differs, the view was not preserved (recreated instead)
@@ -181,7 +181,7 @@ describe('Browser History View Preservation Tests', () => {
         canvasWidth: canvas.width,
         canvasHeight: canvas.height
       };
-    }, TEST_TIMEOUT);
+    });
 
     // Canvas should have drawn pixels (not all transparent)
     expect(canvasCheck.drawnPixels).toBeGreaterThan(0);
@@ -194,15 +194,15 @@ describe('Browser History View Preservation Tests', () => {
     // This test simulates a scenario where a view moves to a different index
     // during popstate (e.g., view 2 becomes view 1 when view 1 is removed)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 }, TEST_TIMEOUT);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 10000 });
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 });
 
     // Wait for some computation on view 2
     await page.waitForFunction(() => {
       const view = window.explorer.grid.views[2];
       return view && view.di > 0;
-    }, { timeout: 20000 }, TEST_TIMEOUT);
+    }, { timeout: 20000 });
 
     // Give a bit more time for computation
     await page.waitForTimeout(500);
@@ -217,7 +217,7 @@ describe('Browser History View Preservation Tests', () => {
         di: view.di,
         sizes: view.sizes
       };
-    }, TEST_TIMEOUT);
+    });
 
     expect(view2Before.computedCount).toBeGreaterThan(0);
 
@@ -245,7 +245,7 @@ describe('Browser History View Preservation Tests', () => {
         hidden: []
       };
       grid.updateLayout(state);
-    }, TEST_TIMEOUT);
+    });
 
     // Wait for 2 views
     await page.waitForFunction(() =>
@@ -257,7 +257,7 @@ describe('Browser History View Preservation Tests', () => {
 
     await page.evaluate(() => {
       window.explorer.urlHandler.updateurl();
-    }, TEST_TIMEOUT);
+    });
 
     // Go back - this should restore original 3 views
     // View at new index 1 (originally at index 2) should be preserved and moved back to index 2
@@ -295,7 +295,7 @@ describe('Browser History View Preservation Tests', () => {
         canvasWidth: canvas.width,
         canvasHeight: canvas.height
       };
-    }, TEST_TIMEOUT);
+    });
 
     // View should have computed pixels
     expect(afterState.computedCount).toBeGreaterThan(0);
@@ -307,15 +307,15 @@ describe('Browser History View Preservation Tests', () => {
     // This test reproduces a race condition where popstate fires while
     // an update process is in progress, causing views to be lost
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 }, TEST_TIMEOUT);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 10000 });
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 });
 
     // Wait for computation on view 2 (just needs some pixels computed)
     await page.waitForFunction(() => {
       const view = window.explorer.grid.views[2];
       return view && view.di > 0;
-    }, { timeout: 20000 }, TEST_TIMEOUT);
+    }, { timeout: 20000 });
 
     // Record view 2's computed state
     const view2Before = await page.evaluate(() => {
@@ -325,7 +325,7 @@ describe('Browser History View Preservation Tests', () => {
         computedCount: view.nn.filter(n => n !== 0).length,
         di: view.di
       };
-    }, TEST_TIMEOUT);
+    });
 
     expect(view2Before.computedCount).toBeGreaterThan(0);
 
@@ -337,9 +337,11 @@ describe('Browser History View Preservation Tests', () => {
       window.explorer.urlHandler.lastHidden = window.explorer.urlHandler.extractHidden(
         window.explorer.urlHandler.currenturl()
       );
-    }, TEST_TIMEOUT);
+    });
+    // Wait for no update before clicking closebox (click is ignored during updates)
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
     await page.click('#b_1 .closebox');
-    await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 5000 }, TEST_TIMEOUT);
+    await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 5000 });
 
     // Now rapidly go back and forward multiple times to trigger race condition
     // The key is to trigger popstate while an update is still in progress
@@ -356,8 +358,8 @@ describe('Browser History View Preservation Tests', () => {
     await page.evaluate(() => history.back());
 
     // Wait for everything to settle
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForFunction(() => window.explorer.grid.views.length === 3, { timeout: 5000 }, TEST_TIMEOUT);
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+    await page.waitForFunction(() => window.explorer.grid.views.length === 3, { timeout: 5000 });
 
     // Check if view 2 still has its computed data
     const view2After = await page.evaluate(() => {
@@ -369,11 +371,11 @@ describe('Browser History View Preservation Tests', () => {
         di: view.di,
         hi: view.hi ? view.hi.length : 0
       };
-    }, TEST_TIMEOUT);
+    });
 
     // View 2 should still have computed pixels (may have more due to continued computation)
     expect(view2After.computedCount).toBeGreaterThanOrEqual(view2Before.computedCount);
     // Histogram should still exist
     expect(view2After.hi).toBeGreaterThan(0);
   }, TEST_TIMEOUT);
-}, TEST_TIMEOUT);
+});

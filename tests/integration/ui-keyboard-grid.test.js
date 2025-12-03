@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Keyboard Grid Grow/Shrink Tests', () => {
   let browser;
@@ -24,7 +24,7 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   describe('H and G keys control grid columns', () => {
@@ -36,6 +36,9 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
       // Wait for the initial view to start computing
       await waitForViewReady(page, 0);
 
+      // Ensure no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
+
       // Press H to add a column
       await page.keyboard.press('h');
       await page.waitForFunction(
@@ -45,6 +48,9 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
 
       // Should now have 2 columns
       expect(await page.evaluate(() => window.explorer.config.gridcols)).toBe(2);
+
+      // Ensure no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
 
       // Press G to remove a column
       await page.keyboard.press('g');
@@ -61,9 +67,16 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
       const initialCols = await page.evaluate(() => window.explorer.config.gridcols);
       expect(initialCols).toBe(1);
 
+      // Ensure no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
+
       // Try pressing G when already at 1 column - should stay at 1
       await page.keyboard.press('g');
-      await page.waitForTimeout(300);
+      // Wait for any potential change to settle, then verify still at 1
+      await page.waitForFunction(
+        () => !window.explorer.grid.currentUpdateProcess,
+        { timeout: 5000 }
+      );
 
       expect(await page.evaluate(() => window.explorer.config.gridcols)).toBe(1);
     }, TEST_TIMEOUT);
@@ -84,7 +97,10 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
       // Get initial iteration count (should be low since we just started)
       const initialDi = await page.evaluate(() => window.explorer.grid.views[0]?.di || 0);
 
-      // Press H immediately to add a column
+      // Ensure no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
+
+      // Press H to add a column
       await page.keyboard.press('h');
 
       // Wait for update to complete (views length changes)
@@ -97,8 +113,12 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
       // Record the iteration count right after layout change
       const diAfterLayout = await page.evaluate(() => window.explorer.grid.views[0]?.di || 0);
 
-      // Wait for computation to continue for a reasonable period
-      await page.waitForTimeout(2000);
+      // Wait for computation to continue - should increase by at least 10 iterations
+      await page.waitForFunction(
+        (baseline) => (window.explorer.grid.views[0]?.di || 0) > baseline + 10,
+        { timeout: 20000 },
+        diAfterLayout
+      );
 
       // Check iteration progress - should have increased substantially
       const diFinal = await page.evaluate(() => window.explorer.grid.views[0]?.di || 0);
@@ -118,14 +138,17 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
         { timeout: 5000 }
       );
 
-      // Press H three times quickly
+      // Press H three times, waiting for each to take effect
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
       await page.keyboard.press('h');
-      await page.waitForTimeout(100);
+      await page.waitForFunction(() => window.explorer.config.gridcols === 2, { timeout: 5000 });
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
       await page.keyboard.press('h');
-      await page.waitForTimeout(100);
+      await page.waitForFunction(() => window.explorer.config.gridcols === 3, { timeout: 5000 });
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
       await page.keyboard.press('h');
 
-      // Wait for layout to settle (3 columns now)
+      // Wait for layout to settle (4 columns now)
       await page.waitForFunction(
         () => window.explorer.config.gridcols === 4 &&
               !window.explorer.grid.currentUpdateProcess,
@@ -135,8 +158,12 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
       // Record iteration count
       const diAfterLayout = await page.evaluate(() => window.explorer.grid.views[0]?.di || 0);
 
-      // Wait for more computation
-      await page.waitForTimeout(2000);
+      // Wait for computation to continue - should increase by at least 10 iterations
+      await page.waitForFunction(
+        (baseline) => (window.explorer.grid.views[0]?.di || 0) > baseline + 10,
+        { timeout: 20000 },
+        diAfterLayout
+      );
 
       // Check progress
       const diFinal = await page.evaluate(() => window.explorer.grid.views[0]?.di || 0);
@@ -156,8 +183,10 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
       );
 
       // H then G
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
       await page.keyboard.press('h');
-      await page.waitForTimeout(500);
+      await page.waitForFunction(() => window.explorer.config.gridcols === 2, { timeout: 5000 });
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
       await page.keyboard.press('g');
 
       // Wait for layout to settle
@@ -169,8 +198,12 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
 
       const diAfterLayout = await page.evaluate(() => window.explorer.grid.views[0]?.di || 0);
 
-      // Wait for more computation
-      await page.waitForTimeout(2000);
+      // Wait for computation to continue - should increase by at least 10 iterations
+      await page.waitForFunction(
+        (baseline) => (window.explorer.grid.views[0]?.di || 0) > baseline + 10,
+        { timeout: 20000 },
+        diAfterLayout
+      );
 
       const diFinal = await page.evaluate(() => window.explorer.grid.views[0]?.di || 0);
 

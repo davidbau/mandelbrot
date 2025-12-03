@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Mouse UI Tests', () => {
   let browser;
@@ -24,12 +24,14 @@ describe('Mouse UI Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   describe('View Creation', () => {
     test('Click should zoom in and create child view', async () => {
       await waitForViewReady(page);
+      // Wait for no update before clicking to create new view
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
       const viewsBefore = await page.evaluate(() => window.explorer.grid.views.length);
 
       const canvas = await page.$('#grid canvas');
@@ -56,28 +58,50 @@ describe('Mouse UI Tests', () => {
 
     test('Click X button should delete view', async () => {
       await waitForViewReady(page);
+      // Wait for no update before clicking to create second view
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
 
       const canvas = await page.$('#grid canvas');
       const box = await canvas.boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 
-      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 }, TEST_TIMEOUT);
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
       // Wait for update to complete - closebox click is blocked during updates
       await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       const viewsBefore = await page.evaluate(() => window.explorer.grid.views.length);
       expect(viewsBefore).toBeGreaterThanOrEqual(2);
 
-      const closeboxes = await page.$$('#grid .closebox');
-      expect(closeboxes.length).toBeGreaterThan(0);
+      // Get the last view's bounding box
+      const lastViewIdx = viewsBefore - 1;
+      const viewBox = await page.evaluate((idx) => {
+        const div = document.getElementById(`b_${idx}`);
+        if (!div) return null;
+        const rect = div.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      }, lastViewIdx);
 
-      const lastClosebox = closeboxes[closeboxes.length - 1];
-      await lastClosebox.click();
-      await page.waitForTimeout(500);
+      // Hover over the view to make closebox visible (removes hidemarks class)
+      await page.mouse.move(viewBox.x + viewBox.width / 2, viewBox.y + viewBox.height / 2);
+      await page.waitForFunction(() => !document.body.classList.contains('hidemarks'), { timeout: 2000 });
+
+      // Wait for no update process before clicking closebox
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
+
+      // Click the closebox
+      const closebox = await page.$(`#b_${lastViewIdx} .closebox`);
+      await closebox.click();
+
+      // Wait for the view count to decrease
+      await page.waitForFunction(
+        (before) => window.explorer.grid.views.filter(v => v !== null).length < before,
+        { timeout: 5000 },
+        viewsBefore
+      );
 
       const viewsAfter = await page.evaluate(() => {
         return window.explorer.grid.views.filter(v => v !== null).length;
-      }, TEST_TIMEOUT);
+      });
 
       expect(viewsAfter).toBeLessThan(viewsBefore);
     }, TEST_TIMEOUT);

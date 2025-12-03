@@ -71,14 +71,25 @@ async function setupPage(browser, options = {}) {
   // Start coverage collection if enabled
   if (isCoverageEnabled()) {
     await startCoverage(page);
-
-    // Wrap page.close to collect coverage before closing
-    const originalClose = page.close.bind(page);
-    page.close = async function() {
-      await stopCoverage(page);
-      return originalClose();
-    };
   }
+
+  // Wrap page.close to terminate workers and collect coverage before closing
+  const originalClose = page.close.bind(page);
+  page.close = async function() {
+    // Terminate workers before closing to prevent hanging
+    try {
+      await page.evaluate(() => {
+        if (window.explorer?.scheduler?.workers) {
+          window.explorer.scheduler.workers.forEach(w => w.terminate());
+        }
+      });
+    } catch (e) { /* page may already be navigated away */ }
+
+    if (isCoverageEnabled()) {
+      await stopCoverage(page);
+    }
+    return originalClose();
+  };
 
   // Capture console messages (optional, can be noisy)
   if (options.captureConsole) {
@@ -92,6 +103,14 @@ async function setupPage(browser, options = {}) {
 
 // Clean up page and collect coverage (for explicit use if needed)
 async function teardownPage(page) {
+  // Terminate workers before closing to prevent hanging
+  try {
+    await page.evaluate(() => {
+      if (window.explorer?.scheduler?.workers) {
+        window.explorer.scheduler.workers.forEach(w => w.terminate());
+      }
+    });
+  } catch (e) { /* page may already be closed */ }
   await page.close();
 }
 
@@ -103,6 +122,35 @@ async function navigateToApp(page, queryParams = '') {
   await sleep(200);
 }
 
+// Close browser with timeout to prevent hanging in afterAll
+async function closeBrowser(browser, timeout = 10000) {
+  if (!browser) return;
+  try {
+    // Close all pages first to terminate workers
+    const pages = await browser.pages();
+    await Promise.all(pages.map(async (page) => {
+      try {
+        await page.evaluate(() => {
+          if (window.explorer?.scheduler?.workers) {
+            window.explorer.scheduler.workers.forEach(w => w.terminate());
+          }
+        });
+      } catch (e) { /* page may be closed */ }
+      try { await page.close(); } catch (e) { /* ignore */ }
+    }));
+
+    // Race browser.close() against timeout
+    await Promise.race([
+      browser.close(),
+      sleep(timeout).then(() => {
+        // Force kill if close hangs
+        const proc = browser.process();
+        if (proc) proc.kill('SIGKILL');
+      })
+    ]);
+  } catch (e) { /* ignore */ }
+}
+
 module.exports = {
   TEST_TIMEOUT,
   TEST_VIEWPORT,
@@ -112,6 +160,7 @@ module.exports = {
   setupPage,
   teardownPage,
   navigateToApp,
+  closeBrowser,
   clearCoverage,
   isCoverageEnabled
 };

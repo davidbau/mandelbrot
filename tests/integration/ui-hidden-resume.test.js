@@ -3,7 +3,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Hidden Boards Resume Tests', () => {
   let browser;
@@ -22,7 +22,7 @@ describe('Hidden Boards Resume Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   test('Computation should resume after hiding and going back', async () => {
@@ -51,8 +51,11 @@ describe('Hidden Boards Resume Tests', () => {
     await page.click('#b_1 .closebox');
     await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 5000 });
 
-    // Wait a moment to ensure hidden state is processed
-    await page.waitForTimeout(500);
+    // Wait for hidden state to be processed
+    await page.waitForFunction(
+      () => !window.explorer.grid.currentUpdateProcess,
+      { timeout: 5000 }
+    );
 
     // Record view 2 state after hiding
     const afterHideDi = await page.evaluate(() => window.explorer.grid.views[2]?.di || 0);
@@ -69,10 +72,7 @@ describe('Hidden Boards Resume Tests', () => {
     const hiddenViews = await page.evaluate(() => window.explorer.grid.getHiddenViews());
     expect(hiddenViews).toEqual([]);
 
-    // Wait for computation to potentially resume
-    await page.waitForTimeout(2000);
-
-    // Check if computation resumed on view 2
+    // Check if computation resumed on view 2 (di should be >= what it was)
     const finalDi = await page.evaluate(() => window.explorer.grid.views[2]?.di || 0);
 
     // Computation should have resumed (finalDi should be >= afterHideDi)
@@ -110,8 +110,11 @@ describe('Hidden Boards Resume Tests', () => {
     await page.click('#b_1 .closebox');
     await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 5000 });
 
-    // Wait a moment
-    await page.waitForTimeout(500);
+    // Wait for hidden state to be processed
+    await page.waitForFunction(
+      () => !window.explorer.grid.currentUpdateProcess,
+      { timeout: 5000 }
+    );
 
     // Now go back (unhide view 1)
     await page.evaluate(() => history.back());
@@ -119,9 +122,6 @@ describe('Hidden Boards Resume Tests', () => {
 
     // Wait for update to complete
     await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
-
-    // Wait for computation to resume
-    await page.waitForTimeout(2000);
 
     // Check that view 1 is visible
     const view1Visible = await page.evaluate(() =>

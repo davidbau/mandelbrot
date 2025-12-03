@@ -1,5 +1,5 @@
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, closeBrowser } = require('./test-utils');
 
 describe('Aspect Ratio Tests', () => {
   let browser;
@@ -10,7 +10,7 @@ describe('Aspect Ratio Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   beforeEach(async () => {
@@ -30,8 +30,14 @@ describe('Aspect Ratio Tests', () => {
 
     // Wait for the second view to be rendered, which ensures the zoom rect on the first is also rendered.
     await page.waitForSelector('#grid #b_1 canvas', { timeout: 10000 });
-    // Add a small delay for styles to be applied after rendering.
-    await page.waitForTimeout(500);
+    // Wait for zoom rect to be styled (it should have a non-empty style.top)
+    await page.waitForFunction(
+      () => {
+        const rect = document.querySelector('#b_0 .rect');
+        return rect && rect.style.top !== '';
+      },
+      { timeout: 5000 }
+    );
 
     // Get the dimensions of the first view's container for calculation.
     const view0_dims = await page.evaluate(() => {
@@ -89,14 +95,23 @@ describe('Aspect Ratio Tests', () => {
 
     // Press 'a' to toggle to 16:9
     await page.keyboard.press('a');
-    await page.waitForTimeout(300);
+    await page.waitForFunction(
+      () => Math.abs(window.explorer.config.aspectRatio - 16/9) < 0.001,
+      { timeout: 5000 }
+    );
 
     const afterFirstPress = await page.evaluate(() => window.explorer.config.aspectRatio);
     expect(afterFirstPress).toBeCloseTo(16/9, 5);
 
+    // Wait for any layout update to complete before second toggle
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+
     // Press 'a' again to toggle back to 1:1
     await page.keyboard.press('a');
-    await page.waitForTimeout(300);
+    await page.waitForFunction(
+      () => window.explorer.config.aspectRatio === 1.0,
+      { timeout: 5000 }
+    );
 
     const afterSecondPress = await page.evaluate(() => window.explorer.config.aspectRatio);
     expect(afterSecondPress).toBe(1.0);

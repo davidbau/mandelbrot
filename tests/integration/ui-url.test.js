@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('URL Parameter Tests', () => {
   let browser;
@@ -24,26 +24,26 @@ describe('URL Parameter Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   test('Should load with zoom, center, and scientific notation parameters', async () => {
     // Test 1: z parameter with center (Feigenbaum point)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-1.401155+0i&z=100`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => window.explorer.grid.views.length > 0, { timeout: 5000 });
     const viewData = await page.evaluate(() => {
       const view = window.explorer.grid.views[0];
       return { size: view.sizes[0], center_re: view.sizes[1][0], center_im: view.sizes[2][0] };
-    }, TEST_TIMEOUT);
+    });
     expect(viewData.size).toBeCloseTo(3.0 / 100, 3);
     expect(viewData.center_re).toBeCloseTo(-1.401155, 4);
     expect(viewData.center_im).toBeCloseTo(0.0, 5);
 
     // Test 2: Scientific notation in z parameter
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i&z=1e3`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => window.explorer.grid.views.length > 0, { timeout: 5000 });
     const sizeWithSciNotation = await page.evaluate(() => window.explorer.grid.views[0].sizes[0]);
     expect(sizeWithSciNotation).toBeCloseTo(3.0 / 1000, 4);
   }, TEST_TIMEOUT);
@@ -51,44 +51,44 @@ describe('URL Parameter Tests', () => {
   test('Should load with theme, grid, and aspect ratio parameters', async () => {
     // Test 1: Theme parameter
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?theme=neon`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => window.explorer.config.theme === 'neon', { timeout: 5000 });
     const theme = await page.evaluate(() => window.explorer.config.theme);
     expect(theme).toBe('neon');
 
     // Test 2: Grid parameter
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?grid=3`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => window.explorer.config.gridcols === 3, { timeout: 5000 });
     const gridcols = await page.evaluate(() => window.explorer.config.gridcols);
     expect(gridcols).toBe(3);
 
     // Test 3: Aspect ratio parameter (widescreen 16:9)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?a=16:9`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForSelector('#grid canvas', { timeout: 5000 });
     const aspectRatio = await page.evaluate(() => window.explorer.config.aspectRatio);
     expect(aspectRatio).toBeCloseTo(16/9, 5);
     const canvasDims = await page.evaluate(() => {
-      const view = window.explorer.grid.views[0];
-      if (!view || !view.canvas) return null;
-      return { width: view.canvas.width, height: view.canvas.height };
-    }, TEST_TIMEOUT);
+      const canvas = document.querySelector('#grid canvas');
+      if (!canvas) return null;
+      return { width: canvas.width, height: canvas.height };
+    });
     if (canvasDims) {
       expect(canvasDims.width / canvasDims.height).toBeCloseTo(16/9, 1);
     }
 
     // Test 4: Non-standard aspect ratio (4:3)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?a=4:3`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForSelector('#grid canvas', { timeout: 5000 });
     const aspectRatio43 = await page.evaluate(() => window.explorer.config.aspectRatio);
     expect(aspectRatio43).toBeCloseTo(4/3, 5);
     const canvasDims43 = await page.evaluate(() => {
-      const view = window.explorer.grid.views[0];
-      if (!view || !view.canvas) return null;
-      return { width: view.canvas.width, height: view.canvas.height };
-    }, TEST_TIMEOUT);
+      const canvas = document.querySelector('#grid canvas');
+      if (!canvas) return null;
+      return { width: canvas.width, height: canvas.height };
+    });
     if (canvasDims43) {
       expect(canvasDims43.width / canvasDims43.height).toBeCloseTo(4/3, 1);
     }
@@ -121,14 +121,14 @@ describe('URL Parameter Tests', () => {
     // Test iceblue theme
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?theme=iceblue`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.config.theme === 'iceblue', { timeout: 5000 });
     const iceblueTheme = await page.evaluate(() => window.explorer.config.theme);
     expect(iceblueTheme).toBe('iceblue');
 
     // Test tiedye theme
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?theme=tiedye`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.config.theme === 'tiedye', { timeout: 5000 });
     const tiedyeTheme = await page.evaluate(() => window.explorer.config.theme);
     expect(tiedyeTheme).toBe('tiedye');
   }, TEST_TIMEOUT);
@@ -137,28 +137,28 @@ describe('URL Parameter Tests', () => {
     // Test exponent parameter (z³ instead of z²)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?exponent=3`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.config.exponent === 3, { timeout: 5000 });
     const exponent = await page.evaluate(() => window.explorer.config.exponent);
     expect(exponent).toBe(3);
 
     // Test gpu=0 parameter (disable GPU)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?gpu=0`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.config.enableGPU === false, { timeout: 5000 });
     const gpuDisabled = await page.evaluate(() => window.explorer.config.enableGPU);
     expect(gpuDisabled).toBe(false);
 
     // Test board parameter
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?board=cpu`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.config.forceBoard === 'cpu', { timeout: 5000 });
     const forceBoard = await page.evaluate(() => window.explorer.config.forceBoard);
     expect(forceBoard).toBe('cpu');
 
     // Test pixelratio parameter
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?pixelratio=2`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.config.pixelRatio === 2, { timeout: 5000 });
     const pixelRatio = await page.evaluate(() => window.explorer.config.pixelRatio);
     expect(pixelRatio).toBe(2);
   }, TEST_TIMEOUT);
@@ -167,14 +167,14 @@ describe('URL Parameter Tests', () => {
     // Test hex color without #
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?unk=888`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.config.unknowncolor === '#888', { timeout: 5000 });
     const hexColor = await page.evaluate(() => window.explorer.config.unknowncolor);
     expect(hexColor).toBe('#888');
 
     // Test named color
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?unk=yellow`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.config.unknowncolor === 'yellow', { timeout: 5000 });
     const namedColor = await page.evaluate(() => window.explorer.config.unknowncolor);
     expect(namedColor).toBe('yellow');
   }, TEST_TIMEOUT);
@@ -182,8 +182,8 @@ describe('URL Parameter Tests', () => {
   test('URL encoding: c parameter correctly represents view centers', async () => {
     // Test 1: c=-0.6+0.2i means SINGLE view at that location (not default + zoomed)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.6+0.2i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => window.explorer.grid.views.length > 0, { timeout: 5000 });
 
     const singleViewData = await page.evaluate(() => ({
       viewCount: window.explorer.grid.views.length,
@@ -196,9 +196,9 @@ describe('URL Parameter Tests', () => {
 
     // Test 2: c=,-0.6+0.2i means TWO views - first at default (comma=inherit), second explicit
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=,-0.6+0.2i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
     // Wait for 2nd view to be created
-    await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 }, TEST_TIMEOUT);
+    await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
 
     const twoViewData = await page.evaluate(() => {
       const views = window.explorer.grid.views;
@@ -209,7 +209,7 @@ describe('URL Parameter Tests', () => {
         view1Re: views[1] ? views[1].sizes[1][0] : null,
         view1Im: views[1] ? views[1].sizes[2][0] : null
       };
-    }, TEST_TIMEOUT);
+    });
     expect(twoViewData.viewCount).toBe(2);
     // View 0 inherits from default (firstr=-0.5, firstj=0)
     expect(twoViewData.view0Re).toBeCloseTo(-0.5, 5);

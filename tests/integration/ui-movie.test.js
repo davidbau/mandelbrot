@@ -3,7 +3,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Movie Mode Tests', () => {
   let browser;
@@ -23,25 +23,33 @@ describe('Movie Mode Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   async function setupForMovieMode(page) {
     await waitForViewReady(page);
+    // Wait for no update in progress before clicking to create second view
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
     const canvas = await page.$('#grid canvas');
     const box = await canvas.boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+    // Wait for computation to start on second view
+    await page.waitForFunction(() => {
+      const view = window.explorer.grid.views[1];
+      return view && !view.uninteresting();
+    }, { timeout: 5000 });
+    // Wait for update process to complete before returning
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
   }
 
   test('M key should require multiple views and toggle movie mode correctly', async () => {
     // Test 1: With only one view, M should not activate movie mode
-    await page.waitForTimeout(300);
+    await waitForViewReady(page);
     const viewsBefore = await page.evaluate(() => window.explorer.grid.views.length);
     if (viewsBefore === 1) {
       await page.keyboard.press('m');
-      await page.waitForTimeout(200);
+      // Movie mode should not activate with single view
       const movieActive = await page.evaluate(() => window.explorer.movieMode.active);
       expect(movieActive).toBe(false);
     }
@@ -53,7 +61,7 @@ describe('Movie Mode Tests', () => {
     expect(initialActive).toBe(false);
 
     await page.keyboard.press('m');
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.movieMode.active === true, { timeout: 5000 });
 
     const afterMPress = await page.evaluate(() => {
       const grid = document.getElementById('grid');
@@ -63,13 +71,13 @@ describe('Movie Mode Tests', () => {
         gridDisplay: window.getComputedStyle(grid).display,
         movieDisplay: window.getComputedStyle(movie).display
       };
-    }, TEST_TIMEOUT);
+    });
     expect(afterMPress.active).toBe(true);
     expect(afterMPress.gridDisplay).toBe('none');
     expect(afterMPress.movieDisplay).not.toBe('none');
 
     await page.keyboard.press('m');
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.movieMode.active === false, { timeout: 5000 });
 
     const afterSecondM = await page.evaluate(() => {
       const grid = document.getElementById('grid');
@@ -77,7 +85,7 @@ describe('Movie Mode Tests', () => {
         active: window.explorer.movieMode.active,
         gridDisplay: window.getComputedStyle(grid).display
       };
-    }, TEST_TIMEOUT);
+    });
     expect(afterSecondM.active).toBe(false);
     expect(afterSecondM.gridDisplay).not.toBe('none');
   }, TEST_TIMEOUT);
@@ -86,7 +94,7 @@ describe('Movie Mode Tests', () => {
     await setupForMovieMode(page);
 
     await page.keyboard.press('m');
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.movieMode.active === true, { timeout: 5000 });
 
     const movieState = await page.evaluate(() => {
       const movie = document.getElementById('movie');
@@ -96,14 +104,14 @@ describe('Movie Mode Tests', () => {
         hasScale: movie.querySelector('#moviescale') !== null,
         hasStatus: movie.querySelector('#moviestatus') !== null
       };
-    }, TEST_TIMEOUT);
+    });
     expect(movieState.hasMovieCanvas).toBe(true);
     expect(movieState.containerHasCanvas).toBe(true);
     expect(movieState.hasScale).toBe(true);
     expect(movieState.hasStatus).toBe(true);
 
     await page.keyboard.press('m');
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => window.explorer.movieMode.active === false, { timeout: 5000 });
 
     const afterStop = await page.evaluate(() => {
       const movie = document.getElementById('movie');
@@ -111,7 +119,7 @@ describe('Movie Mode Tests', () => {
         canvasCleanedUp: window.explorer.movieMode.movieCanvas === null,
         containerEmpty: movie.children.length === 0
       };
-    }, TEST_TIMEOUT);
+    });
     expect(afterStop.canvasCleanedUp).toBe(true);
     expect(afterStop.containerEmpty).toBe(true);
   }, TEST_TIMEOUT);
@@ -121,38 +129,33 @@ describe('Movie Mode Tests', () => {
 
     // Test 1: Modifier keys should NOT dismiss movie mode
     await page.keyboard.press('m');
-    await page.waitForTimeout(200);
-    expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(true);
+    await page.waitForFunction(() => window.explorer.movieMode.active === true, { timeout: 5000 });
 
     await page.keyboard.down('Shift');
     await page.keyboard.up('Shift');
     await page.keyboard.down('Control');
     await page.keyboard.up('Control');
-    await page.waitForTimeout(100);
+    // Modifiers shouldn't change movie mode
     expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(true);
 
     await page.keyboard.press('m');
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => window.explorer.movieMode.active === false, { timeout: 5000 });
 
     // Test 2: Regular key should dismiss movie mode
     await page.keyboard.press('m');
-    await page.waitForTimeout(200);
-    expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(true);
+    await page.waitForFunction(() => window.explorer.movieMode.active === true, { timeout: 5000 });
 
     await page.keyboard.press('a');
-    await page.waitForTimeout(200);
-    expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(false);
+    await page.waitForFunction(() => window.explorer.movieMode.active === false, { timeout: 5000 });
 
     // Test 3: Click should dismiss movie mode
     await page.keyboard.press('m');
-    await page.waitForTimeout(200);
-    expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(true);
+    await page.waitForFunction(() => window.explorer.movieMode.active === true, { timeout: 5000 });
 
     const movieContainer = await page.$('#movie');
     const box = await movieContainer.boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForTimeout(200);
-    expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(false);
+    await page.waitForFunction(() => window.explorer.movieMode.active === false, { timeout: 5000 });
   }, TEST_TIMEOUT);
 
   test('Movie encoding creates MP4 blob using WebCodecs and mp4Muxer', async () => {
@@ -168,12 +171,15 @@ describe('Movie Mode Tests', () => {
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.1i&s=3,2&pixelratio=1`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
     await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
-    await page.waitForTimeout(500);
+    // Wait for computation to start
+    await page.waitForFunction(() => {
+      const view = window.explorer.grid.views[1];
+      return view && !view.uninteresting();
+    }, { timeout: 5000 });
 
     // Start movie mode
     await page.keyboard.press('m');
-    await page.waitForTimeout(300);
-    expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(true);
+    await page.waitForFunction(() => window.explorer.movieMode.active === true, { timeout: 5000 });
 
     // Wait for encoding to complete (recordedBlob gets set)
     // This exercises: Muxer constructor, addVideoChunk, finalize, ArrayBufferTarget
@@ -216,4 +222,44 @@ describe('Movie Mode Tests', () => {
     // Clean up - exit movie mode
     await page.keyboard.press('m');
   }, 90000);  // 90 second timeout for this test
+
+  test('Clicking .moviemode hyperlink in help text triggers movie mode', async () => {
+    await setupForMovieMode(page);
+
+    // Find the .moviemode link in the help text
+    const movieLink = await page.$('a.moviemode');
+    expect(movieLink).toBeTruthy();
+
+    // Verify we have multiple views (required for movie mode link to work)
+    const viewCount = await page.evaluate(() => window.explorer.grid.views.length);
+    expect(viewCount).toBeGreaterThan(1);
+
+    // Movie mode should be inactive initially
+    expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(false);
+
+    // Wait for no update in progress before clicking the link
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
+
+    // Click the hyperlink
+    await movieLink.click();
+    await page.waitForFunction(() => window.explorer.movieMode.active === true, { timeout: 5000 });
+
+    // Verify movie mode activated
+    const movieState = await page.evaluate(() => {
+      const grid = document.getElementById('grid');
+      const movie = document.getElementById('movie');
+      return {
+        active: window.explorer.movieMode.active,
+        gridHidden: window.getComputedStyle(grid).display === 'none',
+        movieVisible: window.getComputedStyle(movie).display !== 'none'
+      };
+    });
+    expect(movieState.active).toBe(true);
+    expect(movieState.gridHidden).toBe(true);
+    expect(movieState.movieVisible).toBe(true);
+
+    // Clean up
+    await page.keyboard.press('m');
+    await page.waitForFunction(() => window.explorer.movieMode.active === false, { timeout: 5000 });
+  }, TEST_TIMEOUT);
 }, TEST_TIMEOUT);

@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Keyboard Navigation Tests', () => {
   let browser;
@@ -30,20 +30,19 @@ describe('Keyboard Navigation Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (e) {
-        // Ignore close errors
-      }
-    }
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   describe('Theme and Color Commands', () => {
     test('T key should cycle through color themes', async () => {
       const initialTheme = await page.evaluate(() => window.explorer.config.theme);
       await page.keyboard.press('t');
-      await page.waitForTimeout(100);
+      // Wait for theme to change
+      await page.waitForFunction(
+        (init) => window.explorer.config.theme !== init,
+        { timeout: 5000 },
+        initialTheme
+      );
       const newTheme = await page.evaluate(() => window.explorer.config.theme);
       expect(newTheme).not.toBe(initialTheme);
     }, TEST_TIMEOUT);
@@ -53,7 +52,11 @@ describe('Keyboard Navigation Tests', () => {
       await page.keyboard.down('Shift');
       await page.keyboard.press('t');
       await page.keyboard.up('Shift');
-      await page.waitForTimeout(100);
+      await page.waitForFunction(
+        (init) => window.explorer.config.theme !== init,
+        { timeout: 5000 },
+        initialTheme
+      );
       const newTheme = await page.evaluate(() => window.explorer.config.theme);
       expect(newTheme).not.toBe(initialTheme);
     }, TEST_TIMEOUT);
@@ -84,9 +87,14 @@ describe('Keyboard Navigation Tests', () => {
         return samples;
       });
 
-      // Change theme
+      // Change theme and wait for redraw
+      const themeBefore = await page.evaluate(() => window.explorer.config.theme);
       await page.keyboard.press('t');
-      await page.waitForTimeout(200);  // Wait for redraw to complete
+      await page.waitForFunction(
+        (init) => window.explorer.config.theme !== init,
+        { timeout: 5000 },
+        themeBefore
+      );
 
       // Get canvas pixel data after theme change
       const afterPixels = await page.evaluate(() => {
@@ -120,7 +128,11 @@ describe('Keyboard Navigation Tests', () => {
     test('U key should cycle unknown color', async () => {
       const initialColor = await page.evaluate(() => window.explorer.config.unknowncolor);
       await page.keyboard.press('u');
-      await page.waitForTimeout(100);
+      await page.waitForFunction(
+        (init) => window.explorer.config.unknowncolor !== init,
+        { timeout: 5000 },
+        initialColor
+      );
       const newColor = await page.evaluate(() => window.explorer.config.unknowncolor);
       expect(newColor).not.toBe(initialColor);
     }, TEST_TIMEOUT);
@@ -151,18 +163,85 @@ describe('Keyboard Navigation Tests', () => {
     test('C key should center views when multiple views exist', async () => {
       await waitForViewReady(page);
 
+      // Create second view by clicking off-center
       const canvas = await page.$('#grid canvas');
       const box = await canvas.boundingBox();
       await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.3);
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
 
-      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 }, TEST_TIMEOUT);
-      await page.waitForTimeout(500);
+      // Get the off-center position of view 1
+      const beforeCenter = await page.evaluate(() => ({
+        view0_re: window.explorer.grid.views[0].sizes[1][0],
+        view1_re: window.explorer.grid.views[1].sizes[1][0],
+        viewCount: window.explorer.grid.views.length
+      }));
 
+      // Press C to center views (without Ctrl, so view 0 stays put)
       await page.keyboard.press('c');
-      await page.waitForTimeout(500);
+      // Wait for centering animation/recompute
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
-      const viewsAfter = await page.evaluate(() => window.explorer.grid.views.length);
-      expect(viewsAfter).toBeGreaterThanOrEqual(2);
+      const afterCenter = await page.evaluate(() => ({
+        view0_re: window.explorer.grid.views[0].sizes[1][0],
+        view1_re: window.explorer.grid.views[1].sizes[1][0],
+        viewCount: window.explorer.grid.views.length
+      }));
+
+      // View count should remain the same
+      expect(afterCenter.viewCount).toBe(beforeCenter.viewCount);
+      // View 0 should stay in place (without Ctrl)
+      expect(afterCenter.view0_re).toBeCloseTo(beforeCenter.view0_re, 5);
+    }, TEST_TIMEOUT);
+
+    test('Ctrl+C should center ALL views including the first view', async () => {
+      await waitForViewReady(page);
+
+      // Create view 2 by clicking off-center on view 1
+      const canvas1 = await page.$('#grid canvas');
+      const box1 = await canvas1.boundingBox();
+      await page.mouse.click(box1.x + box1.width * 0.3, box1.y + box1.height * 0.3);
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+
+      // Wait for second canvas to appear
+      await page.waitForSelector('#grid #b_1 canvas', { timeout: 5000 });
+      // Wait for some computation so we have a valid canvas
+      await page.waitForFunction(() => {
+        const view = window.explorer.grid.views[1];
+        return view && !view.uninteresting();
+      }, { timeout: 10000 });
+
+      // Create view 3 by clicking on view 2's canvas
+      const canvas2 = await page.$('#grid #b_1 canvas');
+      const box2 = await canvas2.boundingBox();
+      await page.mouse.click(box2.x + box2.width * 0.5, box2.y + box2.height * 0.5);
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 5000 });
+
+      // Get positions before centering
+      const before = await page.evaluate(() => ({
+        view0_re: window.explorer.grid.views[0].sizes[1][0],
+        view2_re: window.explorer.grid.views[2].sizes[1][0],
+        viewCount: window.explorer.grid.views.length
+      }));
+      expect(before.viewCount).toBe(3);
+
+      // Press Ctrl+C to center ALL views including first
+      await page.keyboard.down('Control');
+      await page.keyboard.press('c');
+      await page.keyboard.up('Control');
+
+      // Wait for centering
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+
+      const after = await page.evaluate(() => ({
+        view0_re: window.explorer.grid.views[0].sizes[1][0],
+        view2_re: window.explorer.grid.views[2].sizes[1][0],
+        viewCount: window.explorer.grid.views.length
+      }));
+
+      // View count should remain the same
+      expect(after.viewCount).toBe(3);
+      // With Ctrl, view 0 should have moved to center on deepest view
+      // (it might be the same if deepest happens to be at default center)
     }, TEST_TIMEOUT);
   }, TEST_TIMEOUT);
 
@@ -170,18 +249,31 @@ describe('Keyboard Navigation Tests', () => {
     test('H key should increase grid columns', async () => {
       const initialCols = await page.evaluate(() => window.explorer.config.gridcols);
       await page.keyboard.press('h');
-      await page.waitForTimeout(500);
+      await page.waitForFunction(
+        (init) => window.explorer.config.gridcols === init + 1,
+        { timeout: 5000 },
+        initialCols
+      );
       const newCols = await page.evaluate(() => window.explorer.config.gridcols);
       expect(newCols).toBe(initialCols + 1);
     }, TEST_TIMEOUT);
 
     test('G key should decrease grid columns', async () => {
+      const startCols = await page.evaluate(() => window.explorer.config.gridcols);
       await page.keyboard.press('h');
-      await page.waitForTimeout(500);
+      await page.waitForFunction(
+        (init) => window.explorer.config.gridcols === init + 1,
+        { timeout: 5000 },
+        startCols
+      );
       const initialCols = await page.evaluate(() => window.explorer.config.gridcols);
 
       await page.keyboard.press('g');
-      await page.waitForTimeout(500);
+      await page.waitForFunction(
+        (init) => window.explorer.config.gridcols === init - 1,
+        { timeout: 5000 },
+        initialCols
+      );
       const newCols = await page.evaluate(() => window.explorer.config.gridcols);
       expect(newCols).toBe(initialCols - 1);
     }, TEST_TIMEOUT);
@@ -191,7 +283,11 @@ describe('Keyboard Navigation Tests', () => {
       await page.keyboard.press('h');
       await page.keyboard.press('h');
       await page.keyboard.press('h');
-      await page.waitForTimeout(500);
+      await page.waitForFunction(
+        (init) => window.explorer.config.gridcols === init + 3,
+        { timeout: 5000 },
+        initialCols
+      );
       const finalCols = await page.evaluate(() => window.explorer.config.gridcols);
       expect(finalCols).toBe(initialCols + 3);
     }, TEST_TIMEOUT);

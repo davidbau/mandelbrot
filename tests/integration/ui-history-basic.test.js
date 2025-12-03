@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Browser History Basic Tests', () => {
   let browser;
@@ -26,15 +26,13 @@ describe('Browser History Basic Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) {
-      try { await browser.close(); } catch (e) { /* ignore */ }
-    }
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   test('centersWereLost should detect when center points are removed or replaced', async () => {
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
     // Test centersWereLost logic directly (it's now a standalone function)
     const testResults = await page.evaluate(() => {
@@ -70,7 +68,6 @@ describe('Browser History Basic Tests', () => {
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
     // Wait for initial update process to complete to avoid history pushes from initialization
     await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
-    await page.waitForTimeout(100);
 
     // Get initial history length and current centers from URL
     const { initialLength, currentCenters } = await page.evaluate(() => ({
@@ -89,7 +86,6 @@ describe('Browser History Basic Tests', () => {
     await page.evaluate(() => {
       window.explorer.grid.notifyurl();
     });
-    await page.waitForTimeout(100);
 
     const afterSameLength = await page.evaluate(() => history.length);
     // Same centers should NOT push (replaceState)
@@ -100,7 +96,6 @@ describe('Browser History Basic Tests', () => {
       window.explorer.urlHandler.lastCenters = centers + ',-0.6+0.2i,-0.7+0.3i';
       window.explorer.grid.notifyurl();
     }, currentCenters);
-    await page.waitForTimeout(100);
 
     const afterReplaceLength = await page.evaluate(() => history.length);
     // Removing centers should push to history
@@ -111,7 +106,7 @@ describe('Browser History Basic Tests', () => {
     // Start with default view (no theme parameter = default 'warm')
     await page.goto(`file://${path.join(__dirname, '../../index.html')}`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
     // Verify starting with default theme
     const initialTheme = await page.evaluate(() => window.explorer.config.theme);

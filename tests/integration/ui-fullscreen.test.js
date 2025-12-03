@@ -3,7 +3,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Fullscreen Mode Tests', () => {
   let browser;
@@ -23,7 +23,7 @@ describe('Fullscreen Mode Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   test('Fullscreen button and method should exist', async () => {
@@ -32,7 +32,7 @@ describe('Fullscreen Mode Tests', () => {
 
     const hasMethod = await page.evaluate(() => {
       return typeof window.explorer.toggleFullscreen === 'function';
-    }, TEST_TIMEOUT);
+    });
     expect(hasMethod).toBe(true);
   }, TEST_TIMEOUT);
 
@@ -44,7 +44,11 @@ describe('Fullscreen Mode Tests', () => {
     expect(initialState.fullscreen).toBe(false);
 
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(500);
+    // Wait for fullscreen state to change (or timeout if not supported)
+    await page.waitForFunction(
+      () => document.fullscreenElement !== null || window._fullscreenAttempted,
+      { timeout: 2000 }
+    ).catch(() => {});  // May not enter fullscreen in headless mode
 
     const afterEnter = await page.evaluate(() => ({
       isFullscreen: document.fullscreenElement !== null,
@@ -57,7 +61,11 @@ describe('Fullscreen Mode Tests', () => {
       expect(afterEnter.gridcols).toBe(1);
 
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(500);
+      // Wait for fullscreen exit
+      await page.waitForFunction(
+        () => document.fullscreenElement === null,
+        { timeout: 2000 }
+      ).catch(() => {});
 
       const afterEscape = await page.evaluate(() => ({
         fullscreen: document.fullscreenElement !== null,
@@ -76,14 +84,22 @@ describe('Fullscreen Mode Tests', () => {
     expect(beforeClick).toBe(false);
 
     await button.click();
-    await page.waitForTimeout(500);
+    // Wait for fullscreen state to change (or timeout if not supported)
+    await page.waitForFunction(
+      () => document.fullscreenElement !== null || window._fullscreenAttempted,
+      { timeout: 2000 }
+    ).catch(() => {});  // May not enter fullscreen in headless mode
 
     const afterClick = await page.evaluate(() => document.fullscreenElement !== null);
 
     if (afterClick) {
       expect(afterClick).toBe(true);
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(500);
+      // Wait for fullscreen exit
+      await page.waitForFunction(
+        () => document.fullscreenElement === null,
+        { timeout: 2000 }
+      ).catch(() => {});
       const afterExit = await page.evaluate(() => document.fullscreenElement !== null);
       expect(afterExit).toBe(false);
     }

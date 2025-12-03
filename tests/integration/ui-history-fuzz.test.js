@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, closeBrowser } = require('./test-utils');
 
 describe('History Fuzzing Tests', () => {
   let browser;
@@ -15,7 +15,7 @@ describe('History Fuzzing Tests', () => {
   }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await setupPage(browser, {}, TEST_TIMEOUT);
+    page = await setupPage(browser, {});
   }, TEST_TIMEOUT);
 
   afterEach(async () => {
@@ -23,7 +23,7 @@ describe('History Fuzzing Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   test('Forward history should be preserved after going back', async () => {
@@ -44,6 +44,8 @@ describe('History Fuzzing Tests', () => {
     });
 
     // Hide view 1 - this should push history
+    // Wait for no update before clicking closebox (click is ignored during updates)
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
     await page.click('#b_1 .closebox');
     await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 5000 });
 
@@ -91,6 +93,8 @@ describe('History Fuzzing Tests', () => {
     });
 
     // Create history: hide view 1
+    // Wait for no update before clicking closebox (click is ignored during updates)
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
     await page.click('#b_1 .closebox');
     await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 5000 });
 
@@ -123,4 +127,4 @@ describe('History Fuzzing Tests', () => {
     expect(canGoForward).toBe(true);
   }, TEST_TIMEOUT);
 
-}, TEST_TIMEOUT);
+});

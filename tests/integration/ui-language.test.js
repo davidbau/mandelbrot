@@ -3,7 +3,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Language/Internationalization Tests', () => {
   let browser;
@@ -23,7 +23,7 @@ describe('Language/Internationalization Tests', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
   test('Should show correct language based on lang URL parameter', async () => {
@@ -35,14 +35,17 @@ describe('Language/Internationalization Tests', () => {
         enVisible: enDiv && window.getComputedStyle(enDiv).display !== 'none',
         esVisible: esDiv && window.getComputedStyle(esDiv).display !== 'none'
       };
-    }, TEST_TIMEOUT);
+    });
     expect(defaultLang.enVisible).toBe(true);
     expect(defaultLang.esVisible).toBe(false);
 
     // Test 2: Spanish (lang=es)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?lang=es`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => {
+      const esDiv = document.querySelector('#text [lang="es"]');
+      return esDiv && window.getComputedStyle(esDiv).display !== 'none';
+    }, { timeout: 5000 });
     const esLang = await page.evaluate(() => {
       const enDiv = document.querySelector('#text [lang="en"]');
       const esDiv = document.querySelector('#text [lang="es"]');
@@ -51,7 +54,7 @@ describe('Language/Internationalization Tests', () => {
         esVisible: esDiv && window.getComputedStyle(esDiv).display !== 'none',
         helpText: esDiv ? esDiv.textContent : null
       };
-    }, TEST_TIMEOUT);
+    });
     expect(esLang.enVisible).toBe(false);
     expect(esLang.esVisible).toBe(true);
     expect(esLang.helpText).toContain('Explorador');
@@ -59,8 +62,11 @@ describe('Language/Internationalization Tests', () => {
 
     // Test 3: Traditional Chinese (lang=zh-tw)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?lang=zh-tw`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => {
+      const zhTwDiv = document.querySelector('#text [lang="zh-TW"]');
+      return zhTwDiv && window.getComputedStyle(zhTwDiv).display !== 'none';
+    }, { timeout: 5000 });
     const zhTwLang = await page.evaluate(() => {
       const enDiv = document.querySelector('#text [lang="en"]');
       const zhTwDiv = document.querySelector('#text [lang="zh-TW"]');
@@ -68,14 +74,17 @@ describe('Language/Internationalization Tests', () => {
         enVisible: enDiv && window.getComputedStyle(enDiv).display !== 'none',
         zhTwVisible: zhTwDiv && window.getComputedStyle(zhTwDiv).display !== 'none'
       };
-    }, TEST_TIMEOUT);
+    });
     expect(zhTwLang.enVisible).toBe(false);
     expect(zhTwLang.zhTwVisible).toBe(true);
 
     // Test 4: Simplified Chinese (lang=zh)
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?lang=zh`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => {
+      const zhDiv = document.querySelector('#text [lang="zh"]');
+      return zhDiv && window.getComputedStyle(zhDiv).display !== 'none';
+    }, { timeout: 5000 });
     const zhLang = await page.evaluate(() => {
       const enDiv = document.querySelector('#text [lang="en"]');
       const zhDiv = document.querySelector('#text [lang="zh"]');
@@ -83,32 +92,35 @@ describe('Language/Internationalization Tests', () => {
         enVisible: enDiv && window.getComputedStyle(enDiv).display !== 'none',
         zhVisible: zhDiv && window.getComputedStyle(zhDiv).display !== 'none'
       };
-    }, TEST_TIMEOUT);
+    });
     expect(zhLang.enVisible).toBe(false);
     expect(zhLang.zhVisible).toBe(true);
 
     // Test 5: Unsupported language falls back to English
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?lang=xyz`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await page.waitForFunction(() => {
+      const enDiv = document.querySelector('#text [lang="en"]');
+      return enDiv && window.getComputedStyle(enDiv).display !== 'none';
+    }, { timeout: 5000 });
     const fallbackLang = await page.evaluate(() => {
       const enDiv = document.querySelector('#text [lang="en"]');
       return { enVisible: enDiv && window.getComputedStyle(enDiv).display !== 'none' };
-    }, TEST_TIMEOUT);
+    });
     expect(fallbackLang.enVisible).toBe(true);
   }, TEST_TIMEOUT);
 
   test('Should preserve or omit lang parameter in generated URLs correctly', async () => {
     // Test 1: lang parameter should be preserved in generated URLs
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?lang=es`);
-    await page.waitForFunction(() => window.explorer?.urlHandler !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
+    await page.waitForFunction(() => window.explorer?.urlHandler !== undefined, { timeout: 10000 });
     await waitForViewReady(page);
     const urlWithLang = await page.evaluate(() => window.explorer.urlHandler.currenturl());
     expect(urlWithLang).toContain('lang=es');
 
     // Test 2: lang parameter should be omitted if not specified originally
     await page.goto(`file://${path.join(__dirname, '../../index.html')}`);
-    await page.waitForFunction(() => window.explorer?.urlHandler !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
+    await page.waitForFunction(() => window.explorer?.urlHandler !== undefined, { timeout: 10000 });
     await waitForViewReady(page);
     const urlWithoutLang = await page.evaluate(() => window.explorer.urlHandler.currenturl());
     expect(urlWithoutLang).not.toContain('lang=');
