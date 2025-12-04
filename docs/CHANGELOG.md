@@ -58,7 +58,10 @@ Added keyboard shortcuts for power users:
 
 ## 2024: Deep Zoom and Movies
 
-The biggest technical leap, enabling exploration beyond 10^30 magnification:
+The biggest technical leap, enabling exploration beyond 10^30 magnification.
+In 2024 I began coding with Claude as a chatbot, copying code back and forth.
+Features that would have taken weeks to research and implement came together
+in days.
 
 ### Quad Precision
 
@@ -93,23 +96,16 @@ calculations. Multiple workers enable parallel computation across CPU cores.
 - Multiple color themes (warm, neon, ice blue, tie-dye, grayscale)
 - User-adjustable subpixel resolution
 - URL parameters for sharing specific locations and settings
+- Basic fullscreen mode
 
-In 2024 I began coding with Claude as a chatbot, copying code back and forth.
-Features that would have taken weeks to research and implement came together
-in days. We debugged precision bugs, optimized buffer management, and added:
+## 2025: Claude Code and WebGPU
 
-- Aspect ratio support (16:9 and other ratios)
-- Fullscreen mode with viewport-adaptive layout
-- Internationalization (11 languages)
-
-## 2025: Claude Code
-
-In 2025 I switched to Claude Code, using Claude as an autonomous agent that
-edits files directly, runs tests, and commits code. This changed the workflow
+In November 2025 I switched to Claude Code, using Claude as an autonomous agent
+that edits files directly, runs tests, and commits code. This changed the workflow
 entirely - instead of copying snippets, Claude works in the codebase alongside
 me. Claude also drafted this documentation.
 
-The result: WebGPU support with massive parallelism.
+The result: WebGPU support with massive parallelism, plus significant UI enhancements.
 
 ### GPU Computation
 
@@ -134,6 +130,13 @@ extreme zoom depths.
 - Incremental reference orbit uploads
 - Optimized shader memory access patterns
 
+### UI Enhancements
+
+- Aspect ratio support (16:9 and other ratios)
+- Enhanced fullscreen mode with viewport-adaptive layout
+- Internationalization (11 languages)
+- Browser history support (back/forward navigation)
+
 ### Bug Fixes and Refinements
 
 - Float32 precision handling for deep zoom cycle detection
@@ -148,8 +151,8 @@ extreme zoom depths.
 | 2009 | Table-cell and canvas rendering, cycle detection |
 | 2020 | High DPI, orbit visualization |
 | 2022 | Keyboard controls |
-| 2024 | Quad precision, perturbation, movies |
-| 2025 | WebGPU acceleration |
+| 2024 | Quad precision, perturbation, movies, web workers |
+| 2025 | WebGPU acceleration, i18n, aspect ratio, fullscreen |
 
 ## The Philosophy
 
