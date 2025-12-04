@@ -61,6 +61,8 @@ The application uses a three-tier pipeline to keep the UI responsive while perfo
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
+A 'workgroup' is a batch of threads (64 in this case) that execute in parallel on the GPU. The workgroup size is a key parameter for tuning GPU performance, and 64 is a common, effective choice.
+
 **Data flow summary:**
 - **Main → Worker:** `createBoard` message with coordinates and size.
 - **Worker → GPU:** Buffer writes (initial `z` and `c` values) and compute shader dispatches.
@@ -138,7 +140,7 @@ If one worker finishes its board early while another is still busy, the Schedule
 ## GPU Computation Strategy
 
 ### Dynamic Batch Size Tuning
-The number of iterations per GPU batch is tuned dynamically to balance efficiency (favoring large batches) and UI responsiveness (requiring frequent updates). The formula `iterationsPerBatch = 1,111,211 / active_pixels` targets about 1 million pixel-iterations per batch.
+The number of iterations per GPU batch is tuned dynamically to balance efficiency (favoring large batches) and UI responsiveness (requiring frequent updates). The formula `iterationsPerBatch = 1,111,211 / active_pixels` targets about 1 million pixel-iterations per batch. The target of ~1.1 million pixel-iterations was found empirically to be a sweet spot that balances GPU throughput with the overhead of launching a new compute pass.
 - With **500,000 active pixels**, batches are tiny (~2 iterations), providing rapid UI updates.
 - With **1,000 active pixels**, batches are large (~1000 iterations), maximizing GPU throughput.
 This automatically shifts priority from responsiveness to throughput as the image fills in.

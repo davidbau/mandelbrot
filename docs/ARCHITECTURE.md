@@ -44,6 +44,20 @@ The application is composed of several collaborating classes, coordinated by the
 
 ## Core Classes
 
+| Class | Primary Responsibility |
+|---|---|
+| `MandelbrotExplorer` | The application root; creates and wires together all other components. |
+| `StateStore` | A Redux-inspired container that holds the entire application state. |
+| `Config` | Provides an ergonomic, property-based API for accessing and modifying state. |
+| `Grid` | Manages the layout and collection of `View` objects. |
+| `View` | Represents a single zoom level, holding its coordinates and pixel data. |
+| `Scheduler` | Manages the pool of Web Workers and distributes computational tasks. |
+| `URLHandler` | Synchronizes the application state with the browser's URL for bookmarking. |
+| `EventHandler` | Handles all user input, such as mouse clicks, drags, and keyboard shortcuts. |
+| `ZoomManager` | Manages the UI for the zoom selection box. |
+| `MovieMode` | Handles the rendering and encoding of smooth zoom animations. |
+| `Board` (in worker) | The computational engine that performs the fractal calculations for a `View`. |
+
 ### MandelbrotExplorer
 The application root. It creates and wires together all the other components.
 

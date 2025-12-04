@@ -234,7 +234,7 @@ Points can have periods of millions of iterations. With Fibonacci checkpoints, d
 
 ### Period Harmonics
 
-The checkpoint method can report a multiple of the true period. If a point has period p, we detect convergence when the orbit returns to a checkpoint. But if the checkpoint was set at iteration n and the orbit returns at n + kp for some integer k > 1, we report period kp instead of p. The reported period is still correct (the orbit does repeat), but it may not be the smallest period.
+ This is not a visual bug, as the point is still correctly identified as being inside the set and colored black. The only consequence is that the 'period' number shown in the hover details may be a multiple of the true minimum period.
 
 ### Precision Limits
 

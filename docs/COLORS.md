@@ -86,6 +86,8 @@ Most themes use the **HCL (Hue, Chroma, Luminance)** color space instead of the 
 
 ```javascript
 warm: (i, frac, fracD, fracL, s) => {
+  // Use the fraction of diverged pixels relative to the view's estimated limit,
+  // clamping the value to prevent division-by-zero or instability.
   frac = Math.max(frac, Math.min(0.99, fracD / Math.max(1e-3, fracL)));
   let hue = (Math.log(i + 20) * 200) % 360;
   let chroma = 100;
@@ -116,6 +118,11 @@ neon: (i, frac, fracD, fracL, s) => {
 ```
 
 **`iceblue`:** Creates a cool, crystalline appearance where the blue channel is dominant, and the red and green channels add subtle warmth based on both iteration count and the zoom scale (`s`), making the palette evolve slightly as you zoom deeper.
+
+**`tiedye`:** Similar to the `warm` theme, this uses the HCL color space but with a much faster-cycling hue (`log(i) * 1000`). This creates a psychedelic effect with many fine, multicolored bands.
+
+**`gray`:** A simple grayscale theme. The brightness is calculated from the pixel's rank in the histogram, making it useful for analyzing the fractal's structure without the distraction of color.
+
 
 ## Rendering Optimization
 
