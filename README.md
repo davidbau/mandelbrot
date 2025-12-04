@@ -35,7 +35,9 @@ infinite number of iterations to render crisp fractals over time.
 
 - [Architecture](docs/ARCHITECTURE.md) - How the code is organized
 - [Algorithms](docs/ALGORITHMS.md) - Perturbation theory, cycle detection, double-double precision
+- [Math](docs/MATH.md) - Deep dive into the quad-precision arithmetic
 - [Computation](docs/COMPUTATION.md) - Workers, GPU acceleration, scheduling
+- [GPU Shaders](docs/GPU-SHADERS.md) - In-depth explanation of the WebGPU shader implementation
 - [Colors](docs/COLORS.md) - Histogram-based coloring, HCL color space
 - [Movies](docs/MOVIES.md) - Smooth zoom animations, video encoding
 - [URL Parameters](docs/URL-PARAMETERS.md) - Full list of URL options
