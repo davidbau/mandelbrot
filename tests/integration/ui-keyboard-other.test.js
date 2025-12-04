@@ -29,6 +29,8 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
 
   describe('Exponent and Resolution Commands', () => {
     test('X/Z keys control exponent, exponent cannot go below 2', async () => {
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const initialExp = await page.evaluate(() => window.explorer.config.exponent);
       expect(initialExp).toBe(2);
 
@@ -47,6 +49,8 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
     }, TEST_TIMEOUT);
 
     test('F/D keys control pixel ratio', async () => {
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const initialRatio = await page.evaluate(() => window.explorer.config.pixelRatio);
 
       await page.keyboard.press('f');
@@ -69,6 +73,9 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
 
   describe('Help Text Box', () => {
     test('? key shows help (centered), X closebox hides it', async () => {
+      // Wait for no update in progress before UI interactions
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+
       const initialStyle = await page.evaluate(() => {
         const textEl = document.getElementById('text');
         return window.getComputedStyle(textEl).display;
@@ -133,6 +140,8 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
   describe('Backspace Key', () => {
     test('Backspace closes deepest view when multiple views exist', async () => {
       await waitForViewReady(page);
+      // Wait for no update in progress before clicking
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       // Click to create a second view
       const canvas = await page.$('#grid canvas');
@@ -142,6 +151,9 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
 
       const viewsBefore = await page.evaluate(() => window.explorer.grid.views.length);
       expect(viewsBefore).toBeGreaterThanOrEqual(2);
+
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       // Press backspace to close deepest view
       await page.keyboard.press('Backspace');
@@ -157,6 +169,8 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
 
     test('Backspace does nothing with only one view', async () => {
       await waitForViewReady(page);
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       const viewsBefore = await page.evaluate(() => window.explorer.grid.views.length);
       expect(viewsBefore).toBe(1);

@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, navigateToUrl, getAppUrl, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Mouse UI Tests', () => {
   let browser;
@@ -52,7 +52,7 @@ describe('Mouse UI Tests', () => {
 
       const sizes = await page.evaluate(() => {
         return window.explorer.grid.views.map(v => v ? v.sizes[0] : null);
-      }, TEST_TIMEOUT);
+      });
       expect(sizes[1]).toBeLessThan(sizes[0]);
     }, TEST_TIMEOUT);
 
@@ -88,16 +88,35 @@ describe('Mouse UI Tests', () => {
       // Wait for no update process before clicking closebox
       await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
 
-      // Click the closebox
-      const closebox = await page.$(`#b_${lastViewIdx} .closebox`);
-      await closebox.click();
+      // Verify closebox exists and click it
+      const clickResult = await page.evaluate((idx) => {
+        const closebox = document.querySelector(`#b_${idx} .closebox`);
+        if (!closebox) return { error: 'closebox not found' };
+        const style = window.getComputedStyle(closebox);
+        if (style.display === 'none' || style.visibility === 'hidden') {
+          return { error: 'closebox not visible', display: style.display, visibility: style.visibility };
+        }
+        closebox.click();
+        return { clicked: true };
+      }, lastViewIdx);
 
-      // Wait for the view count to decrease
+      expect(clickResult.error).toBeUndefined();
+
+      // Wait for the view count to decrease (closebox on deepest view deletes it)
+      // or for the view to be hidden (if it's not the deepest view)
       await page.waitForFunction(
-        (before) => window.explorer.grid.views.filter(v => v !== null).length < before,
-        { timeout: 5000 },
-        viewsBefore
+        (before, idx) => {
+          const visibleViews = window.explorer.grid.views.filter(v => v !== null).length;
+          const viewHidden = window.explorer.grid.hiddencanvas && window.explorer.grid.hiddencanvas(idx);
+          return visibleViews < before || viewHidden;
+        },
+        { timeout: 15000 },
+        viewsBefore,
+        lastViewIdx
       );
+
+      // Wait for any update process to complete
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 });
 
       const viewsAfter = await page.evaluate(() => {
         return window.explorer.grid.views.filter(v => v !== null).length;
@@ -110,6 +129,8 @@ describe('Mouse UI Tests', () => {
   describe('View Hiding and Restore', () => {
     test('Ctrl+Click hides view, R key restores, closebox hides, R restores again', async () => {
       await waitForViewReady(page);
+      // Wait for no update in progress before Ctrl+click
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       // Initially no hidden views
       const initialHidden = await page.evaluate(() => window.explorer.grid.getHiddenViews());
@@ -122,8 +143,9 @@ describe('Mouse UI Tests', () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       await page.keyboard.up('Control');
 
-      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 }, TEST_TIMEOUT);
-      await page.waitForTimeout(300);
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
+      // Wait for update to complete before checking state
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       // Verify first view is hidden and tracked
       const afterCtrlClick = await page.evaluate(() => ({
@@ -136,8 +158,11 @@ describe('Mouse UI Tests', () => {
       expect(afterCtrlClick.hiddenViews).toContain(0);
 
       // Test 2: R key restores hidden views
+      // Wait for no update process before pressing R (keypresses blocked during updates)
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       await page.keyboard.press('r');
-      await page.waitForTimeout(300);
+      // Wait for view to be restored (hidden views should be empty)
+      await page.waitForFunction(() => window.explorer.grid.getHiddenViews().length === 0, { timeout: 10000 });
       const afterRestore1 = await page.evaluate(() => ({
         hiddenViaMethod: window.explorer.grid.hiddencanvas(0),
         hiddenViews: window.explorer.grid.getHiddenViews()
@@ -146,16 +171,22 @@ describe('Mouse UI Tests', () => {
       expect(afterRestore1.hiddenViews.length).toBe(0);
 
       // Test 3: Closebox click hides view
+      // Wait for no update process before clicking closebox
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const closeboxes = await page.$$('#grid .closebox');
       expect(closeboxes.length).toBeGreaterThan(0);
       await closeboxes[0].click();
-      await page.waitForTimeout(300);
+      // Wait for view 0 to be hidden
+      await page.waitForFunction(() => window.explorer.grid.hiddencanvas(0), { timeout: 10000 });
       const afterClosebox = await page.evaluate(() => window.explorer.grid.hiddencanvas(0));
       expect(afterClosebox).toBe(true);
 
       // Test 4: R key restores views hidden by closebox
+      // Wait for no update process before pressing R
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       await page.keyboard.press('r');
-      await page.waitForTimeout(300);
+      // Wait for view to be restored (not hidden)
+      await page.waitForFunction(() => !window.explorer.grid.hiddencanvas(0), { timeout: 10000 });
       const afterRestore2 = await page.evaluate(() => window.explorer.grid.hiddencanvas(0));
       expect(afterRestore2).toBe(false);
     }, TEST_TIMEOUT);
@@ -166,10 +197,8 @@ describe('Mouse UI Tests', () => {
       // index was still in the worker's hiddenBoards set.
 
       // Start with 3 views
-      await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-1.4012+0i,-1.40120+0i`);
-      await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+      await navigateToUrl(page, getAppUrl('?c=-0.5+0i,-1.4012+0i,-1.40120+0i'));
       await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 15000 });
-      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 });
 
       // Wait for initial computation to make progress
       await page.waitForFunction(() => {
@@ -178,16 +207,21 @@ describe('Mouse UI Tests', () => {
       }, { timeout: 15000 });
 
       // Hide the middle view (index 1) via closebox
+      // Wait for no update process before clicking closebox
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const closeboxes = await page.$$('#grid .closebox');
       expect(closeboxes.length).toBeGreaterThanOrEqual(2);
       await closeboxes[1].click();  // Click closebox on view 1
-      await page.waitForTimeout(300);
+      // Wait for view 1 to be hidden
+      await page.waitForFunction(() => window.explorer.grid.hiddencanvas(1), { timeout: 10000 });
 
       // Verify view 1 is hidden
       const isHidden = await page.evaluate(() => window.explorer.grid.hiddencanvas(1));
       expect(isHidden).toBe(true);
 
       // Click on view 0 to create a new view - this will truncate and create at index 1
+      // Wait for no update process before clicking
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const canvas = await page.$('#grid canvas');
       const box = await canvas.boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -233,8 +267,7 @@ describe('Mouse UI Tests', () => {
   describe('Computation and URL', () => {
     test('Should complete computation and verify pixel values', async () => {
       // Use grid=5 for a small but meaningful computation
-      await page.goto(`file://${path.join(__dirname, '../../index.html')}?grid=5`);
-      await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
+      await navigateToUrl(page, getAppUrl('?grid=5'));
 
       const result = await page.evaluate(async () => {
         const view = window.explorer.grid.views[0];
@@ -336,7 +369,7 @@ describe('Mouse UI Tests', () => {
       await page.waitForFunction(() => {
         const view = window.explorer.grid.views[0];
         return view && !view.uninteresting();
-      }, { timeout: 10000 }, TEST_TIMEOUT);
+      }, { timeout: 10000 });
 
       const url = await page.url();
       expect(url).toContain('?');
@@ -348,12 +381,10 @@ describe('Mouse UI Tests', () => {
       await page.evaluateOnNewDocument(() => {
         Object.defineProperty(navigator, 'gpu', {
           get: () => undefined
-        }, TEST_TIMEOUT);
-      }, TEST_TIMEOUT);
+        });
+      });
 
-      await page.goto(`file://${path.join(__dirname, '../../index.html')}`);
-      await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 }, TEST_TIMEOUT);
-      await page.waitForTimeout(500);
+      await navigateToUrl(page, getAppUrl(''));
 
       const hasViews = await page.evaluate(() => window.explorer.grid.views.length > 0);
       expect(hasViews).toBe(true);

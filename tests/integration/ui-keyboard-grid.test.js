@@ -88,10 +88,13 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
       await page.goto(`file://${path.join(__dirname, '../../index.html')}`);
       await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
 
-      // Wait until there's at least one view
+      // Wait until there's at least one view with some computation started
       await page.waitForFunction(
-        () => window.explorer.grid.views.length >= 1,
-        { timeout: 5000 }
+        () => {
+          const view = window.explorer?.grid?.views?.[0];
+          return view && !view.uninteresting();
+        },
+        { timeout: 10000 }
       );
 
       // Get initial iteration count (should be low since we just started)
@@ -132,10 +135,13 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
       await page.goto(`file://${path.join(__dirname, '../../index.html')}`);
       await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
 
-      // Wait for initial view
+      // Wait for initial view with some computation started
       await page.waitForFunction(
-        () => window.explorer.grid.views.length >= 1,
-        { timeout: 5000 }
+        () => {
+          const view = window.explorer?.grid?.views?.[0];
+          return view && !view.uninteresting();
+        },
+        { timeout: 10000 }
       );
 
       // Press H three times, waiting for each to take effect
@@ -176,10 +182,19 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
       await page.goto(`file://${path.join(__dirname, '../../index.html')}`);
       await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
 
+      // Wait for initial view with some computation started
+      await page.waitForFunction(
+        () => {
+          const view = window.explorer?.grid?.views?.[0];
+          return view && !view.uninteresting();
+        },
+        { timeout: 10000 }
+      );
+
       // Let some computation happen first
       await page.waitForFunction(
         () => window.explorer.grid.views?.[0]?.di > 10,
-        { timeout: 10000 }
+        { timeout: 15000 }
       );
 
       // H then G

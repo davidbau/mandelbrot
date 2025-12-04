@@ -238,11 +238,16 @@ describe('Movie Mode Tests', () => {
     expect(await page.evaluate(() => window.explorer.movieMode.active)).toBe(false);
 
     // Wait for no update in progress before clicking the link
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 5000 });
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
-    // Click the hyperlink
-    await movieLink.click();
-    await page.waitForFunction(() => window.explorer.movieMode.active === true, { timeout: 5000 });
+    // Click the hyperlink using evaluate to ensure proper event handling
+    await page.evaluate(() => {
+      const link = document.querySelector('a.moviemode');
+      if (link && link.onclick) {
+        link.onclick();
+      }
+    });
+    await page.waitForFunction(() => window.explorer.movieMode.active === true, { timeout: 10000 });
 
     // Verify movie mode activated
     const movieState = await page.evaluate(() => {

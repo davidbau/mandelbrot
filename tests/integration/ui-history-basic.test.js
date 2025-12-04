@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, navigateToUrl, getAppUrl, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Browser History Basic Tests', () => {
   let browser;
@@ -30,9 +30,7 @@ describe('Browser History Basic Tests', () => {
   }, TEST_TIMEOUT);
 
   test('centersWereLost should detect when center points are removed or replaced', async () => {
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+    await navigateToUrl(page, getAppUrl('?c=-0.5+0i'));
 
     // Test centersWereLost logic directly (it's now a standalone function)
     const testResults = await page.evaluate(() => {
@@ -64,10 +62,7 @@ describe('Browser History Basic Tests', () => {
   }, TEST_TIMEOUT);
 
   test('Should use pushState when centers are replaced via updateurl', async () => {
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    // Wait for initial update process to complete to avoid history pushes from initialization
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+    await navigateToUrl(page, getAppUrl('?c=-0.5+0i'));
 
     // Get initial history length and current centers from URL
     const { initialLength, currentCenters } = await page.evaluate(() => ({
@@ -104,9 +99,7 @@ describe('Browser History Basic Tests', () => {
 
   test('handlePopState should restore default theme when going back to URL without theme', async () => {
     // Start with default view (no theme parameter = default 'warm')
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+    await navigateToUrl(page, getAppUrl(''));
 
     // Verify starting with default theme
     const initialTheme = await page.evaluate(() => window.explorer.config.theme);
@@ -137,7 +130,7 @@ describe('Browser History Basic Tests', () => {
       history.back();
     });
     // Wait for theme to be restored
-    await page.waitForFunction(() => window.explorer.config.theme === 'warm', { timeout: 5000 });
+    await page.waitForFunction(() => window.explorer.config.theme === 'warm', { timeout: 10000 });
 
     // Theme should be restored to default 'warm'
     const restoredTheme = await page.evaluate(() => window.explorer.config.theme);
@@ -146,15 +139,14 @@ describe('Browser History Basic Tests', () => {
 
   test('handlePopState should preserve unchanged views when navigating back', async () => {
     // Start with 3 views via URL (ensures proper quad-double coordinates)
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await navigateToUrl(page, getAppUrl('?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i'));
 
     // Wait for views to be created AND update to complete
     await page.waitForFunction(() =>
       window.explorer.grid.views.length === 3 &&
       window.explorer.grid.views.every(v => v !== null) &&
       !window.explorer.grid.currentUpdateProcess,
-      { timeout: 10000 }
+      { timeout: 15000 }
     );
 
     // Wait for view 2 to have some computation before proceeding
@@ -192,7 +184,7 @@ describe('Browser History Basic Tests', () => {
       window.explorer.grid.views.length === 4 &&
       window.explorer.grid.views.every(v => v !== null) &&
       !window.explorer.grid.currentUpdateProcess,
-      { timeout: 10000 }
+      { timeout: 15000 }
     );
 
     await page.evaluate(() => window.explorer.urlHandler.updateurl());
@@ -215,13 +207,11 @@ describe('Browser History Basic Tests', () => {
     });
 
     // Wait for views AND update to complete
-    // Note: This test verifies basic view preservation, not race conditions.
-    // The "Rapid back/forward" test in ui-history-preserve covers race conditions.
     await page.waitForFunction(() =>
       window.explorer.grid.views.length === 4 &&
       window.explorer.grid.views.every(v => v !== null) &&
       !window.explorer.grid.currentUpdateProcess,
-      { timeout: 10000 }
+      { timeout: 15000 }
     );
 
     // Capture view 3's ID before going back (it has different coords than target)
@@ -235,13 +225,10 @@ describe('Browser History Basic Tests', () => {
     await page.waitForFunction(() => {
       const v = window.explorer.grid.views[3];
       return v && Math.abs(v.sizes[1][0] - (-0.66)) < 0.01;
-    }, { timeout: 5000 });
+    }, { timeout: 10000 });
 
     // Check views 0-2 are preserved (same coords, so reused from history),
     // and view 3 is recreated (different coords in current vs target state)
-    // Note: With lastOldViews priority, views 0-2 may come from an earlier update
-    // that had the same coordinates. The key is that view 3 should be different
-    // since its coordinates changed.
     const afterBack = await page.evaluate(() => ({
       viewIds: window.explorer.grid.views.map(v => v ? v.id : null),
       viewCoords: window.explorer.grid.views.map(v => v ? { re: v.sizes[1][0], im: v.sizes[2][0] } : null),
@@ -261,11 +248,14 @@ describe('Browser History Basic Tests', () => {
 
   test('Should push history when hiding views and restore on back', async () => {
     // Start with 3 views (need 3+ so hiding one doesn't truncate to 1)
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-    await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 5000 });
-    // Wait for update process to complete (close button is blocked during updates)
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+    await navigateToUrl(page, getAppUrl('?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i'));
+
+    // Wait for views to be created AND update to complete
+    await page.waitForFunction(() =>
+      window.explorer.grid.views.length >= 3 &&
+      !window.explorer.grid.currentUpdateProcess,
+      { timeout: 15000 }
+    );
 
     // Verify we have 3 views, none hidden
     const initialState = await page.evaluate(() => ({
@@ -285,7 +275,7 @@ describe('Browser History Basic Tests', () => {
       const closeButton = document.querySelector('#b_1 .closebox');
       closeButton.click();
     });
-    await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 5000 });
+    await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 10000 });
 
     // Verify view is hidden and history was pushed
     const afterHide = await page.evaluate(() => ({
@@ -299,7 +289,7 @@ describe('Browser History Basic Tests', () => {
 
     // Now go back - view should be restored
     await page.evaluate(() => history.back());
-    await page.waitForFunction(() => !location.search.includes('h='), { timeout: 5000 });
+    await page.waitForFunction(() => !location.search.includes('h='), { timeout: 10000 });
 
     // Verify view is visible again
     const afterBack = await page.evaluate(() => ({

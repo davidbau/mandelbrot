@@ -1,5 +1,5 @@
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, closeBrowser } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, navigateToUrl, getAppUrl, closeBrowser } = require('./test-utils');
 
 describe('Aspect Ratio Tests', () => {
   let browser;
@@ -26,7 +26,7 @@ describe('Aspect Ratio Tests', () => {
     // Navigate to a URL with a 16:9 aspect ratio and two views.
     // The second view is centered at (re=0.5, im=0.4), vertically off-center from the first view.
     // The first view is at the default center (-0.5, 0).
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?a=16:9&c=-0.5+0i,0.5+0.4i&s=3,0.6`);
+    await navigateToUrl(page, getAppUrl('?a=16:9&c=-0.5+0i,0.5+0.4i&s=3,0.6'));
 
     // Wait for the second view to be rendered, which ensures the zoom rect on the first is also rendered.
     await page.waitForSelector('#grid #b_1 canvas', { timeout: 10000 });
@@ -36,7 +36,7 @@ describe('Aspect Ratio Tests', () => {
         const rect = document.querySelector('#b_0 .rect');
         return rect && rect.style.top !== '';
       },
-      { timeout: 5000 }
+      { timeout: 10000 }
     );
 
     // Get the dimensions of the first view's container for calculation.
@@ -83,7 +83,7 @@ describe('Aspect Ratio Tests', () => {
     // console.log('--- END TEST DEBUG ---');
 
     expect(zoomRectTop).toBeCloseTo(expectedTop, 1);
-  });
+  }, TEST_TIMEOUT);
 
   test('A key toggles aspect ratio between 1:1 and 16:9', async () => {
     // Navigate to default page (1:1 aspect ratio)

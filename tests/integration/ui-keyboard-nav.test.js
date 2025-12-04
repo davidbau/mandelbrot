@@ -35,6 +35,8 @@ describe('Keyboard Navigation Tests', () => {
 
   describe('Theme and Color Commands', () => {
     test('T key should cycle through color themes', async () => {
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const initialTheme = await page.evaluate(() => window.explorer.config.theme);
       await page.keyboard.press('t');
       // Wait for theme to change
@@ -48,6 +50,8 @@ describe('Keyboard Navigation Tests', () => {
     }, TEST_TIMEOUT);
 
     test('Shift+T should cycle themes backward', async () => {
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const initialTheme = await page.evaluate(() => window.explorer.config.theme);
       await page.keyboard.down('Shift');
       await page.keyboard.press('t');
@@ -126,6 +130,8 @@ describe('Keyboard Navigation Tests', () => {
     }, TEST_TIMEOUT);
 
     test('U key should cycle unknown color', async () => {
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const initialColor = await page.evaluate(() => window.explorer.config.unknowncolor);
       await page.keyboard.press('u');
       await page.waitForFunction(
@@ -141,6 +147,8 @@ describe('Keyboard Navigation Tests', () => {
   describe('Navigation Commands', () => {
     test('I key should zoom in at current position', async () => {
       await waitForViewReady(page);
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const viewsBefore = await page.evaluate(() => window.explorer.grid.views.length);
 
       await page.keyboard.press('i');
@@ -162,6 +170,8 @@ describe('Keyboard Navigation Tests', () => {
 
     test('C key should center views when multiple views exist', async () => {
       await waitForViewReady(page);
+      // Wait for no update in progress before clicking
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       // Create second view by clicking off-center
       const canvas = await page.$('#grid canvas');
@@ -195,6 +205,8 @@ describe('Keyboard Navigation Tests', () => {
 
     test('Ctrl+C should center ALL views including the first view', async () => {
       await waitForViewReady(page);
+      // Wait for no update in progress before clicking
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       // Create view 2 by clicking off-center on view 1
       const canvas1 = await page.$('#grid canvas');
@@ -247,6 +259,8 @@ describe('Keyboard Navigation Tests', () => {
 
   describe('Grid Commands', () => {
     test('H key should increase grid columns', async () => {
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const initialCols = await page.evaluate(() => window.explorer.config.gridcols);
       await page.keyboard.press('h');
       await page.waitForFunction(
@@ -259,6 +273,8 @@ describe('Keyboard Navigation Tests', () => {
     }, TEST_TIMEOUT);
 
     test('G key should decrease grid columns', async () => {
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const startCols = await page.evaluate(() => window.explorer.config.gridcols);
       await page.keyboard.press('h');
       await page.waitForFunction(
@@ -279,6 +295,8 @@ describe('Keyboard Navigation Tests', () => {
     }, TEST_TIMEOUT);
 
     test('H key should work repeatedly during relayout', async () => {
+      // Wait for no update in progress before keypress
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
       const initialCols = await page.evaluate(() => window.explorer.config.gridcols);
       await page.keyboard.press('h');
       await page.keyboard.press('h');

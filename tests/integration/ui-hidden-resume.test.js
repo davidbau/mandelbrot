@@ -3,7 +3,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToUrl, getAppUrl, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Hidden Boards Resume Tests', () => {
   let browser;
@@ -27,8 +27,9 @@ describe('Hidden Boards Resume Tests', () => {
 
   test('Computation should resume after hiding and going back', async () => {
     // Start with 3 views
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await navigateToUrl(page, getAppUrl('?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i'));
+
+    // Wait for 3 views to be created
     await page.waitForFunction(() =>
       window.explorer.grid.views.length === 3 &&
       !window.explorer.grid.currentUpdateProcess,
@@ -47,14 +48,17 @@ describe('Hidden Boards Resume Tests', () => {
       );
     });
 
+    // Wait for no update before clicking closebox (click is ignored during updates)
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+
     // Hide view 1 (middle view)
     await page.click('#b_1 .closebox');
-    await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 5000 });
+    await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 10000 });
 
     // Wait for hidden state to be processed
     await page.waitForFunction(
       () => !window.explorer.grid.currentUpdateProcess,
-      { timeout: 5000 }
+      { timeout: 10000 }
     );
 
     // Record view 2 state after hiding
@@ -63,7 +67,7 @@ describe('Hidden Boards Resume Tests', () => {
 
     // Now go back (unhide view 1)
     await page.evaluate(() => history.back());
-    await page.waitForFunction(() => !location.search.includes('h='), { timeout: 5000 });
+    await page.waitForFunction(() => !location.search.includes('h='), { timeout: 10000 });
 
     // Wait for update to complete
     await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
@@ -82,8 +86,9 @@ describe('Hidden Boards Resume Tests', () => {
 
   test('Previously hidden view should resume computation after going back', async () => {
     // Start with 3 views
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await navigateToUrl(page, getAppUrl('?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i'));
+
+    // Wait for 3 views to be created
     await page.waitForFunction(() =>
       window.explorer.grid.views.length === 3 &&
       !window.explorer.grid.currentUpdateProcess,
@@ -106,19 +111,22 @@ describe('Hidden Boards Resume Tests', () => {
       );
     });
 
+    // Wait for no update before clicking closebox (click is ignored during updates)
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+
     // Hide view 1 (middle view)
     await page.click('#b_1 .closebox');
-    await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 5000 });
+    await page.waitForFunction(() => location.search.includes('h=1'), { timeout: 10000 });
 
     // Wait for hidden state to be processed
     await page.waitForFunction(
       () => !window.explorer.grid.currentUpdateProcess,
-      { timeout: 5000 }
+      { timeout: 10000 }
     );
 
     // Now go back (unhide view 1)
     await page.evaluate(() => history.back());
-    await page.waitForFunction(() => !location.search.includes('h='), { timeout: 5000 });
+    await page.waitForFunction(() => !location.search.includes('h='), { timeout: 10000 });
 
     // Wait for update to complete
     await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });

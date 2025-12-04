@@ -37,6 +37,9 @@ describe('Fullscreen Mode Tests', () => {
   }, TEST_TIMEOUT);
 
   test('Enter/Escape keys should toggle fullscreen and save/restore grid settings', async () => {
+    // Wait for no update in progress before keypress
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+
     const initialState = await page.evaluate(() => ({
       fullscreen: document.fullscreenElement !== null,
       gridcols: window.explorer.config.gridcols
@@ -77,6 +80,9 @@ describe('Fullscreen Mode Tests', () => {
   }, TEST_TIMEOUT);
 
   test('Fullscreen button click should enter and exit fullscreen', async () => {
+    // Wait for no update in progress before clicking
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
+
     const button = await page.$('#fullscreen-button');
     expect(button).toBeTruthy();
 

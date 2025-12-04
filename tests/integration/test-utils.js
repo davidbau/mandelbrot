@@ -114,12 +114,37 @@ async function teardownPage(page) {
   await page.close();
 }
 
-// Navigate to the app and wait for explorer to initialize
+// Navigate to the app and wait for explorer to initialize AND initial view to be ready
 async function navigateToApp(page, queryParams = '') {
   const htmlPath = `file://${path.join(__dirname, '../../index.html')}${queryParams}`;
-  await page.goto(htmlPath, { waitUntil: 'networkidle0' });
-  await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
-  await sleep(200);
+  await page.goto(htmlPath, { waitUntil: 'load' });
+  await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
+  // Wait for initial view to exist and have some computation
+  await page.waitForFunction(() => {
+    const view = window.explorer?.grid?.views?.[0];
+    return view && !view.uninteresting();
+  }, { timeout: 15000 });
+  // Wait for any initial update process to complete
+  await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 });
+}
+
+// Navigate to app with full URL and wait for proper preconditions
+// Use this instead of direct page.goto() calls in tests
+async function navigateToUrl(page, url) {
+  await page.goto(url, { waitUntil: 'load' });
+  await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
+  // Wait for initial view to exist
+  await page.waitForFunction(() => {
+    const views = window.explorer?.grid?.views;
+    return views && views.length > 0 && views[0] !== null;
+  }, { timeout: 15000 });
+  // Wait for any initial update process to complete
+  await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 });
+}
+
+// Get the base URL for the app
+function getAppUrl(queryString = '') {
+  return `file://${path.join(__dirname, '../../index.html')}${queryString}`;
 }
 
 // Close browser with timeout to prevent hanging in afterAll
@@ -140,11 +165,11 @@ async function closeBrowser(browser, timeout = 10000) {
     }));
 
     // Race browser.close() against timeout
+    const proc = browser.process();
     await Promise.race([
       browser.close(),
       sleep(timeout).then(() => {
         // Force kill if close hangs
-        const proc = browser.process();
         if (proc) proc.kill('SIGKILL');
       })
     ]);
@@ -160,6 +185,8 @@ module.exports = {
   setupPage,
   teardownPage,
   navigateToApp,
+  navigateToUrl,
+  getAppUrl,
   closeBrowser,
   clearCoverage,
   isCoverageEnabled
