@@ -65,6 +65,8 @@ this.epsilon = Math.min(1e-12, pixelSize / 10);   // Strict: confirmed convergen
 this.epsilon2 = Math.min(1e-9, pixelSize * 10);   // Loose: probable convergence
 ```
 
+The strict `epsilon` is a fraction of the pixel size to confirm the orbit has settled well within a pixel's area. The looser `epsilon2` is larger than a pixel to generously detect orbits that are merely approaching a cycle.
+
 When `|z - checkpoint| < epsilon2`, we note the iteration as a candidate period. When it drops below `epsilon`, we confirm convergence. This two-stage approach catches gradual, spiraling convergence earlier while avoiding false positives.
 
 Why two thresholds? Convergence to a cycle is gradual—the orbit spirals inward, getting closer each time. A single tight threshold would miss early detection opportunities. The loose threshold (`epsilon2`) lets us notice "this point is probably converging" and record the likely period. The strict threshold (`epsilon`) confirms it.
@@ -102,12 +104,12 @@ fillBinZpow(binZpow, zr, zi) {
     binZpow[k*2-2] = coeff * zrCurrent;
     binZpow[k*2-1] = coeff * ziCurrent;
 
-    // Next power of z
+    // Update z power: z_current = z_current * z (complex multiplication)
     const zrNew = zrCurrent * zr - ziCurrent * zi;
     ziCurrent = zrCurrent * zi + ziCurrent * zr;
     zrCurrent = zrNew;
 
-    // Coefficient: n*(n-1)/2, then n*(n-1)*(n-2)/6, etc.
+    // Update coefficient for next iteration: n*(n-1)/2, then n*(n-1)*(n-2)/6, etc.
     coeff *= (this.config.exponent - k) / (k + 1);
   }
 }
@@ -217,7 +219,8 @@ The `Scheduler` automatically selects the best algorithm for the job:
 | > 1e-6 | Yes | **GpuBoard** | Fast, parallel, but uses `float32` which has limited precision. |
 | > 1e-12 | No | **CpuBoard** | Simple `float64` iteration on the CPU. |
 | <= 1e-6 | Yes | **GpuZhuoranBoard** | The workhorse for deep GPU zooms. Uses a quad-precision reference orbit with `float32` perturbations and rebasing. |
-| <= 1e-12 | No | **PerturbationBoard** | The CPU fallback for deep zooms. Uses quad-precision reference orbits and a multi-reference grid. |
+| <= 1e-12 | No | **PerturbationBoard** | The default CPU deep zoom algorithm using a multi-reference grid. Faster than ZhuoranBoard due to more cache-friendly memory access patterns. |
+| <= 1e-12 | No | **ZhuoranBoard** | Alternative CPU deep zoom with single reference orbit and rebasing. Can be forced via `?board=zhuoran` for testing. |
 
 ## Unsolved Problems
 

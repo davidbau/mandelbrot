@@ -22,7 +22,7 @@ function catmullRom1D(p0, p1, p2, p3, t) {
   const t2 = t * t;
   const t3 = t2 * t;
   const c0 = (-t3 + 2*t2 - t) / 2;
-  // c1 = (3*t3 - 5*t2 + 2) / 2; // unneeded since p1 = 0 in offset form
+  // c1 term omitted: using offsets from p1, so p1's coefficient is zero; p1 added back at end
   const c2 = (-3*t3 + 4*t2 + t) / 2;
   const c3 = (t3 - t2) / 2;
   // Compute offsets from p1 for numerical stability

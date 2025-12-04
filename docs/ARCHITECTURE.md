@@ -4,6 +4,8 @@
 
 The entire application—interface, computation, and styling—lives in a single `index.html` file. This design choice is intentional. It means the fractal explorer is a self-contained digital object. You can save the page, email it, or host it on any simple web server without needing a build system, package manager, or CDN. It's as portable as the mathematics it visualizes.
 
+This commitment to a single file means new features should be implemented without adding external file dependencies, preserving the project's portability.
+
 Despite being a single file, the code is highly structured, using modern JavaScript classes to create a clean, maintainable system.
 
 ## The Big Picture
@@ -67,7 +69,7 @@ The state is organized into four domains:
 ```
 
 ### Config
-Configuration management with property getters/setters that delegate to `StateStore`. It provides an ergonomic layer over the raw state, with computed properties and validation. Key configuration categories include Viewport, Computation, Display, and Initial View settings.
+Configuration management with property getters/setters that delegate to `StateStore`. It provides an ergonomic layer over the raw state, with computed properties and validation. For example, instead of dispatching `{type: 'SET_THEME', payload: 'neon'}`, the `Config` class allows for a simpler assignment: `config.theme = 'neon'`, which handles the dispatch internally. Key configuration categories include Viewport, Computation, Display, and Initial View settings.
 
 ### Grid
 Manages the collection of `View` objects and their corresponding DOM elements. It handles layout changes, view creation/deletion, and coordinates the visual representation of the zoom hierarchy.
@@ -145,12 +147,12 @@ The application's JavaScript is contained within `<script>` tags inside `index.h
 
 | Script ID | Approx Lines | Contents |
 |-----------|-------------|----------|
-| `mainCode` | 198-4520 | Core classes (MandelbrotExplorer, StateStore, Config, View, Grid, ZoomManager), UI classes (URLHandler, EventHandler, MovieMode), Scheduler |
-| `workerCode` | 4523-8020 | Board classes and computational algorithms |
-| `quadCode` | 8025-9235 | Quad-double precision math library |
-| `i18nCode` | 9238-9413 | Internationalization messages |
-| `mp4Muxer` | 9416-9720 | Bundled mp4-muxer library |
-| `startApp` | 9722-9728 | Application startup |
+| `mainCode` | 198-4316 | Core classes (MandelbrotExplorer, StateStore, Config, View, Grid, ZoomManager), UI classes (URLHandler, EventHandler, MovieMode), Scheduler |
+| `workerCode` | 4317-7818 | Board classes and computational algorithms |
+| `quadCode` | 7819-9031 | Quad-double precision math library |
+| `i18nCode` | 9032-9209 | Internationalization messages |
+| `mp4Muxer` | 9210-10171 | Bundled mp4-muxer library |
+| `startApp` | 10172-10186 | Application startup |
 
 The line numbers are approximate and shift as the code evolves. The script IDs are used for code coverage reporting.
 

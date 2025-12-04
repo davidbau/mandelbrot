@@ -15,8 +15,9 @@ Sets the center of the view in the complex plane.
 ?c=-0.7+0.3i,-0.5   # Chain of centers (zoom path)
 ```
 
-The format is `real+imag*i` or `real-imag*i`. When chaining multiple centers
-with commas, each becomes a separate zoom level, creating a path.
+The format is `real+imag*i` or `real-imag*i`. When providing a number without
+an imaginary part (like `-0.5`), it is interpreted as `-0.5+0i`. When chaining
+multiple centers with commas, each becomes a separate zoom level, creating a path.
 
 ### `z` - Zoom Level
 

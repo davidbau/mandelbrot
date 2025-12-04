@@ -66,6 +66,8 @@ The report is written to the `coverage/` directory. Open `coverage/index.html` i
 
 ## Project Structure
 
+The main application file, `index.html`, is located in the project's root directory, one level above this `docs` folder.
+
 ```
 mandelbrot/
 ├── index.html          # The entire application

@@ -100,10 +100,11 @@ calculations. Multiple workers enable parallel computation across CPU cores.
 
 ## 2025: Claude Code and WebGPU
 
-In November 2025 I switched to Claude Code, using Claude as an autonomous agent
-that edits files directly, runs tests, and commits code. This changed the workflow
-entirely - instead of copying snippets, Claude works in the codebase alongside
-me. Claude also drafted this documentation.
+In November 2025 the project adopted a novel workflow using Claude Code, where
+Claude (an AI from Anthropic) works as an autonomous agent that directly edits
+files, runs tests, and commits code to the repository. This changed the workflow
+entirely - instead of copying snippets back and forth, Claude works in the
+codebase alongside me. Claude also drafted this documentation.
 
 The result: WebGPU support with massive parallelism, plus significant UI enhancements.
 
