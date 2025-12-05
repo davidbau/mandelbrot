@@ -5852,6 +5852,201 @@ class ZhuoranBoard extends Board {
   }
 }
 
+// Oct-precision reference orbit perturbation board (CPU)
+class OctZhuoranBoard extends Board {
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+    this.maxRefIterations = 10000;
+    this.refOrbit = [];  // Array of [r0,r1,r2,r3,i0,i1,i2,i3]
+    this.refOrbitEscaped = false;
+    this.refIterations = 0;
+    const refRe = toOct(re);
+    const refIm = toOct(im);
+    this.refC = [refRe[0], refRe[1], refRe[2], refRe[3], refIm[0], refIm[1], refIm[2], refIm[3]];
+    this.dc = [];
+    this.dz = [];
+    this.refIter = [];
+    this.pixelIndexes = [];
+    this.maxRefIter = 1;
+    this.tt = new Array(32);
+    this.threading = new ReferenceOrbitThreading(this.epsilon);
+    this.refOrbit.push([0, 0, 0, 0, 0, 0, 0, 0]);  // z=0
+    this.refOrbit.push(this.refC.slice());         // z=c
+    this.refIterations = 1;
+    this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});
+    this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});
+    this.initPixels(size, re, im);
+    this.effort = 3;
+  }
+
+  initPixels(size, re, im) {
+    const pixW = size / this.config.dimsWidth;
+    const pixH = (size / this.config.aspectRatio) / this.config.dimsHeight;
+    const dimsWidth = this.config.dimsWidth;
+    const dimsHeight = this.config.dimsHeight;
+    const refRe = this.refC[0] + this.refC[1] + this.refC[2] + this.refC[3];
+    const refIm = this.refC[4] + this.refC[5] + this.refC[6] + this.refC[7];
+    const re_double = Array.isArray(re) ? (re[0] + (re[1]||0) + (re[2]||0) + (re[3]||0)) : re;
+    const im_double = Array.isArray(im) ? (im[0] + (im[1]||0) + (im[2]||0) + (im[3]||0)) : im;
+    for (let y = 0; y < dimsHeight; y++) {
+      const yFrac = (0.5 - y / dimsHeight);
+      const ci = im_double + yFrac * (size / this.config.aspectRatio);
+      const dci = ci - refIm;
+      for (let x = 0; x < dimsWidth; x++) {
+        const xFrac = (x / dimsWidth - 0.5);
+        const cr = re_double + xFrac * size;
+        const dcr = cr - refRe;
+        const index = y * dimsWidth + x;
+        this.dc[index * 2] = dcr;
+        this.dc[index * 2 + 1] = dci;
+        this.dz[index * 2] = dcr;
+        this.dz[index * 2 + 1] = dci;
+        this.refIter[index] = 1;
+        this.pixelIndexes.push(index);
+        if (this.inspike(cr, ci)) {
+          this.ch += 1;
+        }
+      }
+    }
+  }
+
+  static fromSerialized(serialized) {
+    const board = new OctZhuoranBoard(
+      serialized.k,
+      serialized.sizes[0],
+      serialized.sizes[1],
+      serialized.sizes[2],
+      serialized.config,
+      serialized.id
+    );
+    Object.assign(board, serialized);
+    if (!serialized.maxRefIter) {
+      board.maxRefIter = 1;
+      for (let i = 0; i < board.refIter.length; i++) {
+        if (board.refIter[i] > board.maxRefIter) board.maxRefIter = board.refIter[i];
+      }
+    }
+    return board;
+  }
+
+  serialize() {
+    return {
+      ...super.serialize(),
+      refOrbit: this.refOrbit,
+      refOrbitEscaped: this.refOrbitEscaped,
+      refIterations: this.refIterations,
+      refC: this.refC,
+      dc: this.dc,
+      dz: this.dz,
+      refIter: this.refIter,
+      pixelIndexes: this.pixelIndexes
+    };
+  }
+
+  iterate() {
+    let changes = null;
+    const targetRefIterations = Math.max(this.it + 100, this.maxRefIter + 100);
+    while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
+      this.extendReferenceOrbit();
+    }
+    const newPixelIndexes = [];
+    for (const index of this.pixelIndexes) {
+      if (this.nn[index]) continue;
+      const result = this.iteratePixel(index);
+      if (result !== 0) {
+        if (!changes) changes = { iter: this.it, nn: [], vv: [] };
+        if (result < 0) {
+          changes.vv.push({
+            index: index,
+            z: [this.dz[index*2], this.dz[index*2+1]],
+            p: this.refIter[index]  // use refIter as proxy
+          });
+        } else {
+          changes.nn.push(index);
+        }
+      } else {
+        newPixelIndexes.push(index);
+      }
+    }
+    this.pixelIndexes = newPixelIndexes;
+    this.un -= (changes ? changes.nn.length + changes.vv.length : 0);
+    this.di += (changes ? changes.nn.length : 0);
+    if (changes) {
+      this.queueChanges(changes);
+    }
+    this.it++;
+  }
+
+  extendReferenceOrbit() {
+    while (!this.refOrbitEscaped && this.refIterations < this.maxRefIterations) {
+      const last = this.refOrbit[this.refIterations];
+      const rr = last[0]; const rl1 = last[1]; const rl2 = last[2]; const rl3 = last[3];
+      const ri = last[4]; const il1 = last[5]; const il2 = last[6]; const il3 = last[7];
+      const tt = this.tt;
+      AoctSquare(tt, 0, rr, rl1, rl2, rl3);
+      AoctSquare(tt, 4, ri, il1, il2, il3);
+      AoctMul(tt, 8, 2*rr, 2*rl1, 2*rl2, 2*rl3, ri, il1, il2, il3);
+      AoctAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);
+      for (let ord=2; ord < this.config.exponent; ord++) {
+        AoctMul(tt, 0, ri, il1, il2, il3, tt[8], tt[9], tt[10], tt[11]);
+        AoctMul(tt, 4, rr, rl1, rl2, rl3, tt[16], tt[17], tt[18], tt[19]);
+        AoctAdd(tt, 12, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
+        AoctAdd(tt, 16, tt[12], tt[13], tt[14], tt[15], 0,0,0,0);
+      }
+      const nzr = new Array(4);
+      const nzi = new Array(4);
+      AoctAdd(nzr, 0, tt[16], tt[17], tt[18], tt[19], this.refC[0], this.refC[1], this.refC[2], this.refC[3]);
+      AoctAdd(nzi, 0, tt[8], tt[9], tt[10], tt[11], this.refC[4], this.refC[5], this.refC[6], this.refC[7]);
+      const nzr_f = nzr[0] + nzr[1];
+      const nzi_f = nzi[0] + nzi[1];
+      if (nzr_f*nzr_f + nzi_f*nzi_f > 4) {
+        this.refOrbitEscaped = true;
+      }
+      this.refOrbit.push([nzr[0], nzr[1], nzr[2], nzr[3], nzi[0], nzi[1], nzi[2], nzi[3]]);
+      this.refIterations++;
+      this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});
+    }
+  }
+
+  iteratePixel(index) {
+    let r = this.dz[index*2];
+    let j = this.dz[index*2+1];
+    let refIter = this.refIter[index];
+    const reDelta = this.dc[index*2];
+    const imDelta = this.dc[index*2+1];
+    while (refIter < this.refIterations) {
+      const orbit = this.refOrbit[refIter];
+      const zr = orbit[0] + orbit[1] + orbit[2] + orbit[3];
+      const zi = orbit[4] + orbit[5] + orbit[6] + orbit[7];
+      // Perturbation: z = z_ref + dz
+      const nr = zr + r;
+      const ni = zi + j;
+      // Iterate: z = z^2 + c_ref + dc
+      const rr = nr*nr - ni*ni;
+      const ri = 2*nr*ni;
+      r = rr + this.refC[0] + this.refC[1] + this.refC[2] + this.refC[3] + reDelta - zr;
+      j = ri + this.refC[4] + this.refC[5] + this.refC[6] + this.refC[7] + imDelta - zi;
+      refIter++;
+      const mag2 = (nr*nr + ni*ni);
+      if (mag2 > 4) {
+        this.nn[index] = refIter;
+        this.refIter[index] = refIter;
+        return 1;
+      }
+      if (Math.abs(r) + Math.abs(j) < this.epsilon) {
+        this.nn[index] = -refIter;
+        this.refIter[index] = refIter;
+        return -1;
+      }
+    }
+    this.dz[index*2] = r;
+    this.dz[index*2+1] = j;
+    this.refIter[index] = refIter;
+    if (refIter > this.maxRefIter) this.maxRefIter = refIter;
+    return 0;
+  }
+}
+
 // WebGPU-accelerated Mandelbrot computation using single-precision float32
 // GPU computes all pixels in parallel using standard Mandelbrot iteration
 // Base class for WebGPU-accelerated boards
