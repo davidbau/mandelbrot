@@ -3641,14 +3641,14 @@ class Scheduler {
 
   assembleWorkerCode() {
     const workerCode = document.getElementById('workerCode');
-    const quadCode = document.getElementById('mathCode');
+    const mathCode = document.getElementById('mathCode');
     return '// Linefeeds to align line numbers with HTML.\n' +
            ''.padStart(lastScriptLineNumber, '\n') +
            '// <script id="workerCode">' +
            workerCode.textContent +
            '// <\/script>\n' +
            '// <script id="mathCode">' +
-           quadCode.textContent +
+           mathCode.textContent +
            '// <\/script>\n';
   }
 

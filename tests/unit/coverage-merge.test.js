@@ -236,16 +236,16 @@ describe('Worker Blob Line Number Alignment', () => {
    */
   function buildWorkerBlob() {
     const workerCodePath = getScriptPath('workerCode');
-    const quadCodePath = getScriptPath('mathCode');
+    const mathCodePath = getScriptPath('mathCode');
     const workerCode = fs.readFileSync(workerCodePath, 'utf-8');
-    const quadCode = fs.readFileSync(quadCodePath, 'utf-8');
+    const mathCode = fs.readFileSync(mathCodePath, 'utf-8');
 
     return '// Linefeeds to align line numbers with HTML.\n' +
            '// <script id="workerCode">' +
            workerCode +
            '// </script>\n' +
            '// <script id="mathCode">' +
-           quadCode +
+           mathCode +
            '// </script>\n';
   }
 
@@ -282,20 +282,20 @@ describe('Worker Blob Line Number Alignment', () => {
 
   test('workerCode.js and mathCode.js are extracted correctly', () => {
     const workerCodePath = getScriptPath('workerCode');
-    const quadCodePath = getScriptPath('mathCode');
+    const mathCodePath = getScriptPath('mathCode');
 
     expect(fs.existsSync(workerCodePath)).toBe(true);
-    expect(fs.existsSync(quadCodePath)).toBe(true);
+    expect(fs.existsSync(mathCodePath)).toBe(true);
 
     const workerCode = fs.readFileSync(workerCodePath, 'utf-8');
-    const quadCode = fs.readFileSync(quadCodePath, 'utf-8');
+    const mathCode = fs.readFileSync(mathCodePath, 'utf-8');
 
     expect(workerCode.length).toBeGreaterThan(100);
-    expect(quadCode.length).toBeGreaterThan(100);
+    expect(mathCode.length).toBeGreaterThan(100);
 
     // workerCode should contain Board class
     expect(workerCode).toContain('class Board');
     // mathCode should contain quad-double functions
-    expect(quadCode).toContain('qdAdd');
+    expect(mathCode).toContain('qdAdd');
   });
 });

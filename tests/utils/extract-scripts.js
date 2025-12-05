@@ -163,11 +163,11 @@ function loadScript(scriptId) {
 function getWorkerBlobSource() {
   // Get paths to source scripts (extract if needed)
   const workerCodePath = getScriptPath('workerCode');
-  const quadCodePath = getScriptPath('mathCode');
+  const mathCodePath = getScriptPath('mathCode');
 
   // Read source files
   const workerCode = fs.readFileSync(workerCodePath, 'utf-8');
-  const quadCode = fs.readFileSync(quadCodePath, 'utf-8');
+  const mathCode = fs.readFileSync(mathCodePath, 'utf-8');
 
   // Build worker blob matching browser's assembleWorkerCode() format under Puppeteer
   // (no line padding - navigator.webdriver sets lastScriptLineNumber to 0)
@@ -176,7 +176,7 @@ function getWorkerBlobSource() {
                        workerCode +
                        '// </script>\n' +
                        '// <script id="mathCode">' +
-                       quadCode +
+                       mathCode +
                        '// </script>\n';
 
   // Auto-detect exports from combined code
