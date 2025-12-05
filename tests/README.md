@@ -7,7 +7,7 @@ Comprehensive test suite for the Mandelbrot Explorer application, including unit
 ```
 tests/
 ├── unit/                      # Unit tests
-│   ├── quad-double.test.js    # Quad-double arithmetic tests
+│   ├── quad-math.test.js      # Quad-double arithmetic tests
 │   └── mandelbrot-boards.test.js  # Board computation tests
 ├── integration/               # Integration tests
 │   └── ui-commands.test.js    # UI keyboard and mouse command tests
@@ -58,7 +58,7 @@ npm run test:coverage
 
 ### Unit Tests
 
-#### Quad-Double Arithmetic (`quad-double.test.js`)
+#### Quad-Double Arithmetic (`quad-math.test.js`)
 Tests the high-precision arithmetic functions used for deep zoom calculations:
 - Two-sum operations (Afast2Sum, Aslow2Sum)
 - Two-product operations (AtwoProduct, AtwoSquare)
@@ -204,7 +204,7 @@ npm test -- --verbose
 
 Run a single test file:
 ```bash
-npm test -- tests/unit/quad-double.test.js
+npm test -- tests/unit/quad-math.test.js
 ```
 
 Run tests matching a pattern:

@@ -89,7 +89,7 @@ The application's JavaScript is contained within `<script>` tags inside `index.h
 1.  **Main Application Code (`mainCode`):** Contains the core application logic and classes that run on the main thread, including `MandelbrotExplorer`, `StateStore`, `Config`, `View`, `Grid`, and `ZoomManager`.
 2.  **UI and Interaction Code:** Includes classes for handling user input and browser integration, such as `URLHandler`, `EventHandler`, and `MovieMode`.
 3.  **Worker Code (`workerCode`):** Contains the `Board` classes and all the computational algorithms. This code is loaded into Web Workers to run off the main thread.
-4.  **Quad-Precision Math (`quadCode`):** The library for quad-double arithmetic.
+4.  **Quad-Precision Math (`mathCode`):** The library for quad-double arithmetic.
 5.  **Bundled MP4 Muxer:** The minified `mp4-muxer` library, injected by the build script.
 6.  **Internationalization (i18n):** Contains the translated strings for the UI.
 7.  **Startup Script:** A final small script that instantiates `MandelbrotExplorer` to start the application.

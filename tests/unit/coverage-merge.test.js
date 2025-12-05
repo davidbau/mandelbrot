@@ -236,7 +236,7 @@ describe('Worker Blob Line Number Alignment', () => {
    */
   function buildWorkerBlob() {
     const workerCodePath = getScriptPath('workerCode');
-    const quadCodePath = getScriptPath('quadCode');
+    const quadCodePath = getScriptPath('mathCode');
     const workerCode = fs.readFileSync(workerCodePath, 'utf-8');
     const quadCode = fs.readFileSync(quadCodePath, 'utf-8');
 
@@ -244,7 +244,7 @@ describe('Worker Blob Line Number Alignment', () => {
            '// <script id="workerCode">' +
            workerCode +
            '// </script>\n' +
-           '// <script id="quadCode">' +
+           '// <script id="mathCode">' +
            quadCode +
            '// </script>\n';
   }
@@ -265,7 +265,7 @@ describe('Worker Blob Line Number Alignment', () => {
     const blob = buildWorkerBlob();
     const lines = blob.split('\n');
 
-    // Find qdDouble function (a simple 3-line function in quadCode)
+    // Find qdDouble function (a simple 3-line function in mathCode)
     const qdDoubleIndex = lines.findIndex(l => l.includes('function qdDouble'));
     expect(qdDoubleIndex).toBeGreaterThan(0);
 
@@ -277,12 +277,12 @@ describe('Worker Blob Line Number Alignment', () => {
     // Find CpuBoard class (in workerCode)
     const cpuBoardIndex = lines.findIndex(l => l.includes('class CpuBoard'));
     expect(cpuBoardIndex).toBeGreaterThan(0);
-    expect(cpuBoardIndex).toBeLessThan(qdDoubleIndex); // workerCode before quadCode
+    expect(cpuBoardIndex).toBeLessThan(qdDoubleIndex); // workerCode before mathCode
   });
 
-  test('workerCode.js and quadCode.js are extracted correctly', () => {
+  test('workerCode.js and mathCode.js are extracted correctly', () => {
     const workerCodePath = getScriptPath('workerCode');
-    const quadCodePath = getScriptPath('quadCode');
+    const quadCodePath = getScriptPath('mathCode');
 
     expect(fs.existsSync(workerCodePath)).toBe(true);
     expect(fs.existsSync(quadCodePath)).toBe(true);
@@ -295,7 +295,7 @@ describe('Worker Blob Line Number Alignment', () => {
 
     // workerCode should contain Board class
     expect(workerCode).toContain('class Board');
-    // quadCode should contain quad-double functions
+    // mathCode should contain quad-double functions
     expect(quadCode).toContain('qdAdd');
   });
 });

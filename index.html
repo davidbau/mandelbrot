@@ -3641,13 +3641,13 @@ class Scheduler {
 
   assembleWorkerCode() {
     const workerCode = document.getElementById('workerCode');
-    const quadCode = document.getElementById('quadCode');
+    const quadCode = document.getElementById('mathCode');
     return '// Linefeeds to align line numbers with HTML.\n' +
            ''.padStart(lastScriptLineNumber, '\n') +
            '// <script id="workerCode">' +
            workerCode.textContent +
            '// <\/script>\n' +
-           '// <script id="quadCode">' +
+           '// <script id="mathCode">' +
            quadCode.textContent +
            '// <\/script>\n';
   }
@@ -7816,7 +7816,7 @@ async function iterateBoards() {
 }
 
 </script>
-<script id="quadCode">
+<script id="mathCode">
 //////////// quad-precision (qd, double double) utilities ///////////
 
 function toQd(x) {
@@ -8210,6 +8210,17 @@ function AtwoSquare(r, i, a) {
   r[i+1] = err;
 }
 
+function AquickTwoSum(a, b) {
+  const s = a + b;
+  return [s, b - (s - a)];
+}
+
+function AsymmetricTwoSum(a, b) {
+  const s = a + b;
+  const bb = s - a;
+  return [s, (a - (s - bb)) + (b - bb)];
+}
+
 function AqdAdd(r, i, a1, a2, b1, b2) {
   Aslow2Sum(r, i, a1, b1);
   const h1 = r[i];
@@ -8259,6 +8270,99 @@ function AqdAbsSub(r, i, a1, a2, b1, b2) {
     r[i] = -r[i];
     r[i+1] = -r[i+1];
   }
+}
+
+// Oct-double (four-limb) helpers for deeper precision
+
+function AoctTwoProduct(a, b) {
+  const tmp = [];
+  AtwoProduct(tmp, 0, a, b);
+  return [tmp[0], tmp[1]];
+}
+
+function AoctRenorm(r, i, s0, s1, s2, s3, s4) {
+  [s3, s4] = AquickTwoSum(s3, s4);
+  [s2, s3] = AquickTwoSum(s2, s3);
+  [s1, s2] = AquickTwoSum(s1, s2);
+  [s0, s1] = AquickTwoSum(s0, s1);
+  [s2, s3] = AquickTwoSum(s2, s3);
+  [s1, s2] = AquickTwoSum(s1, s2);
+  AoctSet(r, i, s0, s1, s2, s3);
+}
+
+function AoctSet(r, i, a1, a2, a3, a4) {
+  r[i] = a1;
+  r[i+1] = a2;
+  r[i+2] = a3;
+  r[i+3] = a4;
+}
+
+function AoctcCopy(r, i, s, si) {
+  r[i] = s[si];
+  r[i+1] = s[si+1];
+  r[i+2] = s[si+2];
+  r[i+3] = s[si+3];
+  r[i+4] = s[si+4];
+  r[i+5] = s[si+5];
+  r[i+6] = s[si+6];
+  r[i+7] = s[si+7];
+}
+
+function AoctcGet(s, si) {
+  return s.slice(si, si+8);
+}
+
+function AoctAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
+  let s0, s1, s2, s3, s4, t0, t1, t2;
+  [s0, t0] = AsymmetricTwoSum(a1, b1);
+  [s1, t1] = AsymmetricTwoSum(a2, b2);
+  [s2, t2] = AsymmetricTwoSum(a3, b3);
+  s3 = a4 + b4;
+
+  [s1, t0] = AsymmetricTwoSum(s1, t0);
+  [s2, t1] = AsymmetricTwoSum(s2, t1);
+  s3 += t2;
+
+  [s2, t0] = AsymmetricTwoSum(s2, t0);
+  s3 += t1;
+
+  [s3, s4] = AsymmetricTwoSum(s3, t0);
+
+  [s0, s1] = AquickTwoSum(s0, s1);
+  [s1, s2] = AquickTwoSum(s1, s2);
+  [s2, s3] = AquickTwoSum(s2, s3);
+  [s3, s4] = AquickTwoSum(s3, s4);
+
+  s2 += s4;
+  [s2, s3] = AquickTwoSum(s2, s3);
+  [s1, s2] = AquickTwoSum(s1, s2);
+
+  AoctSet(r, i, s0, s1, s2, s3);
+}
+
+function AoctMul(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
+  const [p0, e0] = AoctTwoProduct(a1, b1);
+  const [c1, e1] = AoctTwoProduct(a1, b2);
+  const [c2, e2] = AoctTwoProduct(a2, b1);
+
+  const [p1, carry12] = AsymmetricTwoSum(c1, c2);
+  const crossError = e0 + e1 + e2 + carry12;
+
+  const cross2 = a1 * b3 + a2 * b2 + a3 * b1;
+  const cross3 = a1 * b4 + a2 * b3 + a3 * b2 + a4 * b1;
+  const cross4 = a2 * b4 + a3 * b3 + a4 * b2;
+  const cross5 = a3 * b4 + a4 * b3;
+  const tail = a4 * b4;
+
+  const s2 = crossError + cross2;
+  const s3 = cross3 + cross4;
+  const s4 = cross5 + tail;
+
+  AoctRenorm(r, i, p0, p1, s2, s3, s4);
+}
+
+function AoctSquare(r, i, a1, a2, a3, a4) {
+  AoctMul(r, i, a1, a2, a3, a4, a1, a2, a3, a4);
 }
 
 // Additional shared utility function for tracking cycles.

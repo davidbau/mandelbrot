@@ -80,23 +80,46 @@ describe('Mandelbrot Board Computations', () => {
   let page;
 
   beforeAll(async () => {
-    const chromePath = findChrome();
+    // Prefer an explicitly set executable, else bundled Chromium to avoid system crashpad perms.
+    const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath();
+    const userDataDir = path.join(__dirname, '../../.puppeteer-profile');
+    const chromeHome = path.join(__dirname, '../../.chrome-home');
+    fs.mkdirSync(userDataDir, { recursive: true });
+    fs.mkdirSync(chromeHome, { recursive: true });
     const launchOptions = {
       headless: 'new',
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
+        '--disable-crash-reporter',
+        '--disable-features=Crashpad,Breakpad',
+        '--enable-logging',
+        '--v=1',
+        `--user-data-dir=${userDataDir}`,
         // Enable WebGPU support
         '--enable-unsafe-webgpu',
         '--enable-features=Vulkan',
         '--use-angle=metal',  // Use Metal on macOS
-      ]
+      ],
+      userDataDir
     };
     if (chromePath) {
       launchOptions.executablePath = chromePath;
     }
-    browser = await puppeteer.launch(launchOptions);
+    browser = await puppeteer.launch({
+      ...launchOptions,
+      userDataDir,
+      env: {
+        ...process.env,
+        HOME: chromeHome,
+        XDG_CONFIG_HOME: chromeHome,
+        XDG_CACHE_HOME: chromeHome,
+        CRASHPAD_HANDLER_PATH: path.join(userDataDir, 'crashpad-handler'),
+        CHROME_CRASHPAD_PIPE: path.join(userDataDir, 'crashpad-pipe'),
+        CHROME_CRASHPAD_PIPE: '/dev/null'
+      }
+    });
     page = await browser.newPage();
 
     // Load the page (use domcontentloaded since we only need the DOM, not all resources)

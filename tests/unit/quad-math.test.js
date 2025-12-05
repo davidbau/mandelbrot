@@ -1,12 +1,12 @@
 /**
  * Unit tests for quad-double precision arithmetic.
- * Loads quadCode.js directly for accurate coverage reporting.
+ * Loads mathCode.js directly for accurate coverage reporting.
  */
 
 const { loadScript } = require('../utils/extract-scripts');
 
-// Load quadCode directly (no worker environment needed for pure math functions)
-const qd = loadScript('quadCode');
+// Load mathCode directly (no worker environment needed for pure math functions)
+const qd = loadScript('mathCode');
 
 // Helper to check if a qd is NaN (pure math format)
 const isQdNaN = (q) => isNaN(q[0]);

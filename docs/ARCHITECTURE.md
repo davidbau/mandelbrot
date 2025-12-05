@@ -163,7 +163,7 @@ The application's JavaScript is contained within `<script>` tags inside `index.h
 |-----------|-------------|----------|
 | `mainCode` | 198-4316 | Core classes (MandelbrotExplorer, StateStore, Config, View, Grid, ZoomManager), UI classes (URLHandler, EventHandler, MovieMode), Scheduler |
 | `workerCode` | 4317-7818 | Board classes and computational algorithms |
-| `quadCode` | 7819-9031 | Quad-double precision math library |
+| `mathCode` | 7819-9031 | Quad-double precision math library |
 | `i18nCode` | 9032-9209 | Internationalization messages |
 | `mp4Muxer` | 9210-10171 | Bundled mp4-muxer library |
 | `startApp` | 10172-10186 | Application startup |

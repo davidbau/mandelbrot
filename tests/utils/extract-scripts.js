@@ -11,7 +11,7 @@ const SCRIPTS_DIR = path.join(__dirname, '../../.nyc_output/scripts');
 const HTML_PATH = path.join(__dirname, '../../index.html');
 
 // Script IDs to extract
-const SCRIPT_IDS = ['quadCode', 'mainCode', 'workerCode', 'i18nCode'];
+const SCRIPT_IDS = ['mathCode', 'mainCode', 'workerCode', 'i18nCode'];
 
 /**
  * Extract a script block by its ID and write it to a .js file
@@ -154,7 +154,7 @@ function loadScript(scriptId) {
 }
 
 /**
- * Get the combined worker blob source (workerCode + quadCode) without loading.
+ * Get the combined worker blob source (workerCode + mathCode) without loading.
  * Matches the exact format created by assembleWorkerCode() in index.html
  * when running under Puppeteer (no line padding, for coverage alignment).
  *
@@ -163,7 +163,7 @@ function loadScript(scriptId) {
 function getWorkerBlobSource() {
   // Get paths to source scripts (extract if needed)
   const workerCodePath = getScriptPath('workerCode');
-  const quadCodePath = getScriptPath('quadCode');
+  const quadCodePath = getScriptPath('mathCode');
 
   // Read source files
   const workerCode = fs.readFileSync(workerCodePath, 'utf-8');
@@ -175,7 +175,7 @@ function getWorkerBlobSource() {
                        '// <script id="workerCode">' +
                        workerCode +
                        '// </script>\n' +
-                       '// <script id="quadCode">' +
+                       '// <script id="mathCode">' +
                        quadCode +
                        '// </script>\n';
 
@@ -197,7 +197,7 @@ function getWorkerBlobSource() {
 }
 
 /**
- * Create and load the combined worker blob (workerCode + quadCode).
+ * Create and load the combined worker blob (workerCode + mathCode).
  * Requires mocking global.self = global before calling.
  *
  * @returns {Object} Object with all detected exports

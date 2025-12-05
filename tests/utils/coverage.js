@@ -164,8 +164,8 @@ const HTML_PATH = path.join(__dirname, '../../index.html');
 
 // Scripts to track for main thread coverage
 // Note: workerCode is excluded (type="text/webworker", only used in worker blob)
-// quadCode is included because it's used in both main thread AND worker blob
-const MAIN_THREAD_SCRIPTS = ['mainCode', 'quadCode', 'i18nCode', 'mp4Muxer', 'startApp', 'analytics'];
+// mathCode is included because it's used in both main thread AND worker blob
+const MAIN_THREAD_SCRIPTS = ['mainCode', 'mathCode', 'i18nCode', 'mp4Muxer', 'startApp', 'analytics'];
 
 /**
  * Parse index.html to find script block line numbers dynamically.

@@ -1,6 +1,6 @@
 /**
  * Unit tests for Worker Logic (Board implementations).
- * Uses workerBlob.js (workerCode + quadCode combined) which matches
+ * Uses workerBlob.js (workerCode + mathCode combined) which matches
  * the browser's worker blob format for coverage merge.
  */
 
