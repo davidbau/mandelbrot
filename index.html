@@ -4383,6 +4383,7 @@ class Board {
     const subclasses = new Map([
       ['CpuBoard', CpuBoard],
       ['PerturbationBoard', PerturbationBoard],
+      ['OctPerturbationBoard', OctPerturbationBoard],
       ['ZhuoranBoard', ZhuoranBoard],
       ['GpuBoard', GpuBoard],
       ['GpuZhuoranBoard', GpuZhuoranBoard]
@@ -5001,6 +5002,240 @@ class PerturbationBoard extends Board {
     AqdAdd(this.cc, m4, cr, 0, refcc[ri4], refcc[ri4+1])
     AqdAdd(this.cc, m4+2, ci, 0, refcc[ri4+2], refcc[ri4+3])
   }
+}
+
+// Oct-precision CPU board using perturbation theory (oct-double anchors)
+class OctPerturbationBoard extends Board {
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+    this.octIndexes = [];   // Pixels computed in oct precision
+    this.tt = new Array(32).fill(0);           // Working array for oct operations
+    this.effort = 4;        // Higher cost than quad perturbation
+    this.initOctBoard(size, re, im);
+  }
+
+  initOctBoard(size, re, im) {
+    const dimsArea = this.config.dimsArea;
+    this.cc = new Array(dimsArea * 8).fill(0);
+    this.zz = new Array(dimsArea * 8).fill(0);
+    this.bb = new Array(dimsArea * 8).fill(0);
+    this.ss = Array.from({length: dimsArea}, (_, i) => i);
+    this.nn = new Array(dimsArea).fill(0);
+    this.pp = new Array(dimsArea).fill(0);
+    this.un = dimsArea;
+    this.di = 0;
+    const re_o = Array.isArray(re) && re.length === 4 ? re : [re, 0, 0, 0];
+    const im_o = Array.isArray(im) && im.length === 4 ? im : [im, 0, 0, 0];
+    for (let y = 0; y < this.config.dimsHeight; y++) {
+      const jFrac = (0.5 - (y / this.config.dimsHeight));
+      const cj = toOctAdd(im_o, toOctScale(toOct(jFrac), size / this.config.aspectRatio));
+      for (let x = 0; x < this.config.dimsWidth; x++) {
+        const rFrac = ((x / this.config.dimsWidth) - 0.5);
+        const cr = toOctAdd(re_o, toOctScale(toOct(rFrac), size));
+        const idx = y * this.config.dimsWidth + x;
+        const m8 = idx * 8;
+        this.cc[m8] = cr[0]; this.cc[m8+1] = cr[1]; this.cc[m8+2] = cr[2]; this.cc[m8+3] = cr[3];
+        this.cc[m8+4] = cj[0]; this.cc[m8+5] = cj[1]; this.cc[m8+6] = cj[2]; this.cc[m8+7] = cj[3];
+        this.zz[m8] = cr[0]; this.zz[m8+1] = cr[1]; this.zz[m8+2] = cr[2]; this.zz[m8+3] = cr[3];
+        this.zz[m8+4] = cj[0]; this.zz[m8+5] = cj[1]; this.zz[m8+6] = cj[2]; this.zz[m8+7] = cj[3];
+        this.bb[m8] = cr[0]; this.bb[m8+1] = cr[1]; this.bb[m8+2] = cr[2]; this.bb[m8+3] = cr[3];
+        this.bb[m8+4] = cj[0]; this.bb[m8+5] = cj[1]; this.bb[m8+6] = cj[2]; this.bb[m8+7] = cj[3];
+        this.octIndexes.push(idx);
+        if (this.inspikeQdA(cr[0], cr[1], cj[0], cj[1])) {
+          this.ch += 1;
+        }
+      }
+    }
+  }
+
+  static fromSerialized(serialized) {
+    const board = new OctPerturbationBoard(
+      serialized.k,
+      serialized.sizes[0],
+      serialized.sizes[1],
+      serialized.sizes[2],
+      serialized.config,
+      serialized.id
+    );
+    const cc = board.cc;
+
+    // Override initialized values with serialized data
+    Object.assign(board, serialized);
+    delete board.pertZZ;
+
+    // Reconstruct arrays from serialized data, leaving empty spots
+    board.cc = [];
+    board.zz = [];
+    board.nz = [];
+    board.bb = [];
+    board.pp = [];
+    const octIdx = serialized.octIndexes || serialized.quadIndexes || [];
+    for (let i = 0; i < octIdx.length; i++) {
+      const index = octIdx[i];
+      for (let j = 0; j < 8; j++) {
+        board.zz[index * 8 + j] = board.nz[index * 8 + j] = serialized.zz[i * 8 + j];
+        board.bb[index * 8 + j] = serialized.bb[i * 8 + j];
+        board.cc[index * 8 + j] = cc[index * 8 + j];
+      }
+      if (!isFinite(cc[index * 8 + 7])) {
+        board.initAsOctPrecision(index, cc);
+      }
+      board.pp[index] = serialized.pp[i];
+    }
+    for (let i = 0; i < serialized.pertIndexes.length; i++) {
+      const index = serialized.pertIndexes[i];
+      for (let j = 0; j < 3; j++) {
+        board.zz[index * 8 + j] = serialized.pertZZ[i * 3 + j];
+        board.cc[index * 8 + j] = cc[index * 8 + j];
+      }
+      board.zz[index * 8 + 7] = board.cc[index * 8 + 7] = Infinity;
+      board.pp[index] = 0;
+    }
+    return board;
+  }
+
+  serialize() {
+    return {
+      ...super.serialize(),
+      octIndexes: this.octIndexes,
+      pertIndexes: this.pertIndexes,
+      zz: this.octIndexes.flatMap(i => this.zz.slice(i*8, i*8+8)),
+      bb: this.octIndexes.flatMap(i => this.bb.slice(i*8, i*8+8)),
+      pp: this.octIndexes.map(index => this.pp[index]),
+      pertZZ: this.pertIndexes.flatMap(i => this.zz.slice(i*8, i*8+3)),
+    };
+  }
+
+  initAsOctPrecision(index, refcc) {
+    const m8 = index * 8;
+    for (let j = 0; j < 4; j++) {
+      this.cc[m8 + j] = refcc[m8 + j];
+      this.cc[m8 + 4 + j] = refcc[m8 + 4 + j];
+    }
+  }
+
+  iterate() {
+    let changes = null;
+    const s = this.ss;
+    const isCheckpoint = fibonacciPeriod(this.it) === 1;
+    if (isCheckpoint) {
+      for (let t = 0; t < s.length; ++t) {
+        const m = s[t];
+        if (this.nn[m]) continue;
+        AoctcCopy(this.bb, m*8, this.zz, m*8);  // bb = checkpoint z position
+        this.pp[m] = 0;  // Reset pp
+      }
+    }
+    for (let t = 0; t < s.length; ++t) {
+      const index = s[t];
+      const result = this.compute(index);
+      if (result !== 0) {
+        if (!changes) {
+          changes = { iter: this.it, nn: [], vv: [] };
+        }
+        if (result < 0) {
+          changes.vv.push({
+            index: index,
+            z: AoctcGet(this.zz, index*8),
+            p: this.pp[index]  // period
+          });
+        } else {
+          changes.nn.push(index);
+        }
+      }
+    }
+    if (changes) {
+      this.un -= changes.nn.length + changes.vv.length; // newly finished
+      this.di += changes.nn.length; // diverged
+    }
+    if (s.length > this.un * 1.25) {
+      this.compact();
+      if (this.ss.length > this.un + this.ch) {
+        throw new Error(`excess ss ${s.length}, ${this.ss.length}, ${this.un}`);
+      }
+    }
+    this.it++;
+    this.queueChanges(changes);
+  }
+
+  compact() {
+    this.ss = this.ss.filter(i => !this.nn[i]);
+  }
+
+  compute(m) {
+    if (this.nn[m]) return 0;
+    const m8 = m * 8;
+    const tt = this.tt;
+    const r1 = this.zz[m8];
+    const r2 = this.zz[m8+1];
+    const r3 = this.zz[m8+2];
+    const r4 = this.zz[m8+3];
+    const j1 = this.zz[m8+4];
+    const j2 = this.zz[m8+5];
+    const j3 = this.zz[m8+6];
+    const j4 = this.zz[m8+7];
+    const cr1 = this.cc[m8];
+    const cr2 = this.cc[m8+1];
+    const cr3 = this.cc[m8+2];
+    const cr4 = this.cc[m8+3];
+    const cj1 = this.cc[m8+4];
+    const cj2 = this.cc[m8+5];
+    const cj3 = this.cc[m8+6];
+    const cj4 = this.cc[m8+7];
+    AoctSquare(tt, 0, r1, r2, r3, r4);
+    AoctSquare(tt, 4, j1, j2, j3, j4);
+    AoctAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
+    if (tt[8] > 4) {
+      this.nn[m] = this.it;
+      return 1;  // Diverged
+    }
+    AoctMul(tt, 12, 2 * r1, 2 * r2, 2 * r3, 2 * r4, j1, j2, j3, j4);
+    AoctAdd(tt, 20, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);
+    for (let ord = 2; ord < this.config.exponent; ord++) {
+      AoctMul(tt, 0, j1, j2, j3, j4, tt[12], tt[13], tt[14], tt[15]);
+      AoctMul(tt, 4, r1, r2, r3, r4, tt[20], tt[21], tt[22], tt[23]);
+      AoctAdd(tt, 8, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);
+      AoctMul(tt, 0, r1, r2, r3, r4, tt[12], tt[13], tt[14], tt[15]);
+      AoctMul(tt, 4, j1, j2, j3, j4, tt[20], tt[21], tt[22], tt[23]);
+      AoctAdd(tt, 12, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
+      AoctSet(tt, 20, tt[8], tt[9], tt[10], tt[11]);
+    }
+    AoctAdd(this.zz, m8, tt[20], tt[21], tt[22], tt[23], cr1, cr2, cr3, cr4);
+    AoctAdd(this.zz, m8+4, tt[12], tt[13], tt[14], tt[15], cj1, cj2, cj3, cj4);
+    // Check convergence: compare current z to checkpoint
+    const br1 = this.bb[m8];
+    const br2 = this.bb[m8+1];
+    const bj1 = this.bb[m8+4];
+    const bj2 = this.bb[m8+5];
+    AoctAbsSub(tt, 0, br1, br2, this.zz[m8], this.zz[m8+1]);
+    AoctAbsSub(tt, 4, bj1, bj2, this.zz[m8+4], this.zz[m8+5]);
+    AoctAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
+    const db = tt[8] + tt[9];
+    if (db <= this.epsilon2) {
+      if (!this.pp[m]) { this.pp[m] = this.it; }
+      if (db <= this.epsilon) {
+        this.nn[m] = -this.it;
+        if (this.inspikeQdA(cr1, cr2, cj1, cj2) && this.ch > 0) {
+          this.ch -= 1;
+        }
+        return -1;  // Converged
+      }
+    }
+    return 0;
+  }
+}
+
+// Utility helpers for oct-precision operations (inline duplicates to avoid refactor)
+function toOct(x) { return Array.isArray(x) ? x : [x, 0, 0, 0]; }
+
+function toOctScale(a, s) {
+  return [a[0] * s, a[1] * s, a[2] * s, a[3] * s];
+}
+
+function toOctAdd(a, b) {
+  const out = new Array(4);
+  AoctAdd(out, 0, a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]);
+  return out;
 }
 
 // Reference Orbit Threading - enables robust cycle detection despite rebasing
@@ -7653,6 +7888,10 @@ self.onmessage = async function(e) {
         // WebGPU disabled or unavailable - use CPU-based boards
         if (pixelSize > 1e-12) {
           board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+        } else if (pixelSize < 1e-28) {
+          board = new OctPerturbationBoard(
+            data.k, data.size, data.re, data.im, data.config, data.id
+          );
         } else {
           board = new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id);
         }
