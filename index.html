@@ -314,10 +314,30 @@ class MandelbrotExplorer {
       startState.sizes = this.config.firststate().sizes;
     }
 
-    // Convert zoom factor from URL to absolute size
+    // Convert zoom/size from URL to absolute size
+    // zoomFromUrl: {mantissa, exponent} from z= parameter (computed here after initSizes for correct firstsize)
+    // sizeFromUrl: direct size from s= parameter
+    let actualSize = null;
     if (this.config.zoomFromUrl !== undefined) {
-      const actualSize = this.config.firstsize / this.config.zoomFromUrl;
+      const { mantissa, exponent } = this.config.zoomFromUrl;
       delete this.config.zoomFromUrl;
+      // Compute size = firstsize / zoom = (firstsize / mantissa) * 10^(-exponent)
+      // Now firstsize has the correct aspect-ratio-adjusted value
+      const baseSize = this.config.firstsize / mantissa;
+      const size = baseSize * Math.pow(10, -exponent);
+      if (size === 0 || !isFinite(size)) {
+        // Cap at ~1e310 zoom to ensure pixel sizes remain representable
+        console.warn(`Zoom too extreme, capping at maximum supported zoom (~1e310)`);
+        actualSize = 3e-310;
+      } else {
+        actualSize = size;
+      }
+    } else if (this.config.sizeFromUrl !== undefined) {
+      actualSize = this.config.sizeFromUrl;
+      delete this.config.sizeFromUrl;
+    }
+
+    if (actualSize !== null) {
       // Fill in sizes with the zoom-adjusted value
       for (let i = 0; i < startState.sizes.length; i++) {
         if (startState.sizes[i][0] === null) {
@@ -779,8 +799,10 @@ class Config {
   static WIDESCREEN_ASPECT_RATIO = 16 / 9;
   static CENTER_COORDINATE = 0.5;
 
-  // Feigenbaum / Myreberg point (quad-precision real number [high, low])
-  static FEIGENBAUM_POINT = [-1.4011551890920506, 1.196330130384937e-17];
+  // Feigenbaum / Myreberg point (real-axis accumulation point of period doubling)
+  // Stored in oct precision and derived quad-double for legacy callers.
+  static FEIGENBAUM_POINT_OCT = [-1.4011551890920506, 3.1858157e-17, 0, 0];
+  static FEIGENBAUM_POINT = [-1.4011551890920506, 3.1858157e-17];
 
   constructor(store) {
     if (!store) {
@@ -808,6 +830,8 @@ class Config {
       forceBoard: null,
       firstr: [-0.5, 0],
       firstj: [0.0, 0],
+      firstrOct: [-0.5, 0, 0, 0],
+      firstjOct: [0.0, 0, 0, 0],
       firstsize: 3.0,
       pixelRatio,
       zoomfactor: Config.DEFAULT_ZOOM_FACTOR,
@@ -838,6 +862,8 @@ class Config {
   get forceBoard() { return this.store.getState().config.forceBoard; }
   get firstr() { return this.store.getState().config.firstr; }
   get firstj() { return this.store.getState().config.firstj; }
+  get firstrOct() { return this.store.getState().config.firstrOct; }
+  get firstjOct() { return this.store.getState().config.firstjOct; }
 
   // Backward compatibility computed property
   get dimsArea() { return this.dimsWidth * this.dimsHeight; }
@@ -1037,6 +1063,15 @@ class View {
     this.exponent = config.exponent;
   }
 
+  // Getter properties that derive from sizesOct (the authoritative source)
+  // This eliminates the redundant sizes array that caused precision bugs
+  get size() { return octToNumber(this.sizesOct[0]); }
+  get re() { return octToQd(this.sizesOct[1]); }
+  get im() { return octToQd(this.sizesOct[2]); }
+  // Backward-compatible getter - returns derived qd-precision array
+  // Prefer using sizesOct directly for full precision, or individual getters
+  get sizes() { return [this.size, this.re, this.im]; }
+
   // Static helper: lookup histogram fractions for a given iteration count
   static lookupHistogram(i, histogram) {
     let j = 0;
@@ -1052,7 +1087,8 @@ class View {
   }
 
   initview(size, re, im) {
-    this.sizes = [size, toQd(re), toQd(im)];
+    // Only store oct-precision coordinates - derived getters provide qd/float access
+    this.sizesOct = [toOct(size), toOct(re), toOct(im)];
     this.nn = new Array(this.config.dimsArea).fill(0);
     this.un = this.config.dimsArea;
     this.di = 0;
@@ -1082,18 +1118,44 @@ class View {
     const changedIndices = [];
 
     for (const { nn, vv, iter } of changeList) {
-      for (const index of nn) {
-        this.nn[index] = iter;
+      for (const entry of nn) {
+        // Support both formats: plain index or {index, iter} object
+        const index = typeof entry === 'number' ? entry : entry.index;
+        const pixelIter = typeof entry === 'number' ? iter : entry.iter;
+        this.nn[index] = pixelIter;
         changedIndices.push(index);
       }
-      for (const { index, z, p } of vv) {
-        this.nn[index] = -iter;
+      for (const entry of vv) {
+        const { index, z, p, iter: entryIter } = entry;
+        // Use entry's iter if provided (for perturbation boards), otherwise use -iter
+        this.nn[index] = entryIter !== undefined ? -entryIter : -iter;
         this.convergedData.set(index, { z: toQdc(z), p });
         changedIndices.push(index);
       }
       this.di += nn.length;
       this.un -= nn.length + vv.length;
-      this.updateHistogram(this.un, this.di, iter);
+
+      // For perturbation boards with per-pixel iterations, update histogram
+      // with intermediate iterations to build up a proper histogram like GPU boards
+      if (nn.length > 0 && typeof nn[0] === 'object') {
+        // Group pixels by iteration and update histogram progressively
+        const byIter = new Map();
+        for (const entry of nn) {
+          byIter.set(entry.iter, (byIter.get(entry.iter) || 0) + 1);
+        }
+        // Sort by iteration and update histogram for each
+        const sortedIters = [...byIter.keys()].sort((a, b) => a - b);
+        let cumDi = this.di - nn.length;
+        let cumUn = this.un + nn.length;
+        for (const i of sortedIters) {
+          const count = byIter.get(i);
+          cumDi += count;
+          cumUn -= count;
+          this.updateHistogram(cumUn, cumDi, i);
+        }
+      } else {
+        this.updateHistogram(this.un, this.di, iter);
+      }
     }
     this.un = un;
     this.di = di;
@@ -1116,16 +1178,19 @@ class View {
 
   currentc(j) {
     const { dimsWidth, dimsHeight, aspectRatio } = this.config;
-    const [size, centerR, centerI] = this.sizes;
     const x = j % dimsWidth;
     const y = Math.floor(j / dimsWidth);
     const rFrac = (x / dimsWidth) - Config.CENTER_COORDINATE;
     const jFrac = Config.CENTER_COORDINATE - (y / dimsHeight);
-    // Scale real coordinate by full size, imaginary by size/aspectRatio
-    const r = qdAdd(centerR, qdScale(toQd(rFrac), size));
-    const heightScale = size / aspectRatio;
-    const i = qdAdd(centerI, qdScale(toQd(jFrac), heightScale));
-    return [r[0], r[1], i[0], i[1]];
+    // Use oct precision for scaling to preserve accuracy at deep zoom
+    // Multiply sizeOct by fractional offset (normal float64) to avoid precision loss
+    const sizeOct = this.sizesOct[0];
+    const centerROct = this.sizesOct[1];
+    const centerIOct = this.sizesOct[2];
+    const rOct = toOctAdd(centerROct, toOctScale(sizeOct, rFrac));
+    const iOct = toOctAdd(centerIOct, toOctScale(sizeOct, jFrac / aspectRatio));
+    // Return oct format (8 elements: 4 real + 4 imaginary) for full precision
+    return [rOct[0], rOct[1], rOct[2], rOct[3], iOct[0], iOct[1], iOct[2], iOct[3]];
   }
 
   currentz(j) {
@@ -1202,11 +1267,57 @@ class View {
   // Calculate coordinate mapping from parent to child canvas
   calculateParentMapping() {
     const parent = this.parentView;
-    const [childSize, childCenterR, childCenterI] = this.sizes;
-    const [parentSize, parentCenterR, parentCenterI] = parent.sizes;
     const { dimsWidth, dimsHeight, aspectRatio } = this.config;
 
-    // Use quad precision for coordinate calculations at deep zoom
+    // Use oct precision when available (needed at z > ~1e30)
+    const useOct = this.sizesOct && parent.sizesOct;
+
+    if (useOct) {
+      // Oct precision path for deep zoom
+      const [childSizeOct, childCenterROct, childCenterIOct] = this.sizesOct;
+      const [parentSizeOct, parentCenterROct, parentCenterIOct] = parent.sizesOct;
+
+      const childSize = octToNumber(childSizeOct);
+      const parentSize = octToNumber(parentSizeOct);
+      const parentHeight = parentSize / aspectRatio;
+
+      // For sx: compute (childCenterR - parentCenterR) / parentSize * dimsWidth + dimsWidth/2 - sw/2
+      // The child left edge is at: childCenterR - childSize/2
+      // The parent left edge is at: parentCenterR - parentSize/2
+      // sx = ((childLeft - parentLeft) / parentSize) * dimsWidth
+      //    = ((childCenterR - childSize/2) - (parentCenterR - parentSize/2)) / parentSize * dimsWidth
+      //    = ((childCenterR - parentCenterR) + (parentSize - childSize)/2) / parentSize * dimsWidth
+
+      // Compute childCenterR - parentCenterR using oct precision
+      const deltaR = toOctSub(childCenterROct, parentCenterROct);
+      const deltaRNum = octToNumber(deltaR);
+
+      // sx = (deltaR + (parentSize - childSize)/2) / parentSize * dimsWidth
+      const sx = ((deltaRNum + (parentSize - childSize) / 2) / parentSize) * dimsWidth;
+
+      // For sy: similar but with inverted y direction
+      // sy = ((parentTop - childTop) / parentHeight) * dimsHeight
+      //    = ((parentCenterI + parentHeight/2) - (childCenterI + childHeight/2)) / parentHeight * dimsHeight
+      // childHeight = childSize / aspectRatio
+      const childHeight = childSize / aspectRatio;
+
+      // Compute parentCenterI - childCenterI using oct precision
+      const deltaI = toOctSub(parentCenterIOct, childCenterIOct);
+      const deltaINum = octToNumber(deltaI);
+
+      // sy = (deltaI + (parentHeight - childHeight)/2) / parentHeight * dimsHeight
+      const sy = ((deltaINum + (parentHeight - childHeight) / 2) / parentHeight) * dimsHeight;
+
+      const sw = (childSize / parentSize) * dimsWidth;
+      const sh = (childSize / parentSize) * dimsHeight;
+
+      return { sx, sy, sw, sh };
+    }
+
+    // Quad precision fallback for shallow zoom
+    const [childSize, childCenterR, childCenterI] = this.sizes;
+    const [parentSize, parentCenterR, parentCenterI] = parent.sizes;
+
     const temp = new Float64Array(4);
 
     // childLeft = childCenterR - childSize / 2
@@ -1364,19 +1475,66 @@ class View {
 
   drawchange(ctx, change) {
     if (change.nn.length) {
-      ctx.fillStyle = this.makecolor(change.iter);
-      for (let m of change.nn) {
-        const x = m % this.config.dimsWidth;
-        const y = (m - x) / this.config.dimsWidth;
-        ctx.fillRect(x, y, 1, 1);
+      // Support both formats: plain index or {index, iter} object
+      const firstEntry = change.nn[0];
+      const hasPerPixelIter = typeof firstEntry === 'object';
+
+      if (hasPerPixelIter) {
+        // Per-pixel iteration values (perturbation boards)
+        // Group by iteration for efficient drawing
+        const byIter = new Map();
+        for (const entry of change.nn) {
+          const iter = entry.iter;
+          if (!byIter.has(iter)) byIter.set(iter, []);
+          byIter.get(iter).push(entry.index);
+        }
+        for (const [iter, indices] of byIter) {
+          ctx.fillStyle = this.makecolor(iter);
+          for (const index of indices) {
+            const x = index % this.config.dimsWidth;
+            const y = (index - x) / this.config.dimsWidth;
+            ctx.fillRect(x, y, 1, 1);
+          }
+        }
+      } else {
+        // Plain indices (regular boards) - use batch iteration
+        ctx.fillStyle = this.makecolor(change.iter);
+        for (let m of change.nn) {
+          const x = m % this.config.dimsWidth;
+          const y = (m - x) / this.config.dimsWidth;
+          ctx.fillRect(x, y, 1, 1);
+        }
       }
     }
     if (change.vv.length) {
-      ctx.fillStyle = this.makecolor(-change.iter);
-      for (let v of change.vv) {
-        const x = v.index % this.config.dimsWidth;
-        const y = (v.index - x) / this.config.dimsWidth;
-        ctx.fillRect(x, y, 1, 1);
+      // Support both formats: with or without per-pixel iter
+      const firstEntry = change.vv[0];
+      const hasPerPixelIter = firstEntry.iter !== undefined;
+
+      if (hasPerPixelIter) {
+        // Per-pixel iteration values (perturbation boards)
+        const byIter = new Map();
+        for (const v of change.vv) {
+          const iter = -v.iter;  // Negative for convergence
+          if (!byIter.has(iter)) byIter.set(iter, []);
+          byIter.get(iter).push(v.index);
+        }
+        for (const [iter, indices] of byIter) {
+          ctx.fillStyle = this.makecolor(iter);
+          for (const index of indices) {
+            const x = index % this.config.dimsWidth;
+            const y = (index - x) / this.config.dimsWidth;
+            ctx.fillRect(x, y, 1, 1);
+          }
+        }
+      } else {
+        // Regular format - use batch iteration
+        ctx.fillStyle = this.makecolor(-change.iter);
+        for (let v of change.vv) {
+          const x = v.index % this.config.dimsWidth;
+          const y = (v.index - x) / this.config.dimsWidth;
+          ctx.fillRect(x, y, 1, 1);
+        }
       }
     }
   }
@@ -1987,8 +2145,10 @@ class Grid {
       if (unfinishedCount > 0 && percentDone >= 99.9) {
         percentDone = 99.9;
       }
-      const coords = formatcomplex(k, this.views[k].sizes[1], this.views[k].sizes[2])
-        .replaceAll('-', '\u2212');
+      // Use oct precision coordinates when available to preserve full precision in status
+      const ore = this.views[k].sizesOct ? this.views[k].sizesOct[1] : this.views[k].sizes[1];
+      const oim = this.views[k].sizesOct ? this.views[k].sizesOct[2] : this.views[k].sizes[2];
+      const coords = formatcomplex(k, ore, oim).replaceAll('-', '\u2212');
       const iters = formatLargeInt(this.views[k].it);
       const regularStatus = `${MSG.center_at_}${coords}\n${percentDone}` +
                              `${MSG.percent_done_after_}${iters}${MSG.iters}`;
@@ -2007,8 +2167,9 @@ class Grid {
     if (k >= this.views.length) return;
     const osize = this.views[k].sizes[0];
     const zoomFactor = this.config.firstsize / osize;  // Zoom factor (1.0 = default)
-    const ore = this.views[k].sizes[1];
-    const oim = this.views[k].sizes[2];
+    // Use oct precision coordinates when available to preserve full precision in URL
+    const ore = this.views[k].sizesOct ? this.views[k].sizesOct[1] : this.views[k].sizes[1];
+    const oim = this.views[k].sizesOct ? this.views[k].sizesOct[2] : this.views[k].sizes[2];
     const exponentParam = this.config.exponent !== 2 ? `&exponent=${this.config.exponent}` : '';
     const themeParam = this.config.theme !== 'warm' ? `&theme=${this.config.theme}` : '';
     const coords = formatcomplex(k, ore, oim);
@@ -2102,12 +2263,16 @@ class ZoomManager {
     let prevK = 0;
     for (let k = 0; k < this.grid.views.length; k++) {
       if (this.grid.hiddencanvas(k)) { continue; }
-      let currView = this.grid.views[k].sizes;
+      let currView = this.grid.views[k].sizesOct;  // Use oct precision for deep zoom
       if (prevView !== null) {
-        let x = qdSub(currView[1], prevView[1])[0] / prevView[0] + 0.5;
-        let y = 0.5 - qdSub(currView[2], prevView[2])[0] / (prevView[0] / this.config.aspectRatio);
-
-        let zf = prevView[0] / currView[0];
+        const prevSizeOct = prevView[0];  // Already oct, no conversion needed
+        const invPrevSize = 1 / octToNumber(prevSizeOct);
+        const deltaRe = toOctSub(currView[1], prevView[1]);
+        const deltaIm = toOctSub(currView[2], prevView[2]);
+        const x = octToNumber(toOctAdd(toOctScale(deltaRe, invPrevSize), toOct(0.5)));
+        const y = octToNumber(toOctAdd(toOct(0.5),
+          toOctScale(deltaIm, -invPrevSize * this.config.aspectRatio)));
+        const zf = octToNumber(toOctScale(prevSizeOct, 1 / octToNumber(currView[0])));
         this.showZoomRect(prevK, x, y, zf);
       }
       prevView = currView;
@@ -2122,20 +2287,28 @@ class ZoomManager {
     let k = this.grid.views.length - 1;
     if (this.grid.views[k].uninteresting()) { return; }
     let osize = this.grid.views[k].sizes[0];
-    let ore = this.grid.views[k].sizes[1];
-    let oim = this.grid.views[k].sizes[2];
+    // Use sizesOct directly to preserve full precision at deep zoom levels
+    let oreOct = this.grid.views[k].sizesOct[1];
+    let oimOct = this.grid.views[k].sizesOct[2];
+    let ore = octToQd(oreOct);
+    let oim = octToQd(oimOct);
     let rre = Config.CENTER_COORDINATE;
     if (k === 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
       // Myreberg / Feigenbaum point
-      ore = Config.FEIGENBAUM_POINT;
-      rre = (ore[0] - this.grid.views[0].sizes[1][0]) / this.grid.views[0].sizes[0] +
-            Config.CENTER_COORDINATE;
+      const baseRe = this.grid.views[0].sizesOct[1];
+      oreOct = Config.FEIGENBAUM_POINT_OCT;
+      ore = octToQd(oreOct);
+      rre = octToNumber(toOctAdd(
+        toOctScale(toOctSub(oreOct, baseRe), 1 / this.grid.views[0].sizes[0]),
+        Config.CENTER_COORDINATE
+      ));
     }
     this.showZoomRect(k, rre, 0.5, this.config.zoomfactor);
     let nsize = osize / this.config.zoomfactor;
 
     // Stage 1: Create DOM and scroll immediately
-    this.grid.makecanvas(k + 1);
+    // Pass nsize to makecanvas so the zoom label shows correct scientific notation
+    this.grid.makecanvas(k + 1, [nsize, null, null]);
     if (hideCurrent) {
       this.grid.canvas(k).parentElement.style.display = 'none';
       this.updateZoomRectangles();
@@ -2150,7 +2323,10 @@ class ZoomManager {
 
     // Stage 2: Create view structure
     setTimeout(() => {
-      let newView = this.grid.makeView(k + 1, nsize, ore, oim, true);
+      // Pass oct coordinates directly to preserve full precision at deep zoom
+      let newView = this.grid.makeView(
+        k + 1, nsize, oreOct, oimOct, true
+      );
       this.grid.notifyurl();
 
       // Stage 3: Draw and start computation
@@ -2171,8 +2347,10 @@ class ZoomManager {
   cellclickdelay(k, m, hideCurrent) {
     if (k >= this.grid.views.length || this.grid.currentUpdateProcess) return;
     let osize = this.grid.views[k].sizes[0];
-    let ore = this.grid.views[k].sizes[1];
-    let oim = this.grid.views[k].sizes[2];
+    // Use oct precision for size and centers to preserve full precision at deep zoom
+    let osizeOct = this.grid.views[k].sizesOct[0];
+    let ore = this.grid.views[k].sizesOct[1];
+    let oim = this.grid.views[k].sizesOct[2];
     let cx = m % this.config.dimsWidth;
     let cy = (m - cx) / this.config.dimsWidth;
     const rectX = cx / this.config.dimsWidth;
@@ -2183,12 +2361,21 @@ class ZoomManager {
     // that no longer exist, preventing them from blocking new boards at those indices
     this.grid.updateHiddenViews();
     let nsize = osize / this.config.zoomfactor;
-    let nre = qdAdd(ore, [((cx / this.config.dimsWidth) - 0.5) * osize, 0]);
-    const offsetY = (0.5 - rectY) * (osize / this.config.aspectRatio);
-    let nim = qdAdd(oim, [offsetY, 0]);
+    // Compute fractional offsets from center (both as simple fractions)
+    const offsetX = (cx / this.config.dimsWidth) - 0.5;
+    const offsetY = 0.5 - rectY;
+    // Scale offsets by oct-precision size to preserve accuracy at deep zoom
+    // Multiply osizeOct by fractional offset (normal float64) to preserve precision
+    // X offset: size * fraction
+    // Y offset: size * fraction / aspectRatio (since Y spans size/aspectRatio in coordinate space)
+    const nreOct = toOctAdd(ore, toOctScale(osizeOct, offsetX));
+    const nimOct = toOctAdd(oim, toOctScale(osizeOct, offsetY / this.config.aspectRatio));
+    let nre = octToQd(nreOct);
+    let nim = octToQd(nimOct);
 
     // Stage 1: Create DOM and scroll immediately (instant visual feedback)
-    this.grid.makecanvas(k + 1);
+    // Pass nsize to makecanvas so the zoom label shows correct scientific notation
+    this.grid.makecanvas(k + 1, [nsize, null, null]);
     this.grid.updateFullscreenButton();
     if (hideCurrent) {
       this.grid.canvas(k).parentElement.style.display = 'none';
@@ -2203,8 +2390,9 @@ class ZoomManager {
     canvas.offsetHeight; // Trigger reflow
 
     // Stage 2: Create view structure
+    // Pass oct precision coordinates to preserve full precision at deep zoom
     setTimeout(() => {
-      let newView = this.grid.makeView(k + 1, nsize, nre, nim, true);
+      let newView = this.grid.makeView(k + 1, nsize, nreOct, nimOct, true);
       this.grid.showcanvas(k + 1);
       this.grid.notifyurl();
       document.body.className = '';
@@ -2219,22 +2407,35 @@ class ZoomManager {
 
   centerViews(includeFirst) {
     let k = this.grid.views.length - 1;
-    let ore = this.grid.views[k].sizes[1];
-    let oim = this.grid.views[k].sizes[2];
+    // Use sizesOct for full precision at deep zoom
+    let oreOct = this.grid.views[k].sizesOct[1];
+    let oimOct = this.grid.views[k].sizesOct[2];
     if (!includeFirst) {
+      const invPrevSize = 1 / this.grid.views[0].sizes[0];
       this.showZoomRect(
-        0, 0.5 + (ore[0] - this.grid.views[0].sizes[1][0]) / this.grid.views[0].sizes[0],
-           0.5 - (oim[0] - this.grid.views[0].sizes[2][0]) / this.grid.views[0].sizes[0],
+        0,
+        octToNumber(toOctAdd(
+          toOct(0.5),
+          toOctScale(
+            octSub(oreOct, this.grid.views[0].sizesOct[1]),
+            invPrevSize
+          ))),
+        octToNumber(toOctAdd(
+          toOct(0.5),
+          toOctScale(
+            octSub(this.grid.views[0].sizesOct[2], oimOct),
+            invPrevSize * this.config.aspectRatio
+          ))),
            this.grid.views[0].sizes[0] / this.grid.views[1].sizes[0]);
     }
     for (k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
       this.showZoomRect(
           k, 0.5, 0.5, this.grid.views[k].sizes[0] / this.grid.views[k+1].sizes[0]);
-      if (qdCompare(this.grid.views[k].sizes[1], ore) ||
-          qdCompare(this.grid.views[k].sizes[2], oim)) {
+      if (octCompare(this.grid.views[k].sizesOct[1], oreOct) ||
+          octCompare(this.grid.views[k].sizesOct[2], oimOct)) {
         this.grid.scheduler.removeBoardFromWorker(k);
         let nsize = this.grid.views[k].sizes[0];
-        this.grid.makeView(k, nsize, ore, oim);
+        this.grid.makeView(k, nsize, oreOct, oimOct);
         this.grid.views[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
         this.grid.clearseq(k);
       }
@@ -2454,12 +2655,67 @@ class URLHandler {
     return { viewsToKeep, newState };
   }
 
+  /**
+   * Parse a scientific notation string like "1e400" without JavaScript's parseFloat overflow.
+   * Returns {mantissa, exponent} where the value = mantissa * 10^exponent.
+   */
+  parseScientificNotation(str) {
+    str = str.trim().toLowerCase();
+    // Match patterns like: 1e400, 1.5e+300, 2e-10, 1.23
+    const match = str.match(/^([+-]?\d*\.?\d+)(?:e([+-]?\d+))?$/);
+    if (!match) {
+      return { mantissa: parseFloat(str), exponent: 0 };
+    }
+    const mantissa = parseFloat(match[1]);
+    const exponent = match[2] ? parseInt(match[2], 10) : 0;
+    return { mantissa, exponent };
+  }
+
+  /**
+   * Get the view size from the URL zoom parameter.
+   * Computes size = firstsize / zoom directly to avoid overflow for extreme zoom values.
+   * Returns the size (not the zoom factor).
+   */
+  getSizeFromZoomUrl() {
+    const params = new URLSearchParams(document.location.search);
+    let zVal = params.get('z');
+    if (zVal) {
+      zVal = zVal.replace(/ /g, '+');
+      const { mantissa, exponent } = this.parseScientificNotation(zVal);
+      // size = firstsize / (mantissa * 10^exponent) = (firstsize / mantissa) * 10^(-exponent)
+      // This works for exponents up to ~324 (float64 min is ~5e-324)
+      const baseSize = this.config.firstsize / mantissa;
+      // Use Math.pow for the exponent, which handles underflow gracefully (returns 0)
+      const size = baseSize * Math.pow(10, -exponent);
+      if (size === 0 || !isFinite(size)) {
+        // Cap at ~1e310 zoom to ensure pixel sizes remain representable
+        console.warn(`Zoom ${zVal} too extreme, capping at maximum supported zoom (~1e310)`);
+        return 3e-310;  // Minimum usable size
+      }
+      return size;
+    }
+    let sVal = params.get('s');
+    if (sVal) {
+      sVal = sVal.replace(/ /g, '+');
+      const size = parseFloat(sVal);
+      if (!isFinite(size) || size <= 0) {
+        console.warn(`Invalid size parameter: ${sVal}`);
+        return this.config.firstsize;
+      }
+      return size;
+    }
+    return null;  // No zoom/size specified in URL
+  }
+
+  // Legacy method for compatibility - returns zoom factor (may overflow for extreme values)
   getZoomFactorFromUrl() {
     const params = new URLSearchParams(document.location.search);
     let zVal = params.get('z');
     if (zVal) {
       zVal = zVal.replace(/ /g, '+');
-      return parseFloat(zVal);
+      const { mantissa, exponent } = this.parseScientificNotation(zVal);
+      // For display purposes, return the zoom factor (may be Infinity for extreme zooms)
+      return mantissa * Math.pow(10, exponent);
     }
     let sVal = params.get('s');
     if (sVal) {
@@ -2546,7 +2802,10 @@ class URLHandler {
         name: 'board',
         parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
-          const validTypes = ['cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran'];
+          const validTypes = [
+            'cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran',
+            'octzhuoran', 'octgpuzhuoran', 'octcpu'
+          ];
           if (validTypes.includes(boardType)) {
             configUpdates.forceBoard = boardType;
           } else {
@@ -2578,8 +2837,11 @@ class URLHandler {
         parse: (val, configUpdates) => {
           // URLSearchParams decodes '+' as space, convert back for scientific notation
           val = val.replace(/ /g, '+');
-          // zoomFromUrl is not stored in state - set directly on config object
-          this.config.zoomFromUrl = parseFloat(val);
+          // Parse scientific notation to handle extreme zoom values (e.g., 1e400)
+          const { mantissa, exponent } = this.parseScientificNotation(val);
+          // Store zoom parameters for later - size computation needs aspect-ratio-adjusted firstsize
+          // which isn't available until after initSizes() is called
+          this.config.zoomFromUrl = { mantissa, exponent };
         }
       },
       {
@@ -2588,9 +2850,13 @@ class URLHandler {
           // URLSearchParams decodes '+' as space, convert back for scientific notation
           val = val.replace(/ /g, '+');
           // Legacy parameter: s is the actual size in complex plane
-          // Convert to zoom factor: z = 3.0 / s
-          // zoomFromUrl is not stored in state - set directly on config object
-          this.config.zoomFromUrl = 3.0 / parseFloat(val);
+          const size = parseFloat(val);
+          if (!isFinite(size) || size <= 0) {
+            console.warn(`Invalid size parameter: ${val}`);
+            this.config.sizeFromUrl = this.config.firstsize;
+          } else {
+            this.config.sizeFromUrl = size;
+          }
         }
       },
       {
@@ -2653,14 +2919,15 @@ class URLHandler {
     if (c) {
       c = c.replace(/ /g, '+');
       for (const coords of c.split(',')) {
-        const m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]\d+)?)i)?/);
+        const m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]?\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]?\d+)?)i)?/);
         // Store coordinates; size will be calculated later after relativeScale is applied
+        // Use decimalToOct for full 60+ digit precision (qdParse only gives ~31 digits)
         startstate.sizes.push([
           null,  // Placeholder - will be filled in after initSizes()
-          m && m[1] ? qdParse(m[1]) : (startstate.sizes.length > 0 ?
-              startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstr),
-          m && m[2] ? qdParse(m[2]) : (startstate.sizes.length > 0 ?
-              startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstj)
+          m && m[1] ? decimalToOct(m[1]) : (startstate.sizes.length > 0 ?
+              startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstrOct),
+          m && m[2] ? decimalToOct(m[2]) : (startstate.sizes.length > 0 ?
+              startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstjOct)
         ]);
       }
     }
@@ -2680,21 +2947,27 @@ class URLHandler {
     let state = this.grid.currentGridState();
     let compactc = '';
     let commas = '';
-    let prev = [this.config.firstr, this.config.firstj];
+    let prev = [this.config.firstrOct, this.config.firstjOct];
     let prevj = -1;
     for (let j = 0; j <= state.sizes.length; j++) {
+      const view = this.grid.views[j];
+      const viewReOct = view?.sizesOct ? view.sizesOct[1] : state.sizes[j]?.[1];
+      const viewImOct = view?.sizesOct ? view.sizesOct[2] : state.sizes[j]?.[2];
       if (j < state.sizes.length &&
-          !qdCompare(state.sizes[j][1], prev[0]) &&
-          !qdCompare(state.sizes[j][2], prev[1])) {
+          !qdCompare(octToQd(viewReOct), octToQd(prev[0])) &&
+          !qdCompare(octToQd(viewImOct), octToQd(prev[1]))) {
         commas += ',';
       } else {
         if (prevj >= 0) {
-          compactc += `${formatcomplex(j - 1, state.sizes[prevj][1], state.sizes[prevj][2])},`;
+          const pv = this.grid.views[prevj];
+          const pre = pv?.sizesOct ? pv.sizesOct[1] : state.sizes[prevj][1];
+          const pim = pv?.sizesOct ? pv.sizesOct[2] : state.sizes[prevj][2];
+          compactc += `${formatcomplex(j - 1, pre, pim)},`;
         }
         compactc += commas;
         if (j < state.sizes.length) {
           commas = '';
-          prev = [state.sizes[j][1], state.sizes[j][2]];
+          prev = [viewReOct, viewImOct];
           prevj = j;
         }
       }
@@ -3490,7 +3763,8 @@ class MovieMode {
     scaleElement.href = URL.createObjectURL(this.recordedBlob);
     const k = this.explorer.grid.views.length - 1;
     const view = this.explorer.grid.views[k];
-    const coords = formatcomplex(k, view.sizes[1], view.sizes[2]);
+    // Use sizesOct for full precision at deep zoom
+    const coords = formatcomplex(k, view.sizesOct[1], view.sizesOct[2]);
     scaleElement.download = `mandelbrot${coords}-${view.it}.mp4`;
   }
 
@@ -3511,19 +3785,19 @@ class MovieMode {
     const colorT = expT * expT;
     const interpolatedSize = sourceSize * mulT;
 
-    // Use spline interpolation for center coordinates
-    const sourceCenter = [sourceView.sizes[1], sourceView.sizes[2]];
-    const targetCenter = [targetView.sizes[1], targetView.sizes[2]];
+    // Use oct-precision spline interpolation for center coordinates at deep zoom
+    const sourceCenter = [sourceView.sizesOct[1], sourceView.sizesOct[2]];
+    const targetCenter = [targetView.sizesOct[1], targetView.sizesOct[2]];
 
     const p0 = k > 0 ? [
-        this.explorer.grid.views[k-1].sizes[1],
-        this.explorer.grid.views[k-1].sizes[2]] : sourceCenter;
+        this.explorer.grid.views[k-1].sizesOct[1],
+        this.explorer.grid.views[k-1].sizesOct[2]] : sourceCenter;
     const p1 = sourceCenter;
     const p2 = targetCenter
     const p3 = k+2 < this.explorer.grid.views.length ? [
-        this.explorer.grid.views[k+2].sizes[1],
-        this.explorer.grid.views[k+2].sizes[2]] : targetCenter;
-    const interpolatedCenter = catmullRomSpline(p0, p1, p2, p3, t);
+        this.explorer.grid.views[k+2].sizesOct[1],
+        this.explorer.grid.views[k+2].sizesOct[2]] : targetCenter;
+    const interpolatedCenter = catmullRomSplineOct(p0, p1, p2, p3, t);
 
     // Clear the movie canvas with black (so unfinished pixels appear black)
     this.movieCtx.fillStyle = 'black';
@@ -3531,11 +3805,11 @@ class MovieMode {
 
     // Draw the current frame
     const scale = sourceSize / interpolatedSize;
-    const offsetX = qdMul(qdSub(interpolatedCenter[0], sourceCenter[0]),
-                          [this.explorer.config.dimsWidth / sourceSize, 0])[0];
+    const offsetX = octToNumber(toOctScale(toOctSub(interpolatedCenter[0], sourceCenter[0]),
+                          this.explorer.config.dimsWidth / sourceSize));
     const sourceHeight = sourceSize / this.explorer.config.aspectRatio;
-    const offsetY = qdMul(qdSub(sourceCenter[1], interpolatedCenter[1]),
-                          [this.explorer.config.dimsHeight / sourceHeight, 0])[0];
+    const offsetY = octToNumber(toOctScale(toOctSub(sourceCenter[1], interpolatedCenter[1]),
+                          this.explorer.config.dimsHeight / sourceHeight));
     this.movieCtx.save();
     this.movieCtx.imageSmoothingEnabled = true;
     this.movieCtx.imageSmoothingQuality = 'high';
@@ -3665,6 +3939,18 @@ class Scheduler {
     this.boardIds.set(k, id);  // Track which board ID is at this index
     this.assignments[k] = workerNumber;
 
+    const view = (this.grid && this.grid.views && this.grid.views[k]) ? this.grid.views[k] : null;
+    const viewOct = view && view.sizesOct ? view.sizesOct : null;
+    const sizeOct = (viewOct && viewOct.length > 0 && viewOct[0] !== undefined)
+      ? viewOct[0] : toOct(size);
+    const reOct = (viewOct && viewOct.length > 1 && viewOct[1] !== undefined)
+      ? viewOct[1] : toOct(re);
+    const imOct = (viewOct && viewOct.length > 2 && viewOct[2] !== undefined)
+      ? viewOct[2] : toOct(im);
+
+    if (!isFinite(size)) {
+      console.warn(`Board ${k}: non-finite size`, size, sizeOct);
+    }
     worker.postMessage({
       type: 'addBoard',
       data: {
@@ -3672,6 +3958,9 @@ class Scheduler {
         size,
         re,
         im,
+        sizeOct,
+        reOct,
+        imOct,
         config: {
           dimsArea: config.dimsArea,
           dimsWidth: config.dimsWidth,
@@ -3915,6 +4204,33 @@ class Scheduler {
   }
 }
 
+// Oct arithmetic helpers for orbit computation (must be defined before OrbitComputer)
+function toOctMul(a, b) {
+  const aa = toOct(a);
+  const bb = toOct(b);
+  const out = new Array(4);
+  AoctMul(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+  return out;
+}
+
+function toOctSquare(a) {
+  const aa = toOct(a);
+  const out = new Array(4);
+  AoctMul(out, 0, aa[0], aa[1], aa[2], aa[3], aa[0], aa[1], aa[2], aa[3]);
+  return out;
+}
+
+function toOctDouble(a) {
+  const aa = toOct(a);
+  return [aa[0] * 2, aa[1] * 2, aa[2] * 2, aa[3] * 2];
+}
+
+// Convert QD complex (4 elements: [r0, r1, i0, i1]) to oct complex (8 elements)
+function qdcToOctc(qdc) {
+  if (!qdc || qdc.length !== 4) return null;
+  return [qdc[0], qdc[1], 0, 0, qdc[2], qdc[3], 0, 0];
+}
+
 // Computes and displays iteration orbits when hovering over points.
 class OrbitComputer {
   constructor(explorer) {
@@ -3963,25 +4279,28 @@ class OrbitComputer {
     let view = this.explorer.grid.views[k];
 
     if (view && j >= 0 && j < this.explorer.config.dimsArea) {
-      let c = view.currentc(j);
-      let z = view.currentz(j);
+      let c = view.currentc(j);  // Now returns oct format (8 elements)
+      let zQd = view.currentz(j);  // Returns QD format (4 elements)
 
       // Calculate a further orbit beyond the old orbit.
+      // Orbits now use 8 elements per point (oct format)
       let finished = Math.max(view.currentp(j) || 0, Math.abs(view.nn[j] || 0));
       let whole = Math.min(finished || Math.max(view.it, 8));
-      let more = Math.min(whole - oldOrb.length / 4, 53);
+      let more = Math.min(whole - oldOrb.length / 8, 53);
       if (oldOrb.length) {
-        let s = oldOrb.slice(oldOrb.length - 4);
+        let s = oldOrb.slice(oldOrb.length - 8);
         orb = this.suborbit(s, c, more + 1);
-        orb.splice(0, 4);
+        orb.splice(0, 8);
       } else {
         orb = this.suborbit(c, c, more);
       }
-      if (!finished || (orb.length + oldOrb.length) / 4 < finished) {
+      if (!finished || (orb.length + oldOrb.length) / 8 < finished) {
         ongoing = true;
       }
       // Calculate a cycle and any messages
-      title = 'c=' + formatcomplex(k, [c[0], c[1]], [c[2], c[3]]).replaceAll('-', '\u2212');
+      // c is oct format: [r0, r1, r2, r3, i0, i1, i2, i3]
+      // Use full oct precision (4 components each) to avoid discretization at deep zoom
+      title = 'c=' + formatcomplex(k, [c[0], c[1], c[2], c[3]], [c[4], c[5], c[6], c[7]]).replaceAll('-', '\u2212');
       if (view.nn[j]) {
         if (view.nn[j] > 0) {
           title += MSG.diverges_in_ + view.nn[j];
@@ -3995,6 +4314,8 @@ class OrbitComputer {
             title += MSG.after_ + iters + MSG.period_ + periodStr;
           }
           let clen = fibonacciPeriod(view.currentp(j));
+          // Convert z from QD (4 elements) to oct (8 elements) for suborbit
+          const z = qdcToOctc(zQd);
           cyc = z ? this.suborbit(z, c, clen) : [];
         }
       } else {
@@ -4032,25 +4353,27 @@ class OrbitComputer {
   }
 
   suborbit(z, c, len) {
-    let r = [z[0], z[1]];
-    let j = [z[2], z[3]];
-    const cr = [c[0], c[1]];
-    const cj = [c[2], c[3]];
+    // z and c are in oct format: [r0, r1, r2, r3, i0, i1, i2, i3]
+    let r = [z[0], z[1], z[2], z[3]];
+    let j = [z[4], z[5], z[6], z[7]];
+    const cr = [c[0], c[1], c[2], c[3]];
+    const cj = [c[4], c[5], c[6], c[7]];
 
-    let result = [r[0], r[1], j[0], j[1]];
-    while (result.length < len * 4) {
-      let j2 = qdSquare(j);
-      let ja = qdMul(qdDouble(r), j);
-      let r2 = qdSquare(r);
-      let ra = qdSub(r2, j2);
+    // Result stores 8 elements per point (oct format)
+    let result = [r[0], r[1], r[2], r[3], j[0], j[1], j[2], j[3]];
+    while (result.length < len * 8) {
+      let j2 = toOctSquare(j);
+      let ja = toOctMul(toOctDouble(r), j);
+      let r2 = toOctSquare(r);
+      let ra = toOctSub(r2, j2);
       for (let ord = 2; ord < this.explorer.config.exponent; ord++) {
-        let rt = qdSub(qdMul(r, ra), qdMul(j, ja));
-        ja = qdAdd(qdMul(r, ja), qdMul(j, ra));
+        let rt = toOctSub(toOctMul(r, ra), toOctMul(j, ja));
+        ja = toOctAdd(toOctMul(r, ja), toOctMul(j, ra));
         ra = rt;
       }
-      r = qdAdd(ra, cr);
-      j = qdAdd(ja, cj);
-      result.push(r[0], r[1], j[0], j[1]);
+      r = toOctAdd(ra, cr);
+      j = toOctAdd(ja, cj);
+      result.push(r[0], r[1], r[2], r[3], j[0], j[1], j[2], j[3]);
     }
     return result;
   }
@@ -4061,13 +4384,19 @@ class OrbitComputer {
     if (!overlay) { return; }
     let ctx = overlay.getContext('2d');
     ctx.fillStyle = color;
-    let [s, cr, cj] = this.explorer.grid.views[k].sizes;
-    for (let i = 0; i < seq.length; i += 4) {
-      let r = [seq[i], seq[i+1]];
-      let j = [seq[i+2], seq[i+3]];
-      let x = (qdSub(r, cr)[0] / s + 0.5) * this.explorer.config.dimsWidth;
+    // Use sizesOct for full oct precision
+    const view = this.explorer.grid.views[k];
+    const sizeOct = view.sizesOct[0];
+    const crOct = view.sizesOct[1];
+    const cjOct = view.sizesOct[2];
+    const s = octToNumber(sizeOct);
+    // seq is in oct format: 8 elements per point
+    for (let i = 0; i < seq.length; i += 8) {
+      let r = [seq[i], seq[i+1], seq[i+2], seq[i+3]];
+      let j = [seq[i+4], seq[i+5], seq[i+6], seq[i+7]];
+      let x = (octToNumber(toOctSub(r, crOct)) / s + 0.5) * this.explorer.config.dimsWidth;
       const sHeight = s / this.explorer.config.aspectRatio;
-      let y = (qdSub(cj, j)[0] / sHeight + 0.5) * this.explorer.config.dimsHeight;
+      let y = (octToNumber(toOctSub(cjOct, j)) / sHeight + 0.5) * this.explorer.config.dimsHeight;
       const w = this.explorer.config.dimsWidth;
       const h = this.explorer.config.dimsHeight;
       if (x >= 0 && y >= 0 && x < w && y < h) {
@@ -4192,15 +4521,80 @@ function toSimpleFraction(decimal, maxDenominator = 100) {
   return [bestNum, bestDen];
 }
 
+// Convert oct value to decimal string with exact BigInt arithmetic.
+// This avoids the rounding errors that qd-based formatting introduces.
+function octToDecimalString(oct, digits) {
+  const o = Array.isArray(oct) ? oct : [oct, 0, 0, 0];
+  const internalScale = 60;
+
+  // Sum all limbs as exact BigInt values
+  let total = 0n;
+  for (let i = 0; i < 4; i++) {
+    if (o[i] !== 0) {
+      total += float64ToBigIntScaled(o[i], internalScale);
+    }
+  }
+
+  const neg = total < 0n;
+  if (neg) total = -total;
+
+  // Convert to decimal string
+  const divisor = BigInt(10) ** BigInt(internalScale);
+  const intPart = total / divisor;
+  let fracPart = total % divisor;
+
+  // Build the string
+  let result = intPart.toString();
+
+  if (digits > 0) {
+    // Pad fracPart to internalScale digits, then take first 'digits' digits
+    let fracStr = fracPart.toString().padStart(internalScale, '0');
+
+    // Round at position 'digits'
+    if (digits < fracStr.length) {
+      const roundDigit = parseInt(fracStr[digits]);
+      fracStr = fracStr.slice(0, digits);
+      if (roundDigit >= 5) {
+        // Carry the rounding
+        let carry = 1;
+        let chars = fracStr.split('');
+        for (let i = chars.length - 1; i >= 0 && carry; i--) {
+          const d = parseInt(chars[i]) + carry;
+          chars[i] = (d % 10).toString();
+          carry = Math.floor(d / 10);
+        }
+        fracStr = chars.join('');
+        if (carry) {
+          // Carry into integer part
+          result = (BigInt(result) + 1n).toString();
+        }
+      }
+    } else {
+      // Pad with zeros if needed
+      fracStr = fracStr.padEnd(digits, '0');
+    }
+
+    result += '.' + fracStr;
+  }
+
+  return result;
+}
+
 function formatcomplex(k, re, im) {
-  let pix = explorer.grid.views[k].sizes[0] / explorer.config.dimsWidth;
+  const view = explorer.grid.views[k];
+  const sizeOct = view && view.sizesOct ? view.sizesOct[0] : null;
+  const pix = (sizeOct ? octToNumber(sizeOct) : view.sizes[0]) / explorer.config.dimsWidth;
   let digits = Math.max(0, -Math.floor(Math.log10(pix)));
-  re = toQd(re);
-  im = toQd(im);
-  let rd = qdFixed(qdAbs(re), digits)
-  let id = qdFixed(qdAbs(im), digits)
-  let rs = re[0] < 0.0 ? '-' : '+';
-  let is = im[0] < 0.0 ? '-' : '+';
+
+  // Use BigInt-based conversion for exact decimal output
+  const reOct = Array.isArray(re) ? re : [re, 0, 0, 0];
+  const imOct = Array.isArray(im) ? im : [im, 0, 0, 0];
+
+  let rd = octToDecimalString(reOct, digits);
+  let id = octToDecimalString(imOct, digits);
+
+  let rs = reOct[0] < 0.0 ? '-' : '+';
+  let is = imOct[0] < 0.0 ? '-' : '+';
   return rs + rd + is + id + 'i';
 }
 
@@ -4229,6 +4623,28 @@ function catmullRomSpline(p0, p1, p2, p3, t) {
   return [
     catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),
     catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)
+  ];
+}
+
+// Oct-precision Catmull-Rom spline for deep zoom movie interpolation
+function catmullRom1DOct(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const c0 = (-t3 + 2*t2 - t) / 2;
+  const c2 = (-3*t3 + 4*t2 + t) / 2;
+  const c3 = (t3 - t2) / 2;
+  // Compute offsets from p1 for numerical stability
+  const s0 = toOctSub(p0, p1);
+  const s2 = toOctSub(p2, p1);
+  const s3 = toOctSub(p3, p1);
+  return toOctAdd(toOctAdd(toOctAdd(toOctScale(s0, c0),
+           toOctScale(s3, c3)), toOctScale(s2, c2)), p1);
+}
+
+function catmullRomSplineOct(p0, p1, p2, p3, t) {
+  return [
+    catmullRom1DOct(p0[0], p1[0], p2[0], p3[0], t),
+    catmullRom1DOct(p0[1], p1[1], p2[1], p3[1], t)
   ];
 }
 
@@ -4322,7 +4738,8 @@ const MAX_CHAOTIC_ITERATIONS = 100000;
 class Board {
   constructor(k, size, re, im, config, id) {
     this.k = k;    // Number in explorer
-    this.sizes = [size, toQd(re), toQd(im)];
+    // Only store oct-precision coordinates - derived getters provide qd/float access
+    this.sizesOct = [toOct(size), toOct(re), toOct(im)];
     this.id = id;  // Random ID
     this.config = config;  // Global config
 
@@ -4332,7 +4749,7 @@ class Board {
     this.ch = 0;            // Chaotic pixels
     this.effort = 1;        // Work-per pixel
 
-    this.pix = this.sizes[0] / this.config.dimsWidth;
+    this.pix = this.size / this.config.dimsWidth;
     this.epsilon = Math.min(1e-12, this.pix / 10);
     this.epsilon2 = Math.min(1e-9, this.pix * 10);
 
@@ -4352,11 +4769,21 @@ class Board {
     this.checkpointIter = new Array(this.config.dimsArea).fill(0);
   }
 
+  // Getter properties that derive from sizesOct (the authoritative source)
+  // This eliminates the redundant sizes array that caused precision bugs
+  get size() { return octToNumber(this.sizesOct[0]); }
+  get re() { return octToQd(this.sizesOct[1]); }
+  get im() { return octToQd(this.sizesOct[2]); }
+  // Backward-compatible getter - returns derived qd-precision array
+  // Prefer using sizesOct directly for full precision, or individual getters
+  get sizes() { return [this.size, this.re, this.im]; }
+
   serialize() {
     return {
       type: this.constructor.name,
       k: this.k,
-      sizes: this.sizes,
+      sizes: this.sizes,  // Uses getter for serialization
+      sizesOct: this.sizesOct,
       id: this.id,
       config: this.config,
       it: this.it,
@@ -4382,13 +4809,24 @@ class Board {
   static fromSerialized(serialized) {
     const subclasses = new Map([
       ['CpuBoard', CpuBoard],
+      ['OctCpuBoard', OctCpuBoard],
       ['PerturbationBoard', PerturbationBoard],
+      ['OctZhuoranBoard', OctZhuoranBoard],
       ['OctPerturbationBoard', OctPerturbationBoard],
       ['ZhuoranBoard', ZhuoranBoard],
       ['GpuBoard', GpuBoard],
-      ['GpuZhuoranBoard', GpuZhuoranBoard]
+      ['GpuZhuoranBoard', GpuZhuoranBoard],
+      ['OctGpuZhuoranBoard', OctGpuZhuoranBoard]
     ]);
-    return subclasses.get(serialized.type).fromSerialized(serialized);
+    const board = subclasses.get(serialized.type).fromSerialized(serialized);
+    if (!board.sizesOct) {
+      board.sizesOct = [
+        toOct(serialized.sizes ? serialized.sizes[0] : board.sizes[0]),
+        toOct(serialized.sizes ? serialized.sizes[1] : board.sizes[1]),
+        toOct(serialized.sizes ? serialized.sizes[2] : board.sizes[2])
+      ];
+    }
+    return board;
   }
 
   inspike(re, im) {
@@ -4448,7 +4886,9 @@ class CpuBoard extends Board {
     );
 
     // Override initialized values with serialized data
-    Object.assign(board, serialized);
+    // Note: 'sizes' is a computed getter, so exclude it from Object.assign
+    const { sizes, ...rest } = serialized;
+    Object.assign(board, rest);
 
     // Reconstruct sparse arrays from serialized data
     const cc = board.cc;
@@ -4605,6 +5045,226 @@ class CpuBoard extends Board {
 
 }
 
+// CPU board using direct oct-precision iteration (no perturbation).
+// Very slow but maximally accurate - serves as ground truth for verification.
+class OctCpuBoard extends Board {
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+    // Override epsilon for oct precision - need much tighter thresholds
+    // to avoid false convergence detection at deep zoom.
+    // Base Board uses pix/10 and pix*10, but for direct oct iteration
+    // we need thresholds much smaller than pixel size.
+    this.epsilon = this.pix * 1e-20;   // Final convergence threshold
+    this.epsilon2 = this.pix * 1e-15;  // Getting close threshold
+    // Use oct-precision values from parent (sizesOct was set in super())
+    // IMPORTANT: At deep zoom (z > 1e30), double precision cannot represent
+    // the pixel size or offset accurately. Must use oct precision throughout.
+    const sizeOct = this.sizesOct[0];
+    const reOct = this.sizesOct[1];
+    const imOct = this.sizesOct[2];
+    // Pre-compute size/aspectRatio in oct precision for y offsets
+    // Use toOctMul instead of toOctScale to capture error terms at deep zoom
+    const aspectRecipOct = toOct(1 / this.config.aspectRatio);
+    const sizeOverAspect = toOctMul(sizeOct, aspectRecipOct);
+    // Initialize board: cc = c values (8 floats per pixel), zz = current z (8 floats per pixel)
+    // bb = checkpoint z, ss = active pixel indices
+    // Format: [r0, r1, r2, r3, i0, i1, i2, i3] for each complex number
+    for (let y = 0; y < this.config.dimsHeight; y++) {
+      const jFrac = (0.5 - (y / this.config.dimsHeight));
+      // Use toOctMul instead of toOctScale to capture error terms
+      const jOct = toOctAdd(imOct, toOctMul(sizeOverAspect, toOct(jFrac)));
+      for (let x = 0; x < this.config.dimsWidth; x++) {
+        const rFrac = ((x / this.config.dimsWidth) - 0.5);
+        // Use toOctMul instead of toOctScale to capture error terms
+        const rOct = toOctAdd(reOct, toOctMul(sizeOct, toOct(rFrac)));
+        // Store c as 8 floats: [r0, r1, r2, r3, i0, i1, i2, i3]
+        this.cc.push(rOct[0], rOct[1], rOct[2], rOct[3], jOct[0], jOct[1], jOct[2], jOct[3]);
+        const r = rOct[0] + rOct[1] + rOct[2] + rOct[3];
+        const j = jOct[0] + jOct[1] + jOct[2] + jOct[3];
+        if (this.inspike(r, j)) {
+          this.ch += 1;
+        }
+      }
+    }
+    this.zz = this.cc.slice();  // Start with z = c
+    this.bb = this.cc.slice();  // Initial checkpoint = c
+    this.ss = Array(this.config.dimsArea).fill(null).map((_, i) => i);  // All pixels active
+  }
+
+  static fromSerialized(serialized) {
+    const board = new OctCpuBoard(
+      serialized.k,
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
+      serialized.config,
+      serialized.id
+    );
+
+    // Override initialized values with serialized data
+    const { sizes, ...rest } = serialized;
+    Object.assign(board, rest);
+
+    // Reconstruct sparse arrays from serialized data (8 floats per pixel)
+    const cc = board.cc;
+    board.cc = [];
+    board.zz = [];
+    board.bb = [];
+    board.pp = [];
+    for (let i = 0; i < serialized.ss.length; i++) {
+      const index = serialized.ss[i];
+      const i8 = index * 8;
+      for (let j = 0; j < 8; j++) {
+        board.cc[i8 + j] = cc[i8 + j];
+        board.zz[i8 + j] = serialized.zz[i * 8 + j];
+        board.bb[i8 + j] = serialized.bb[i * 8 + j];
+      }
+      board.pp[index] = serialized.pp[i];
+    }
+
+    return board;
+  }
+
+  serialize() {
+    return {
+      ...super.serialize(),
+      ss: this.ss,
+      zz: this.ss.flatMap(i => {
+        const i8 = i * 8;
+        return [this.zz[i8], this.zz[i8+1], this.zz[i8+2], this.zz[i8+3],
+                this.zz[i8+4], this.zz[i8+5], this.zz[i8+6], this.zz[i8+7]];
+      }),
+      bb: this.ss.flatMap(i => {
+        const i8 = i * 8;
+        return [this.bb[i8], this.bb[i8+1], this.bb[i8+2], this.bb[i8+3],
+                this.bb[i8+4], this.bb[i8+5], this.bb[i8+6], this.bb[i8+7]];
+      }),
+      pp: this.ss.map(index => this.pp[index]),
+    }
+  }
+
+  iterate() {
+    let changes = null;
+    let s = this.ss;    // speedy list of active pixel indices to compute
+    // Update checkpoints at fibonacciPeriod intervals (returns 1 at Fibonacci points)
+    if (fibonacciPeriod(this.it) == 1) {
+      for (let t = 0; t < s.length; ++t) {
+        let m = s[t];
+        if (this.nn[m]) continue;
+        const m8 = m * 8;
+        for (let i = 0; i < 8; i++) {
+          this.bb[m8 + i] = this.zz[m8 + i];
+        }
+        this.pp[m] = 0;  // Reset pp (period = iter when convergence first detected)
+      }
+    }
+    for (let t = 0; t < s.length; ++t) {
+      const index = s[t];
+      const computeResult = this.compute(index);
+      if (computeResult !== 0) {
+        if (!changes) {
+          changes = { iter: this.it, nn: [], vv: [] };
+        }
+        if (computeResult < 0) {
+          const m8 = index * 8;
+          changes.vv.push({
+            index: index,
+            z: [this.zz[m8] + this.zz[m8+1] + this.zz[m8+2] + this.zz[m8+3],
+                this.zz[m8+4] + this.zz[m8+5] + this.zz[m8+6] + this.zz[m8+7]],
+            p: this.pp[index]  // period
+          });
+        } else {
+          changes.nn.push(index);
+        }
+      }
+    }
+    if (changes) {
+      this.un -= changes.nn.length + changes.vv.length; // newly finished
+      this.di += changes.nn.length; // diverged
+    }
+    if (s.length > this.un * 1.25) {
+      this.compact();
+    }
+
+    this.it++;
+    this.queueChanges(changes);
+  }
+
+  compact() {
+    this.ss = this.ss.filter(i => !this.nn[i]);
+  }
+
+  compute(m) {
+    if (this.nn[m]) return 0;
+    const m8 = m * 8;
+    // Extract z as oct complex: [r0, r1, r2, r3] and [i0, i1, i2, i3]
+    const zr = [this.zz[m8], this.zz[m8+1], this.zz[m8+2], this.zz[m8+3]];
+    const zi = [this.zz[m8+4], this.zz[m8+5], this.zz[m8+6], this.zz[m8+7]];
+
+    // Mandelbrot iteration: z = z² + c using oct precision
+    // z² = (zr + zi*i)² = zr² - zi² + 2*zr*zi*i
+    const zr2 = toOctSquare(zr);      // zr²
+    const zi2 = toOctSquare(zi);      // zi²
+    const zri = toOctMul(zr, zi);     // zr * zi
+
+    // Check escape: |z|² > 4 using FULL oct precision comparison
+    // IMPORTANT: Cannot sum components to double and compare - this loses precision
+    // when |z|² ≈ 4 and differences are at 1e-34 scale. Adjacent pixels would escape
+    // at the same iteration, creating vertical stripes in the output.
+    // Instead, compute |z|² - 4 in oct precision and check if positive.
+    const mag2Oct = toOctAdd(zr2, zi2);  // |z|² in oct precision
+    const diffOct = toOctSub(mag2Oct, [4, 0, 0, 0]);  // |z|² - 4
+    // Check if diff > 0: find first non-zero component and check its sign
+    const escaped = diffOct[0] > 0 ||
+      (diffOct[0] === 0 && (diffOct[1] > 0 ||
+        (diffOct[1] === 0 && (diffOct[2] > 0 ||
+          (diffOct[2] === 0 && diffOct[3] > 0)))));
+    if (escaped) {
+      this.nn[m] = this.it;
+      return 1;  // Diverged
+    }
+
+    const newZr = toOctSub(zr2, zi2); // zr² - zi²
+    const newZi = toOctDouble(zri);   // 2 * zr * zi
+
+    // Add c
+    const cr = [this.cc[m8], this.cc[m8+1], this.cc[m8+2], this.cc[m8+3]];
+    const ci = [this.cc[m8+4], this.cc[m8+5], this.cc[m8+6], this.cc[m8+7]];
+    const finalZr = toOctAdd(newZr, cr);
+    const finalZi = toOctAdd(newZi, ci);
+
+    // Store back
+    this.zz[m8] = finalZr[0]; this.zz[m8+1] = finalZr[1];
+    this.zz[m8+2] = finalZr[2]; this.zz[m8+3] = finalZr[3];
+    this.zz[m8+4] = finalZi[0]; this.zz[m8+5] = finalZi[1];
+    this.zz[m8+6] = finalZi[2]; this.zz[m8+7] = finalZi[3];
+
+    // Check convergence: compare current z to checkpoint
+    // IMPORTANT: Must compute difference in oct precision FIRST, then convert to double.
+    // If we sum to double first and then subtract, we lose precision due to catastrophic
+    // cancellation when z ≈ 2 (fixed point) and differences are at 1e-35 scale.
+    const bbR = [this.bb[m8], this.bb[m8+1], this.bb[m8+2], this.bb[m8+3]];
+    const bbI = [this.bb[m8+4], this.bb[m8+5], this.bb[m8+6], this.bb[m8+7]];
+    const diffR = toOctSub(finalZr, bbR);
+    const diffI = toOctSub(finalZi, bbI);
+    const db = Math.abs(diffR[0] + diffR[1] + diffR[2] + diffR[3]) +
+               Math.abs(diffI[0] + diffI[1] + diffI[2] + diffI[3]);
+    if (db <= this.epsilon2) {
+      if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
+      if (db <= this.epsilon) {
+        this.nn[m] = -this.it;
+        const cR = this.cc[m8] + this.cc[m8+1] + this.cc[m8+2] + this.cc[m8+3];
+        const cI = this.cc[m8+4] + this.cc[m8+5] + this.cc[m8+6] + this.cc[m8+7];
+        if (this.inspike(cR, cI) && this.ch > 0) {
+          this.ch -= 1;
+        }
+        return -1;  // Converged
+      }
+    }
+    return 0;  // Continue iterating
+  }
+}
+
 // CPU board using perturbation theory with sparse quad precision anchors.
 class PerturbationBoard extends Board {
   constructor(k, size, re, im, config, id) {
@@ -4698,7 +5358,9 @@ class PerturbationBoard extends Board {
     const cc = board.cc;
 
     // Override initialized values with serialized data
-    Object.assign(board, serialized);
+    // Note: 'sizes' is a computed getter, so exclude it from Object.assign
+    const { sizes, ...rest } = serialized;
+    Object.assign(board, rest);
     delete board.pertZZ;
 
     // Reconstruct arrays from serialized data, leaving empty spots
@@ -5060,7 +5722,9 @@ class OctPerturbationBoard extends Board {
     const cc = board.cc;
 
     // Override initialized values with serialized data
-    Object.assign(board, serialized);
+    // Note: 'sizes' is a computed getter, so exclude it from Object.assign
+    const { sizes, ...rest } = serialized;
+    Object.assign(board, rest);
     delete board.pertZZ;
 
     // Reconstruct arrays from serialized data, leaving empty spots
@@ -5226,16 +5890,189 @@ class OctPerturbationBoard extends Board {
 }
 
 // Utility helpers for oct-precision operations (inline duplicates to avoid refactor)
-function toOct(x) { return Array.isArray(x) ? x : [x, 0, 0, 0]; }
+function toOct(x) {
+  if (!Array.isArray(x)) return [x, 0, 0, 0];
+  if (x.length >= 4) return [x[0], x[1], x[2], x[3]];
+  if (x.length === 3) return [x[0], x[1], x[2], 0];
+  return [x[0], x[1] || 0, 0, 0];
+}
 
 function toOctScale(a, s) {
-  return [a[0] * s, a[1] * s, a[2] * s, a[3] * s];
+  const o = toOct(a);
+  return [o[0] * s, o[1] * s, o[2] * s, o[3] * s];
 }
 
 function toOctAdd(a, b) {
+  const aa = toOct(a);
+  const bb = toOct(b);
   const out = new Array(4);
-  AoctAdd(out, 0, a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]);
+  AoctAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
   return out;
+}
+
+function toOctSub(a, b) {
+  const bb = toOct(b);
+  return toOctAdd(a, [-bb[0], -bb[1], -bb[2], -bb[3]]);
+}
+
+function toOctMul(a, b) {
+  const aa = toOct(a);
+  const bb = toOct(b);
+  const out = new Array(4);
+  AoctMul(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+  return out;
+}
+
+function toOctSquare(a) {
+  const aa = toOct(a);
+  const out = new Array(4);
+  AoctMul(out, 0, aa[0], aa[1], aa[2], aa[3], aa[0], aa[1], aa[2], aa[3]);
+  return out;
+}
+
+function toOctDouble(a) {
+  const aa = toOct(a);
+  return [aa[0] * 2, aa[1] * 2, aa[2] * 2, aa[3] * 2];
+}
+
+function octToNumber(o) {
+  const v = toOct(o);
+  return v[0] + v[1] + v[2] + v[3];
+}
+
+function octToQd(o) {
+  const v = toOct(o);
+  return [v[0], v[1] + v[2] + v[3]];
+}
+
+function decimalToOct(decimalString) {
+  let s = decimalString.trim().toLowerCase();
+  const neg = s.startsWith('-');
+  if (neg) s = s.slice(1);
+  if (s.startsWith('+')) s = s.slice(1);
+
+  // Handle scientific notation: split on 'e'
+  let exp = 0;
+  const eIdx = s.indexOf('e');
+  if (eIdx !== -1) {
+    exp = parseInt(s.slice(eIdx + 1), 10);
+    s = s.slice(0, eIdx);
+  }
+
+  // Parse mantissa
+  const parts = s.split('.');
+  const intPart = parts[0] || '0';
+  const fracPart = parts[1] || '';
+
+  // Scale tracks decimal places in the BigInt representation
+  // Positive exp shifts decimal right, negative shifts left
+  let scale = fracPart.length - exp;
+  const bigStr = intPart + fracPart;
+  let n = BigInt(bigStr.replace(/^0+/, '') || '0');
+  if (neg) n = -n;
+
+  // If scale is negative, we need to multiply by 10^|scale|
+  if (scale < 0) {
+    n = n * (BigInt(10) ** BigInt(-scale));
+    scale = 0;
+  }
+
+  // Convert to oct-precision by extracting limbs that sum to the exact decimal value.
+  // The challenge: n/10^scale may not be exactly representable in float64.
+  // Example: -19/10 = -1.9 exactly, but float64(-1.9) ≈ -1.89999999999999991...
+  //
+  // We use a high-precision internal scale (60 decimal places) to exactly represent
+  // the float64 values, then work with that throughout the computation.
+
+  // Use internal scale of 60 decimal places - enough for ~200 bits of precision
+  // which exceeds the 53-bit mantissa of float64 plus any exponent adjustment
+  const internalScale = 60;
+
+  // Scale to the internal scale
+  if (scale < internalScale) {
+    // Scale up to internal precision
+    n = n * (BigInt(10) ** BigInt(internalScale - scale));
+  } else if (scale > internalScale) {
+    // Scale down to internal precision (truncates excess precision)
+    n = n / (BigInt(10) ** BigInt(scale - internalScale));
+  }
+  // Now n represents the value at 10^(-internalScale) scale
+
+  const limbs = [];
+  let residual = n;
+  const divisor = BigInt(10) ** BigInt(internalScale);
+
+  for (let i = 0; i < 4; i++) {
+    if (residual === 0n) {
+      limbs.push(0);
+      continue;
+    }
+
+    // Get the limb as a float64 approximation
+    const limb = Number(residual) / Number(divisor);
+    limbs.push(limb);
+
+    // Compute the exact BigInt value that this float64 represents at internal scale.
+    const limbBigInt = float64ToBigIntScaled(limb, internalScale);
+    residual = residual - limbBigInt;
+  }
+  return limbs;
+}
+
+// Convert a float64 to its exact BigInt representation, scaled by 10^scale.
+// Returns the BigInt n such that n / 10^scale equals the exact value of the float64.
+function float64ToBigIntScaled(x, scale) {
+  if (x === 0) return 0n;
+  if (!Number.isFinite(x)) return 0n;
+
+  // Get the exact rational representation of the float64
+  // x = sign * mantissa * 2^binaryExp where mantissa is in [2^52, 2^53) for normalized numbers
+  const sign = x < 0 ? -1n : 1n;
+  const absX = Math.abs(x);
+
+  // Extract binary exponent and mantissa from IEEE 754 representation
+  const buffer = new ArrayBuffer(8);
+  const view = new DataView(buffer);
+  view.setFloat64(0, absX);
+  const bits = view.getBigUint64(0);
+
+  const expBits = Number((bits >> 52n) & 0x7FFn);
+  const mantissaBits = bits & 0xFFFFFFFFFFFFFn;  // 52 bits
+
+  let binaryExp;
+  let mantissa;
+  if (expBits === 0) {
+    // Subnormal number: x = mantissa * 2^(-1022-52)
+    mantissa = mantissaBits;
+    binaryExp = -1022 - 52;
+  } else {
+    // Normal number: x = (1 + mantissa/2^52) * 2^(expBits - 1023)
+    // = (2^52 + mantissa) * 2^(expBits - 1023 - 52)
+    mantissa = (1n << 52n) | mantissaBits;
+    binaryExp = expBits - 1023 - 52;
+  }
+
+  // Now x = sign * mantissa * 2^binaryExp (exactly)
+  // We need: result / 10^scale = sign * mantissa * 2^binaryExp
+  // So: result = sign * mantissa * 2^binaryExp * 10^scale
+  //            = sign * mantissa * 2^binaryExp * 2^scale * 5^scale
+  //            = sign * mantissa * 5^scale * 2^(binaryExp + scale)
+
+  const five = 5n;
+  const two = 2n;
+  let result = sign * mantissa * (five ** BigInt(scale));
+  const netBinaryExp = binaryExp + scale;
+
+  if (netBinaryExp >= 0) {
+    result = result * (two ** BigInt(netBinaryExp));
+  } else {
+    // Division by power of 2.
+    // With scale=60, this division should be exact for all normal float64 values
+    // because 60 decimal digits provide more than enough precision.
+    result = result / (two ** BigInt(-netBinaryExp));
+  }
+
+  return result;
 }
 
 // Reference Orbit Threading - enables robust cycle detection despite rebasing
@@ -5880,22 +6717,19 @@ class OctZhuoranBoard extends Board {
   }
 
   initPixels(size, re, im) {
-    const pixW = size / this.config.dimsWidth;
-    const pixH = (size / this.config.aspectRatio) / this.config.dimsHeight;
     const dimsWidth = this.config.dimsWidth;
     const dimsHeight = this.config.dimsHeight;
+    const sizeY = size / this.config.aspectRatio;
+    // Reference point is at view center, so deltas are simply pixel offsets
+    // Compute deltas directly to avoid precision loss from (re + offset) - refRe
     const refRe = this.refC[0] + this.refC[1] + this.refC[2] + this.refC[3];
     const refIm = this.refC[4] + this.refC[5] + this.refC[6] + this.refC[7];
-    const re_double = Array.isArray(re) ? (re[0] + (re[1]||0) + (re[2]||0) + (re[3]||0)) : re;
-    const im_double = Array.isArray(im) ? (im[0] + (im[1]||0) + (im[2]||0) + (im[3]||0)) : im;
     for (let y = 0; y < dimsHeight; y++) {
       const yFrac = (0.5 - y / dimsHeight);
-      const ci = im_double + yFrac * (size / this.config.aspectRatio);
-      const dci = ci - refIm;
+      const dci = yFrac * sizeY;  // Delta from reference (at center)
       for (let x = 0; x < dimsWidth; x++) {
         const xFrac = (x / dimsWidth - 0.5);
-        const cr = re_double + xFrac * size;
-        const dcr = cr - refRe;
+        const dcr = xFrac * size;  // Delta from reference (at center)
         const index = y * dimsWidth + x;
         this.dc[index * 2] = dcr;
         this.dc[index * 2 + 1] = dci;
@@ -5903,6 +6737,9 @@ class OctZhuoranBoard extends Board {
         this.dz[index * 2 + 1] = dci;
         this.refIter[index] = 1;
         this.pixelIndexes.push(index);
+        // For spike detection, use absolute coordinates
+        const cr = refRe + dcr;
+        const ci = refIm + dci;
         if (this.inspike(cr, ci)) {
           this.ch += 1;
         }
@@ -5910,15 +6747,7 @@ class OctZhuoranBoard extends Board {
     }
   }
 
-  static fromSerialized(serialized) {
-    const board = new OctZhuoranBoard(
-      serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
-      serialized.config,
-      serialized.id
-    );
+  static restoreFromSerialized(board, serialized) {
     Object.assign(board, serialized);
     if (!serialized.maxRefIter) {
       board.maxRefIter = 1;
@@ -5927,6 +6756,18 @@ class OctZhuoranBoard extends Board {
       }
     }
     return board;
+  }
+
+  static fromSerialized(serialized) {
+    const board = new this(
+      serialized.k,
+      serialized.sizes[0],
+      serialized.sizes[1],
+      serialized.sizes[2],
+      serialized.config,
+      serialized.id
+    );
+    return this.restoreFromSerialized(board, serialized);
   }
 
   serialize() {
@@ -5959,10 +6800,12 @@ class OctZhuoranBoard extends Board {
           changes.vv.push({
             index: index,
             z: [this.dz[index*2], this.dz[index*2+1]],
-            p: this.refIter[index]  // use refIter as proxy
+            p: this.refIter[index],  // use refIter as proxy
+            iter: -this.nn[index]  // actual iteration (negative for convergence)
           });
         } else {
-          changes.nn.push(index);
+          // Include actual iteration value (refIter) for perturbation boards
+          changes.nn.push({index, iter: this.nn[index]});
         }
       } else {
         newPixelIndexes.push(index);
@@ -5978,7 +6821,9 @@ class OctZhuoranBoard extends Board {
   }
 
   extendReferenceOrbit() {
-    while (!this.refOrbitEscaped && this.refIterations < this.maxRefIterations) {
+    // Continue extending even after escape - perturbation can still use escaped reference
+    // orbit values, the deltas just grow larger. This is simpler than rebasing.
+    while (this.refIterations < this.maxRefIterations) {
       const last = this.refOrbit[this.refIterations];
       const rr = last[0]; const rl1 = last[1]; const rl2 = last[2]; const rl3 = last[3];
       const ri = last[4]; const il1 = last[5]; const il2 = last[6]; const il3 = last[7];
@@ -6009,39 +6854,77 @@ class OctZhuoranBoard extends Board {
   }
 
   iteratePixel(index) {
-    let r = this.dz[index*2];
-    let j = this.dz[index*2+1];
+    let dr = this.dz[index*2];
+    let di = this.dz[index*2+1];
     let refIter = this.refIter[index];
-    const reDelta = this.dc[index*2];
-    const imDelta = this.dc[index*2+1];
-    while (refIter < this.refIterations) {
-      const orbit = this.refOrbit[refIter];
-      const zr = orbit[0] + orbit[1] + orbit[2] + orbit[3];
-      const zi = orbit[4] + orbit[5] + orbit[6] + orbit[7];
-      // Perturbation: z = z_ref + dz
-      const nr = zr + r;
-      const ni = zi + j;
-      // Iterate: z = z^2 + c_ref + dc
-      const rr = nr*nr - ni*ni;
-      const ri = 2*nr*ni;
-      r = rr + this.refC[0] + this.refC[1] + this.refC[2] + this.refC[3] + reDelta - zr;
-      j = ri + this.refC[4] + this.refC[5] + this.refC[6] + this.refC[7] + imDelta - zi;
-      refIter++;
-      const mag2 = (nr*nr + ni*ni);
+    const dcR = this.dc[index*2];
+    const dcI = this.dc[index*2+1];
+
+    // Handle case when pixel has caught up to escaped reference orbit
+    // Imagina's approach: rebase to beginning of reference orbit
+    if (refIter >= this.refIterations && this.refOrbitEscaped) {
+      // Get current total z = z_ref_last + dz
+      const lastOrbit = this.refOrbit[this.refIterations - 1];
+      const lastRefR = lastOrbit[0] + lastOrbit[1] + lastOrbit[2] + lastOrbit[3];
+      const lastRefI = lastOrbit[4] + lastOrbit[5] + lastOrbit[6] + lastOrbit[7];
+
+      // Set dz to current total position (VecResetAndSync)
+      dr = lastRefR + dr;
+      di = lastRefI + di;
+
+      // Check if we've escaped during rebasing
+      const mag2 = dr * dr + di * di;
       if (mag2 > 4) {
         this.nn[index] = refIter;
         this.refIter[index] = refIter;
+        this.dz[index*2] = dr;
+        this.dz[index*2+1] = di;
         return 1;
       }
-      if (Math.abs(r) + Math.abs(j) < this.epsilon) {
-        this.nn[index] = -refIter;
-        this.refIter[index] = refIter;
-        return -1;
-      }
+
+      // Restart from iteration 0 (where z_ref = 0)
+      refIter = 0;
     }
-    this.dz[index*2] = r;
-    this.dz[index*2+1] = j;
+
+    // Perturbation phase: do ONE iteration (matching ZhuoranBoard design)
+    // Get reference orbit value for current iteration
+    const orbit = this.refOrbit[refIter];
+    const zr = orbit[0] + orbit[1] + orbit[2] + orbit[3];
+    const zi = orbit[4] + orbit[5] + orbit[6] + orbit[7];
+
+    // Check escape BEFORE iteration (using current z = z_ref + dz)
+    const totalR = zr + dr;
+    const totalI = zi + di;
+    const mag2 = totalR * totalR + totalI * totalI;
+    if (mag2 > 4) {
+      this.nn[index] = refIter;
+      this.refIter[index] = refIter;
+      return 1;
+    }
+
+    // Perturbation formula: dz_new = 2*z_ref*dz + dz² + dc
+    // This comes from: (z_ref + dz)² + c - z_ref_new
+    //                = (z_ref + dz)² + (c_ref + dc) - (z_ref² + c_ref)
+    //                = z_ref² + 2*z_ref*dz + dz² + dc - z_ref²
+    //                = 2*z_ref*dz + dz² + dc
+    const twoZrDr = 2 * (zr * dr - zi * di);  // Re(2*z_ref*dz)
+    const twoZrDi = 2 * (zr * di + zi * dr);  // Im(2*z_ref*dz)
+    const dzSqR = dr * dr - di * di;          // Re(dz²)
+    const dzSqI = 2 * dr * di;                // Im(dz²)
+    const newDr = twoZrDr + dzSqR + dcR;
+    const newDi = twoZrDi + dzSqI + dcI;
+
+    this.dz[index*2] = newDr;
+    this.dz[index*2+1] = newDi;
+    refIter++;
     this.refIter[index] = refIter;
+
+    // Check convergence (period detection)
+    if (Math.abs(newDr) + Math.abs(newDi) < this.epsilon) {
+      this.nn[index] = -refIter;
+      return -1;
+    }
+
     if (refIter > this.maxRefIter) this.maxRefIter = refIter;
     return 0;
   }
@@ -6057,10 +6940,7 @@ class GpuBaseBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
-    // Save parameters
-    this.size = size;
-    this.re = re;
-    this.im = im;
+    // Note: size, re, im are available via inherited getters from Board (computed from sizesOct)
 
     // WebGPU state (shared by all GPU board implementations)
     this.device = null;
@@ -6250,8 +7130,15 @@ class GpuBaseBoard extends Board {
   static getBoardClass(pixelSize) {
     // Select board type based on zoom level
     // Shallow zooms: GpuBoard (simple float32)
-    // Deep zooms: GpuZhuoranBoard (perturbation theory)
-    return pixelSize > 1e-6 ? GpuBoard : GpuZhuoranBoard;
+    // Medium zooms: GpuZhuoranBoard (GPU perturbation, quad precision reference)
+    // Very deep zooms: OctGpuZhuoranBoard (GPU perturbation, oct precision reference)
+    // Note: GPU perturbation uses float32 for deltas. While float32 underflows at ~1e-38,
+    // precision issues appear earlier due to accumulated rounding in iteration.
+    // At z~1e30 (pixelSize ~1e-33), pixelation becomes visible with GPU board.
+    // Use oct precision earlier (pixelSize < 1e-29 ≈ z > 3e28) for better quality.
+    if (pixelSize > 1e-6) return GpuBoard;
+    if (pixelSize < 1e-29) return OctZhuoranBoard;
+    return GpuZhuoranBoard;
   }
 
   // Abstract methods - subclasses must implement these
@@ -7977,6 +8864,107 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   }
 }
 
+// GPU perturbation board placeholder for oct precision (currently same as quad-based GPU)
+class OctGpuZhuoranBoard extends GpuZhuoranBoard {
+  constructor(k, size, re, im, config, id) {
+    // Build oct reference first
+    const refReOct = toOct(re);
+    const refImOct = toOct(im);
+    const refReQd = octToQd(refReOct);
+    const refImQd = octToQd(refImOct);
+    super(k, size, [refReQd[0], refReQd[1]], [refImQd[0], refImQd[1]], config, id);
+    // Replace refC with oct-aware values (stored as quad pairs for GPU upload)
+    this.refC = [refReQd[0], refReQd[1], refImQd[0], refImQd[1]];
+    this.refOrbit = [[0, 0, 0, 0]];
+    this.refOrbit.push(this.refC.slice());
+    this.refIterations = 1;
+    this.refOrbitEscaped = false;
+    // Full oct reference orbit retained to downcast to f32 right before upload
+    this.octOrbit = [[0, 0, 0, 0, 0, 0, 0, 0], [...refReOct, ...refImOct]];
+    this.refC_oct = [...refReOct, ...refImOct];
+  }
+
+  extendReferenceOrbit() {
+    // Compute one more iteration of the reference orbit in oct precision
+    const last = this.octOrbit[this.refIterations];
+    const rr = [last[0], last[1], last[2], last[3]];
+    const ri = [last[4], last[5], last[6], last[7]];
+    const tt = new Array(32);
+
+    AoctSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);
+    AoctSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);
+    AoctMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3], ri[0], ri[1], ri[2], ri[3]);
+    AoctAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);
+    for (let ord = 2; ord < this.config.exponent; ord++) {
+      AoctMul(tt, 0, ri[0], ri[1], ri[2], ri[3], tt[8], tt[9], tt[10], tt[11]);
+      AoctMul(tt, 4, rr[0], rr[1], rr[2], rr[3], tt[16], tt[17], tt[18], tt[19]);
+      AoctAdd(tt, 12, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
+      AoctAdd(tt, 16, tt[12], tt[13], tt[14], tt[15], 0, 0, 0, 0);
+    }
+
+    const nzrOct = new Array(4);
+    const nziOct = new Array(4);
+    AoctAdd(nzrOct, 0, tt[16], tt[17], tt[18], tt[19],
+      this.refC_oct[0], this.refC_oct[1], this.refC_oct[2], this.refC_oct[3]);
+    AoctAdd(nziOct, 0, tt[8], tt[9], tt[10], tt[11],
+      this.refC_oct[4], this.refC_oct[5], this.refC_oct[6], this.refC_oct[7]);
+
+    const nzrQd = octToQd(nzrOct);
+    const nziQd = octToQd(nziOct);
+    this.refOrbit.push([nzrQd[0], nzrQd[1], nziQd[0], nziQd[1]]);
+    this.octOrbit.push([nzrOct[0], nzrOct[1], nzrOct[2], nzrOct[3],
+                        nziOct[0], nziOct[1], nziOct[2], nziOct[3]]);
+    this.refIterations++;
+
+    if (this.refIterations >= 2584) {
+      const reSum = nzrOct[0] + nzrOct[1] + nzrOct[2] + nzrOct[3];
+      const imSum = nziOct[0] + nziOct[1] + nziOct[2] + nziOct[3];
+      const getPoint = (i) => {
+        if (i < 0 || i >= this.octOrbit.length) return null;
+        const p = this.octOrbit[i];
+        return { re: p[0] + p[1] + p[2] + p[3], im: p[4] + p[5] + p[6] + p[7] };
+      };
+      this.threading.addOrbitPoint(this.refIterations, reSum, imSum, getPoint);
+    }
+  }
+
+  async uploadReferenceOrbit() {
+    // Override to downcast from full oct orbit at upload time
+    const totalIters = this.refIterations + 1;
+    if (this.lastUploadedOrbitLength < this.refIterations) {
+      const startIdx = Math.max(0, this.lastUploadedOrbitLength + 1);
+      const count = this.refIterations - startIdx + 1;
+      const orbitF32 = new Float32Array(count * 2);
+
+      for (let i = 0; i < count; i++) {
+        const orbitIdx = startIdx + i;
+        const ref = this.octOrbit[orbitIdx];
+        orbitF32[i * 2] = ref[0] + ref[1] + ref[2] + ref[3];
+        orbitF32[i * 2 + 1] = ref[4] + ref[5] + ref[6] + ref[7];
+      }
+
+      const byteOffset = startIdx * 2 * 4;
+      this.device.queue.writeBuffer(this.buffers.refOrbit, byteOffset, orbitF32);
+      this.lastUploadedOrbitLength = this.refIterations;
+    }
+
+    // Threading still uses parent implementation (float data derived from sums)
+    await super.uploadThreading();
+    return totalIters;
+  }
+
+  static fromSerialized(serialized) {
+    return new OctGpuZhuoranBoard(
+      serialized.k,
+      serialized.sizes[0],
+      serialized.sizes[1],
+      serialized.sizes[2],
+      serialized.config,
+      serialized.id
+    );
+  }
+}
+
 function workerLog(message) {
   self.postMessage({
     type: 'log',
@@ -8010,8 +8998,19 @@ self.onmessage = async function(e) {
 
       // Explicit board selection via board= parameter
       const forcedBoardType = data.config.forceBoard;
+      const sizeArgRaw = data.sizeOct || data.size;
+      const sizeScalar = Array.isArray(sizeArgRaw)
+        ? sizeArgRaw.reduce((a, b) => a + (b || 0), 0)
+        : sizeArgRaw;
+      if (!isFinite(sizeScalar)) {
+        console.warn(`Board ${data.k}: non-finite size`, data.size, data.sizeOct);
+      }
       let board;
-      const pixelSize = data.size / data.config.dimsWidth;
+      const reArg = data.reOct || data.re;
+      const imArg = data.imOct || data.im;
+      // Use oct-precision size when available (needed for OctCpuBoard at z > 1e30)
+      const sizeArg = data.sizeOct || sizeScalar;
+      const pixelSize = sizeScalar / data.config.dimsWidth;
       const GpuBoardClass = GpuBaseBoard.getBoardClass(pixelSize);
       const bytesPerPixel = GpuBoardClass.BYTES_PER_PIXEL;
       const gpuSafe = GpuBaseBoard.isSafeDims(
@@ -8027,47 +9026,71 @@ self.onmessage = async function(e) {
         // Use switch to avoid referencing undefined classes
         switch (forcedBoardType) {
           case 'cpu':
-            board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            board = new CpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
             break;
           case 'zhuoran':
-            board = new ZhuoranBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            board = new ZhuoranBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
             break;
           case 'perturbation':
             board = new PerturbationBoard(
-              data.k, data.size, data.re, data.im, data.config, data.id
+              data.k, sizeArg, reArg, imArg, data.config, data.id
             );
             break;
           case 'gpu':
             if (webGPUAvailable && gpuSafe) {
-              board = new GpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+              board = new GpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
             } else {
               console.warn('GpuBoard requested but not available, falling back to CpuBoard');
-              board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+              board = new CpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
             }
             break;
           case 'gpuzhuoran':
             if (webGPUAvailable && gpuSafe) {
               board = new GpuZhuoranBoard(
-                data.k, data.size, data.re, data.im, data.config, data.id
+                data.k, sizeArg, reArg, imArg, data.config, data.id
               );
             } else {
               console.warn(
                 'GpuZhuoranBoard requested but not available, falling back to ZhuoranBoard'
               );
               board = new ZhuoranBoard(
-                data.k, data.size, data.re, data.im, data.config, data.id
+                data.k, sizeArg, reArg, imArg, data.config, data.id
               );
             }
             break;
+          case 'octzhuoran':
+            board = new OctZhuoranBoard(
+              data.k, sizeArg, reArg, imArg, data.config, data.id
+            );
+            break;
+          case 'octgpuzhuoran':
+            if (webGPUAvailable && gpuSafe) {
+              board = new OctGpuZhuoranBoard(
+                data.k, sizeArg, reArg, imArg, data.config, data.id
+              );
+            } else {
+              console.warn(
+                'OctGpuZhuoranBoard requested but not available, falling back to OctZhuoranBoard'
+              );
+              board = new OctZhuoranBoard(
+                data.k, sizeArg, reArg, imArg, data.config, data.id
+              );
+            }
+            break;
+          case 'octcpu':
+            board = new OctCpuBoard(
+              data.k, sizeArg, reArg, imArg, data.config, data.id
+            );
+            break;
           default:
             console.error(`Unknown board type: ${forcedBoardType}, falling back to CpuBoard`);
-            board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+            board = new CpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
         }
       } else if (enableGPU && webGPUAvailable && gpuSafe) {
         // Two-tier strategy with WebGPU:
         // - Shallow zooms: GpuBoard with simple float32 iteration
         // - Deep zooms: GpuZhuoranBoard with quad precision reference + float32 perturbations
-        board = new GpuBoardClass(data.k, data.size, data.re, data.im, data.config, data.id);
+        board = new GpuBoardClass(data.k, sizeArg, reArg, imArg, data.config, data.id);
       } else {
         if (enableGPU && webGPUAvailable && !gpuSafe) {
           const dimsArea = data.config.dimsArea;
@@ -8082,17 +9105,26 @@ self.onmessage = async function(e) {
         }
         // WebGPU disabled or unavailable - use CPU-based boards
         if (pixelSize > 1e-12) {
-          board = new CpuBoard(data.k, data.size, data.re, data.im, data.config, data.id);
-        } else if (pixelSize < 1e-28) {
-          board = new OctPerturbationBoard(
-            data.k, data.size, data.re, data.im, data.config, data.id
+          board = new CpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+        } else if (pixelSize < 1e-30) {
+          board = new OctZhuoranBoard(
+            data.k, sizeArg, reArg, imArg, data.config, data.id
           );
         } else {
-          board = new PerturbationBoard(data.k, data.size, data.re, data.im, data.config, data.id);
+          board = new PerturbationBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
         }
       }
 
       boards.set(data.k, board);
+
+      // Restore oct centers if provided
+      if (data.sizeOct || data.reOct || data.imOct) {
+        board.sizesOct = [
+          data.sizeOct || board.sizesOct[0] || toOct(sizeScalar),
+          data.reOct || board.sizesOct[1] || toOct(reArg),
+          data.imOct || board.sizesOct[2] || toOct(imArg)
+        ];
+      }
 
       const re_val = Array.isArray(data.re) ? (data.re[0] + data.re[1]) : data.re;
       const im_val = Array.isArray(data.im) ? (data.im[0] + data.im[1]) : data.im;
@@ -8262,6 +9294,126 @@ function toQdc(c) {
   const r = toQd(c[0]);
   const j = toQd(c[1]);
   return [r[0], r[1], j[0], j[1]];
+}
+
+// Oct helpers - defined here for main thread, also in workerCode for workers
+// Guard against redefinition when test harness concatenates scripts
+if (typeof toOct === 'undefined') {
+  function toOct(x) {
+    if (!Array.isArray(x)) return [x, 0, 0, 0];
+    if (x.length >= 4) return [x[0], x[1], x[2], x[3]];
+    if (x.length === 3) return [x[0], x[1], x[2], 0];
+    return [x[0], x[1] || 0, 0, 0];
+  }
+  globalThis.toOct = toOct;
+
+  function toOctScale(a, s) {
+    const o = toOct(a);
+    return [o[0] * s, o[1] * s, o[2] * s, o[3] * s];
+  }
+  globalThis.toOctScale = toOctScale;
+
+  function toOctAdd(a, b) {
+    const aa = toOct(a);
+    const bb = toOct(b);
+    const out = new Array(4);
+    AoctAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+    return out;
+  }
+  globalThis.toOctAdd = toOctAdd;
+
+  function toOctSub(a, b) {
+    const bb = toOct(b);
+    return toOctAdd(a, [-bb[0], -bb[1], -bb[2], -bb[3]]);
+  }
+  globalThis.toOctSub = toOctSub;
+
+  function octToNumber(o) {
+    const v = toOct(o);
+    return v[0] + v[1] + v[2] + v[3];
+  }
+  globalThis.octToNumber = octToNumber;
+
+  function octToQd(o) {
+    const v = toOct(o);
+    return [v[0], v[1] + v[2] + v[3]];
+  }
+  globalThis.octToQd = octToQd;
+
+  // Convert a float64 to its exact BigInt representation, scaled by 10^scale.
+  function float64ToBigIntScaled(x, scale) {
+    if (x === 0) return 0n;
+    if (!Number.isFinite(x)) return 0n;
+    const sign = x < 0 ? -1n : 1n;
+    const absX = Math.abs(x);
+    const buffer = new ArrayBuffer(8);
+    const view = new DataView(buffer);
+    view.setFloat64(0, absX);
+    const bits = view.getBigUint64(0);
+    const expBits = Number((bits >> 52n) & 0x7FFn);
+    const mantissaBits = bits & 0xFFFFFFFFFFFFFn;
+    let binaryExp, mantissa;
+    if (expBits === 0) {
+      mantissa = mantissaBits;
+      binaryExp = -1022 - 52;
+    } else {
+      mantissa = (1n << 52n) | mantissaBits;
+      binaryExp = expBits - 1023 - 52;
+    }
+    const five = 5n, two = 2n;
+    let result = sign * mantissa * (five ** BigInt(scale));
+    const netBinaryExp = binaryExp + scale;
+    if (netBinaryExp >= 0) {
+      result = result * (two ** BigInt(netBinaryExp));
+    } else {
+      result = result / (two ** BigInt(-netBinaryExp));
+    }
+    return result;
+  }
+  globalThis.float64ToBigIntScaled = float64ToBigIntScaled;
+
+  function decimalToOct(decimalString) {
+    let s = decimalString.trim().toLowerCase();
+    const neg = s.startsWith('-');
+    if (neg) s = s.slice(1);
+    if (s.startsWith('+')) s = s.slice(1);
+    let exp = 0;
+    const eIdx = s.indexOf('e');
+    if (eIdx !== -1) {
+      exp = parseInt(s.slice(eIdx + 1), 10);
+      s = s.slice(0, eIdx);
+    }
+    const parts = s.split('.');
+    const intPart = parts[0] || '0';
+    const fracPart = parts[1] || '';
+    let scale = fracPart.length - exp;
+    const bigStr = intPart + fracPart;
+    let n = BigInt(bigStr.replace(/^0+/, '') || '0');
+    if (neg) n = -n;
+    if (scale < 0) {
+      n = n * (BigInt(10) ** BigInt(-scale));
+      scale = 0;
+    }
+    // Use internal scale of 60 decimal places for exact float64 representation
+    const internalScale = 60;
+    if (scale < internalScale) {
+      n = n * (BigInt(10) ** BigInt(internalScale - scale));
+    } else if (scale > internalScale) {
+      n = n / (BigInt(10) ** BigInt(scale - internalScale));
+    }
+    const limbs = [];
+    let residual = n;
+    const divisor = BigInt(10) ** BigInt(internalScale);
+    for (let i = 0; i < 4; i++) {
+      if (residual === 0n) { limbs.push(0); continue; }
+      const limb = Number(residual) / Number(divisor);
+      limbs.push(limb);
+      const limbBigInt = float64ToBigIntScaled(limb, internalScale);
+      residual = residual - limbBigInt;
+    }
+    return limbs;
+  }
+  globalThis.decimalToOct = decimalToOct;
 }
 
 function fast2Sum(a, b) {
@@ -8780,7 +9932,15 @@ function AoctMul(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   const [c2, e2] = AoctTwoProduct(a2, b1);
 
   const [p1, carry12] = AsymmetricTwoSum(c1, c2);
-  const crossError = e0 + e1 + e2 + carry12;
+
+  // FIX: e0 (error from main product) can be much larger than p1 (cross terms)
+  // when a1,b1 are ~1 but a2,b2 are tiny (e.g., at deep zoom).
+  // We must combine them with TwoSum to preserve both, ensuring proper
+  // magnitude ordering for renormalization.
+  const [s1, s1_error] = AsymmetricTwoSum(e0, p1);
+
+  // Now s1 contains the larger part, s1_error contains what was lost in the sum
+  const lowErrors = e1 + e2 + carry12 + s1_error;
 
   const cross2 = a1 * b3 + a2 * b2 + a3 * b1;
   const cross3 = a1 * b4 + a2 * b3 + a3 * b2 + a4 * b1;
@@ -8788,15 +9948,27 @@ function AoctMul(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   const cross5 = a3 * b4 + a4 * b3;
   const tail = a4 * b4;
 
-  const s2 = crossError + cross2;
+  const s2 = lowErrors + cross2;
   const s3 = cross3 + cross4;
   const s4 = cross5 + tail;
 
-  AoctRenorm(r, i, p0, p1, s2, s3, s4);
+  AoctRenorm(r, i, p0, s1, s2, s3, s4);
 }
 
 function AoctSquare(r, i, a1, a2, a3, a4) {
   AoctMul(r, i, a1, a2, a3, a4, a1, a2, a3, a4);
+}
+
+// Oct-precision absolute difference: r = |a - b|
+// Used for cycle detection in OctPerturbationBoard
+function AoctAbsSub(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
+  AoctAdd(r, i, a1, a2, a3, a4, -b1, -b2, -b3, -b4);
+  if (r[i] + r[i+1] + r[i+2] + r[i+3] < 0) {
+    r[i] = -r[i];
+    r[i+1] = -r[i+1];
+    r[i+2] = -r[i+2];
+    r[i+3] = -r[i+3];
+  }
 }
 
 // Additional shared utility function for tracking cycles.
