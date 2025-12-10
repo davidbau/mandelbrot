@@ -4828,16 +4828,18 @@ class Board {
 class CpuBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    // Convert re and im to quad precision if they're scalars
-    if (typeof re === 'number') re = toQd(re);
-    if (typeof im === 'number') im = toQd(im);
+    // Use this.size/this.re/this.im getters which properly convert from oct to scalar/qd
+    // This handles the case when size/re/im are passed as oct arrays from the worker
+    const sizeScalar = this.size;
+    const reQd = this.re;  // Returns qd array from getter
+    const imQd = this.im;  // Returns qd array from getter
     // Initialize board: cc = c values, zz = current z, bb = checkpoint z, ss = active pixel indices
     for (let y = 0; y < this.config.dimsHeight; y++) {
       const jFrac = (0.5 - (y / this.config.dimsHeight));
-      const j = jFrac * (size / this.config.aspectRatio) + im[0];  // Scale by height
+      const j = jFrac * (sizeScalar / this.config.aspectRatio) + imQd[0];  // Scale by height
       for (let x = 0; x < this.config.dimsWidth; x++) {
         const rFrac = ((x / this.config.dimsWidth) - 0.5);
-        const r = rFrac * size + re[0];  // Scale by width
+        const r = rFrac * sizeScalar + reQd[0];  // Scale by width
         this.cc.push(r, j);
         if (this.inspike(r, j)) {
           this.ch += 1;
@@ -6131,9 +6133,9 @@ class ZhuoranBoard extends Board {
     this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low] for each iteration
     this.refOrbitEscaped = false;
     this.refIterations = 0;  // Current length of reference orbit
-    // Reference point (center of image)
-    const refRe = toQd(re);
-    const refIm = toQd(im);
+    // Reference point (center of image) - use getters which properly convert oct arrays
+    const refRe = this.re;  // Returns qd array via octToQd
+    const refIm = this.im;  // Returns qd array via octToQd
     this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
     // Per-pixel data (double precision)
     this.dc = [];  // Delta c from reference point [real, imag] pairs
@@ -6151,28 +6153,32 @@ class ZhuoranBoard extends Board {
     this.refIterations = 1;  // We have computed 1 iteration beyond z=0
     this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});  // iter 0
     this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});  // iter 1
-    this.initPixels(size, re, im);
+    this.initPixels();
     this.effort = 2;  // Slightly lower than PerturbationBoard since simpler
   }
 
-  initPixels(size, re, im) {
-    const pixW = size / this.config.dimsWidth;
-    const pixH = (size / this.config.aspectRatio) / this.config.dimsHeight;
+  initPixels() {
+    // Use getters which properly convert oct arrays to scalar/qd
+    const sizeScalar = this.size;
+    const reQd = this.re;
+    const imQd = this.im;
+    const pixW = sizeScalar / this.config.dimsWidth;
+    const pixH = (sizeScalar / this.config.aspectRatio) / this.config.dimsHeight;
     const dimsWidth = this.config.dimsWidth;
     const dimsHeight = this.config.dimsHeight;
     const refRe = this.refC[0] + this.refC[1];
     const refIm = this.refC[2] + this.refC[3];
     // Convert quad precision arrays to doubles for perturbation deltas
-    const re_double = Array.isArray(re) ? (re[0] + re[1]) : re;
-    const im_double = Array.isArray(im) ? (im[0] + im[1]) : im;
+    const re_double = reQd[0] + reQd[1];
+    const im_double = imQd[0] + imQd[1];
     // Initialize all pixels as perturbations from the reference point
     for (let y = 0; y < dimsHeight; y++) {
       const yFrac = (0.5 - y / dimsHeight);
-      const ci = im_double + yFrac * (size / this.config.aspectRatio);
+      const ci = im_double + yFrac * (sizeScalar / this.config.aspectRatio);
       const dci = ci - refIm;
       for (let x = 0; x < dimsWidth; x++) {
         const xFrac = (x / dimsWidth - 0.5);
-        const cr = re_double + xFrac * size;
+        const cr = re_double + xFrac * sizeScalar;
         const dcr = cr - refRe;
         const index = y * dimsWidth + x;
         this.dc[index * 2] = dcr;
@@ -6248,9 +6254,9 @@ class ZhuoranBoard extends Board {
           changes = { iter: this.it, nn: [], vv: [] };
         }
         if (result > 0) {
-          // Diverged: result=1 means before iteration, result=2 means after
+          // Diverged
           changes.nn.push(index);
-          this.nn[index] = (result === 1) ? this.it : this.it + 1;
+          this.nn[index] = this.it;
           this.di += 1;
           this.un -= 1;
         } else {
@@ -6480,23 +6486,8 @@ class ZhuoranBoard extends Board {
     // Update dz first before checking divergence
     this.dz[index2] = newDr;
     this.dz[index2 + 1] = newDi;
-    // Check divergence using the next reference iteration (refOrbit[refIter+1] + newDz)
-    const nextRefIter = refIter + 1;
-    if (nextRefIter >= this.refOrbit.length) {
-      // This shouldn't happen because we extend the reference orbit beforehand
-      console.error(`nextRefIter ${nextRefIter} >= refOrbit.length ${this.refOrbit.length}`);
-      return 1;
-    }
-    const nextRef = this.refOrbit[nextRefIter];
-    const nextRefR = nextRef[0] + nextRef[1];
-    const nextRefI = nextRef[2] + nextRef[3];
-    // Use escape radius 2 (magnitude² > 4)
-    const totalR = nextRefR + newDr;
-    const totalI = nextRefI + newDi;
-    const totalMag2 = totalR * totalR + totalI * totalI;
-    if (totalMag2 > 4) {
-      return 2;  // Diverged after iteration: report this.it + 1
-    }
+    // Note: We don't check escape here after iteration. Instead, the next iteration's
+    // pre-check will detect it. This matches CpuBoard's behavior and keeps nn counting simple.
 
     // CONVERGENCE DETECTION: fibonacciPeriod returns 1 at Fibonacci checkpoints
     // Step 1: Update checkpoint at fibonacciPeriod intervals
