@@ -2804,7 +2804,7 @@ class URLHandler {
           const boardType = val.toLowerCase();
           const validTypes = [
             'cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran',
-            'octzhuoran', 'octgpuzhuoran', 'octcpu'
+            'octgpuzhuoran', 'octcpu'
           ];
           if (validTypes.includes(boardType)) {
             configUpdates.forceBoard = boardType;
@@ -4811,7 +4811,6 @@ class Board {
       ['CpuBoard', CpuBoard],
       ['OctCpuBoard', OctCpuBoard],
       ['PerturbationBoard', PerturbationBoard],
-      ['OctZhuoranBoard', OctZhuoranBoard],
       ['OctPerturbationBoard', OctPerturbationBoard],
       ['ZhuoranBoard', ZhuoranBoard],
       ['GpuBoard', GpuBoard],
@@ -6689,247 +6688,6 @@ class ZhuoranBoard extends Board {
   }
 }
 
-// Oct-precision reference orbit perturbation board (CPU)
-class OctZhuoranBoard extends Board {
-  constructor(k, size, re, im, config, id) {
-    super(k, size, re, im, config, id);
-    this.maxRefIterations = 10000;
-    this.refOrbit = [];  // Array of [r0,r1,r2,r3,i0,i1,i2,i3]
-    this.refOrbitEscaped = false;
-    this.refIterations = 0;
-    const refRe = toOct(re);
-    const refIm = toOct(im);
-    this.refC = [refRe[0], refRe[1], refRe[2], refRe[3], refIm[0], refIm[1], refIm[2], refIm[3]];
-    this.dc = [];
-    this.dz = [];
-    this.refIter = [];
-    this.pixelIndexes = [];
-    this.maxRefIter = 1;
-    this.tt = new Array(32);
-    this.threading = new ReferenceOrbitThreading(this.epsilon);
-    this.refOrbit.push([0, 0, 0, 0, 0, 0, 0, 0]);  // z=0
-    this.refOrbit.push(this.refC.slice());         // z=c
-    this.refIterations = 1;
-    this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});
-    this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});
-    this.initPixels(size, re, im);
-    this.effort = 3;
-  }
-
-  initPixels(size, re, im) {
-    const dimsWidth = this.config.dimsWidth;
-    const dimsHeight = this.config.dimsHeight;
-    const sizeY = size / this.config.aspectRatio;
-    // Reference point is at view center, so deltas are simply pixel offsets
-    // Compute deltas directly to avoid precision loss from (re + offset) - refRe
-    const refRe = this.refC[0] + this.refC[1] + this.refC[2] + this.refC[3];
-    const refIm = this.refC[4] + this.refC[5] + this.refC[6] + this.refC[7];
-    for (let y = 0; y < dimsHeight; y++) {
-      const yFrac = (0.5 - y / dimsHeight);
-      const dci = yFrac * sizeY;  // Delta from reference (at center)
-      for (let x = 0; x < dimsWidth; x++) {
-        const xFrac = (x / dimsWidth - 0.5);
-        const dcr = xFrac * size;  // Delta from reference (at center)
-        const index = y * dimsWidth + x;
-        this.dc[index * 2] = dcr;
-        this.dc[index * 2 + 1] = dci;
-        this.dz[index * 2] = dcr;
-        this.dz[index * 2 + 1] = dci;
-        this.refIter[index] = 1;
-        this.pixelIndexes.push(index);
-        // For spike detection, use absolute coordinates
-        const cr = refRe + dcr;
-        const ci = refIm + dci;
-        if (this.inspike(cr, ci)) {
-          this.ch += 1;
-        }
-      }
-    }
-  }
-
-  static restoreFromSerialized(board, serialized) {
-    Object.assign(board, serialized);
-    if (!serialized.maxRefIter) {
-      board.maxRefIter = 1;
-      for (let i = 0; i < board.refIter.length; i++) {
-        if (board.refIter[i] > board.maxRefIter) board.maxRefIter = board.refIter[i];
-      }
-    }
-    return board;
-  }
-
-  static fromSerialized(serialized) {
-    const board = new this(
-      serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
-      serialized.config,
-      serialized.id
-    );
-    return this.restoreFromSerialized(board, serialized);
-  }
-
-  serialize() {
-    return {
-      ...super.serialize(),
-      refOrbit: this.refOrbit,
-      refOrbitEscaped: this.refOrbitEscaped,
-      refIterations: this.refIterations,
-      refC: this.refC,
-      dc: this.dc,
-      dz: this.dz,
-      refIter: this.refIter,
-      pixelIndexes: this.pixelIndexes
-    };
-  }
-
-  iterate() {
-    let changes = null;
-    const targetRefIterations = Math.max(this.it + 100, this.maxRefIter + 100);
-    while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
-      this.extendReferenceOrbit();
-    }
-    const newPixelIndexes = [];
-    for (const index of this.pixelIndexes) {
-      if (this.nn[index]) continue;
-      const result = this.iteratePixel(index);
-      if (result !== 0) {
-        if (!changes) changes = { iter: this.it, nn: [], vv: [] };
-        if (result < 0) {
-          changes.vv.push({
-            index: index,
-            z: [this.dz[index*2], this.dz[index*2+1]],
-            p: this.refIter[index],  // use refIter as proxy
-            iter: -this.nn[index]  // actual iteration (negative for convergence)
-          });
-        } else {
-          // Include actual iteration value (refIter) for perturbation boards
-          changes.nn.push({index, iter: this.nn[index]});
-        }
-      } else {
-        newPixelIndexes.push(index);
-      }
-    }
-    this.pixelIndexes = newPixelIndexes;
-    this.un -= (changes ? changes.nn.length + changes.vv.length : 0);
-    this.di += (changes ? changes.nn.length : 0);
-    if (changes) {
-      this.queueChanges(changes);
-    }
-    this.it++;
-  }
-
-  extendReferenceOrbit() {
-    // Continue extending even after escape - perturbation can still use escaped reference
-    // orbit values, the deltas just grow larger. This is simpler than rebasing.
-    while (this.refIterations < this.maxRefIterations) {
-      const last = this.refOrbit[this.refIterations];
-      const rr = last[0]; const rl1 = last[1]; const rl2 = last[2]; const rl3 = last[3];
-      const ri = last[4]; const il1 = last[5]; const il2 = last[6]; const il3 = last[7];
-      const tt = this.tt;
-      AoctSquare(tt, 0, rr, rl1, rl2, rl3);
-      AoctSquare(tt, 4, ri, il1, il2, il3);
-      AoctMul(tt, 8, 2*rr, 2*rl1, 2*rl2, 2*rl3, ri, il1, il2, il3);
-      AoctAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);
-      for (let ord=2; ord < this.config.exponent; ord++) {
-        AoctMul(tt, 0, ri, il1, il2, il3, tt[8], tt[9], tt[10], tt[11]);
-        AoctMul(tt, 4, rr, rl1, rl2, rl3, tt[16], tt[17], tt[18], tt[19]);
-        AoctAdd(tt, 12, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
-        AoctAdd(tt, 16, tt[12], tt[13], tt[14], tt[15], 0,0,0,0);
-      }
-      const nzr = new Array(4);
-      const nzi = new Array(4);
-      AoctAdd(nzr, 0, tt[16], tt[17], tt[18], tt[19], this.refC[0], this.refC[1], this.refC[2], this.refC[3]);
-      AoctAdd(nzi, 0, tt[8], tt[9], tt[10], tt[11], this.refC[4], this.refC[5], this.refC[6], this.refC[7]);
-      const nzr_f = nzr[0] + nzr[1];
-      const nzi_f = nzi[0] + nzi[1];
-      if (nzr_f*nzr_f + nzi_f*nzi_f > 4) {
-        this.refOrbitEscaped = true;
-      }
-      this.refOrbit.push([nzr[0], nzr[1], nzr[2], nzr[3], nzi[0], nzi[1], nzi[2], nzi[3]]);
-      this.refIterations++;
-      this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});
-    }
-  }
-
-  iteratePixel(index) {
-    let dr = this.dz[index*2];
-    let di = this.dz[index*2+1];
-    let refIter = this.refIter[index];
-    const dcR = this.dc[index*2];
-    const dcI = this.dc[index*2+1];
-
-    // Handle case when pixel has caught up to escaped reference orbit
-    // Imagina's approach: rebase to beginning of reference orbit
-    if (refIter >= this.refIterations && this.refOrbitEscaped) {
-      // Get current total z = z_ref_last + dz
-      const lastOrbit = this.refOrbit[this.refIterations - 1];
-      const lastRefR = lastOrbit[0] + lastOrbit[1] + lastOrbit[2] + lastOrbit[3];
-      const lastRefI = lastOrbit[4] + lastOrbit[5] + lastOrbit[6] + lastOrbit[7];
-
-      // Set dz to current total position (VecResetAndSync)
-      dr = lastRefR + dr;
-      di = lastRefI + di;
-
-      // Check if we've escaped during rebasing
-      const mag2 = dr * dr + di * di;
-      if (mag2 > 4) {
-        this.nn[index] = refIter;
-        this.refIter[index] = refIter;
-        this.dz[index*2] = dr;
-        this.dz[index*2+1] = di;
-        return 1;
-      }
-
-      // Restart from iteration 0 (where z_ref = 0)
-      refIter = 0;
-    }
-
-    // Perturbation phase: do ONE iteration (matching ZhuoranBoard design)
-    // Get reference orbit value for current iteration
-    const orbit = this.refOrbit[refIter];
-    const zr = orbit[0] + orbit[1] + orbit[2] + orbit[3];
-    const zi = orbit[4] + orbit[5] + orbit[6] + orbit[7];
-
-    // Check escape BEFORE iteration (using current z = z_ref + dz)
-    const totalR = zr + dr;
-    const totalI = zi + di;
-    const mag2 = totalR * totalR + totalI * totalI;
-    if (mag2 > 4) {
-      this.nn[index] = refIter;
-      this.refIter[index] = refIter;
-      return 1;
-    }
-
-    // Perturbation formula: dz_new = 2*z_ref*dz + dz² + dc
-    // This comes from: (z_ref + dz)² + c - z_ref_new
-    //                = (z_ref + dz)² + (c_ref + dc) - (z_ref² + c_ref)
-    //                = z_ref² + 2*z_ref*dz + dz² + dc - z_ref²
-    //                = 2*z_ref*dz + dz² + dc
-    const twoZrDr = 2 * (zr * dr - zi * di);  // Re(2*z_ref*dz)
-    const twoZrDi = 2 * (zr * di + zi * dr);  // Im(2*z_ref*dz)
-    const dzSqR = dr * dr - di * di;          // Re(dz²)
-    const dzSqI = 2 * dr * di;                // Im(dz²)
-    const newDr = twoZrDr + dzSqR + dcR;
-    const newDi = twoZrDi + dzSqI + dcI;
-
-    this.dz[index*2] = newDr;
-    this.dz[index*2+1] = newDi;
-    refIter++;
-    this.refIter[index] = refIter;
-
-    // Check convergence (period detection)
-    if (Math.abs(newDr) + Math.abs(newDi) < this.epsilon) {
-      this.nn[index] = -refIter;
-      return -1;
-    }
-
-    if (refIter > this.maxRefIter) this.maxRefIter = refIter;
-    return 0;
-  }
-}
-
 // WebGPU-accelerated Mandelbrot computation using single-precision float32
 // GPU computes all pixels in parallel using standard Mandelbrot iteration
 // Base class for WebGPU-accelerated boards
@@ -7137,7 +6895,7 @@ class GpuBaseBoard extends Board {
     // At z~1e30 (pixelSize ~1e-33), pixelation becomes visible with GPU board.
     // Use oct precision earlier (pixelSize < 1e-29 ≈ z > 3e28) for better quality.
     if (pixelSize > 1e-6) return GpuBoard;
-    if (pixelSize < 1e-29) return OctZhuoranBoard;
+    if (pixelSize < 1e-29) return OctCpuBoard;
     return GpuZhuoranBoard;
   }
 
@@ -9058,11 +8816,6 @@ self.onmessage = async function(e) {
               );
             }
             break;
-          case 'octzhuoran':
-            board = new OctZhuoranBoard(
-              data.k, sizeArg, reArg, imArg, data.config, data.id
-            );
-            break;
           case 'octgpuzhuoran':
             if (webGPUAvailable && gpuSafe) {
               board = new OctGpuZhuoranBoard(
@@ -9070,9 +8823,9 @@ self.onmessage = async function(e) {
               );
             } else {
               console.warn(
-                'OctGpuZhuoranBoard requested but not available, falling back to OctZhuoranBoard'
+                'OctGpuZhuoranBoard requested but not available, falling back to OctCpuBoard'
               );
-              board = new OctZhuoranBoard(
+              board = new OctCpuBoard(
                 data.k, sizeArg, reArg, imArg, data.config, data.id
               );
             }
@@ -9107,7 +8860,7 @@ self.onmessage = async function(e) {
         if (pixelSize > 1e-12) {
           board = new CpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
         } else if (pixelSize < 1e-30) {
-          board = new OctZhuoranBoard(
+          board = new OctCpuBoard(
             data.k, sizeArg, reArg, imArg, data.config, data.id
           );
         } else {
