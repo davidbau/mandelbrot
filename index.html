@@ -6992,13 +6992,16 @@ class GpuBaseBoard extends Board {
     // Select board type based on zoom level
     // Shallow zooms: GpuBoard (simple float32)
     // Medium zooms: GpuZhuoranBoard (GPU perturbation, quad precision reference)
-    // Very deep zooms: OctGpuZhuoranBoard (GPU perturbation, oct precision reference)
-    // Note: GPU perturbation uses float32 for deltas. While float32 underflows at ~1e-38,
-    // precision issues appear earlier due to accumulated rounding in iteration.
-    // At z~1e30 (pixelSize ~1e-33), pixelation becomes visible with GPU board.
-    // Use oct precision earlier (pixelSize < 1e-29 ≈ z > 3e28) for better quality.
+    // Deep zooms: OctGpuZhuoranBoard (GPU perturbation, oct precision reference)
+    // Ultra-deep zooms: OctCpuBoard (for zooms where GPU float32 underflows)
+    // Note: GPU perturbation uses float32 for deltas. Float32 underflows at ~1e-38,
+    // so use CPU for ultra-deep zooms (pixelSize < 1e-35 ≈ z > 3e34).
     if (pixelSize > 1e-6) return GpuBoard;
-    if (pixelSize < 1e-29) return OctCpuBoard;
+    // Ultra-deep zooms: GPU float32 underflows, use CPU
+    if (pixelSize < 1e-35) return OctCpuBoard;
+    // Deep zooms: use oct precision reference orbit
+    if (pixelSize < 1e-29) return OctGpuZhuoranBoard;
+    // Medium zooms: use quad precision reference orbit
     return GpuZhuoranBoard;
   }
 
@@ -8689,6 +8692,26 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       }
     }
 
+    // Handle reference orbit escape: mark remaining pixels as diverged
+    // When the reference orbit escapes, all pixels that are still computing
+    // should be marked as diverged at the reference orbit's escape iteration
+    if (this.refOrbitEscaped) {
+      const escapeIter = this.refIterations;  // Iteration when ref orbit escaped
+      for (let i = 0; i < dimsArea; i++) {
+        if (this.nn[i] === 0) {  // Still computing
+          this.nn[i] = escapeIter;
+          this.pp[i] = 1;
+          this.di++;
+          this.un--;
+
+          if (!pixelsByIteration.has(escapeIter)) {
+            pixelsByIteration.set(escapeIter, []);
+          }
+          pixelsByIteration.get(escapeIter).push(i);
+        }
+      }
+    }
+
     // Create change objects grouped by iteration
     const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
     const sortedIterations = Array.from(allIterations).sort((a, b) => a - b);
@@ -8752,15 +8775,30 @@ class OctGpuZhuoranBoard extends GpuZhuoranBoard {
     const ri = [last[4], last[5], last[6], last[7]];
     const tt = new Array(32);
 
-    AoctSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);
-    AoctSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);
-    AoctMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3], ri[0], ri[1], ri[2], ri[3]);
-    AoctAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);
+    // Check for escape using sum of oct components
+    const rSum = rr[0] + rr[1] + rr[2] + rr[3];
+    const iSum = ri[0] + ri[1] + ri[2] + ri[3];
+    const mag = rSum * rSum + iSum * iSum;
+    if (mag > 1e10) {
+      this.refOrbitEscaped = true;
+      return;
+    }
+
+    // Compute z^2 = (zr + zi*i)^2 = zr^2 - zi^2 + 2*zr*zi*i
+    AoctSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
+    AoctSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
+    AoctMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3], ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
+    AoctAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
+
+    // For higher exponents (z^n where n > 2), multiply by z iteratively
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      AoctMul(tt, 0, ri[0], ri[1], ri[2], ri[3], tt[8], tt[9], tt[10], tt[11]);
-      AoctMul(tt, 4, rr[0], rr[1], rr[2], rr[3], tt[16], tt[17], tt[18], tt[19]);
-      AoctAdd(tt, 12, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
-      AoctAdd(tt, 16, tt[12], tt[13], tt[14], tt[15], 0, 0, 0, 0);
+      AoctMul(tt, 0, ri[0], ri[1], ri[2], ri[3], tt[8], tt[9], tt[10], tt[11]);         // j * ja
+      AoctMul(tt, 4, rr[0], rr[1], rr[2], rr[3], tt[16], tt[17], tt[18], tt[19]);       // r * ra
+      AoctAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
+      AoctMul(tt, 0, rr[0], rr[1], rr[2], rr[3], tt[8], tt[9], tt[10], tt[11]);         // r * ja
+      AoctMul(tt, 4, ri[0], ri[1], ri[2], ri[3], tt[16], tt[17], tt[18], tt[19]);       // j * ra
+      AoctAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
+      AoctSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);                                   // ra = rt
     }
 
     const nzrOct = new Array(4);
