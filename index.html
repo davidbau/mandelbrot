@@ -6818,6 +6818,7 @@ class GpuBaseBoard extends Board {
     // Count chaotic pixels in spike region and track which pixels are in spike
     const dimsWidth = this.config.dimsWidth;
     const dimsHeight = this.config.dimsHeight;
+    const size_double = Array.isArray(size) ? size.reduce((a, b) => a + (b || 0), 0) : size;
     const re_double = Array.isArray(re) ? (re[0] + re[1]) : re;
     const im_double = Array.isArray(im) ? (im[0] + im[1]) : im;
 
@@ -6826,12 +6827,12 @@ class GpuBaseBoard extends Board {
 
     for (let y = 0; y < dimsHeight; y++) {
       const yFrac = (0.5 - y / dimsHeight);
-      const ci = im_double + yFrac * (size / this.config.aspectRatio);
+      const ci = im_double + yFrac * (size_double / this.config.aspectRatio);
 
       for (let x = 0; x < dimsWidth; x++) {
         const index = y * dimsWidth + x;
         const xFrac = (x / dimsWidth - 0.5);
-        const cr = re_double + xFrac * size;
+        const cr = re_double + xFrac * size_double;
 
         if (this.inspike(cr, ci)) {
           // Lazily allocate array only when we find the first spike pixel
@@ -7027,7 +7028,7 @@ class GpuBoard extends GpuBaseBoard {
     super(k, size, re, im, config, id);
     this.effort = 1;
     // Epsilon values for convergence detection scale with pixel size
-    const pix = size / this.config.dimsWidth;
+    const pix = this.size / this.config.dimsWidth;
     // GPU uses float32 precision, so thresholds must be larger than CPU's float64
     this.epsilon = Math.min(1e-7, pix / 10);   // Final convergence threshold
     this.epsilon2 = Math.min(1e-5, pix * 10);  // Getting close threshold
