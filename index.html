@@ -1118,44 +1118,19 @@ class View {
     const changedIndices = [];
 
     for (const { nn, vv, iter } of changeList) {
-      for (const entry of nn) {
-        // Support both formats: plain index or {index, iter} object
-        const index = typeof entry === 'number' ? entry : entry.index;
-        const pixelIter = typeof entry === 'number' ? iter : entry.iter;
-        this.nn[index] = pixelIter;
+      for (const index of nn) {
+        this.nn[index] = iter;
         changedIndices.push(index);
       }
       for (const entry of vv) {
-        const { index, z, p, iter: entryIter } = entry;
-        // Use entry's iter if provided (for perturbation boards), otherwise use -iter
-        this.nn[index] = entryIter !== undefined ? -entryIter : -iter;
+        const { index, z, p } = entry;
+        this.nn[index] = -iter;
         this.convergedData.set(index, { z: toQdc(z), p });
         changedIndices.push(index);
       }
       this.di += nn.length;
       this.un -= nn.length + vv.length;
-
-      // For perturbation boards with per-pixel iterations, update histogram
-      // with intermediate iterations to build up a proper histogram like GPU boards
-      if (nn.length > 0 && typeof nn[0] === 'object') {
-        // Group pixels by iteration and update histogram progressively
-        const byIter = new Map();
-        for (const entry of nn) {
-          byIter.set(entry.iter, (byIter.get(entry.iter) || 0) + 1);
-        }
-        // Sort by iteration and update histogram for each
-        const sortedIters = [...byIter.keys()].sort((a, b) => a - b);
-        let cumDi = this.di - nn.length;
-        let cumUn = this.un + nn.length;
-        for (const i of sortedIters) {
-          const count = byIter.get(i);
-          cumDi += count;
-          cumUn -= count;
-          this.updateHistogram(cumUn, cumDi, i);
-        }
-      } else {
-        this.updateHistogram(this.un, this.di, iter);
-      }
+      this.updateHistogram(this.un, this.di, iter);
     }
     this.un = un;
     this.di = di;
