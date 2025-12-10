@@ -315,26 +315,29 @@ class MandelbrotExplorer {
     }
 
     // Convert zoom/size from URL to absolute size
-    // zoomFromUrl: {mantissa, exponent} from z= parameter (computed here after initSizes for correct firstsize)
-    // sizeFromUrl: direct size from s= parameter
+    // zoomFromUrl: {mantissa, exponent} from z= parameter, or simple number from s= parameter
     let actualSize = null;
     if (this.config.zoomFromUrl !== undefined) {
-      const { mantissa, exponent } = this.config.zoomFromUrl;
+      const zoom = this.config.zoomFromUrl;
       delete this.config.zoomFromUrl;
-      // Compute size = firstsize / zoom = (firstsize / mantissa) * 10^(-exponent)
-      // Now firstsize has the correct aspect-ratio-adjusted value
-      const baseSize = this.config.firstsize / mantissa;
-      const size = baseSize * Math.pow(10, -exponent);
-      if (size === 0 || !isFinite(size)) {
-        // Cap at ~1e310 zoom to ensure pixel sizes remain representable
-        console.warn(`Zoom too extreme, capping at maximum supported zoom (~1e310)`);
-        actualSize = 3e-310;
+      if (typeof zoom === 'object') {
+        // z= parameter: {mantissa, exponent} for extreme zoom values
+        const { mantissa, exponent } = zoom;
+        // Compute size = firstsize / zoom = (firstsize / mantissa) * 10^(-exponent)
+        // Now firstsize has the correct aspect-ratio-adjusted value
+        const baseSize = this.config.firstsize / mantissa;
+        const size = baseSize * Math.pow(10, -exponent);
+        if (size === 0 || !isFinite(size)) {
+          // Cap at ~1e310 zoom to ensure pixel sizes remain representable
+          console.warn(`Zoom too extreme, capping at maximum supported zoom (~1e310)`);
+          actualSize = 3e-310;
+        } else {
+          actualSize = size;
+        }
       } else {
-        actualSize = size;
+        // s= parameter: simple zoom factor (3.0 / size from URL)
+        actualSize = this.config.firstsize / zoom;
       }
-    } else if (this.config.sizeFromUrl !== undefined) {
-      actualSize = this.config.sizeFromUrl;
-      delete this.config.sizeFromUrl;
     }
 
     if (actualSize !== null) {
@@ -2238,16 +2241,12 @@ class ZoomManager {
     let prevK = 0;
     for (let k = 0; k < this.grid.views.length; k++) {
       if (this.grid.hiddencanvas(k)) { continue; }
-      let currView = this.grid.views[k].sizesOct;  // Use oct precision for deep zoom
+      let currView = this.grid.views[k].sizes;
       if (prevView !== null) {
-        const prevSizeOct = prevView[0];  // Already oct, no conversion needed
-        const invPrevSize = 1 / octToNumber(prevSizeOct);
-        const deltaRe = toOctSub(currView[1], prevView[1]);
-        const deltaIm = toOctSub(currView[2], prevView[2]);
-        const x = octToNumber(toOctAdd(toOctScale(deltaRe, invPrevSize), toOct(0.5)));
-        const y = octToNumber(toOctAdd(toOct(0.5),
-          toOctScale(deltaIm, -invPrevSize * this.config.aspectRatio)));
-        const zf = octToNumber(toOctScale(prevSizeOct, 1 / octToNumber(currView[0])));
+        let x = qdSub(currView[1], prevView[1])[0] / prevView[0] + 0.5;
+        let y = 0.5 - qdSub(currView[2], prevView[2])[0] / (prevView[0] / this.config.aspectRatio);
+
+        let zf = prevView[0] / currView[0];
         this.showZoomRect(prevK, x, y, zf);
       }
       prevView = currView;
@@ -2825,12 +2824,12 @@ class URLHandler {
           // URLSearchParams decodes '+' as space, convert back for scientific notation
           val = val.replace(/ /g, '+');
           // Legacy parameter: s is the actual size in complex plane
+          // Convert to zoom factor: z = 3.0 / s
+          // This uses base size 3.0 so that actual size becomes (firstsize * s / 3.0)
+          // which properly applies aspect ratio adjustment (firstsize >= 3.0 for 16:9)
           const size = parseFloat(val);
-          if (!isFinite(size) || size <= 0) {
-            console.warn(`Invalid size parameter: ${val}`);
-            this.config.sizeFromUrl = this.config.firstsize;
-          } else {
-            this.config.sizeFromUrl = size;
+          if (isFinite(size) && size > 0) {
+            this.config.zoomFromUrl = 3.0 / size;
           }
         }
       },
