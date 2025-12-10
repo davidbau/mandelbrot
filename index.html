@@ -2778,7 +2778,7 @@ class URLHandler {
         parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
           const validTypes = [
-            'cpu', 'zhuoran', 'perturbation', 'gpu', 'gpuzhuoran',
+            'cpu', 'zhuoran', 'octzhuoran', 'perturbation', 'gpu', 'gpuzhuoran',
             'octgpuzhuoran', 'octcpu'
           ];
           if (validTypes.includes(boardType)) {
@@ -6654,6 +6654,143 @@ class ZhuoranBoard extends Board {
   }
 }
 
+// Oct-precision perturbation board - extends ZhuoranBoard with oct precision reference orbit
+// Provides higher precision (~212 bits) for very deep zooms where quad precision is insufficient
+class OctZhuoranBoard extends ZhuoranBoard {
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+    // Build oct reference from the base class's oct representation
+    const refReOct = this.sizesOct[1].slice();
+    const refImOct = this.sizesOct[2].slice();
+    // Store oct-precision reference point
+    this.refC_oct = [...refReOct, ...refImOct];
+    // Initialize oct orbit array - stores full oct precision for each reference iteration
+    // Each entry is [re0, re1, re2, re3, im0, im1, im2, im3]
+    this.octOrbit = [
+      [0, 0, 0, 0, 0, 0, 0, 0],  // Iteration 0: z = 0
+      [...refReOct, ...refImOct]  // Iteration 1: z = c
+    ];
+    // Working array for oct precision operations
+    this.tt = new Array(32);
+    // Re-initialize pixels with oct-precision delta computation
+    this.initPixelsOct();
+  }
+
+  initPixelsOct() {
+    // Override parent's initPixels to compute delta c directly without precision loss.
+    // At deep zoom (e.g., z=1e32), computing cr = center + offset loses precision because
+    // -1.8 + 1e-33 = -1.8 in double precision. Instead, compute dc = offset directly.
+    // Since the reference point IS the view center, dc is just the pixel offset from center.
+    const sizeScalar = this.size;
+    const dimsWidth = this.config.dimsWidth;
+    const dimsHeight = this.config.dimsHeight;
+    const aspectRatio = this.config.aspectRatio;
+
+    // Reset arrays that parent already initialized
+    this.dc = [];
+    this.dz = [];
+
+    for (let y = 0; y < dimsHeight; y++) {
+      const yFrac = (0.5 - y / dimsHeight);
+      // Compute dci directly as the offset from center (reference point = center)
+      const dci = yFrac * (sizeScalar / aspectRatio);
+
+      for (let x = 0; x < dimsWidth; x++) {
+        const xFrac = (x / dimsWidth - 0.5);
+        // Compute dcr directly as the offset from center
+        const dcr = xFrac * sizeScalar;
+
+        const index = y * dimsWidth + x;
+        this.dc[index * 2] = dcr;
+        this.dc[index * 2 + 1] = dci;
+        // Start with z = c, so dz = dc (relative to reference z = c_ref)
+        this.dz[index * 2] = dcr;
+        this.dz[index * 2 + 1] = dci;
+      }
+    }
+  }
+
+  extendReferenceOrbit() {
+    // Compute one more iteration of the reference orbit in oct precision
+    const last = this.octOrbit[this.refIterations];
+    const rr = [last[0], last[1], last[2], last[3]];
+    const ri = [last[4], last[5], last[6], last[7]];
+    const tt = this.tt;
+
+    // Check for escape using sum of oct components
+    const rSum = rr[0] + rr[1] + rr[2] + rr[3];
+    const iSum = ri[0] + ri[1] + ri[2] + ri[3];
+    const mag = rSum * rSum + iSum * iSum;
+    if (mag > 1e10) {
+      this.refOrbitEscaped = true;
+      return;
+    }
+
+    // Compute z^n for general exponent
+    // z^2 = (zr + zi*i)^2 = zr^2 - zi^2 + 2*zr*zi*i
+    AoctSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
+    AoctSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
+    AoctMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3], ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
+    AoctAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
+
+    for (let ord = 2; ord < this.config.exponent; ord++) {
+      AoctMul(tt, 0, ri[0], ri[1], ri[2], ri[3], tt[8], tt[9], tt[10], tt[11]);         // j * ja
+      AoctMul(tt, 4, rr[0], rr[1], rr[2], rr[3], tt[16], tt[17], tt[18], tt[19]);       // r * ra
+      AoctAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
+      AoctMul(tt, 0, rr[0], rr[1], rr[2], rr[3], tt[8], tt[9], tt[10], tt[11]);         // r * ja
+      AoctMul(tt, 4, ri[0], ri[1], ri[2], ri[3], tt[16], tt[17], tt[18], tt[19]);       // j * ra
+      AoctAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
+      AoctSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);                                   // ra = rt
+    }
+
+    // Add c to get next z
+    const nzrOct = new Array(4);
+    const nziOct = new Array(4);
+    AoctAdd(nzrOct, 0, tt[16], tt[17], tt[18], tt[19],
+      this.refC_oct[0], this.refC_oct[1], this.refC_oct[2], this.refC_oct[3]);
+    AoctAdd(nziOct, 0, tt[8], tt[9], tt[10], tt[11],
+      this.refC_oct[4], this.refC_oct[5], this.refC_oct[6], this.refC_oct[7]);
+
+    // Store in oct orbit
+    this.octOrbit.push([nzrOct[0], nzrOct[1], nzrOct[2], nzrOct[3],
+                        nziOct[0], nziOct[1], nziOct[2], nziOct[3]]);
+
+    // Convert to quad precision for refOrbit (used by perturbation iterations)
+    const nzrQd = octToQd(nzrOct);
+    const nziQd = octToQd(nziOct);
+    this.refOrbit.push([nzrQd[0], nzrQd[1], nziQd[0], nziQd[1]]);
+    this.refIterations++;
+
+    // Build thread-following map after the orbit settles (first 2000 iterations)
+    if (this.refIterations >= 2000) {
+      const reSum = nzrOct[0] + nzrOct[1] + nzrOct[2] + nzrOct[3];
+      const imSum = nziOct[0] + nziOct[1] + nziOct[2] + nziOct[3];
+      const getPoint = (i) => {
+        if (i < 0 || i >= this.octOrbit.length) return null;
+        const p = this.octOrbit[i];
+        return { re: p[0] + p[1] + p[2] + p[3], im: p[4] + p[5] + p[6] + p[7] };
+      };
+      this.threading.addOrbitPoint(this.refIterations, reSum, imSum, getPoint);
+    }
+
+    // Grow array if needed
+    if (this.refIterations >= this.maxRefIterations) {
+      this.maxRefIterations *= 2;
+    }
+  }
+
+  static fromSerialized(serialized) {
+    return new OctZhuoranBoard(
+      serialized.k,
+      serialized.sizes[0],
+      serialized.sizes[1],
+      serialized.sizes[2],
+      serialized.config,
+      serialized.id
+    );
+  }
+}
+
 // WebGPU-accelerated Mandelbrot computation using single-precision float32
 // GPU computes all pixels in parallel using standard Mandelbrot iteration
 // Base class for WebGPU-accelerated boards
@@ -8754,6 +8891,9 @@ self.onmessage = async function(e) {
             break;
           case 'zhuoran':
             board = new ZhuoranBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+            break;
+          case 'octzhuoran':
+            board = new OctZhuoranBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
             break;
           case 'perturbation':
             board = new PerturbationBoard(
