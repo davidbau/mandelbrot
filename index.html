@@ -6822,16 +6822,17 @@ class GpuBaseBoard extends Board {
     // Select board type based on zoom level
     // Shallow zooms: GpuBoard (simple float32)
     // Medium zooms: GpuZhuoranBoard (GPU perturbation, quad precision reference)
-    // Deep zooms: OctGpuZhuoranBoard (GPU perturbation, oct precision reference)
-    // Ultra-deep zooms: OctCpuBoard (for zooms where GPU float32 underflows)
-    // Note: GPU perturbation uses float32 for deltas. Float32 underflows at ~1e-38,
-    // so use CPU for ultra-deep zooms (pixelSize < 1e-35 ≈ z > 3e34).
+    // Deep zooms: OctZhuoranBoard (CPU perturbation, oct precision reference)
+    // Ultra-deep zooms: OctCpuBoard (for zooms where oct-precision is insufficient)
+    //
+    // Note: OctGpuZhuoranBoard is skipped because it has similar issues to GpuZhuoranBoard
+    // at deep zooms. OctZhuoranBoard (CPU) handles rebasing correctly.
     if (pixelSize > 1e-6) return GpuBoard;
-    // Ultra-deep zooms: GPU float32 underflows, use CPU
+    // Ultra-deep zooms: use non-perturbation CPU for maximum precision
     if (pixelSize < 1e-35) return OctCpuBoard;
-    // Deep zooms: use oct precision reference orbit
-    if (pixelSize < 1e-29) return OctGpuZhuoranBoard;
-    // Medium zooms: use quad precision reference orbit
+    // Deep zooms: use CPU oct precision with perturbation (handles rebasing correctly)
+    if (pixelSize < 1e-31) return OctZhuoranBoard;
+    // Medium zooms: use GPU quad precision with perturbation
     return GpuZhuoranBoard;
   }
 
@@ -8523,25 +8524,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       }
     }
 
-    // Handle reference orbit escape: mark remaining pixels as diverged
-    // When the reference orbit escapes, all pixels that are still computing
-    // should be marked as diverged at the reference orbit's escape iteration
-    if (this.refOrbitEscaped) {
-      const escapeIter = this.refIterations;  // Iteration when ref orbit escaped
-      for (let i = 0; i < dimsArea; i++) {
-        if (this.nn[i] === 0) {  // Still computing
-          this.nn[i] = escapeIter;
-          this.pp[i] = 1;
-          this.di++;
-          this.un--;
-
-          if (!pixelsByIteration.has(escapeIter)) {
-            pixelsByIteration.set(escapeIter, []);
-          }
-          pixelsByIteration.get(escapeIter).push(i);
-        }
-      }
-    }
+    // NOTE: When refOrbitEscaped is true, we do NOT mark remaining pixels as diverged.
+    // The GPU shader will continue iterating those pixels individually, and they will
+    // either diverge naturally or continue until maxiter. This matches the behavior
+    // of ZhuoranBoard which rebases pixels when the reference orbit escapes.
 
     // Create change objects grouped by iteration
     const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
