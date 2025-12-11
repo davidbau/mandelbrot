@@ -29,6 +29,11 @@ When running tests repeatedly:
 - Fix root causes, not symptoms
 - For debug scripts that need long timeouts, create a `tests/debug-*.js` script and run with `node tests/debug-*.js` rather than using long inline commands or `timeout` wrappers - this avoids permission prompts
 
+When filtering tests by name:
+- Do NOT use `npm run test:integration -- --testPathPattern="foo"` - the positional directory arg takes precedence and ignores the pattern
+- Instead use: `npx jest --testPathPattern="integration/foo"` - include the directory in the pattern
+- Multiple `--testPathPattern` args are ORed (match either), not ANDed
+
 ### Architecture
 
 - Single HTML file design - avoid adding external dependencies

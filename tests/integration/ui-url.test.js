@@ -102,15 +102,29 @@ describe('URL Parameter Tests', () => {
   }, TEST_TIMEOUT);
 
   test('Should load with additional color themes (iceblue, tiedye)', async () => {
-    // Test iceblue theme
-    await navigateToUrl(page, getAppUrl('?theme=iceblue'));
+    // Test iceblue theme - wait for pixels to render to exercise color function
+    await navigateToUrl(page, getAppUrl('?theme=iceblue&width=100&height=100'));
     const iceblueTheme = await page.evaluate(() => window.explorer.config.theme);
     expect(iceblueTheme).toBe('iceblue');
+    // Wait for some pixels to be computed and colored
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views?.[0];
+      return view && view.di > 0;
+    }, { timeout: 30000 });
+    const icebluePixels = await page.evaluate(() => window.explorer.grid.views[0].di);
+    expect(icebluePixels).toBeGreaterThan(0);
 
-    // Test tiedye theme
-    await navigateToUrl(page, getAppUrl('?theme=tiedye'));
+    // Test tiedye theme - wait for pixels to render to exercise color function
+    await navigateToUrl(page, getAppUrl('?theme=tiedye&width=100&height=100'));
     const tiedyeTheme = await page.evaluate(() => window.explorer.config.theme);
     expect(tiedyeTheme).toBe('tiedye');
+    // Wait for some pixels to be computed and colored
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views?.[0];
+      return view && view.di > 0;
+    }, { timeout: 30000 });
+    const tiedyePixels = await page.evaluate(() => window.explorer.grid.views[0].di);
+    expect(tiedyePixels).toBeGreaterThan(0);
   }, TEST_TIMEOUT);
 
   test('Should load with exponent, gpu, board, and pixelratio parameters', async () => {
