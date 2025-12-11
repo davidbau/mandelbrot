@@ -1242,86 +1242,28 @@ class View {
     }
   }
 
-  // Calculate coordinate mapping from parent to child canvas
+  // Calculate coordinate mapping from parent to child canvas using oct precision
   calculateParentMapping() {
     const parent = this.parentView;
     const { dimsWidth, dimsHeight, aspectRatio } = this.config;
 
-    // Use oct precision when available (needed at z > ~1e30)
-    const useOct = this.sizesOct && parent.sizesOct;
+    const [childSizeOct, childCenterROct, childCenterIOct] = this.sizesOct;
+    const [parentSizeOct, parentCenterROct, parentCenterIOct] = parent.sizesOct;
 
-    if (useOct) {
-      // Oct precision path for deep zoom
-      const [childSizeOct, childCenterROct, childCenterIOct] = this.sizesOct;
-      const [parentSizeOct, parentCenterROct, parentCenterIOct] = parent.sizesOct;
-
-      const childSize = octToNumber(childSizeOct);
-      const parentSize = octToNumber(parentSizeOct);
-      const parentHeight = parentSize / aspectRatio;
-
-      // For sx: compute (childCenterR - parentCenterR) / parentSize * dimsWidth + dimsWidth/2 - sw/2
-      // The child left edge is at: childCenterR - childSize/2
-      // The parent left edge is at: parentCenterR - parentSize/2
-      // sx = ((childLeft - parentLeft) / parentSize) * dimsWidth
-      //    = ((childCenterR - childSize/2) - (parentCenterR - parentSize/2)) / parentSize * dimsWidth
-      //    = ((childCenterR - parentCenterR) + (parentSize - childSize)/2) / parentSize * dimsWidth
-
-      // Compute childCenterR - parentCenterR using oct precision
-      const deltaR = toOctSub(childCenterROct, parentCenterROct);
-      const deltaRNum = octToNumber(deltaR);
-
-      // sx = (deltaR + (parentSize - childSize)/2) / parentSize * dimsWidth
-      const sx = ((deltaRNum + (parentSize - childSize) / 2) / parentSize) * dimsWidth;
-
-      // For sy: similar but with inverted y direction
-      // sy = ((parentTop - childTop) / parentHeight) * dimsHeight
-      //    = ((parentCenterI + parentHeight/2) - (childCenterI + childHeight/2)) / parentHeight * dimsHeight
-      // childHeight = childSize / aspectRatio
-      const childHeight = childSize / aspectRatio;
-
-      // Compute parentCenterI - childCenterI using oct precision
-      const deltaI = toOctSub(parentCenterIOct, childCenterIOct);
-      const deltaINum = octToNumber(deltaI);
-
-      // sy = (deltaI + (parentHeight - childHeight)/2) / parentHeight * dimsHeight
-      const sy = ((deltaINum + (parentHeight - childHeight) / 2) / parentHeight) * dimsHeight;
-
-      const sw = (childSize / parentSize) * dimsWidth;
-      const sh = (childSize / parentSize) * dimsHeight;
-
-      return { sx, sy, sw, sh };
-    }
-
-    // Quad precision fallback for shallow zoom
-    const [childSize, childCenterR, childCenterI] = this.sizes;
-    const [parentSize, parentCenterR, parentCenterI] = parent.sizes;
-
-    const temp = new Float64Array(4);
-
-    // childLeft = childCenterR - childSize / 2
-    AqdAdd(temp, 0, childCenterR[0], childCenterR[1], -childSize / 2, 0);
-    const childLeft = [temp[0], temp[1]];
-
-    // childTop = childCenterI + (childSize / aspectRatio) / 2
-    AqdAdd(temp, 0, childCenterI[0], childCenterI[1], (childSize / aspectRatio) / 2, 0);
-    const childTop = [temp[0], temp[1]];
-
-    // parentLeft = parentCenterR - parentSize / 2
-    AqdAdd(temp, 0, parentCenterR[0], parentCenterR[1], -parentSize / 2, 0);
-    const parentLeft = [temp[0], temp[1]];
-
-    // parentTop = parentCenterI + (parentSize / aspectRatio) / 2
+    const childSize = octToNumber(childSizeOct);
+    const parentSize = octToNumber(parentSizeOct);
     const parentHeight = parentSize / aspectRatio;
-    AqdAdd(temp, 0, parentCenterI[0], parentCenterI[1], parentHeight / 2, 0);
-    const parentTop = [temp[0], temp[1]];
 
-    // sx = ((childLeft - parentLeft) / parentSize) * dimsWidth
-    AqdAdd(temp, 0, childLeft[0], childLeft[1], -parentLeft[0], -parentLeft[1]);
-    const sx = ((temp[0] + temp[1]) / parentSize) * dimsWidth;
+    // sx = ((childCenterR - parentCenterR) + (parentSize - childSize)/2) / parentSize * dimsWidth
+    const deltaR = toOctSub(childCenterROct, parentCenterROct);
+    const deltaRNum = octToNumber(deltaR);
+    const sx = ((deltaRNum + (parentSize - childSize) / 2) / parentSize) * dimsWidth;
 
-    // sy = ((parentTop - childTop) / parentHeight) * dimsHeight
-    AqdAdd(temp, 0, parentTop[0], parentTop[1], -childTop[0], -childTop[1]);
-    const sy = ((temp[0] + temp[1]) / parentHeight) * dimsHeight;
+    // sy = (deltaI + (parentHeight - childHeight)/2) / parentHeight * dimsHeight
+    const childHeight = childSize / aspectRatio;
+    const deltaI = toOctSub(parentCenterIOct, childCenterIOct);
+    const deltaINum = octToNumber(deltaI);
+    const sy = ((deltaINum + (parentHeight - childHeight) / 2) / parentHeight) * dimsHeight;
 
     const sw = (childSize / parentSize) * dimsWidth;
     const sh = (childSize / parentSize) * dimsHeight;
@@ -1453,66 +1395,21 @@ class View {
 
   drawchange(ctx, change) {
     if (change.nn.length) {
-      // Support both formats: plain index or {index, iter} object
-      const firstEntry = change.nn[0];
-      const hasPerPixelIter = typeof firstEntry === 'object';
-
-      if (hasPerPixelIter) {
-        // Per-pixel iteration values (perturbation boards)
-        // Group by iteration for efficient drawing
-        const byIter = new Map();
-        for (const entry of change.nn) {
-          const iter = entry.iter;
-          if (!byIter.has(iter)) byIter.set(iter, []);
-          byIter.get(iter).push(entry.index);
-        }
-        for (const [iter, indices] of byIter) {
-          ctx.fillStyle = this.makecolor(iter);
-          for (const index of indices) {
-            const x = index % this.config.dimsWidth;
-            const y = (index - x) / this.config.dimsWidth;
-            ctx.fillRect(x, y, 1, 1);
-          }
-        }
-      } else {
-        // Plain indices (regular boards) - use batch iteration
-        ctx.fillStyle = this.makecolor(change.iter);
-        for (let m of change.nn) {
-          const x = m % this.config.dimsWidth;
-          const y = (m - x) / this.config.dimsWidth;
-          ctx.fillRect(x, y, 1, 1);
-        }
+      // Draw diverged pixels - nn contains plain indices
+      ctx.fillStyle = this.makecolor(change.iter);
+      for (let m of change.nn) {
+        const x = m % this.config.dimsWidth;
+        const y = (m - x) / this.config.dimsWidth;
+        ctx.fillRect(x, y, 1, 1);
       }
     }
     if (change.vv.length) {
-      // Support both formats: with or without per-pixel iter
-      const firstEntry = change.vv[0];
-      const hasPerPixelIter = firstEntry.iter !== undefined;
-
-      if (hasPerPixelIter) {
-        // Per-pixel iteration values (perturbation boards)
-        const byIter = new Map();
-        for (const v of change.vv) {
-          const iter = -v.iter;  // Negative for convergence
-          if (!byIter.has(iter)) byIter.set(iter, []);
-          byIter.get(iter).push(v.index);
-        }
-        for (const [iter, indices] of byIter) {
-          ctx.fillStyle = this.makecolor(iter);
-          for (const index of indices) {
-            const x = index % this.config.dimsWidth;
-            const y = (index - x) / this.config.dimsWidth;
-            ctx.fillRect(x, y, 1, 1);
-          }
-        }
-      } else {
-        // Regular format - use batch iteration
-        ctx.fillStyle = this.makecolor(-change.iter);
-        for (let v of change.vv) {
-          const x = v.index % this.config.dimsWidth;
-          const y = (v.index - x) / this.config.dimsWidth;
-          ctx.fillRect(x, y, 1, 1);
-        }
+      // Draw converged pixels - vv contains {index, r, i} objects
+      ctx.fillStyle = this.makecolor(-change.iter);
+      for (let v of change.vv) {
+        const x = v.index % this.config.dimsWidth;
+        const y = (v.index - x) / this.config.dimsWidth;
+        ctx.fillRect(x, y, 1, 1);
       }
     }
   }
@@ -2645,56 +2542,13 @@ class URLHandler {
     return { mantissa, exponent };
   }
 
-  /**
-   * Get the view size from the URL zoom parameter.
-   * Computes size = firstsize / zoom directly to avoid overflow for extreme zoom values.
-   * Returns the size (not the zoom factor).
-   */
-  getSizeFromZoomUrl() {
-    const params = new URLSearchParams(document.location.search);
-    let zVal = params.get('z');
-    if (zVal) {
-      zVal = zVal.replace(/ /g, '+');
-      const { mantissa, exponent } = this.parseScientificNotation(zVal);
-      // size = firstsize / (mantissa * 10^exponent) = (firstsize / mantissa) * 10^(-exponent)
-      // This works for exponents up to ~324 (float64 min is ~5e-324)
-      const baseSize = this.config.firstsize / mantissa;
-      // Use Math.pow for the exponent, which handles underflow gracefully (returns 0)
-      const size = baseSize * Math.pow(10, -exponent);
-      if (size === 0 || !isFinite(size)) {
-        // Cap at ~1e310 zoom to ensure pixel sizes remain representable
-        console.warn(`Zoom ${zVal} too extreme, capping at maximum supported zoom (~1e310)`);
-        return 3e-310;  // Minimum usable size
-      }
-      return size;
-    }
-    let sVal = params.get('s');
-    if (sVal) {
-      sVal = sVal.replace(/ /g, '+');
-      const size = parseFloat(sVal);
-      if (!isFinite(size) || size <= 0) {
-        console.warn(`Invalid size parameter: ${sVal}`);
-        return this.config.firstsize;
-      }
-      return size;
-    }
-    return null;  // No zoom/size specified in URL
-  }
-
-  // Legacy method for compatibility - returns zoom factor (may overflow for extreme values)
   getZoomFactorFromUrl() {
     const params = new URLSearchParams(document.location.search);
     let zVal = params.get('z');
     if (zVal) {
       zVal = zVal.replace(/ /g, '+');
       const { mantissa, exponent } = this.parseScientificNotation(zVal);
-      // For display purposes, return the zoom factor (may be Infinity for extreme zooms)
       return mantissa * Math.pow(10, exponent);
-    }
-    let sVal = params.get('s');
-    if (sVal) {
-      sVal = sVal.replace(/ /g, '+');
-      return 3.0 / parseFloat(sVal);
     }
     return 1.0;
   }
@@ -4575,51 +4429,6 @@ function formatcomplex(k, re, im) {
 function formatLargeInt(i) {
   // Put a comma or period between thousands.
   return Intl.NumberFormat().format(i);
-}
-
-// Catmull-Rom spline interpolation for smooth movie camera paths.
-function catmullRom1D(p0, p1, p2, p3, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const c0 = (-t3 + 2*t2 - t) / 2;
-  // c1 = (3*t3 - 5*t2 + 2) / 2; // unneeded since p1 = 0
-  const c2 = (-3*t3 + 4*t2 + t) / 2;
-  const c3 = (t3 - t2) / 2;
-  // Compute offsets from p1 for numerical stability.
-  const s0 = qdSub(p0, p1);
-  const s2 = qdSub(p2, p1);
-  const s3 = qdSub(p3, p1);
-  return qdAdd(qdAdd(qdAdd(qdScale(s0, c0),
-           qdScale(s3, c3)), qdScale(s2, c2)), p1);
-}
-
-function catmullRomSpline(p0, p1, p2, p3, t) {
-  return [
-    catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),
-    catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)
-  ];
-}
-
-// Oct-precision Catmull-Rom spline for deep zoom movie interpolation
-function catmullRom1DOct(p0, p1, p2, p3, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const c0 = (-t3 + 2*t2 - t) / 2;
-  const c2 = (-3*t3 + 4*t2 + t) / 2;
-  const c3 = (t3 - t2) / 2;
-  // Compute offsets from p1 for numerical stability
-  const s0 = toOctSub(p0, p1);
-  const s2 = toOctSub(p2, p1);
-  const s3 = toOctSub(p3, p1);
-  return toOctAdd(toOctAdd(toOctAdd(toOctScale(s0, c0),
-           toOctScale(s3, c3)), toOctScale(s2, c2)), p1);
-}
-
-function catmullRomSplineOct(p0, p1, p2, p3, t) {
-  return [
-    catmullRom1DOct(p0[0], p1[0], p2[0], p3[0], t),
-    catmullRom1DOct(p0[1], p1[1], p2[1], p3[1], t)
-  ];
 }
 
 function hclColor(h, c, l) {
@@ -9890,6 +9699,52 @@ function fibonacciPeriod(iteration) {
   // Return 1 if iteration is exact Fibonacci, else distance from previous
   if (b === iteration) return 1;
   return iteration - a + 1;
+}
+
+// Catmull-Rom spline interpolation for smooth movie camera paths.
+// Uses quad-precision for numerical stability with close control points.
+function catmullRom1D(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const c0 = (-t3 + 2*t2 - t) / 2;
+  // c1 = (3*t3 - 5*t2 + 2) / 2; // unneeded since p1 = 0
+  const c2 = (-3*t3 + 4*t2 + t) / 2;
+  const c3 = (t3 - t2) / 2;
+  // Compute offsets from p1 for numerical stability.
+  const s0 = qdSub(p0, p1);
+  const s2 = qdSub(p2, p1);
+  const s3 = qdSub(p3, p1);
+  return qdAdd(qdAdd(qdAdd(qdScale(s0, c0),
+           qdScale(s3, c3)), qdScale(s2, c2)), p1);
+}
+
+function catmullRomSpline(p0, p1, p2, p3, t) {
+  return [
+    catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),
+    catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)
+  ];
+}
+
+// Oct-precision Catmull-Rom spline for deep zoom movie interpolation
+function catmullRom1DOct(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const c0 = (-t3 + 2*t2 - t) / 2;
+  const c2 = (-3*t3 + 4*t2 + t) / 2;
+  const c3 = (t3 - t2) / 2;
+  // Compute offsets from p1 for numerical stability
+  const s0 = toOctSub(p0, p1);
+  const s2 = toOctSub(p2, p1);
+  const s3 = toOctSub(p3, p1);
+  return toOctAdd(toOctAdd(toOctAdd(toOctScale(s0, c0),
+           toOctScale(s3, c3)), toOctScale(s2, c2)), p1);
+}
+
+function catmullRomSplineOct(p0, p1, p2, p3, t) {
+  return [
+    catmullRom1DOct(p0[0], p1[0], p2[0], p3[0], t),
+    catmullRom1DOct(p0[1], p1[1], p2[1], p3[1], t)
+  ];
 }
 
 </script>
