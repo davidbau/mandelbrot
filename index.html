@@ -3684,11 +3684,11 @@ class MovieMode {
     // Draw the next frame
     if (k < this.explorer.grid.views.length - 1) {
       const targetScale = targetSize / interpolatedSize;
-      const targetOffsetX = qdMul(qdSub(interpolatedCenter[0], targetCenter[0]),
-                                  [this.explorer.config.dimsWidth / targetSize, 0])[0];
+      const targetOffsetX = octToNumber(toOctScale(toOctSub(interpolatedCenter[0], targetCenter[0]),
+                                  this.explorer.config.dimsWidth / targetSize));
       const targetHeight = targetSize / this.explorer.config.aspectRatio;
-      const targetOffsetY = qdMul(qdSub(targetCenter[1], interpolatedCenter[1]),
-                                  [this.explorer.config.dimsHeight / targetHeight, 0])[0];
+      const targetOffsetY = octToNumber(toOctScale(toOctSub(targetCenter[1], interpolatedCenter[1]),
+                                  this.explorer.config.dimsHeight / targetHeight));
       this.movieCtx.save();
       this.movieCtx.imageSmoothingEnabled = true;
       this.movieCtx.imageSmoothingQuality = 'high';
