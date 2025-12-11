@@ -27,6 +27,7 @@ When running tests repeatedly:
 - Always capture output and grep for FAIL - don't just trust summary lines
 - Test flakiness is usually caused by missing preconditions, not insufficient timeouts
 - Fix root causes, not symptoms
+- For debug scripts that need long timeouts, create a `tests/debug-*.js` script and run with `node tests/debug-*.js` rather than using long inline commands or `timeout` wrappers - this avoids permission prompts
 
 ### Architecture
 

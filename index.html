@@ -7678,8 +7678,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Convert re/im to quad precision if needed
     const re_qd = Array.isArray(re) ? re : toQd(re);
     const im_qd = Array.isArray(im) ? im : toQd(im);
-    const size_qd = toQd(size);
-    const sizeY_qd = toQd(size / this.config.aspectRatio);
+    // Convert size to scalar if it's an oct array (fixes NaN when size is array)
+    const size_scalar = Array.isArray(size) ? size.reduce((a, b) => a + (b || 0), 0) : size;
+    const size_qd = toQd(size_scalar);
+    const sizeY_qd = toQd(size_scalar / this.config.aspectRatio);
 
     // Per-pixel data arrays
     this.dc = new Float32Array(dimsArea * 2);  // Delta c from reference [real, imag] pairs
