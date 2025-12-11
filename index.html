@@ -6074,11 +6074,9 @@ class ZhuoranBoard extends Board {
           // Note: refIter was NOT incremented (returned before increment)
           // dz corresponds to refIter+1
           const nextRefIter = this.refIter[index] + 1;
-          const ref = nextRefIter < this.refOrbit.length
-            ? this.refOrbit[nextRefIter]
-            : this.refOrbit[this.refOrbit.length - 1];
-          const refR = ref ? (ref[0] + ref[1]) : 0;
-          const refI = ref ? (ref[2] + ref[3]) : 0;
+          const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
+          const refR = ref[0] + ref[1];
+          const refI = ref[2] + ref[3];
           changes.vv.push({
             index: index,
             z: [refR + this.dz[index2], refI + this.dz[index2 + 1]],
@@ -8480,10 +8478,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           const dzr = dzAndCheckpointData[i * 6];
           const dzi = dzAndCheckpointData[i * 6 + 1];
 
-          const ref = nextRefIter < this.refOrbit.length ?
-            this.refOrbit[nextRefIter] : this.refOrbit[this.refOrbit.length - 1];
-          const refR = ref ? (ref[0] + ref[1]) : 0;
-          const refI = ref ? (ref[2] + ref[3]) : 0;
+          const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
+          const refR = ref[0] + ref[1];
+          const refI = ref[2] + ref[3];
 
           if (!convergedByIteration.has(iters)) {
             convergedByIteration.set(iters, []);
