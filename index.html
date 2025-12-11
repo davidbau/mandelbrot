@@ -2299,16 +2299,39 @@ class ZoomManager {
           ))),
            this.grid.views[0].sizes[0] / this.grid.views[1].sizes[0]);
     }
+
+    // Helper to check if view center is within 1% tolerance of target
+    const isWithinTolerance = (view, targetReOct, targetImOct) => {
+      const viewSize = view.sizes[0];
+      const tolerance = viewSize * 0.01; // 1% of view extent
+      const viewRe = octToNumber(view.sizesOct[1]);
+      const viewIm = octToNumber(view.sizesOct[2]);
+      const targetRe = octToNumber(targetReOct);
+      const targetIm = octToNumber(targetImOct);
+      return Math.abs(targetRe - viewRe) < tolerance &&
+             Math.abs(targetIm - viewIm) < tolerance;
+    };
+
     for (k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
       this.showZoomRect(
           k, 0.5, 0.5, this.grid.views[k].sizes[0] / this.grid.views[k+1].sizes[0]);
       if (octCompare(this.grid.views[k].sizesOct[1], oreOct) ||
           octCompare(this.grid.views[k].sizesOct[2], oimOct)) {
-        this.grid.scheduler.removeBoardFromWorker(k);
-        let nsize = this.grid.views[k].sizes[0];
-        this.grid.makeView(k, nsize, oreOct, oimOct);
-        this.grid.views[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
-        this.grid.clearseq(k);
+        // View center differs from target - check if within 1% tolerance
+        if (isWithinTolerance(this.grid.views[k], oreOct, oimOct)) {
+          // Within tolerance: update coordinates to exact target without recreating
+          this.grid.views[k].sizesOct[1] = oreOct;
+          this.grid.views[k].sizesOct[2] = oimOct;
+          this.grid.views[k].sizes[1] = [octToNumber(oreOct)];
+          this.grid.views[k].sizes[2] = [octToNumber(oimOct)];
+        } else {
+          // Beyond tolerance: recreate the view
+          this.grid.scheduler.removeBoardFromWorker(k);
+          let nsize = this.grid.views[k].sizes[0];
+          this.grid.makeView(k, nsize, oreOct, oimOct);
+          this.grid.views[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
+          this.grid.clearseq(k);
+        }
       }
     }
     this.grid.notifyurl();
