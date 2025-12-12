@@ -6822,16 +6822,13 @@ class GpuBaseBoard extends Board {
     // Select board type based on zoom level
     // Shallow zooms: GpuBoard (simple float32)
     // Medium zooms: GpuZhuoranBoard (GPU perturbation, quad precision reference)
-    // Deep zooms: OctZhuoranBoard (CPU perturbation, oct precision reference)
-    // Ultra-deep zooms: OctCpuBoard (for zooms where oct-precision is insufficient)
-    //
-    // Note: OctGpuZhuoranBoard is skipped because it has similar issues to GpuZhuoranBoard
-    // at deep zooms. OctZhuoranBoard (CPU) handles rebasing correctly.
+    // Deep zooms: AdaptiveGpuBoard (GPU perturbation with adaptive per-pixel scaling)
+    // Ultra-deep zooms: OctCpuBoard (for zooms where GPU can't handle)
     if (pixelSize > 1e-6) return GpuBoard;
-    // Ultra-deep zooms: use non-perturbation CPU for maximum precision
-    if (pixelSize < 1e-35) return OctCpuBoard;
-    // Deep zooms: use CPU oct precision with perturbation (handles rebasing correctly)
-    if (pixelSize < 1e-31) return OctZhuoranBoard;
+    // Ultra-deep zooms: fall back to CPU for maximum precision
+    if (pixelSize < 1e-60) return OctCpuBoard;
+    // Deep zooms (z > 1e31): use AdaptiveGpuBoard with adaptive scaling
+    if (pixelSize < 1e-31) return AdaptiveGpuBoard;
     // Medium zooms: use GPU quad precision with perturbation
     return GpuZhuoranBoard;
   }
@@ -9356,11 +9353,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     const rSum = rr[0] + rr[1] + rr[2] + rr[3];
     const iSum = ri[0] + ri[1] + ri[2] + ri[3];
     const mag = rSum * rSum + iSum * iSum;
-    // Debug: log when orbit escapes
     if (mag > 1e10) {
-      console.log(`AdaptiveGpuBoard: ref orbit escape at iter ${this.refIterations}, mag=${mag.toExponential(3)}, rSum=${rSum}, iSum=${iSum}`);
-      console.log(`  rr=[${rr.map(x => x.toExponential(3)).join(', ')}]`);
-      console.log(`  ri=[${ri.map(x => x.toExponential(3)).join(', ')}]`);
       this.refOrbitEscaped = true;
       return;
     }
@@ -9599,7 +9592,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     for (let i = 0; i < dimsArea; i++) {
       refIterData[i * 3] = this.refIter[i];
       refIterData[i * 3 + 1] = 0xFFFFFFFF;  // ckpt_iter (invalid = no checkpoint yet)
-      refIterData[i * 3 + 2] = 0;           // next_checkpoint_idx (start at 0)
+      refIterData[i * 3 + 2] = 0xFFFFFFFF;  // next_threaded_ref_iter (invalid = no threading yet)
     }
     this.device.queue.writeBuffer(this.buffers.refIterAndCheckpoint, 0, refIterData);
 
@@ -9618,8 +9611,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         { binding: 4, resource: { buffer: this.buffers.dzAndCheckpoint } },
         { binding: 5, resource: { buffer: this.buffers.pixelScale } },
         { binding: 6, resource: { buffer: this.buffers.refIterAndCheckpoint } },
-        { binding: 7, resource: { buffer: this.buffers.refOrbit } }
-        // Note: binding 8 (threading) removed - getThread() isn't used so compiler optimizes it out
+        { binding: 7, resource: { buffer: this.buffers.refOrbit } },
+        { binding: 8, resource: { buffer: this.buffers.threading } }
       ]
     });
   }
@@ -9695,18 +9688,22 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         let dci = dc[index2 + 1u];
         var pp = statusAndPeriod[index].y;
 
-        // Checkpoint state for convergence detection
-        // bbr/bbi store the ABSOLUTE position at checkpoint (not scaled delta)
+        // Checkpoint state for convergence detection (like OctGpuZhuoranBoard)
+        // bbr/bbi store actual perturbation delta at checkpoint
         var bbr = dzAndCheckpoint[index6 + 2u];
         var bbi = dzAndCheckpoint[index6 + 3u];
+        // Threading: accumulated delta from checkpoint to threaded position
+        var threaded_delta_re = dzAndCheckpoint[index6 + 4u];
+        var threaded_delta_im = dzAndCheckpoint[index6 + 5u];
         var ckpt_iter = refIterAndCheckpoint[index3 + 1u];
-        var next_checkpoint_idx = refIterAndCheckpoint[index3 + 2u];
+        var next_threaded_ref_iter = refIterAndCheckpoint[index3 + 2u];
 
-        // Convergence thresholds - for absolute position comparison at shallow zooms,
-        // we need larger thresholds because positions can be up to |z|=2
-        // At deep zooms (small pixel_size), use tighter thresholds
-        let epsilon = max(1e-6, params.pixel_size * 0.01);   // Final convergence
-        let epsilon2 = max(1e-4, params.pixel_size * 1.0);   // Getting close
+        // Convergence thresholds - match OctGpuZhuoranBoard
+        let epsilon = min(1e-7, params.pixel_size / 10.0);   // Final convergence
+        let epsilon2 = min(1e-5, params.pixel_size * 10.0);  // Getting close
+
+        // Track next checkpoint using O(1) counter for adaptive checkpoints
+        var next_checkpoint_idx = 0u;
 
         for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
           if (statusAndPeriod[index].x != 0u) { break; }
@@ -9714,28 +9711,59 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           let ref_offset = ref_iter * 2u;
           if (ref_offset + 1u >= params.ref_orbit_length * 2u) { break; }
 
-          let refr = refOrbit[ref_offset];
-          let refi = refOrbit[ref_offset + 1u];
+          var refr = refOrbit[ref_offset];
+          var refi = refOrbit[ref_offset + 1u];
 
-          // Compute actual position: z = Z_ref + δ_stored × 2^scale
-          var zr = refr;
-          var zi = refi;
+          // Compute actual delta and position: z = Z_ref + δ_actual
+          var dzr_actual = 0.0;
+          var dzi_actual = 0.0;
           if (scale >= -126) {
-            let dzr_actual = ldexp(dzr, scale);
-            let dzi_actual = ldexp(dzi, scale);
+            dzr_actual = ldexp(dzr, scale);
+            dzi_actual = ldexp(dzi, scale);
+          }
+          var zr = refr + dzr_actual;
+          var zi = refi + dzi_actual;
+
+          // === REBASING ===
+          // Always enable rebasing at all zoom levels (required for correct computation
+          // near bulb interiors at both shallow and deep zooms)
+          let z_norm = max(abs(zr), abs(zi));
+          let dz_norm = max(abs(dzr_actual), abs(dzi_actual));
+          if (ref_iter > 0u && z_norm < dz_norm * 2.0) {
+            // Rebase: δ becomes the absolute position
+            // Compute new scale to keep δ_stored normalized in [0.5, 2)
+            let new_log2 = floor(log2(z_norm));
+            let new_scale = i32(new_log2);
+            dzr = ldexp(zr, -new_scale);
+            dzi = ldexp(zi, -new_scale);
+            scale = new_scale;
+            ref_iter = 0u;
+
+            // Reload reference orbit for ref_iter = 0
+            refr = refOrbit[0];
+            refi = refOrbit[1];
+            dzr_actual = ldexp(dzr, scale);
+            dzi_actual = ldexp(dzi, scale);
             zr = refr + dzr_actual;
             zi = refi + dzi_actual;
           }
 
           // === ESCAPE CHECK ===
-          let z_mag_sq = zr * zr + zi * zi;
-          if (z_mag_sq > 4.0) {
-            statusAndPeriod[index] = vec2<u32>(1u, pp);
-            break;
+          // Only check escape when we can compute a meaningful position
+          // At extreme deep zooms (scale < -126), δ_actual underflows to 0
+          // and all pixels see only the reference orbit position, which
+          // may exceed |z|=2 even for interior points. Skip escape check
+          // until the perturbation grows to a representable scale.
+          if (scale >= -126) {
+            let z_mag_sq = zr * zr + zi * zi;
+            if (z_mag_sq > 4.0) {
+              statusAndPeriod[index] = vec2<u32>(1u, pp);
+              break;
+            }
           }
 
-          // === CONVERGENCE DETECTION ===
-          // Check if this batch_iter is a checkpoint iteration
+          // === CONVERGENCE DETECTION (following OctGpuZhuoranBoard) ===
+          // Save perturbation delta at checkpoint, use threading for comparison
           var just_updated = false;
           if (next_checkpoint_idx < params.checkpoint_count) {
             var checkpoint_offset = 0u;
@@ -9752,29 +9780,91 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
             }
 
             if (batch_iter == checkpoint_offset) {
-              // Save current ABSOLUTE position as checkpoint
+              // Save perturbation delta (dzr_actual, dzi_actual) at checkpoint
+              // This is the actual perturbation value BEFORE iteration
               just_updated = true;
-              bbr = zr;
-              bbi = zi;
+              bbr = dzr_actual;
+              bbi = dzi_actual;
               ckpt_iter = ref_iter;
-              pp = 0u;  // Reset period detection
+              pp = 0u;
               next_checkpoint_idx = next_checkpoint_idx + 1u;
+
+              // Initialize threading: reset deltas and follow ONE thread
+              threaded_delta_re = 0.0;
+              threaded_delta_im = 0.0;
+              if (ref_iter >= 2584u && ref_iter < params.ref_orbit_length) {
+                let thread = getThread(ref_iter);
+                if (thread.x >= 0.0) {
+                  next_threaded_ref_iter = u32(thread.x);
+                  threaded_delta_re = thread.y;
+                  threaded_delta_im = thread.z;
+                } else {
+                  next_threaded_ref_iter = 0xFFFFFFFFu;
+                }
+              } else {
+                next_threaded_ref_iter = 0xFFFFFFFFu;
+              }
             }
           }
 
-          // Check convergence (if we have a checkpoint and didn't just update it)
-          if (ckpt_iter != 0xFFFFFFFFu && !just_updated) {
-            let diff_r = zr - bbr;
-            let diff_i = zi - bbi;
-            let db = max(abs(diff_r), abs(diff_i));
+          // Check convergence using perturbation comparison with threading
+          // Skip when scale < -126 (δ_actual underflows, so comparison is meaningless)
+          if (ckpt_iter != 0xFFFFFFFFu && !just_updated && scale >= -126) {
+            // Threading buffer capacity
+            const THREADING_CAPACITY = 4194304u;
 
-            if (db <= epsilon2) {
-              if (pp == 0u) {
-                pp = iter;  // Record when we first got close
+            // Fallback: when ref_iter exceeds threading buffer, use absolute position
+            if (ref_iter >= THREADING_CAPACITY) {
+              let z_total_r = zr;
+              let z_total_i = zi;
+              let checkpoint_ref_offset = ckpt_iter * 2u;
+              let z_checkpoint_r = refOrbit[checkpoint_ref_offset] + bbr;
+              let z_checkpoint_i = refOrbit[checkpoint_ref_offset + 1u] + bbi;
+
+              let diff_r = z_total_r - z_checkpoint_r;
+              let diff_i = z_total_i - z_checkpoint_i;
+              let db = max(abs(diff_r), abs(diff_i));
+
+              if (db <= epsilon2) {
+                if (pp == 0u) { pp = iter; }
+                if (db <= epsilon) {
+                  statusAndPeriod[index] = vec2<u32>(2u, pp);
+                  break;
+                }
               }
-              if (db <= epsilon) {
-                statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
-                break;
+            } else {
+              // Normal convergence check with threading (high precision)
+              // Check at checkpoint ref_iter or at next threaded position
+              if (ref_iter == ckpt_iter ||
+                  (next_threaded_ref_iter != 0xFFFFFFFFu &&
+                   ref_iter == next_threaded_ref_iter)) {
+                // Compare perturbation deltas with accumulated threading offset
+                let dz_diff_r = dzr_actual - bbr;
+                let dz_diff_i = dzi_actual - bbi;
+                let total_diff_r = threaded_delta_re + dz_diff_r;
+                let total_diff_i = threaded_delta_im + dz_diff_i;
+                let db = max(abs(total_diff_r), abs(total_diff_i));
+
+                if (db <= epsilon2) {
+                  if (pp == 0u) { pp = iter; }
+                  if (db <= epsilon) {
+                    statusAndPeriod[index] = vec2<u32>(2u, pp);
+                    break;
+                  }
+                }
+
+                // If at threaded position, step forward to next thread
+                if (ref_iter == next_threaded_ref_iter &&
+                    next_threaded_ref_iter < params.ref_orbit_length) {
+                  let thread = getThread(next_threaded_ref_iter);
+                  if (thread.x >= 0.0) {
+                    threaded_delta_re = threaded_delta_re + thread.y;
+                    threaded_delta_im = threaded_delta_im + thread.z;
+                    next_threaded_ref_iter = u32(thread.x);
+                  } else {
+                    next_threaded_ref_iter = 0xFFFFFFFFu;
+                  }
+                }
               }
             }
           }
@@ -9833,12 +9923,14 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         iterations[index] = iter;
         dzAndCheckpoint[index6] = dzr;
         dzAndCheckpoint[index6 + 1u] = dzi;
-        dzAndCheckpoint[index6 + 2u] = bbr;  // Checkpoint absolute position
+        dzAndCheckpoint[index6 + 2u] = bbr;  // Checkpoint perturbation delta
         dzAndCheckpoint[index6 + 3u] = bbi;
+        dzAndCheckpoint[index6 + 4u] = threaded_delta_re;
+        dzAndCheckpoint[index6 + 5u] = threaded_delta_im;
         pixelScale[index] = scale;
         refIterAndCheckpoint[index3] = ref_iter;
         refIterAndCheckpoint[index3 + 1u] = ckpt_iter;
-        refIterAndCheckpoint[index3 + 2u] = next_checkpoint_idx;
+        refIterAndCheckpoint[index3 + 2u] = next_threaded_ref_iter;
         // Only write pp if pixel is still computing (preserve status if set)
         if (statusAndPeriod[index].x == 0u) {
           statusAndPeriod[index] = vec2<u32>(0u, pp);
@@ -9936,98 +10028,21 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         this.lastUploadedOrbitLength = totalIters;
       }
 
+      // Upload threading data for convergence detection
+      await this.uploadThreading();
+
       if (this.un === 0) {
         this.isComputing = false;
         return;
       }
 
-      // EXTREME DEEP ZOOM FALLBACK
-      // When initialScale < -126, all per-pixel deltas underflow to 0 in float32.
-      // At such extreme zooms, all pixels follow the reference orbit identically.
-      // Use CPU-based reference orbit tracking instead of GPU compute.
-      if (this.initialScale < -126) {
-        // At extreme deep zooms, pixels follow reference orbit exactly.
-        // Pixels escape when |z_ref|² > 4, NOT when the reference orbit's escape
-        // threshold (1e10) is reached. We need to find when the pixel escape
-        // condition is first met.
-
-        const maxiter = 100000;
-        let pixelEscapeIter = -1;
-
-        // Extend reference orbit and check for pixel escape (|z|² > 4) at each step
-        while (pixelEscapeIter < 0 && this.refIterations < maxiter) {
-          // Check if current orbit point exceeds pixel escape threshold
-          const orb = this.refOrbit[this.refIterations];
-          if (orb) {
-            const re = orb[0] + orb[1];
-            const im = orb[2] + orb[3];
-            const mag2 = re * re + im * im;
-            if (mag2 > 4) {
-              // Pixels escape when we ENTER iteration refIterations with |z|² > 4
-              // In OctZhuoranBoard, iteratePixel checks escape at START of iteration
-              // and reports nn = this.it (the current iteration counter)
-              // Since pixels start at refIter=1 and this.it=1, and both increment together,
-              // the reported iteration = the refOrbit index where escape was detected
-              pixelEscapeIter = this.refIterations;
-              break;
-            }
-          }
-
-          // Extend orbit if we haven't escaped yet
-          if (!this.refOrbitEscaped) {
-            this.extendReferenceOrbit();
-          } else {
-            // Reference escaped at 1e10 threshold but pixels haven't escaped at 4 threshold
-            // This shouldn't happen (4 < 1e10) so reference should still be extending
-            break;
-          }
-        }
-
-        if (pixelEscapeIter >= 0) {
-          // Pixels escape at the iteration where |z|² > 4 was first detected
-          const escapeIter = pixelEscapeIter;
-          const indices = [];
-          for (let i = 0; i < dimsArea; i++) {
-            if (this.nn[i] === 0) {
-              this.nn[i] = escapeIter;
-              this.di++;
-              this.un--;
-              indices.push(i);
-            }
-          }
-          if (indices.length > 0) {
-            this.queueChanges({ iter: escapeIter, nn: indices, vv: [] });
-          }
-          this.it = escapeIter + 1;
-        } else {
-          // Reference didn't escape by maxiter - mark all pixels as converged
-          const indices = [];
-          for (let i = 0; i < dimsArea; i++) {
-            if (this.nn[i] === 0) {
-              this.nn[i] = -maxiter;
-              this.un--;
-              indices.push({ index: i, z: [0, 0], p: 0 });
-            }
-          }
-          if (indices.length > 0) {
-            this.queueChanges({ iter: maxiter, nn: [], vv: indices });
-          }
-          this.it = maxiter;
-        }
-
-        this.isComputing = false;
-        return;
-      }
-
-      // Compute checkpoint offsets - disable convergence at deep zooms
+      // Compute checkpoint offsets for convergence detection (enabled at all zoom levels)
       const checkpointOffsets = [];
       const bufferIter = this.it;
-      if (this.initialScale > -15) {
-        for (let i = 0; i < iterationsPerBatch; i++) {
-          const globalIter = bufferIter + i;
-          if (fibonacciPeriod(globalIter) === 1) {
-            checkpointOffsets.push(i);
-          }
+      for (let i = 0; i < iterationsPerBatch; i++) {
+        const globalIter = bufferIter + i;
+        if (fibonacciPeriod(globalIter) === 1) {
+          checkpointOffsets.push(i);
         }
       }
       const checkpointCount = Math.min(checkpointOffsets.length, 8);
@@ -10149,37 +10164,6 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         }
       }
 
-      // MAXITER HANDLING: Mark remaining unfinished pixels as converged after maxiter
-      // This is necessary because our convergence detection doesn't catch all periodic orbits
-      const MAX_ITER = 1000;  // Sensible default for shallow zooms
-      if (this.un > 0 && this.it >= MAX_ITER) {
-        // Read current state to get positions for converged pixels
-        if (!dzAndCheckpointData) {
-          dzAndCheckpointData = await this.readBuffer(this.buffers.dzAndCheckpoint, Float32Array);
-          refIterData = await this.readBuffer(this.buffers.refIterAndCheckpoint, Uint32Array);
-        }
-
-        const maxiterConverged = [];
-        for (let i = 0; i < dimsArea; i++) {
-          if (this.nn[i] === 0) {  // Still unfinished
-            const iters = iterationsData[i];
-            this.nn[i] = -iters;  // Mark as converged (negative)
-            this.pp[i] = 0;  // Unknown period
-            const refIter = refIterData[i * 3];
-            const dzr = dzAndCheckpointData[i * 6];
-            const dzi = dzAndCheckpointData[i * 6 + 1];
-            const ref = this.refOrbit[Math.min(refIter, this.refOrbit.length - 1)];
-            const refR = ref ? ref[0] + ref[1] : 0;
-            const refI = ref ? ref[2] + ref[3] : 0;
-            maxiterConverged.push({ index: i, z: [refR + dzr, refI + dzi], p: 0 });
-            this.un--;
-          }
-        }
-
-        if (maxiterConverged.length > 0) {
-          this.queueChanges({ iter: this.it, nn: [], vv: maxiterConverged });
-        }
-      }
     } catch (error) {
       console.error('AdaptiveGpuBoard.compute() ERROR:', error?.message || error, error?.stack || '');
     } finally {

@@ -81,7 +81,6 @@ describe('Board computation at default zoom', () => {
     const result = await runBoardTest(page, 'gpu');
     await page.close();
 
-    console.log(`GpuBoard: di=${result.di}/${result.total}`);
     // Board completes when di > 0 (some pixels computed)
     expect(result.di).toBeGreaterThan(0);
   }, TEST_TIMEOUT);
@@ -93,7 +92,6 @@ describe('Board computation at default zoom', () => {
     const result = await runBoardTest(page, 'gpuzhuoran');
     await page.close();
 
-    console.log(`GpuZhuoranBoard: di=${result.di}/${result.total}`);
     // Board completes when di > 0 (some pixels computed)
     expect(result.di).toBeGreaterThan(0);
   }, TEST_TIMEOUT);
@@ -111,7 +109,6 @@ describe('Board computation at default zoom', () => {
     await zhuoranPage.close();
 
     const comparison = compareBoards(gpuResult, zhuoranResult);
-    console.log(`GPU vs GpuZhuoran: ${comparison.matchRate}% match (${comparison.matches}/${comparison.total})`);
 
     // Expect at least 75% match due to different numerical approaches
     // (direct f32 vs perturbation theory with f32 deltas)

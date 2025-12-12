@@ -203,11 +203,6 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
     const result = decimalToOct(input);
     const sum = sumLimbs(result);
 
-    console.log('Input:', input);
-    console.log('Limbs:', result);
-    console.log('Sum:', sum);
-    console.log('Diff from -1.8:', sum - (-1.8));
-
     // KNOWN BUG: The sum equals -1.8 due to float64 precision limits
     // This documents the current behavior, not the desired behavior
     expect(sum).toBe(-1.8);
@@ -239,11 +234,6 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
     const result = decimalToOct(input);
     const sum = sumLimbs(result);
 
-    console.log('Near -2 test:');
-    console.log('Input:', input);
-    console.log('Sum:', sum);
-    console.log('Diff from -2:', sum - (-2));
-
     // KNOWN LIMITATION: rounds to -2
     expect(sum).toBe(-2);
   });
@@ -252,12 +242,6 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
     const input = '1.00000000000000000001';
     const result = decimalToOct(input);
     const sum = sumLimbs(result);
-
-    console.log('1+epsilon test:');
-    console.log('Input:', input);
-    console.log('Limbs:', result);
-    console.log('Sum:', sum);
-    console.log('Diff from 1:', sum - 1);
 
     // KNOWN LIMITATION: rounds to 1
     expect(sum).toBe(1);
@@ -268,11 +252,6 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
     const input = '0.00000000000000000000073';
     const result = decimalToOct(input);
     const sum = sumLimbs(result);
-
-    console.log('Tiny imaginary test:');
-    console.log('Input:', input);
-    console.log('Limbs:', result);
-    console.log('Sum:', sum);
 
     // Should be positive and approximately 7.3e-22
     expect(sum).toBeGreaterThan(0);

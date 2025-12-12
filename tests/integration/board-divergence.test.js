@@ -38,7 +38,7 @@ describe('Board Divergence Comparison Tests', () => {
    */
   async function getBoardIterations(boardType, zoom) {
     const url = 'file://' + path.join(process.cwd(), 'index.html') +
-      `?z=${zoom}&c=${TEST_CENTER}&board=${boardType}&grid=1&maxiter=700`;
+      `?z=${zoom}&c=${TEST_CENTER}&board=${boardType}&grid=20&subpixel=1&maxiter=700`;
 
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
@@ -73,19 +73,16 @@ describe('Board Divergence Comparison Tests', () => {
 
   test('gpuzhuoran shows diverse iterations at z=1e20', async () => {
     const result = await getBoardIterations('gpuzhuoran', '1e20');
-    console.log(`gpuzhuoran: ${result.boardType}, unique=${result.uniqueIters}`);
     expect(result.uniqueIters).toBeGreaterThan(10);
   }, TEST_TIMEOUT);
 
   test('octzhuoran shows diverse iterations at z=1e20', async () => {
     const result = await getBoardIterations('octzhuoran', '1e20');
-    console.log(`octzhuoran: ${result.boardType}, unique=${result.uniqueIters}`);
     expect(result.uniqueIters).toBeGreaterThan(10);
   }, TEST_TIMEOUT);
 
   test('octzhuoran shows diverse iterations at z=1e35', async () => {
     const result = await getBoardIterations('octzhuoran', '1e35');
-    console.log(`octzhuoran at z=1e35: ${result.boardType}, unique=${result.uniqueIters}`);
     expect(result.uniqueIters).toBeGreaterThan(10);
   }, TEST_TIMEOUT);
 
@@ -93,16 +90,12 @@ describe('Board Divergence Comparison Tests', () => {
     const gpuResult = await getBoardIterations('gpuzhuoran', '1e20');
     const octResult = await getBoardIterations('octzhuoran', '1e20');
 
-    console.log(`gpuzhuoran: unique=${gpuResult.uniqueIters}`);
-    console.log(`octzhuoran: unique=${octResult.uniqueIters}`);
-
     // Compare sample pixels
     let matches = 0;
     for (let i = 0; i < gpuResult.sample.length; i++) {
       if (gpuResult.sample[i] === octResult.sample[i]) matches++;
     }
     const matchRate = matches / gpuResult.sample.length;
-    console.log(`Sample match: ${matches}/${gpuResult.sample.length} (${(matchRate * 100).toFixed(1)}%)`);
 
     // Expect high match rate between GPU and CPU perturbation implementations
     expect(matchRate).toBeGreaterThan(0.9);
