@@ -9493,8 +9493,11 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     this.refIter = new Uint32Array(dimsArea);       // Reference iteration index
 
     // Initialize each pixel
+    // Both x and y offsets are in raw pixel units. The pixelSize (size/dimsWidth) is
+    // already correct because sizeY = size/aspectRatio = size*dimsHeight/dimsWidth,
+    // and sizeY/dimsHeight = size/dimsWidth = pixelSize. So no extra scaling needed.
     for (let y = 0; y < dimsHeight; y++) {
-      const yOffset = (dimsHeight / 2 - y) / this.config.aspectRatio;
+      const yOffset = dimsHeight / 2 - y;
 
       for (let x = 0; x < dimsWidth; x++) {
         const xOffset = x - dimsWidth / 2;
