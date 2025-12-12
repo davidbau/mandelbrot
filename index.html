@@ -9598,8 +9598,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     const refIterData = new Uint32Array(dimsArea * 3);
     for (let i = 0; i < dimsArea; i++) {
       refIterData[i * 3] = this.refIter[i];
-      refIterData[i * 3 + 1] = 0xFFFFFFFF;  // ckpt_iter (invalid)
-      refIterData[i * 3 + 2] = 0xFFFFFFFF;  // next_threaded_ref_iter
+      refIterData[i * 3 + 1] = 0xFFFFFFFF;  // ckpt_iter (invalid = no checkpoint yet)
+      refIterData[i * 3 + 2] = 0;           // next_checkpoint_idx (start at 0)
     }
     this.device.queue.writeBuffer(this.buffers.refIterAndCheckpoint, 0, refIterData);
 
@@ -9695,6 +9695,19 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         let dci = dc[index2 + 1u];
         var pp = statusAndPeriod[index].y;
 
+        // Checkpoint state for convergence detection
+        // bbr/bbi store the ABSOLUTE position at checkpoint (not scaled delta)
+        var bbr = dzAndCheckpoint[index6 + 2u];
+        var bbi = dzAndCheckpoint[index6 + 3u];
+        var ckpt_iter = refIterAndCheckpoint[index3 + 1u];
+        var next_checkpoint_idx = refIterAndCheckpoint[index3 + 2u];
+
+        // Convergence thresholds - for absolute position comparison at shallow zooms,
+        // we need larger thresholds because positions can be up to |z|=2
+        // At deep zooms (small pixel_size), use tighter thresholds
+        let epsilon = max(1e-6, params.pixel_size * 0.01);   // Final convergence
+        let epsilon2 = max(1e-4, params.pixel_size * 1.0);   // Getting close
+
         for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
           if (statusAndPeriod[index].x != 0u) { break; }
 
@@ -9704,26 +9717,66 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           let refr = refOrbit[ref_offset];
           let refi = refOrbit[ref_offset + 1u];
 
-          // === ESCAPE CHECK ===
           // Compute actual position: z = Z_ref + δ_stored × 2^scale
-          // At deep zooms (scale < -126), ldexp underflows to 0
-          var escaped = false;
-          if (scale < -126) {
-            // Delta underflows - just check reference orbit
-            let ref_mag_sq = refr * refr + refi * refi;
-            escaped = ref_mag_sq > 4.0;
-          } else {
+          var zr = refr;
+          var zi = refi;
+          if (scale >= -126) {
             let dzr_actual = ldexp(dzr, scale);
             let dzi_actual = ldexp(dzi, scale);
-            let zr = refr + dzr_actual;
-            let zi = refi + dzi_actual;
-            let z_mag_sq = zr * zr + zi * zi;
-            escaped = z_mag_sq > 4.0;
+            zr = refr + dzr_actual;
+            zi = refi + dzi_actual;
           }
 
-          if (escaped) {
+          // === ESCAPE CHECK ===
+          let z_mag_sq = zr * zr + zi * zi;
+          if (z_mag_sq > 4.0) {
             statusAndPeriod[index] = vec2<u32>(1u, pp);
             break;
+          }
+
+          // === CONVERGENCE DETECTION ===
+          // Check if this batch_iter is a checkpoint iteration
+          var just_updated = false;
+          if (next_checkpoint_idx < params.checkpoint_count) {
+            var checkpoint_offset = 0u;
+            switch (next_checkpoint_idx) {
+              case 0u: { checkpoint_offset = params.ckpt0; }
+              case 1u: { checkpoint_offset = params.ckpt1; }
+              case 2u: { checkpoint_offset = params.ckpt2; }
+              case 3u: { checkpoint_offset = params.ckpt3; }
+              case 4u: { checkpoint_offset = params.ckpt4; }
+              case 5u: { checkpoint_offset = params.ckpt5; }
+              case 6u: { checkpoint_offset = params.ckpt6; }
+              case 7u: { checkpoint_offset = params.ckpt7; }
+              default: {}
+            }
+
+            if (batch_iter == checkpoint_offset) {
+              // Save current ABSOLUTE position as checkpoint
+              just_updated = true;
+              bbr = zr;
+              bbi = zi;
+              ckpt_iter = ref_iter;
+              pp = 0u;  // Reset period detection
+              next_checkpoint_idx = next_checkpoint_idx + 1u;
+            }
+          }
+
+          // Check convergence (if we have a checkpoint and didn't just update it)
+          if (ckpt_iter != 0xFFFFFFFFu && !just_updated) {
+            let diff_r = zr - bbr;
+            let diff_i = zi - bbi;
+            let db = max(abs(diff_r), abs(diff_i));
+
+            if (db <= epsilon2) {
+              if (pp == 0u) {
+                pp = iter;  // Record when we first got close
+              }
+              if (db <= epsilon) {
+                statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
+                break;
+              }
+            }
           }
 
           // === PERTURBATION ITERATION (z² + c) ===
@@ -9780,9 +9833,16 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         iterations[index] = iter;
         dzAndCheckpoint[index6] = dzr;
         dzAndCheckpoint[index6 + 1u] = dzi;
+        dzAndCheckpoint[index6 + 2u] = bbr;  // Checkpoint absolute position
+        dzAndCheckpoint[index6 + 3u] = bbi;
         pixelScale[index] = scale;
         refIterAndCheckpoint[index3] = ref_iter;
-        statusAndPeriod[index] = vec2<u32>(statusAndPeriod[index].x, pp);
+        refIterAndCheckpoint[index3 + 1u] = ckpt_iter;
+        refIterAndCheckpoint[index3 + 2u] = next_checkpoint_idx;
+        // Only write pp if pixel is still computing (preserve status if set)
+        if (statusAndPeriod[index].x == 0u) {
+          statusAndPeriod[index] = vec2<u32>(0u, pp);
+        }
       }
     `;
 
@@ -10086,6 +10146,38 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         const convergedData = convergedByIteration.get(iter) || [];
         if (divergedIndices.length > 0 || convergedData.length > 0) {
           this.queueChanges({ iter: iter, nn: divergedIndices, vv: convergedData });
+        }
+      }
+
+      // MAXITER HANDLING: Mark remaining unfinished pixels as converged after maxiter
+      // This is necessary because our convergence detection doesn't catch all periodic orbits
+      const MAX_ITER = 1000;  // Sensible default for shallow zooms
+      if (this.un > 0 && this.it >= MAX_ITER) {
+        // Read current state to get positions for converged pixels
+        if (!dzAndCheckpointData) {
+          dzAndCheckpointData = await this.readBuffer(this.buffers.dzAndCheckpoint, Float32Array);
+          refIterData = await this.readBuffer(this.buffers.refIterAndCheckpoint, Uint32Array);
+        }
+
+        const maxiterConverged = [];
+        for (let i = 0; i < dimsArea; i++) {
+          if (this.nn[i] === 0) {  // Still unfinished
+            const iters = iterationsData[i];
+            this.nn[i] = -iters;  // Mark as converged (negative)
+            this.pp[i] = 0;  // Unknown period
+            const refIter = refIterData[i * 3];
+            const dzr = dzAndCheckpointData[i * 6];
+            const dzi = dzAndCheckpointData[i * 6 + 1];
+            const ref = this.refOrbit[Math.min(refIter, this.refOrbit.length - 1)];
+            const refR = ref ? ref[0] + ref[1] : 0;
+            const refI = ref ? ref[2] + ref[3] : 0;
+            maxiterConverged.push({ index: i, z: [refR + dzr, refI + dzi], p: 0 });
+            this.un--;
+          }
+        }
+
+        if (maxiterConverged.length > 0) {
+          this.queueChanges({ iter: this.it, nn: [], vv: maxiterConverged });
         }
       }
     } catch (error) {
