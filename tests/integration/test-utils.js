@@ -164,13 +164,16 @@ async function closeBrowser(browser, timeout = 10000) {
       try { await page.close(); } catch (e) { /* ignore */ }
     }));
 
-    // Race browser.close() against timeout
+    // Race browser.close() against timeout, ensuring timer is cleaned up
     const proc = browser.process();
+    let timeoutId;
     await Promise.race([
-      browser.close(),
-      sleep(timeout).then(() => {
-        // Force kill if close hangs
-        if (proc) proc.kill('SIGKILL');
+      browser.close().finally(() => clearTimeout(timeoutId)),
+      new Promise(resolve => {
+        timeoutId = setTimeout(() => {
+          if (proc) proc.kill('SIGKILL');
+          resolve();
+        }, timeout);
       })
     ]);
   } catch (e) { /* ignore */ }
