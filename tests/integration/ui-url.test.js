@@ -82,23 +82,23 @@ describe('URL Parameter Tests', () => {
     }
   }, TEST_TIMEOUT);
 
-  test('URL encoding: z parameter uses scientific notation format', async () => {
+  test('URL encoding: z parameter uses compact scientific notation format', async () => {
     // Load page with a high zoom level
     await navigateToUrl(page, getAppUrl('?c=-0.5+0i&z=1e10'));
 
     // Trigger URL update
     await page.evaluate(() => window.explorer.urlHandler.updateurl());
 
-    // Check that the URL uses scientific notation with 3 significant digits
+    // Check that the URL uses compact scientific notation (no +, strips trailing zeros)
     const url = await page.evaluate(() => location.search);
-    expect(url).toMatch(/z=\d\.\d{2}e[+-]\d+/);  // Format like 1.00e+10
+    expect(url).toMatch(/z=\d(\.\d+)?e-?\d+/);  // Format like 1e10 or 1.25e10
 
     // Also test with a different zoom level to verify consistent formatting
     await navigateToUrl(page, getAppUrl('?c=-0.5+0i&z=12500'));
     await page.evaluate(() => window.explorer.urlHandler.updateurl());
 
     const url2 = await page.evaluate(() => location.search);
-    expect(url2).toMatch(/z=\d\.\d{2}e[+-]\d+/);  // Format like 1.25e+4
+    expect(url2).toMatch(/z=\d(\.\d+)?e-?\d+/);  // Format like 1.25e4
   }, TEST_TIMEOUT);
 
   test('Should load with additional color themes (iceblue, tiedye)', async () => {

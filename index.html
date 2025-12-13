@@ -4276,9 +4276,12 @@ function centersWereLost(oldCenters, newCenters) {
   return false;
 }
 
-// Format zoom level for URL (z parameter) - always scientific notation
+// Format zoom level for URL (z parameter) - compact scientific notation
+// Strips trailing zeros: 5.00e+3 → 5e3, 1.50e+10 → 1.5e10
 function formatZoom(z) {
-  return z.toExponential(2);
+  let s = z.toExponential(2);
+  // Strip trailing zeros from mantissa and unnecessary + in exponent
+  return s.replace(/\.?0+e/, 'e').replace('e+', 'e');
 }
 
 // Format scale for human-readable display (e.g., "2.5x", "100x", or scientific for large)
@@ -4380,7 +4383,11 @@ function octToDecimalString(oct, digits) {
       fracStr = fracStr.padEnd(digits, '0');
     }
 
-    result += '.' + fracStr;
+    // Strip trailing zeros from fractional part
+    fracStr = fracStr.replace(/0+$/, '');
+    if (fracStr.length > 0) {
+      result += '.' + fracStr;
+    }
   }
 
   return result;

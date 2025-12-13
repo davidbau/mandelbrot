@@ -51,25 +51,25 @@ describe('formatScale', () => {
 });
 
 describe('formatZoom', () => {
-  test('should format in scientific notation with 3 significant digits', () => {
-    expect(formatFuncs.formatZoom(0.001)).toBe('1.00e-3');
+  test('should format in compact scientific notation (strips trailing zeros)', () => {
+    expect(formatFuncs.formatZoom(0.001)).toBe('1e-3');
     expect(formatFuncs.formatZoom(1.2345e-10)).toBe('1.23e-10');
-    expect(formatFuncs.formatZoom(1.25e+10)).toBe('1.25e+10');
+    expect(formatFuncs.formatZoom(1.25e+10)).toBe('1.25e10');  // no + in exponent
   });
 
   test('should format medium zoom levels in scientific notation', () => {
-    expect(formatFuncs.formatZoom(3.14159)).toBe('3.14e+0');
-    expect(formatFuncs.formatZoom(1)).toBe('1.00e+0');
+    expect(formatFuncs.formatZoom(3.14159)).toBe('3.14e0');  // no + in exponent
+    expect(formatFuncs.formatZoom(1)).toBe('1e0');           // strips trailing zeros
   });
 
   test('should format very small zoom levels', () => {
-    expect(formatFuncs.formatZoom(1e-10)).toBe('1.00e-10');
+    expect(formatFuncs.formatZoom(1e-10)).toBe('1e-10');     // strips trailing zeros
     expect(formatFuncs.formatZoom(5.67e-15)).toBe('5.67e-15');
   });
 
   test('should format large zoom levels', () => {
-    expect(formatFuncs.formatZoom(1e10)).toBe('1.00e+10');
-    expect(formatFuncs.formatZoom(1.25e10)).toBe('1.25e+10');
+    expect(formatFuncs.formatZoom(1e10)).toBe('1e10');       // strips trailing zeros, no +
+    expect(formatFuncs.formatZoom(1.25e10)).toBe('1.25e10'); // no + in exponent
   });
 });
 
