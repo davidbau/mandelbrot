@@ -7779,7 +7779,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
   setupReferenceOrbitLoop() {
     // When reference orbit hits threading limit, find a close point to loop back to
-    const THREADING_CAPACITY = 4194304;  // 2^22
+    const THREADING_CAPACITY = 1048576;  // 2^20
     const SEARCH_WINDOW = 10000;
 
     if (this.refIterations < THREADING_CAPACITY || this.refOrbitLoopConfigured) {
@@ -8101,7 +8101,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           // Use 0xFFFFFFFF as sentinel for "no checkpoint yet" (allows ckpt_iter=0)
           if (ckpt_iter != 0xFFFFFFFFu && !just_updated) {
             // Threading buffer capacity: 64MB / 16 bytes per iteration = 4,194,304 (2^22)
-            const THREADING_CAPACITY = 4194304u;
+            const THREADING_CAPACITY = 1048576u;
 
             // Fallback: when ref_iter exceeds threading buffer, use absolute position comparison
             if (ref_iter >= THREADING_CAPACITY) {
@@ -8224,7 +8224,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Step 1: Extend reference orbit on CPU as needed
     // Extend to what pixels need (this.it) plus enough buffer for next batch
-    const THREADING_CAPACITY = 4194304;  // 2^22
+    const THREADING_CAPACITY = 1048576;  // 2^20
     const currentNeed = this.it + iterationsPerBatch;
     // Also allow growth for thread-following, but cap to avoid waste
     // Use proportional buffer (10%) for long periods, or fixed 10k buffer for short periods
@@ -8959,7 +8959,7 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
 
           // Convergence detection
           if (ckpt_iter != 0xFFFFFFFFu && !just_updated) {
-            const THREADING_CAPACITY = 4194304u;
+            const THREADING_CAPACITY = 1048576u;
 
             if (ref_iter >= THREADING_CAPACITY) {
               // Fallback for very long orbits
@@ -9076,7 +9076,7 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
       this.effort = iterationsPerBatch;
 
       // Extend reference orbit on CPU as needed
-      const THREADING_CAPACITY = 4194304;
+      const THREADING_CAPACITY = 1048576;
       const currentNeed = this.it + iterationsPerBatch;
       const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
       const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
@@ -9403,7 +9403,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     if (this.refOrbitLoopConfigured) return;
 
     // Find a cycle in the reference orbit using threading data
-    const THREADING_CAPACITY = 4194304;
+    const THREADING_CAPACITY = 1048576;
     if (this.refIterations < THREADING_CAPACITY) return;
 
     // Look for a cycle in the last portion of the orbit
@@ -9430,7 +9430,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
   // Upload threading data to GPU (copied from GpuZhuoranBoard)
   async uploadThreading() {
     const threadingData = this.threading.refThreading;
-    const uploadLength = Math.min(threadingData.length, 4194304);
+    const uploadLength = Math.min(threadingData.length, 1048576);
 
     if (this.lastUploadedThreadingLength < uploadLength) {
       const startIdx = Math.max(0, this.lastUploadedThreadingLength);
@@ -9817,7 +9817,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           // Skip when scale < -126 (δ_actual underflows, so comparison is meaningless)
           if (ckpt_iter != 0xFFFFFFFFu && !just_updated && scale >= -126) {
             // Threading buffer capacity
-            const THREADING_CAPACITY = 4194304u;
+            const THREADING_CAPACITY = 1048576u;
 
             // Fallback: when ref_iter exceeds threading buffer, use absolute position
             if (ref_iter >= THREADING_CAPACITY) {
@@ -9990,7 +9990,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       this.effort = iterationsPerBatch;
 
       // Extend reference orbit on CPU as needed
-      const THREADING_CAPACITY = 4194304;
+      const THREADING_CAPACITY = 1048576;
       const currentNeed = this.it + iterationsPerBatch;
       const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
       const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
