@@ -51,7 +51,7 @@ describe('Mouse UI Tests', () => {
       expect(viewsAfter).toBe(viewsBefore + 1);
 
       const sizes = await page.evaluate(() => {
-        return window.explorer.grid.views.map(v => v ? v.sizes[0] : null);
+        return window.explorer.grid.views.map(v => v ? v.size : null);
       });
       expect(sizes[1]).toBeLessThan(sizes[0]);
     }, TEST_TIMEOUT);
@@ -284,9 +284,9 @@ describe('Mouse UI Tests', () => {
         // Get view dimensions and pixel data
         const width = view.config.dimsWidth;
         const height = view.config.dimsHeight;
-        const size = view.sizes[0];  // Size of view in complex plane
-        const centerRe = view.sizes[1][0];  // High part of quad-double
-        const centerIm = view.sizes[2][0];  // High part of quad-double
+        const size = view.size;  // Size of view in complex plane
+        const centerRe = view.re[0];  // High part of oct
+        const centerIm = view.im[0];  // High part of oct
 
         // Helper to convert pixel coords to complex coords
         const pixelToComplex = (px, py) => {

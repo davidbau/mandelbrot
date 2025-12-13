@@ -1067,13 +1067,14 @@ class View {
   }
 
   // Getter properties that derive from sizesOct (the authoritative source)
-  // This eliminates the redundant sizes array that caused precision bugs
   get size() { return octToNumber(this.sizesOct[0]); }
-  get re() { return octToQd(this.sizesOct[1]); }
-  get im() { return octToQd(this.sizesOct[2]); }
-  // Backward-compatible getter - returns derived qd-precision array
-  // Prefer using sizesOct directly for full precision, or individual getters
-  get sizes() { return [this.size, this.re, this.im]; }
+  get sizeOct() { return this.sizesOct[0]; }
+  get re() { return this.sizesOct[1]; }
+  get im() { return this.sizesOct[2]; }
+
+  // Derived scalar properties
+  get pixelSize() { return this.size / this.config.dimsWidth; }
+  get zoomFactor() { return this.config.firstsize / this.size; }
 
   // Static helper: lookup histogram fractions for a given iteration count
   static lookupHistogram(i, histogram) {
@@ -1161,12 +1162,8 @@ class View {
     const rFrac = (x / dimsWidth) - Config.CENTER_COORDINATE;
     const jFrac = Config.CENTER_COORDINATE - (y / dimsHeight);
     // Use oct precision for scaling to preserve accuracy at deep zoom
-    // Multiply sizeOct by fractional offset (normal float64) to avoid precision loss
-    const sizeOct = this.sizesOct[0];
-    const centerROct = this.sizesOct[1];
-    const centerIOct = this.sizesOct[2];
-    const rOct = toOctAdd(centerROct, toOctScale(sizeOct, rFrac));
-    const iOct = toOctAdd(centerIOct, toOctScale(sizeOct, jFrac / aspectRatio));
+    const rOct = toOctAdd(this.re, toOctScale(this.sizeOct, rFrac));
+    const iOct = toOctAdd(this.im, toOctScale(this.sizeOct, jFrac / aspectRatio));
     // Return oct format (8 elements: 4 real + 4 imaginary) for full precision
     return [rOct[0], rOct[1], rOct[2], rOct[3], iOct[0], iOct[1], iOct[2], iOct[3]];
   }
@@ -1419,7 +1416,7 @@ class View {
     if (i < 0) return 'black';
     // Use own histogram for consistent palette at this resolution
     const hi = histogram || this.hi;
-    const size = scale || this.sizes[0];
+    const size = scale || this.size;
     // Validate histogram structure
     if (!hi || !Array.isArray(hi) || hi.length === 0 || !Array.isArray(hi[0]) || hi[0].length < 4) {
       console.warn('Invalid histogram structure:', { hi, viewK: this.k, viewId: this.id });
@@ -1552,7 +1549,7 @@ class Grid {
     const view = this.views[k];
     if (!view) return;
     this.scheduler.assignBoardToWorker(
-      k, view.sizes[0], view.sizes[1], view.sizes[2], this.config, view.id);
+      k, view.size, octToNumber(view.re), octToNumber(view.im), this.config, view.id);
   }
 
   removeView(k) {
@@ -1634,7 +1631,8 @@ class Grid {
       if (this.hiddencanvas(k)) {
         state.hidden.push(k);
       }
-      state.sizes.push(this.views[k].sizes);
+      // State format: [sizeScalar, reOct, imOct] for backward compatibility
+      state.sizes.push([this.views[k].size, this.views[k].re, this.views[k].im]);
     }
     return state;
   }
@@ -1771,7 +1769,7 @@ class Grid {
           if (oldK !== k) {
             this.scheduler.removeBoardFromWorker(oldK);
             this.scheduler.assignBoardToWorker(
-              k, preserved.sizes[0], preserved.sizes[1], preserved.sizes[2],
+              k, preserved.size, octToNumber(preserved.re), octToNumber(preserved.im),
               this.config, preserved.id);
           }
 
@@ -1864,7 +1862,7 @@ class Grid {
     // Use firstsize (which varies with aspect ratio) for display consistency
     let viewSize;
     if (k < this.views.length) {
-      viewSize = this.views[k].sizes[0];
+      viewSize = this.views[k].size;
     } else if (sizeInfo && sizeInfo[0] !== null) {
       viewSize = sizeInfo[0];
     } else {
@@ -2021,9 +2019,7 @@ class Grid {
         percentDone = 99.9;
       }
       // Use oct precision coordinates when available to preserve full precision in status
-      const ore = this.views[k].sizesOct ? this.views[k].sizesOct[1] : this.views[k].sizes[1];
-      const oim = this.views[k].sizesOct ? this.views[k].sizesOct[2] : this.views[k].sizes[2];
-      const coords = formatcomplex(k, ore, oim).replaceAll('-', '\u2212');
+      const coords = formatcomplex(k, this.views[k].re, this.views[k].im).replaceAll('-', '\u2212');
       const iters = formatLargeInt(this.views[k].it);
       const regularStatus = `${MSG.center_at_}${coords}\n${percentDone}` +
                              `${MSG.percent_done_after_}${iters}${MSG.iters}`;
@@ -2040,14 +2036,11 @@ class Grid {
 
   bigurl(k, debug) {
     if (k >= this.views.length) return;
-    const osize = this.views[k].sizes[0];
+    const osize = this.views[k].size;
     const zoomFactor = this.config.firstsize / osize;  // Zoom factor (1.0 = default)
-    // Use oct precision coordinates when available to preserve full precision in URL
-    const ore = this.views[k].sizesOct ? this.views[k].sizesOct[1] : this.views[k].sizes[1];
-    const oim = this.views[k].sizesOct ? this.views[k].sizesOct[2] : this.views[k].sizes[2];
     const exponentParam = this.config.exponent !== 2 ? `&exponent=${this.config.exponent}` : '';
     const themeParam = this.config.theme !== 'warm' ? `&theme=${this.config.theme}` : '';
-    const coords = formatcomplex(k, ore, oim);
+    const coords = formatcomplex(k, this.views[k].re, this.views[k].im);
     return `?z=${formatZoom(zoomFactor)}${exponentParam}&c=${coords}${themeParam}`;
   }
 
@@ -2157,20 +2150,19 @@ class ZoomManager {
   zoomInAtCurrentPosition(hideCurrent) {
     let k = this.grid.views.length - 1;
     if (this.grid.views[k].uninteresting()) { return; }
-    let osize = this.grid.views[k].sizes[0];
-    // Use sizesOct directly to preserve full precision at deep zoom levels
-    let oreOct = this.grid.views[k].sizesOct[1];
-    let oimOct = this.grid.views[k].sizesOct[2];
+    let osize = this.grid.views[k].size;
+    let oreOct = this.grid.views[k].re;
+    let oimOct = this.grid.views[k].im;
     let ore = octToQd(oreOct);
     let oim = octToQd(oimOct);
     let rre = Config.CENTER_COORDINATE;
     if (k === 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
       // Myreberg / Feigenbaum point
-      const baseRe = this.grid.views[0].sizesOct[1];
+      const baseRe = this.grid.views[0].re;
       oreOct = Config.FEIGENBAUM_POINT_OCT;
       ore = octToQd(oreOct);
       rre = octToNumber(toOctAdd(
-        toOctScale(toOctSub(oreOct, baseRe), 1 / this.grid.views[0].sizes[0]),
+        toOctScale(toOctSub(oreOct, baseRe), 1 / this.grid.views[0].size),
         Config.CENTER_COORDINATE
       ));
     }
@@ -2217,11 +2209,10 @@ class ZoomManager {
 
   cellclickdelay(k, m, hideCurrent) {
     if (k >= this.grid.views.length || this.grid.currentUpdateProcess) return;
-    let osize = this.grid.views[k].sizes[0];
-    // Use oct precision for size and centers to preserve full precision at deep zoom
-    let osizeOct = this.grid.views[k].sizesOct[0];
-    let ore = this.grid.views[k].sizesOct[1];
-    let oim = this.grid.views[k].sizesOct[2];
+    let osize = this.grid.views[k].size;
+    let osizeOct = this.grid.views[k].sizeOct;
+    let ore = this.grid.views[k].re;
+    let oim = this.grid.views[k].im;
     let cx = m % this.config.dimsWidth;
     let cy = (m - cx) / this.config.dimsWidth;
     const rectX = cx / this.config.dimsWidth;
@@ -2278,34 +2269,33 @@ class ZoomManager {
 
   centerViews(includeFirst) {
     let k = this.grid.views.length - 1;
-    // Use sizesOct for full precision at deep zoom
-    let oreOct = this.grid.views[k].sizesOct[1];
-    let oimOct = this.grid.views[k].sizesOct[2];
+    let oreOct = this.grid.views[k].re;
+    let oimOct = this.grid.views[k].im;
     if (!includeFirst) {
-      const invPrevSize = 1 / this.grid.views[0].sizes[0];
+      const invPrevSize = 1 / this.grid.views[0].size;
       this.showZoomRect(
         0,
         octToNumber(toOctAdd(
           toOct(0.5),
           toOctScale(
-            octSub(oreOct, this.grid.views[0].sizesOct[1]),
+            octSub(oreOct, this.grid.views[0].re),
             invPrevSize
           ))),
         octToNumber(toOctAdd(
           toOct(0.5),
           toOctScale(
-            octSub(this.grid.views[0].sizesOct[2], oimOct),
+            octSub(this.grid.views[0].im, oimOct),
             invPrevSize * this.config.aspectRatio
           ))),
-           this.grid.views[0].sizes[0] / this.grid.views[1].sizes[0]);
+           this.grid.views[0].size / this.grid.views[1].size);
     }
 
     // Helper to check if view center is within 1% tolerance of target
     const isWithinTolerance = (view, targetReOct, targetImOct) => {
-      const viewSize = view.sizes[0];
+      const viewSize = view.size;
       const tolerance = viewSize * 0.01; // 1% of view extent
-      const viewRe = octToNumber(view.sizesOct[1]);
-      const viewIm = octToNumber(view.sizesOct[2]);
+      const viewRe = octToNumber(view.re);
+      const viewIm = octToNumber(view.im);
       const targetRe = octToNumber(targetReOct);
       const targetIm = octToNumber(targetImOct);
       return Math.abs(targetRe - viewRe) < tolerance &&
@@ -2314,20 +2304,18 @@ class ZoomManager {
 
     for (k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
       this.showZoomRect(
-          k, 0.5, 0.5, this.grid.views[k].sizes[0] / this.grid.views[k+1].sizes[0]);
-      if (octCompare(this.grid.views[k].sizesOct[1], oreOct) ||
-          octCompare(this.grid.views[k].sizesOct[2], oimOct)) {
+          k, 0.5, 0.5, this.grid.views[k].size / this.grid.views[k+1].size);
+      if (octCompare(this.grid.views[k].re, oreOct) ||
+          octCompare(this.grid.views[k].im, oimOct)) {
         // View center differs from target - check if within 1% tolerance
         if (isWithinTolerance(this.grid.views[k], oreOct, oimOct)) {
           // Within tolerance: update coordinates to exact target without recreating
           this.grid.views[k].sizesOct[1] = oreOct;
           this.grid.views[k].sizesOct[2] = oimOct;
-          this.grid.views[k].sizes[1] = [octToNumber(oreOct)];
-          this.grid.views[k].sizes[2] = [octToNumber(oimOct)];
         } else {
           // Beyond tolerance: recreate the view
           this.grid.scheduler.removeBoardFromWorker(k);
-          let nsize = this.grid.views[k].sizes[0];
+          let nsize = this.grid.views[k].size;
           this.grid.makeView(k, nsize, oreOct, oimOct);
           this.grid.views[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
           this.grid.clearseq(k);
@@ -2802,8 +2790,8 @@ class URLHandler {
     let prevj = -1;
     for (let j = 0; j <= state.sizes.length; j++) {
       const view = this.grid.views[j];
-      const viewReOct = view?.sizesOct ? view.sizesOct[1] : state.sizes[j]?.[1];
-      const viewImOct = view?.sizesOct ? view.sizesOct[2] : state.sizes[j]?.[2];
+      const viewReOct = view ? view.re : state.sizes[j]?.[1];
+      const viewImOct = view ? view.im : state.sizes[j]?.[2];
       if (j < state.sizes.length &&
           !qdCompare(octToQd(viewReOct), octToQd(prev[0])) &&
           !qdCompare(octToQd(viewImOct), octToQd(prev[1]))) {
@@ -2811,8 +2799,8 @@ class URLHandler {
       } else {
         if (prevj >= 0) {
           const pv = this.grid.views[prevj];
-          const pre = pv?.sizesOct ? pv.sizesOct[1] : state.sizes[prevj][1];
-          const pim = pv?.sizesOct ? pv.sizesOct[2] : state.sizes[prevj][2];
+          const pre = pv ? pv.re : state.sizes[prevj][1];
+          const pim = pv ? pv.im : state.sizes[prevj][2];
           compactc += `${formatcomplex(j - 1, pre, pim)},`;
         }
         compactc += commas;
@@ -2825,7 +2813,7 @@ class URLHandler {
     }
     compactc = compactc.slice(0, -1);
     // Calculate zoom factor for URL (z parameter)
-    let zoomFactor = this.config.firstsize / this.grid.views[0].sizes[0];
+    let zoomFactor = this.grid.views[0].zoomFactor;
 
     // Format aspect ratio for URL (only if not 1:1)
     let aspectRatioParam = '';
@@ -3265,7 +3253,7 @@ class MovieMode {
         }
         let status = document.getElementById('moviescale');
         if (status) {
-          const scale = this.explorer.config.firstsize / this.explorer.grid.views[k].sizes[0];
+          const scale = this.explorer.grid.views[k].zoomFactor;
           status.textContent = `${MSG.pre_rendering_}${formatScale(scale)}`;
         }
         let canvasPrev = null;
@@ -3614,8 +3602,8 @@ class MovieMode {
     scaleElement.href = URL.createObjectURL(this.recordedBlob);
     const k = this.explorer.grid.views.length - 1;
     const view = this.explorer.grid.views[k];
-    // Use sizesOct for full precision at deep zoom
-    const coords = formatcomplex(k, view.sizesOct[1], view.sizesOct[2]);
+    // Use oct values for full precision at deep zoom
+    const coords = formatcomplex(k, view.re, view.im);
     scaleElement.download = `mandelbrot${coords}-${view.it}.mp4`;
   }
 
@@ -3626,8 +3614,8 @@ class MovieMode {
     const sourceView = this.explorer.grid.views[k];
     const targetView = k+1 < this.explorer.grid.views.length ?
                         this.explorer.grid.views[k+1] : sourceView;
-    const sourceSize = sourceView.sizes[0];
-    const targetSize = targetView.sizes[0];
+    const sourceSize = sourceView.size;
+    const targetSize = targetView.size;
     const zoomRatio = targetSize / sourceSize;
 
     // Use zoom ratio for exponential interpolation
@@ -3637,17 +3625,17 @@ class MovieMode {
     const interpolatedSize = sourceSize * mulT;
 
     // Use oct-precision spline interpolation for center coordinates at deep zoom
-    const sourceCenter = [sourceView.sizesOct[1], sourceView.sizesOct[2]];
-    const targetCenter = [targetView.sizesOct[1], targetView.sizesOct[2]];
+    const sourceCenter = [sourceView.re, sourceView.im];
+    const targetCenter = [targetView.re, targetView.im];
 
     const p0 = k > 0 ? [
-        this.explorer.grid.views[k-1].sizesOct[1],
-        this.explorer.grid.views[k-1].sizesOct[2]] : sourceCenter;
+        this.explorer.grid.views[k-1].re,
+        this.explorer.grid.views[k-1].im] : sourceCenter;
     const p1 = sourceCenter;
     const p2 = targetCenter
     const p3 = k+2 < this.explorer.grid.views.length ? [
-        this.explorer.grid.views[k+2].sizesOct[1],
-        this.explorer.grid.views[k+2].sizesOct[2]] : targetCenter;
+        this.explorer.grid.views[k+2].re,
+        this.explorer.grid.views[k+2].im] : targetCenter;
     const interpolatedCenter = catmullRomSplineOct(p0, p1, p2, p3, t);
 
     // Clear the movie canvas with black (so unfinished pixels appear black)
@@ -4235,11 +4223,11 @@ class OrbitComputer {
     if (!overlay) { return; }
     let ctx = overlay.getContext('2d');
     ctx.fillStyle = color;
-    // Use sizesOct for full oct precision
+    // Use oct values for full precision
     const view = this.explorer.grid.views[k];
-    const sizeOct = view.sizesOct[0];
-    const crOct = view.sizesOct[1];
-    const cjOct = view.sizesOct[2];
+    const sizeOct = view.sizeOct;
+    const crOct = view.re;
+    const cjOct = view.im;
     const s = octToNumber(sizeOct);
     // seq is in oct format: 8 elements per point
     for (let i = 0; i < seq.length; i += 8) {
@@ -4433,8 +4421,7 @@ function octToDecimalString(oct, digits) {
 
 function formatcomplex(k, re, im) {
   const view = explorer.grid.views[k];
-  const sizeOct = view && view.sizesOct ? view.sizesOct[0] : null;
-  const pix = (sizeOct ? octToNumber(sizeOct) : view.sizes[0]) / explorer.config.dimsWidth;
+  const pix = view.pixelSize;
   let digits = Math.max(0, -Math.floor(Math.log10(pix)));
 
   // Use BigInt-based conversion for exact decimal output
@@ -4555,7 +4542,7 @@ class Board {
     this.ch = 0;            // Chaotic pixels
     this.effort = 1;        // Work-per pixel
 
-    this.pix = this.size / this.config.dimsWidth;
+    this.pix = this.pixelSize;
     this.epsilon = Math.min(1e-12, this.pix / 10);
     this.epsilon2 = Math.min(1e-9, this.pix * 10);
 
@@ -4576,19 +4563,18 @@ class Board {
   }
 
   // Getter properties that derive from sizesOct (the authoritative source)
-  // This eliminates the redundant sizes array that caused precision bugs
   get size() { return octToNumber(this.sizesOct[0]); }
-  get re() { return octToQd(this.sizesOct[1]); }
-  get im() { return octToQd(this.sizesOct[2]); }
-  // Backward-compatible getter - returns derived qd-precision array
-  // Prefer using sizesOct directly for full precision, or individual getters
-  get sizes() { return [this.size, this.re, this.im]; }
+  get sizeOct() { return this.sizesOct[0]; }
+  get re() { return this.sizesOct[1]; }
+  get im() { return this.sizesOct[2]; }
+
+  // Derived scalar property
+  get pixelSize() { return this.size / this.config.dimsWidth; }
 
   serialize() {
     return {
       type: this.constructor.name,
       k: this.k,
-      sizes: this.sizes,  // Uses getter for serialization
       sizesOct: this.sizesOct,
       id: this.id,
       config: this.config,
@@ -4624,13 +4610,6 @@ class Board {
       ['OctGpuZhuoranBoard', OctGpuZhuoranBoard]
     ]);
     const board = subclasses.get(serialized.type).fromSerialized(serialized);
-    if (!board.sizesOct) {
-      board.sizesOct = [
-        toOct(serialized.sizes ? serialized.sizes[0] : board.sizes[0]),
-        toOct(serialized.sizes ? serialized.sizes[1] : board.sizes[1]),
-        toOct(serialized.sizes ? serialized.sizes[2] : board.sizes[2])
-      ];
-    }
     return board;
   }
 
@@ -4659,11 +4638,9 @@ class Board {
 class CpuBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    // Use this.size/this.re/this.im getters which properly convert from oct to scalar/qd
-    // This handles the case when size/re/im are passed as oct arrays from the worker
     const sizeScalar = this.size;
-    const reQd = this.re;  // Returns qd array from getter
-    const imQd = this.im;  // Returns qd array from getter
+    const reQd = octToQd(this.re);
+    const imQd = octToQd(this.im);
     // Initialize board: cc = c values, zz = current z, bb = checkpoint z, ss = active pixel indices
     for (let y = 0; y < this.config.dimsHeight; y++) {
       const jFrac = (0.5 - (y / this.config.dimsHeight));
@@ -4685,17 +4662,15 @@ class CpuBoard extends Board {
   static fromSerialized(serialized) {
     const board = new CpuBoard(
       serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
       serialized.config,
       serialized.id
     );
 
     // Override initialized values with serialized data
-    // Note: 'sizes' is a computed getter, so exclude it from Object.assign
-    const { sizes, ...rest } = serialized;
-    Object.assign(board, rest);
+    Object.assign(board, serialized);
 
     // Reconstruct sparse arrays from serialized data
     const cc = board.cc;
@@ -4863,12 +4838,12 @@ class OctCpuBoard extends Board {
     // we need thresholds much smaller than pixel size.
     this.epsilon = this.pix * 1e-20;   // Final convergence threshold
     this.epsilon2 = this.pix * 1e-15;  // Getting close threshold
-    // Use oct-precision values from parent (sizesOct was set in super())
+    // Use oct-precision values from getters
     // IMPORTANT: At deep zoom (z > 1e30), double precision cannot represent
     // the pixel size or offset accurately. Must use oct precision throughout.
-    const sizeOct = this.sizesOct[0];
-    const reOct = this.sizesOct[1];
-    const imOct = this.sizesOct[2];
+    const sizeOct = this.sizeOct;
+    const reOct = this.re;
+    const imOct = this.im;
     // Pre-compute size/aspectRatio in oct precision for y offsets
     // Use toOctMul instead of toOctScale to capture error terms at deep zoom
     const aspectRecipOct = toOct(1 / this.config.aspectRatio);
@@ -4909,8 +4884,7 @@ class OctCpuBoard extends Board {
     );
 
     // Override initialized values with serialized data
-    const { sizes, ...rest } = serialized;
-    Object.assign(board, rest);
+    Object.assign(board, serialized);
 
     // Reconstruct sparse arrays from serialized data (8 floats per pixel)
     const cc = board.cc;
@@ -5156,18 +5130,16 @@ class PerturbationBoard extends Board {
   static fromSerialized(serialized) {
     const board = new PerturbationBoard(
       serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
       serialized.config,
       serialized.id
     );
     const cc = board.cc;
 
     // Override initialized values with serialized data
-    // Note: 'sizes' is a computed getter, so exclude it from Object.assign
-    const { sizes, ...rest } = serialized;
-    Object.assign(board, rest);
+    Object.assign(board, serialized);
     delete board.pertZZ;
 
     // Reconstruct arrays from serialized data, leaving empty spots
@@ -5520,18 +5492,16 @@ class OctPerturbationBoard extends Board {
   static fromSerialized(serialized) {
     const board = new OctPerturbationBoard(
       serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
       serialized.config,
       serialized.id
     );
     const cc = board.cc;
 
     // Override initialized values with serialized data
-    // Note: 'sizes' is a computed getter, so exclude it from Object.assign
-    const { sizes, ...rest } = serialized;
-    Object.assign(board, rest);
+    Object.assign(board, serialized);
     delete board.pertZZ;
 
     // Reconstruct arrays from serialized data, leaving empty spots
@@ -5964,9 +5934,9 @@ class ZhuoranBoard extends Board {
     this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low] for each iteration
     this.refOrbitEscaped = false;
     this.refIterations = 0;  // Current length of reference orbit
-    // Reference point (center of image) - use getters which properly convert oct arrays
-    const refRe = this.re;  // Returns qd array via octToQd
-    const refIm = this.im;  // Returns qd array via octToQd
+    // Reference point (center of image) in quad precision
+    const refRe = octToQd(this.re);
+    const refIm = octToQd(this.im);
     this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
     // Per-pixel data (double precision)
     this.dc = [];  // Delta c from reference point [real, imag] pairs
@@ -5989,10 +5959,9 @@ class ZhuoranBoard extends Board {
   }
 
   initPixels() {
-    // Use getters which properly convert oct arrays to scalar/qd
     const sizeScalar = this.size;
-    const reQd = this.re;
-    const imQd = this.im;
+    const reQd = octToQd(this.re);
+    const imQd = octToQd(this.im);
     const pixW = sizeScalar / this.config.dimsWidth;
     const pixH = (sizeScalar / this.config.aspectRatio) / this.config.dimsHeight;
     const dimsWidth = this.config.dimsWidth;
@@ -6030,9 +5999,9 @@ class ZhuoranBoard extends Board {
   static fromSerialized(serialized) {
     const board = new ZhuoranBoard(
       serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
       serialized.config,
       serialized.id
     );
@@ -6488,9 +6457,9 @@ class ZhuoranBoard extends Board {
 class OctZhuoranBoard extends ZhuoranBoard {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    // Build oct reference from the base class's oct representation
-    const refReOct = this.sizesOct[1].slice();
-    const refImOct = this.sizesOct[2].slice();
+    // Build oct reference from the base class's oct values
+    const refReOct = this.re.slice();
+    const refImOct = this.im.slice();
     // Store oct-precision reference point
     this.refC_oct = [...refReOct, ...refImOct];
     // Initialize oct orbit array - stores full oct precision for each reference iteration
@@ -6611,9 +6580,9 @@ class OctZhuoranBoard extends ZhuoranBoard {
   static fromSerialized(serialized) {
     return new OctZhuoranBoard(
       serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
       serialized.config,
       serialized.id
     );
@@ -6856,7 +6825,7 @@ class GpuBoard extends GpuBaseBoard {
     super(k, size, re, im, config, id);
     this.effort = 1;
     // Epsilon values for convergence detection scale with pixel size
-    const pix = this.size / this.config.dimsWidth;
+    const pix = this.pixelSize;
     // GPU uses float32 precision, so thresholds must be larger than CPU's float64
     this.epsilon = Math.min(1e-7, pix / 10);   // Final convergence threshold
     this.epsilon2 = Math.min(1e-5, pix * 10);  // Getting close threshold
@@ -7181,8 +7150,8 @@ class GpuBoard extends GpuBaseBoard {
     const workgroupSize = 64;
 
     // Prepare parameters for GPU
-    const re_double = Array.isArray(this.re) ? (this.re[0] + this.re[1]) : this.re;
-    const im_double = Array.isArray(this.im) ? (this.im[0] + this.im[1]) : this.im;
+    const re_double = octToNumber(this.re);
+    const im_double = octToNumber(this.im);
     const pixel_size = this.size;
 
     // Initialize CPU-side status tracking if needed
@@ -7445,9 +7414,9 @@ class GpuBoard extends GpuBaseBoard {
   static fromSerialized(serialized) {
     return new GpuBoard(
       serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
       serialized.config,
       serialized.id
     );
@@ -8348,7 +8317,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Step 4: Set up parameters
     // Batch size already calculated above (before reference orbit extension)
-    const pixelSize = this.size / this.config.dimsWidth;
+    const pixelSize = this.pixelSize;
 
     // Step 4a: Precompute checkpoint offsets for this batch using fibonacciPeriod
     const checkpointOffsets = [];
@@ -8550,9 +8519,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   static fromSerialized(serialized) {
     return new GpuZhuoranBoard(
       serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
       serialized.config,
       serialized.id
     );
@@ -8666,9 +8635,9 @@ class OctGpuZhuoranBoard extends GpuZhuoranBoard {
   static fromSerialized(serialized) {
     return new OctGpuZhuoranBoard(
       serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
       serialized.config,
       serialized.id
     );
@@ -9142,8 +9111,7 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
       const checkpointCount = Math.min(checkpointOffsets.length, 8);
 
       // Get scalar size for pixelSize computation
-      const size_scalar = Array.isArray(this.sizes[0]) ?
-        this.sizes[0].reduce((a, b) => a + (b || 0), 0) : this.sizes[0];
+      const size_scalar = this.size;
       const pixelSize = size_scalar / this.config.dimsWidth;
 
       const workgroupSize = 64;
@@ -9267,9 +9235,9 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
   static fromSerialized(serialized) {
     return new ScaledGpuZhuoranBoard(
       serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
       serialized.config,
       serialized.id
     );
@@ -10054,8 +10022,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       const checkpointCount = Math.min(checkpointOffsets.length, 8);
 
       // Get scalar size for pixelSize computation
-      const size_scalar = Array.isArray(this.sizes[0]) ?
-        this.sizes[0].reduce((a, b) => a + (b || 0), 0) : this.sizes[0];
+      const size_scalar = this.size;
       const pixelSize = size_scalar / this.config.dimsWidth;
 
       const workgroupSize = 64;
@@ -10180,9 +10147,9 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
   static fromSerialized(serialized) {
     return new AdaptiveGpuBoard(
       serialized.k,
-      serialized.sizes[0],
-      serialized.sizes[1],
-      serialized.sizes[2],
+      serialized.sizesOct[0],
+      serialized.sizesOct[1],
+      serialized.sizesOct[2],
       serialized.config,
       serialized.id
     );
@@ -10371,9 +10338,9 @@ self.onmessage = async function(e) {
       // Restore oct centers if provided
       if (data.sizeOct || data.reOct || data.imOct) {
         board.sizesOct = [
-          data.sizeOct || board.sizesOct[0] || toOct(sizeScalar),
-          data.reOct || board.sizesOct[1] || toOct(reArg),
-          data.imOct || board.sizesOct[2] || toOct(imArg)
+          data.sizeOct || board.sizeOct || toOct(sizeScalar),
+          data.reOct || board.re || toOct(reArg),
+          data.imOct || board.im || toOct(imArg)
         ];
       }
 

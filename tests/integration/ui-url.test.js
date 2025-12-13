@@ -32,7 +32,7 @@ describe('URL Parameter Tests', () => {
     await navigateToUrl(page, getAppUrl('?c=-1.401155+0i&z=100'));
     const viewData = await page.evaluate(() => {
       const view = window.explorer.grid.views[0];
-      return { size: view.sizes[0], center_re: view.sizes[1][0], center_im: view.sizes[2][0] };
+      return { size: view.size, center_re: view.re[0], center_im: view.im[0] };
     });
     expect(viewData.size).toBeCloseTo(3.0 / 100, 3);
     expect(viewData.center_re).toBeCloseTo(-1.401155, 4);
@@ -40,7 +40,7 @@ describe('URL Parameter Tests', () => {
 
     // Test 2: Scientific notation in z parameter
     await navigateToUrl(page, getAppUrl('?c=-0.5+0i&z=1e3'));
-    const sizeWithSciNotation = await page.evaluate(() => window.explorer.grid.views[0].sizes[0]);
+    const sizeWithSciNotation = await page.evaluate(() => window.explorer.grid.views[0].size);
     expect(sizeWithSciNotation).toBeCloseTo(3.0 / 1000, 4);
   }, TEST_TIMEOUT);
 
@@ -167,8 +167,8 @@ describe('URL Parameter Tests', () => {
 
     const singleViewData = await page.evaluate(() => ({
       viewCount: window.explorer.grid.views.length,
-      view0Re: window.explorer.grid.views[0].sizes[1][0],
-      view0Im: window.explorer.grid.views[0].sizes[2][0]
+      view0Re: window.explorer.grid.views[0].re[0],
+      view0Im: window.explorer.grid.views[0].im[0]
     }));
     expect(singleViewData.viewCount).toBe(1);
     expect(singleViewData.view0Re).toBeCloseTo(-0.6, 5);
@@ -187,10 +187,10 @@ describe('URL Parameter Tests', () => {
       const views = window.explorer.grid.views;
       return {
         viewCount: views.length,
-        view0Re: views[0] ? views[0].sizes[1][0] : null,
-        view0Im: views[0] ? views[0].sizes[2][0] : null,
-        view1Re: views[1] ? views[1].sizes[1][0] : null,
-        view1Im: views[1] ? views[1].sizes[2][0] : null
+        view0Re: views[0] ? views[0].re[0] : null,
+        view0Im: views[0] ? views[0].im[0] : null,
+        view1Re: views[1] ? views[1].re[0] : null,
+        view1Im: views[1] ? views[1].im[0] : null
       };
     });
     expect(twoViewData.viewCount).toBe(2);

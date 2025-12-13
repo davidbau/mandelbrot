@@ -163,7 +163,7 @@ describe('Keyboard Navigation Tests', () => {
 
       const sizes = await page.evaluate(() => {
         const views = window.explorer.grid.views;
-        return { firstSize: views[0].sizes[0], lastSize: views[views.length - 1].sizes[0] };
+        return { firstSize: views[0].size, lastSize: views[views.length - 1].size };
       }, TEST_TIMEOUT);
       expect(sizes.lastSize).toBeLessThan(sizes.firstSize);
     }, TEST_TIMEOUT);
@@ -181,8 +181,8 @@ describe('Keyboard Navigation Tests', () => {
 
       // Get the off-center position of view 1
       const beforeCenter = await page.evaluate(() => ({
-        view0_re: window.explorer.grid.views[0].sizes[1][0],
-        view1_re: window.explorer.grid.views[1].sizes[1][0],
+        view0_re: window.explorer.grid.views[0].re[0],
+        view1_re: window.explorer.grid.views[1].re[0],
         viewCount: window.explorer.grid.views.length
       }));
 
@@ -192,8 +192,8 @@ describe('Keyboard Navigation Tests', () => {
       await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       const afterCenter = await page.evaluate(() => ({
-        view0_re: window.explorer.grid.views[0].sizes[1][0],
-        view1_re: window.explorer.grid.views[1].sizes[1][0],
+        view0_re: window.explorer.grid.views[0].re[0],
+        view1_re: window.explorer.grid.views[1].re[0],
         viewCount: window.explorer.grid.views.length
       }));
 
@@ -230,8 +230,8 @@ describe('Keyboard Navigation Tests', () => {
 
       // Get positions before centering
       const before = await page.evaluate(() => ({
-        view0_re: window.explorer.grid.views[0].sizes[1][0],
-        view2_re: window.explorer.grid.views[2].sizes[1][0],
+        view0_re: window.explorer.grid.views[0].re[0],
+        view2_re: window.explorer.grid.views[2].re[0],
         viewCount: window.explorer.grid.views.length
       }));
       expect(before.viewCount).toBe(3);
@@ -245,8 +245,8 @@ describe('Keyboard Navigation Tests', () => {
       await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       const after = await page.evaluate(() => ({
-        view0_re: window.explorer.grid.views[0].sizes[1][0],
-        view2_re: window.explorer.grid.views[2].sizes[1][0],
+        view0_re: window.explorer.grid.views[0].re[0],
+        view2_re: window.explorer.grid.views[2].re[0],
         viewCount: window.explorer.grid.views.length
       }));
 

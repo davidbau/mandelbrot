@@ -224,14 +224,14 @@ describe('Browser History Basic Tests', () => {
     await page.evaluate(() => history.back());
     await page.waitForFunction(() => {
       const v = window.explorer.grid.views[3];
-      return v && Math.abs(v.sizes[1][0] - (-0.66)) < 0.01;
+      return v && Math.abs(v.re[0] - (-0.66)) < 0.01;
     }, { timeout: 10000 });
 
     // Check views 0-2 are preserved (same coords, so reused from history),
     // and view 3 is recreated (different coords in current vs target state)
     const afterBack = await page.evaluate(() => ({
       viewIds: window.explorer.grid.views.map(v => v ? v.id : null),
-      viewCoords: window.explorer.grid.views.map(v => v ? { re: v.sizes[1][0], im: v.sizes[2][0] } : null),
+      viewCoords: window.explorer.grid.views.map(v => v ? { re: v.re[0], im: v.im[0] } : null),
       // Check that views have computed data (not fresh empty views)
       viewsHaveData: window.explorer.grid.views.map(v => v ? (v.di > 0 || v.nn.some(n => n !== 0)) : false)
     }));

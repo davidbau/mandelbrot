@@ -48,8 +48,8 @@ describe('Center Views 1% Tolerance Tests', () => {
     const beforeState = await page.evaluate(() => ({
       view1_id: window.explorer.grid.views[1].id,
       view1_di: window.explorer.grid.views[1].di,
-      view1_re: window.explorer.grid.views[1].sizes[1][0],
-      view1_re_oct: window.explorer.grid.views[1].sizesOct[1]
+      view1_re: window.explorer.grid.views[1].re[0],
+      view1_re_oct: window.explorer.grid.views[1].re
     }));
 
     // View 1 should already be at the center (clicked at 50%)
@@ -61,7 +61,7 @@ describe('Center Views 1% Tolerance Tests', () => {
     const afterState = await page.evaluate(() => ({
       view1_id: window.explorer.grid.views[1].id,
       view1_di: window.explorer.grid.views[1].di,
-      view1_re: window.explorer.grid.views[1].sizes[1][0]
+      view1_re: window.explorer.grid.views[1].re[0]
     }));
 
     // View should be preserved (same ID, same or more computed pixels)
