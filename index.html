@@ -6819,18 +6819,15 @@ class GpuBaseBoard extends Board {
   }
 
   static getBoardClass(pixelSize) {
-    // Select board type based on zoom level
-    // Shallow zooms: GpuBoard (simple float32)
-    // Medium zooms: GpuZhuoranBoard (GPU perturbation, quad precision reference)
-    // Deep zooms: AdaptiveGpuBoard (GPU perturbation with adaptive per-pixel scaling)
-    // Ultra-deep zooms: OctCpuBoard (for zooms where GPU can't handle)
-    if (pixelSize > 1e-6) return GpuBoard;
-    // Ultra-deep zooms: fall back to CPU for maximum precision
-    if (pixelSize < 1e-60) return OctCpuBoard;
-    // Deep zooms (z > 1e31): use AdaptiveGpuBoard with adaptive scaling
-    if (pixelSize < 1e-31) return AdaptiveGpuBoard;
-    // Medium zooms: use GPU quad precision with perturbation
-    return GpuZhuoranBoard;
+    // Select board type based on zoom level and float32 precision limits
+    // Float32 has ~7 decimal digits, so direct iteration works to ~1e-7 pixel size
+    // Shallow zooms (z < ~1e7): GpuBoard with simple float32 iteration
+    // Medium zooms (z ~1e7 to ~1e30): GpuZhuoranBoard with quad-precision reference
+    // Deep zooms (z > ~1e30): AdaptiveGpuBoard with oct-precision reference
+    //   orbit and adaptive per-pixel scaling for correct escape detection
+    if (pixelSize > 1e-7) return GpuBoard;
+    if (pixelSize > 1e-30) return GpuZhuoranBoard;
+    return AdaptiveGpuBoard;
   }
 
   // Abstract methods - subclasses must implement these
@@ -9732,11 +9729,17 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           // near bulb interiors at both shallow and deep zooms)
           let z_norm = max(abs(zr), abs(zi));
           let dz_norm = max(abs(dzr_actual), abs(dzi_actual));
-          if (ref_iter > 0u && z_norm < dz_norm * 2.0) {
+          // Skip rebasing when z is too small. After rebasing, δ_new ≈ 3z² for
+          // center pixels (where δc≈0). If z² underflows or is tiny, the pixel
+          // gets stuck at very negative scales. Theoretical min: z > 1e-19 (so
+          // z² > fp32 min normal). Empirical min: 1e-13 provides margin needed
+          // for recovery across multiple iterations.
+          if (ref_iter > 0u && z_norm < dz_norm * 2.0 && z_norm > 1e-13) {
             // Rebase: δ becomes the absolute position
             // Compute new scale to keep δ_stored normalized in [0.5, 2)
+            // Ensure scale stays >= -126 to avoid disabling escape checks
             let new_log2 = floor(log2(z_norm));
-            let new_scale = i32(new_log2);
+            let new_scale = max(i32(new_log2), -126);
             dzr = ldexp(zr, -new_scale);
             dzi = ldexp(zi, -new_scale);
             scale = new_scale;
@@ -10351,14 +10354,15 @@ self.onmessage = async function(e) {
           );
         }
         // WebGPU disabled or unavailable - use CPU-based boards
-        if (pixelSize > 1e-12) {
+        // CpuBoard uses double precision (float64, ~15 digits), good to ~1e-15 pixel size
+        // PerturbationBoard uses quad precision reference for medium zooms
+        // OctZhuoranBoard uses oct precision (~212 bits) for deepest zooms
+        if (pixelSize > 1e-15) {
           board = new CpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
-        } else if (pixelSize < 1e-30) {
-          board = new OctCpuBoard(
-            data.k, sizeArg, reArg, imArg, data.config, data.id
-          );
-        } else {
+        } else if (pixelSize > 1e-30) {
           board = new PerturbationBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+        } else {
+          board = new OctZhuoranBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
         }
       }
 

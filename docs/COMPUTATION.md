@@ -78,12 +78,25 @@ The explorer computes "infinitely," refining the image as long as you watch. Thi
 A "Board" is the computational unit for a single zoom level. It lives in a Web Worker and owns all the data and logic for its view.
 
 ### Creation
-When you click to zoom, the `Scheduler` picks a worker and sends a `createBoard` message. The worker then instantiates the appropriate Board type:
+When you click to zoom, the `Scheduler` picks a worker and sends a `createBoard` message. The worker then instantiates the appropriate Board type based on pixel size (smaller = deeper zoom).
 
-- **GPU enabled:** `GpuBoard` for shallow zooms (`pixelSize` > 1e-6) or `GpuZhuoranBoard` for deep zooms (`pixelSize` <= 1e-6).
-- **CPU fallback:** `CpuBoard` for shallow zooms (`pixelSize` > 1e-12) or `PerturbationBoard` for deep zooms (`pixelSize` <= 1e-12).
+#### GPU Board Selection
 
-The thresholds differ because GPUs use `float32` (losing precision around 10^-6), while CPUs use `float64` (reliable to about 10^-15).
+| Pixel Size | Zoom Level | Board | Precision |
+|------------|------------|-------|-----------|
+| > 1e-7 | < ~10⁷ | `GpuBoard` | float32 (~7 digits) direct iteration |
+| 1e-30 to 1e-7 | ~10⁷ to ~10³⁰ | `GpuZhuoranBoard` | float32 perturbation, quad reference |
+| < 1e-30 | > ~10³⁰ | `AdaptiveGpuBoard` | float32 perturbation, oct reference, adaptive per-pixel scaling |
+
+#### CPU Fallback (no GPU available)
+
+| Pixel Size | Zoom Level | Board | Precision |
+|------------|------------|-------|-----------|
+| > 1e-15 | < ~10¹⁵ | `CpuBoard` | float64 (~15 digits) direct iteration |
+| 1e-30 to 1e-15 | ~10¹⁵ to ~10³⁰ | `PerturbationBoard` | float64 perturbation, quad reference |
+| < 1e-30 | > ~10³⁰ | `OctZhuoranBoard` | float64 perturbation, oct reference |
+
+The GPU thresholds are lower than CPU because `float32` has ~7 decimal digits vs `float64`'s ~15 digits. At deep zooms (> 10³⁰), `AdaptiveGpuBoard` uses adaptive per-pixel scaling to correctly detect escape even when the scale exponent exceeds float32's range.
 
 ## Data Structures
 Each Board maintains several `TypedArray`s for performance. These map directly to GPU buffers and are much faster to iterate than standard JavaScript objects.

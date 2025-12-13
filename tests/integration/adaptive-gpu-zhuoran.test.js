@@ -110,4 +110,70 @@ describe('AdaptiveGpuBoard', () => {
     // Expect reasonable convergence detection
     expect(adaptiveResult.converged).toBeGreaterThan(octResult.converged * 0.5);
   }, 30000);
+
+  test('no trapezoid bug at z=5e29 (rebasing threshold)', async () => {
+    // This test verifies the fix for the "trapezoid bug" where rebasing at
+    // very small z values caused pixels to get stuck with incorrect iteration
+    // counts. The fix adds a minimum z threshold (1e-13) to skip rebasing
+    // when z² would underflow or produce unrecoverable tiny values.
+    //
+    // Location chosen because it exhibits the bug when threshold is too low.
+    const TRAPEZOID_CENTER = '-0.53040750060512211537022930878823+0.67082992953379211136335172587405i';
+    const TRAPEZOID_ZOOM = '5.00e+29';
+
+    // Run gpuzhuoran as reference (doesn't have the bug)
+    const cwd = process.cwd();
+    const gpuUrl = `file://${path.join(cwd, 'index.html')}?z=${TRAPEZOID_ZOOM}&c=${TRAPEZOID_CENTER}&board=gpuzhuoran&grid=1&maxiter=3000&width=256&height=144&a=16:9&pixelratio=1`;
+
+    await page.goto(gpuUrl, { waitUntil: 'load' });
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 30000 });
+    await page.waitForFunction(
+      () => {
+        const view = window.explorer?.grid?.views?.[0];
+        return view && view.un === 0;
+      },
+      { timeout: 120000 }
+    );
+
+    const gpuResult = await page.evaluate(() => {
+      const view = window.explorer.grid.views[0];
+      return { nn: Array.from(view.nn) };
+    });
+
+    await page.close();
+    page = await browser.newPage();
+
+    // Run adaptive board
+    const adaptiveUrl = `file://${path.join(cwd, 'index.html')}?z=${TRAPEZOID_ZOOM}&c=${TRAPEZOID_CENTER}&board=adaptive&grid=1&maxiter=3000&width=256&height=144&a=16:9&pixelratio=1`;
+
+    await page.goto(adaptiveUrl, { waitUntil: 'load' });
+    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 30000 });
+    await page.waitForFunction(
+      () => {
+        const view = window.explorer?.grid?.views?.[0];
+        return view && view.un === 0;
+      },
+      { timeout: 120000 }
+    );
+
+    const adaptiveResult = await page.evaluate(() => {
+      const view = window.explorer.grid.views[0];
+      return { nn: Array.from(view.nn) };
+    });
+
+    // Count pixels with large iteration differences (>300 = trapezoid bug)
+    let trapezoidPixels = 0;
+    for (let i = 0; i < gpuResult.nn.length; i++) {
+      if (gpuResult.nn[i] > 0 && adaptiveResult.nn[i] > 0) {
+        const diff = Math.abs(adaptiveResult.nn[i] - gpuResult.nn[i]);
+        if (diff > 300) {
+          trapezoidPixels++;
+        }
+      }
+    }
+
+    // With the 1e-13 threshold fix, we should have very few trapezoid pixels
+    // (typically 4 or fewer, which are f32 boundary noise, not the systematic bug)
+    expect(trapezoidPixels).toBeLessThan(10);
+  }, 180000);
 });

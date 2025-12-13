@@ -644,6 +644,59 @@ fn rebase(Z_ref: vec2<f32>, dz: vec2<f32>, scale: i32, initial_scale: i32) -> Re
 }
 ```
 
+### Rebasing Minimum z Threshold
+
+Rebasing must be skipped when z is too small. After rebasing, the first iteration computes:
+
+```
+δ_new = 2·Z·δ + δ² + δc
+```
+
+For center pixels where δc ≈ 0, and after rebasing where δ = z:
+
+```
+δ_new ≈ 2·z·z + z² = 3z²
+```
+
+If z is very small (e.g., 1e-20), then δ_new ≈ 3e-40, which either underflows or produces a scale so negative that the pixel becomes "stuck" and cannot recover.
+
+**Theoretical minimum:**
+
+For z² to be representable in float32 (min normal ≈ 2^-126 ≈ 1e-38):
+
+```
+z² > 1e-38  →  z > 1e-19
+```
+
+**Empirical minimum:**
+
+In practice, a threshold of **1e-13** is required. This provides ~10⁶× margin above the theoretical minimum, which is needed for:
+
+1. Multiple iterations of slow growth before recovery
+2. Accumulated precision loss in adaptive scaling calculations
+3. Edge cases where the reference orbit passes through z values in the 1e-19 to 1e-13 range
+
+Testing showed:
+- Threshold 1e-19 (theoretical): Full bug manifestation
+- Threshold 1e-15: ~75% of problematic pixels remain
+- Threshold 1e-13: Only isolated outliers (<0.01% of pixels)
+- Threshold 1e-10: Excessive f32 noise (missing necessary rebases)
+
+**Implementation:**
+
+```wgsl
+// Skip rebasing when z is too small to avoid δ² underflow
+let z_norm = max(abs(zr), abs(zi));
+let dz_norm = max(abs(dzr_actual), abs(dzi_actual));
+
+if (ref_iter > 0u && z_norm < dz_norm * 2.0 && z_norm > 1e-13) {
+    // Safe to rebase
+    ...
+}
+```
+
+The threshold 1e-13 ≈ 2^-43 ensures that z² has scale around -86, leaving 40 bits of headroom above the -126 minimum scale floor.
+
 ### Memory Layout
 
 ```wgsl
