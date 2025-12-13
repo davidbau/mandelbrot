@@ -4,36 +4,31 @@
  * as the reference CpuBoard implementation.
  */
 
-const puppeteer = require('puppeteer');
-const path = require('path');
-
-const TEST_TIMEOUT = 60000;
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToUrl, getAppUrl, closeBrowser } = require('./test-utils');
 
 describe('Iteration count consistency', () => {
   let browser;
   let page;
 
   beforeAll(async () => {
-    browser = await puppeteer.launch({ headless: true });
-  });
+    browser = await setupBrowser();
+  }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
-  });
+    await closeBrowser(browser);
+  }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await browser.newPage();
-  });
+    page = await setupPage(browser, {}, TEST_TIMEOUT);
+  }, TEST_TIMEOUT);
 
   afterEach(async () => {
-    if (page) await page.close();
-  });
+    if (page) { try { await page.close(); } catch (e) { /* ignore */ } }
+  }, TEST_TIMEOUT);
 
   test('ZhuoranBoard iteration counts match CpuBoard', async () => {
-    const htmlPath = 'file://' + path.join(__dirname, '../../index.html');
-
     // Test CpuBoard
-    await page.goto(htmlPath + '?a=16:9&board=cpu', { waitUntil: 'load' });
+    await navigateToUrl(page, getAppUrl('?a=16:9&board=cpu'));
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
     await new Promise(r => setTimeout(r, 3000));
 
@@ -49,7 +44,7 @@ describe('Iteration count consistency', () => {
     });
 
     // Test ZhuoranBoard
-    await page.goto(htmlPath + '?a=16:9&board=zhuoran', { waitUntil: 'load' });
+    await navigateToUrl(page, getAppUrl('?a=16:9&board=zhuoran'));
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
     await new Promise(r => setTimeout(r, 3000));
 
