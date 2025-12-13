@@ -75,13 +75,16 @@ describe('Browser History View Preservation Tests', () => {
       // Push current state
       history.pushState(null, '', location.href);
 
+      // Helper to convert sizesOct to state format [size, reOct, imOct]
+      const toStateSize = (v) => [octToNumber(v.sizesOct[0]), v.sizesOct[1], v.sizesOct[2]];
+
       // Use the ACTUAL coordinates from existing views to ensure exact match
       const state = {
         sizes: [
-          grid.views[0].sizes,  // Preserve exact quad-double coords
-          grid.views[1].sizes,  // Preserve exact quad-double coords
-          grid.views[2].sizes,  // Preserve exact quad-double coords
-          [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.66, 0], [0.26, 0]]  // NEW 4th view
+          toStateSize(grid.views[0]),  // Preserve exact coords
+          toStateSize(grid.views[1]),  // Preserve exact coords
+          toStateSize(grid.views[2]),  // Preserve exact coords
+          [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.66, 0, 0, 0], [0.26, 0, 0, 0]]  // NEW 4th view (oct coords)
         ],
         hidden: []
       };
@@ -235,12 +238,15 @@ describe('Browser History View Preservation Tests', () => {
         window.explorer.urlHandler.currenturl()
       );
 
+      // Helper to convert sizesOct to state format [size, reOct, imOct]
+      const toStateSize = (v) => [octToNumber(v.sizesOct[0]), v.sizesOct[1], v.sizesOct[2]];
+
       // New state: remove view 1, so view 2 (at -0.65+0.25i) should move to index 1
       const state = {
         sizes: [
-          [config.firstsize, config.firstr, config.firstj],
+          [config.firstsize, config.firstrOct, config.firstjOct],
           // Skip the old view 1, keep view 2's coordinates at new index 1
-          grid.views[2].sizes
+          toStateSize(grid.views[2])
         ],
         hidden: []
       };

@@ -167,12 +167,15 @@ describe('Browser History Basic Tests', () => {
       const grid = window.explorer.grid;
       const config = window.explorer.config;
 
+      // Helper to convert sizesOct to state format [size, reOct, imOct]
+      const toStateSize = (v) => [octToNumber(v.sizesOct[0]), v.sizesOct[1], v.sizesOct[2]];
+
       const state = {
         sizes: [
-          grid.views[0].sizes,  // Preserve exact quad-double coords
-          grid.views[1].sizes,  // Preserve exact quad-double coords
-          grid.views[2].sizes,  // Preserve exact quad-double coords
-          [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.66, 0], [0.26, 0]]
+          toStateSize(grid.views[0]),  // Preserve exact oct coords
+          toStateSize(grid.views[1]),  // Preserve exact oct coords
+          toStateSize(grid.views[2]),  // Preserve exact oct coords
+          [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.66, 0, 0, 0], [0.26, 0, 0, 0]]
         ],
         hidden: []
       };
@@ -194,12 +197,15 @@ describe('Browser History Basic Tests', () => {
       const grid = window.explorer.grid;
       const config = window.explorer.config;
 
+      // Helper to convert sizesOct to state format [size, reOct, imOct]
+      const toStateSize = (v) => [octToNumber(v.sizesOct[0]), v.sizesOct[1], v.sizesOct[2]];
+
       const state = {
         sizes: [
-          grid.views[0].sizes,
-          grid.views[1].sizes,
-          grid.views[2].sizes,
-          [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.67, 0], [0.27, 0]]  // Different!
+          toStateSize(grid.views[0]),
+          toStateSize(grid.views[1]),
+          toStateSize(grid.views[2]),
+          [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.67, 0, 0, 0], [0.27, 0, 0, 0]]  // Different!
         ],
         hidden: []
       };

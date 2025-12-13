@@ -1041,7 +1041,7 @@ class Config {
   }
 
   firststate() {
-    return {sizes:[[this.firstsize, this.firstr, this.firstj]], hidden:[]};
+    return {sizes:[[this.firstsize, this.firstrOct, this.firstjOct]], hidden:[]};
   }
 }
 
@@ -1694,7 +1694,7 @@ class Grid {
 
     // Helper to check if a view matches target coordinates, dimensions, AND exponent
     const viewMatchesTarget = (view, targetSizes) => {
-      if (!view || !view.sizes || !targetSizes) return false;
+      if (!view || !view.sizesOct || !targetSizes) return false;
 
       // Check exponent matches (views computed with different exponent are incompatible)
       if (view.exponent !== targetExponent) return false;
@@ -1703,7 +1703,8 @@ class Grid {
       const viewArea = view.nn?.length || 0;
       if (viewArea !== targetArea) return false;
 
-      const [viewSize, viewRe, viewIm] = view.sizes;
+      const [viewSizeOct, viewReOct, viewImOct] = view.sizesOct;
+      const viewSize = octToNumber(viewSizeOct);
       const [targetSize, targetRe, targetIm] = targetSizes;
 
       // Check zoom level - must be within 1%
@@ -1711,9 +1712,10 @@ class Grid {
       if (sizeRatio < 0.99 || sizeRatio > 1.01) return false;
 
       // Check coordinates - tolerance is 1% of view extent
+      // Use oct precision for comparison
       const tolerance = viewSize * 0.01;
-      const viewReVal = viewRe[0] + (viewRe[1] || 0);
-      const viewImVal = viewIm[0] + (viewIm[1] || 0);
+      const viewReVal = octToNumber(viewReOct);
+      const viewImVal = octToNumber(viewImOct);
       const targetReVal = targetRe[0] + (targetRe[1] || 0);
       const targetImVal = targetIm[0] + (targetIm[1] || 0);
       return Math.abs(targetReVal - viewReVal) < tolerance &&
@@ -2127,22 +2129,27 @@ class ZoomManager {
   }
 
   updateZoomRectangles() {
-    let prevView = null;
+    let prevSizeOct = null, prevReOct = null, prevImOct = null;
     let prevK = 0;
     for (let k = 0; k < this.grid.views.length; k++) {
       if (this.grid.hiddencanvas(k)) { continue; }
-      let currView = this.grid.views[k].sizes;
-      if (prevView !== null) {
-        let x = qdSub(currView[1], prevView[1])[0] / prevView[0] + 0.5;
-        let y = 0.5 - qdSub(currView[2], prevView[2])[0] / (prevView[0] / this.config.aspectRatio);
+      const view = this.grid.views[k];
+      if (!view || !view.sizesOct) { continue; }
+      const [currSizeOct, currReOct, currImOct] = view.sizesOct;
+      if (prevSizeOct !== null) {
+        const prevSize = octToNumber(prevSizeOct);
+        let x = octToNumber(toOctSub(currReOct, prevReOct)) / prevSize + 0.5;
+        let y = 0.5 - octToNumber(toOctSub(currImOct, prevImOct)) / (prevSize / this.config.aspectRatio);
 
-        let zf = prevView[0] / currView[0];
+        let zf = prevSize / octToNumber(currSizeOct);
         this.showZoomRect(prevK, x, y, zf);
       }
-      prevView = currView;
+      prevSizeOct = currSizeOct;
+      prevReOct = currReOct;
+      prevImOct = currImOct;
       prevK = k;
     }
-    if (prevView !== null) {
+    if (prevSizeOct !== null) {
       this.removeZoomRect(prevK);
     }
   }
@@ -2278,13 +2285,13 @@ class ZoomManager {
         octToNumber(toOctAdd(
           toOct(0.5),
           toOctScale(
-            octSub(oreOct, this.grid.views[0].re),
+            toOctSub(oreOct, this.grid.views[0].re),
             invPrevSize
           ))),
         octToNumber(toOctAdd(
           toOct(0.5),
           toOctScale(
-            octSub(this.grid.views[0].im, oimOct),
+            toOctSub(this.grid.views[0].im, oimOct),
             invPrevSize * this.config.aspectRatio
           ))),
            this.grid.views[0].size / this.grid.views[1].size);
@@ -2362,7 +2369,7 @@ class URLHandler {
 
     // Fill in default base view if no centers specified in URL
     if (targetState.sizes.length === 0) {
-      targetState.sizes = [[null, this.config.firstr, this.config.firstj]];
+      targetState.sizes = [[null, this.config.firstrOct, this.config.firstjOct]];
     }
 
     // Build pool of all reusable views (union of stableViews and current views)
@@ -2380,9 +2387,14 @@ class URLHandler {
 
     // Build currentState from reusable views array
     // The indices here must match reusableViews array indices
+    // State format: [sizeScalar, reOct, imOct]
     const currentState = { hidden: [], sizes: [] };
     for (const view of reusableViews) {
-      currentState.sizes.push(view.sizes);
+      currentState.sizes.push([
+        octToNumber(view.sizesOct[0]),
+        view.sizesOct[1],
+        view.sizesOct[2]
+      ]);
     }
 
     // Find views to keep vs recreate by comparing coordinates
@@ -2485,21 +2497,18 @@ class URLHandler {
 
     // Match target views against current views by coordinates AND zoom level
     // A view is defined by both its center and its size (zoom level)
-    // Uses full quad-double precision with 1% tolerance thresholds
+    // Uses oct precision coordinates with 1% tolerance thresholds
     const viewsMatch = (targetSize, targetRe, targetIm, currentSize, currentRe, currentIm) => {
       // Check zoom level first - must be within 1% of each other
       const sizeRatio = targetSize / currentSize;
       if (sizeRatio < 0.99 || sizeRatio > 1.01) return false;
 
       // Check coordinates - tolerance is 1% of the view's visible extent
-      // Use full quad-double precision by adding high and low parts
+      // Compute difference in oct precision first, then convert magnitude to double
+      // (converting coords to double first would lose precision at deep zooms)
       const tolerance = currentSize * 0.01;
-      const targetReVal = targetRe[0] + (targetRe[1] || 0);
-      const targetImVal = targetIm[0] + (targetIm[1] || 0);
-      const currentReVal = currentRe[0] + (currentRe[1] || 0);
-      const currentImVal = currentIm[0] + (currentIm[1] || 0);
-      const reDiff = Math.abs(targetReVal - currentReVal);
-      const imDiff = Math.abs(targetImVal - currentImVal);
+      const reDiff = Math.abs(octToNumber(toOctSub(targetRe, currentRe)));
+      const imDiff = Math.abs(octToNumber(toOctSub(targetIm, currentIm)));
       return reDiff < tolerance && imDiff < tolerance;
     };
 
