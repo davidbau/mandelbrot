@@ -1067,8 +1067,8 @@ class View {
   }
 
   // Getter properties that derive from sizesOct (the authoritative source)
-  get size() { return octToNumber(this.sizesOct[0]); }
-  get sizeOct() { return this.sizesOct[0]; }
+  // sizesOct format: [sizeDouble, reOct, imOct]
+  get size() { return this.sizesOct[0]; }
   get re() { return this.sizesOct[1]; }
   get im() { return this.sizesOct[2]; }
 
@@ -1091,8 +1091,8 @@ class View {
   }
 
   initview(size, re, im) {
-    // Only store oct-precision coordinates - derived getters provide qd/float access
-    this.sizesOct = [toOct(size), toOct(re), toOct(im)];
+    // Store size as double (sufficient for scaling), coordinates as oct
+    this.sizesOct = [typeof size === 'number' ? size : octToNumber(size), toOct(re), toOct(im)];
     this.nn = new Array(this.config.dimsArea).fill(0);
     this.un = this.config.dimsArea;
     this.di = 0;
@@ -1162,8 +1162,8 @@ class View {
     const rFrac = (x / dimsWidth) - Config.CENTER_COORDINATE;
     const jFrac = Config.CENTER_COORDINATE - (y / dimsHeight);
     // Use oct precision for scaling to preserve accuracy at deep zoom
-    const rOct = toOctAdd(this.re, toOctScale(this.sizeOct, rFrac));
-    const iOct = toOctAdd(this.im, toOctScale(this.sizeOct, jFrac / aspectRatio));
+    const rOct = toOctAdd(this.re, toOctScale(this.size, rFrac));
+    const iOct = toOctAdd(this.im, toOctScale(this.size, jFrac / aspectRatio));
     // Return oct format (8 elements: 4 real + 4 imaginary) for full precision
     return [rOct[0], rOct[1], rOct[2], rOct[3], iOct[0], iOct[1], iOct[2], iOct[3]];
   }
@@ -2217,7 +2217,6 @@ class ZoomManager {
   cellclickdelay(k, m, hideCurrent) {
     if (k >= this.grid.views.length || this.grid.currentUpdateProcess) return;
     let osize = this.grid.views[k].size;
-    let osizeOct = this.grid.views[k].sizeOct;
     let ore = this.grid.views[k].re;
     let oim = this.grid.views[k].im;
     let cx = m % this.config.dimsWidth;
@@ -2233,12 +2232,9 @@ class ZoomManager {
     // Compute fractional offsets from center (both as simple fractions)
     const offsetX = (cx / this.config.dimsWidth) - 0.5;
     const offsetY = 0.5 - rectY;
-    // Scale offsets by oct-precision size to preserve accuracy at deep zoom
-    // Multiply osizeOct by fractional offset (normal float64) to preserve precision
-    // X offset: size * fraction
-    // Y offset: size * fraction / aspectRatio (since Y spans size/aspectRatio in coordinate space)
-    const nreOct = toOctAdd(ore, toOctScale(osizeOct, offsetX));
-    const nimOct = toOctAdd(oim, toOctScale(osizeOct, offsetY / this.config.aspectRatio));
+    // Scale offsets by size to preserve accuracy at deep zoom (toOctScale handles conversion)
+    const nreOct = toOctAdd(ore, toOctScale(osize, offsetX));
+    const nimOct = toOctAdd(oim, toOctScale(osize, offsetY / this.config.aspectRatio));
     let nre = octToQd(nreOct);
     let nim = octToQd(nimOct);
 
@@ -2387,14 +2383,10 @@ class URLHandler {
 
     // Build currentState from reusable views array
     // The indices here must match reusableViews array indices
-    // State format: [sizeScalar, reOct, imOct]
+    // State format: [sizeDouble, reOct, imOct] - matches sizesOct storage format
     const currentState = { hidden: [], sizes: [] };
     for (const view of reusableViews) {
-      currentState.sizes.push([
-        octToNumber(view.sizesOct[0]),
-        view.sizesOct[1],
-        view.sizesOct[2]
-      ]);
+      currentState.sizes.push(view.sizesOct);
     }
 
     // Find views to keep vs recreate by comparing coordinates
@@ -3789,15 +3781,12 @@ class Scheduler {
 
     const view = (this.grid && this.grid.views && this.grid.views[k]) ? this.grid.views[k] : null;
     const viewOct = view && view.sizesOct ? view.sizesOct : null;
-    const sizeOct = (viewOct && viewOct.length > 0 && viewOct[0] !== undefined)
-      ? viewOct[0] : toOct(size);
-    const reOct = (viewOct && viewOct.length > 1 && viewOct[1] !== undefined)
-      ? viewOct[1] : toOct(re);
-    const imOct = (viewOct && viewOct.length > 2 && viewOct[2] !== undefined)
-      ? viewOct[2] : toOct(im);
+    // sizesOct format: [sizeDouble, reOct, imOct]
+    const reOct = (viewOct && viewOct[1]) ? viewOct[1] : toOct(re);
+    const imOct = (viewOct && viewOct[2]) ? viewOct[2] : toOct(im);
 
     if (!isFinite(size)) {
-      console.warn(`Board ${k}: non-finite size`, size, sizeOct);
+      console.warn(`Board ${k}: non-finite size`, size);
     }
     worker.postMessage({
       type: 'addBoard',
@@ -3806,7 +3795,6 @@ class Scheduler {
         size,
         re,
         im,
-        sizeOct,
         reOct,
         imOct,
         config: {
@@ -4234,10 +4222,9 @@ class OrbitComputer {
     ctx.fillStyle = color;
     // Use oct values for full precision
     const view = this.explorer.grid.views[k];
-    const sizeOct = view.sizeOct;
+    const s = view.size;
     const crOct = view.re;
     const cjOct = view.im;
-    const s = octToNumber(sizeOct);
     // seq is in oct format: 8 elements per point
     for (let i = 0; i < seq.length; i += 8) {
       let r = [seq[i], seq[i+1], seq[i+2], seq[i+3]];
@@ -4540,8 +4527,8 @@ const MAX_CHAOTIC_ITERATIONS = 100000;
 class Board {
   constructor(k, size, re, im, config, id) {
     this.k = k;    // Number in explorer
-    // Only store oct-precision coordinates - derived getters provide qd/float access
-    this.sizesOct = [toOct(size), toOct(re), toOct(im)];
+    // Store size as double (sufficient for scaling), coordinates as oct
+    this.sizesOct = [typeof size === 'number' ? size : octToNumber(size), toOct(re), toOct(im)];
     this.id = id;  // Random ID
     this.config = config;  // Global config
 
@@ -4572,8 +4559,8 @@ class Board {
   }
 
   // Getter properties that derive from sizesOct (the authoritative source)
-  get size() { return octToNumber(this.sizesOct[0]); }
-  get sizeOct() { return this.sizesOct[0]; }
+  // sizesOct format: [sizeDouble, reOct, imOct]
+  get size() { return this.sizesOct[0]; }
   get re() { return this.sizesOct[1]; }
   get im() { return this.sizesOct[2]; }
 
@@ -4850,13 +4837,12 @@ class OctCpuBoard extends Board {
     // Use oct-precision values from getters
     // IMPORTANT: At deep zoom (z > 1e30), double precision cannot represent
     // the pixel size or offset accurately. Must use oct precision throughout.
-    const sizeOct = this.sizeOct;
     const reOct = this.re;
     const imOct = this.im;
     // Pre-compute size/aspectRatio in oct precision for y offsets
     // Use toOctMul instead of toOctScale to capture error terms at deep zoom
     const aspectRecipOct = toOct(1 / this.config.aspectRatio);
-    const sizeOverAspect = toOctMul(sizeOct, aspectRecipOct);
+    const sizeOverAspect = toOctMul(this.size, aspectRecipOct);
     // Initialize board: cc = c values (8 floats per pixel), zz = current z (8 floats per pixel)
     // bb = checkpoint z, ss = active pixel indices
     // Format: [r0, r1, r2, r3, i0, i1, i2, i3] for each complex number
@@ -4867,7 +4853,7 @@ class OctCpuBoard extends Board {
       for (let x = 0; x < this.config.dimsWidth; x++) {
         const rFrac = ((x / this.config.dimsWidth) - 0.5);
         // Use toOctMul instead of toOctScale to capture error terms
-        const rOct = toOctAdd(reOct, toOctMul(sizeOct, toOct(rFrac)));
+        const rOct = toOctAdd(reOct, toOctMul(this.size, toOct(rFrac)));
         // Store c as 8 floats: [r0, r1, r2, r3, i0, i1, i2, i3]
         this.cc.push(rOct[0], rOct[1], rOct[2], rOct[3], jOct[0], jOct[1], jOct[2], jOct[3]);
         const r = rOct[0] + rOct[1] + rOct[2] + rOct[3];
@@ -10198,19 +10184,14 @@ self.onmessage = async function(e) {
 
       // Explicit board selection via board= parameter
       const forcedBoardType = data.config.forceBoard;
-      const sizeArgRaw = data.sizeOct || data.size;
-      const sizeScalar = Array.isArray(sizeArgRaw)
-        ? sizeArgRaw.reduce((a, b) => a + (b || 0), 0)
-        : sizeArgRaw;
-      if (!isFinite(sizeScalar)) {
-        console.warn(`Board ${data.k}: non-finite size`, data.size, data.sizeOct);
+      const size = data.size;
+      if (!isFinite(size)) {
+        console.warn(`Board ${data.k}: non-finite size`, size);
       }
       let board;
       const reArg = data.reOct || data.re;
       const imArg = data.imOct || data.im;
-      // Use oct-precision size when available (needed for OctCpuBoard at z > 1e30)
-      const sizeArg = data.sizeOct || sizeScalar;
-      const pixelSize = sizeScalar / data.config.dimsWidth;
+      const pixelSize = size / data.config.dimsWidth;
       const GpuBoardClass = GpuBaseBoard.getBoardClass(pixelSize);
       const bytesPerPixel = GpuBoardClass.BYTES_PER_PIXEL;
       const gpuSafe = GpuBaseBoard.isSafeDims(
@@ -10226,97 +10207,97 @@ self.onmessage = async function(e) {
         // Use switch to avoid referencing undefined classes
         switch (forcedBoardType) {
           case 'cpu':
-            board = new CpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+            board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
             break;
           case 'zhuoran':
-            board = new ZhuoranBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+            board = new ZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
             break;
           case 'octzhuoran':
-            board = new OctZhuoranBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+            board = new OctZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
             break;
           case 'perturbation':
             board = new PerturbationBoard(
-              data.k, sizeArg, reArg, imArg, data.config, data.id
+              data.k, size, reArg, imArg, data.config, data.id
             );
             break;
           case 'gpu':
             if (webGPUAvailable && gpuSafe) {
-              board = new GpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+              board = new GpuBoard(data.k, size, reArg, imArg, data.config, data.id);
             } else {
               console.warn('GpuBoard requested but not available, falling back to CpuBoard');
-              board = new CpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+              board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
             }
             break;
           case 'gpuzhuoran':
             if (webGPUAvailable && gpuSafe) {
               board = new GpuZhuoranBoard(
-                data.k, sizeArg, reArg, imArg, data.config, data.id
+                data.k, size, reArg, imArg, data.config, data.id
               );
             } else {
               console.warn(
                 'GpuZhuoranBoard requested but not available, falling back to ZhuoranBoard'
               );
               board = new ZhuoranBoard(
-                data.k, sizeArg, reArg, imArg, data.config, data.id
+                data.k, size, reArg, imArg, data.config, data.id
               );
             }
             break;
           case 'octgpuzhuoran':
             if (webGPUAvailable && gpuSafe) {
               board = new OctGpuZhuoranBoard(
-                data.k, sizeArg, reArg, imArg, data.config, data.id
+                data.k, size, reArg, imArg, data.config, data.id
               );
             } else {
               console.warn(
                 'OctGpuZhuoranBoard requested but not available, falling back to OctCpuBoard'
               );
               board = new OctCpuBoard(
-                data.k, sizeArg, reArg, imArg, data.config, data.id
+                data.k, size, reArg, imArg, data.config, data.id
               );
             }
             break;
           case 'scaledgpuzhuoran':
             if (webGPUAvailable && gpuSafe) {
               board = new ScaledGpuZhuoranBoard(
-                data.k, sizeArg, reArg, imArg, data.config, data.id
+                data.k, size, reArg, imArg, data.config, data.id
               );
             } else {
               console.warn(
                 'ScaledGpuZhuoranBoard requested but not available, falling back to OctZhuoranBoard'
               );
               board = new OctZhuoranBoard(
-                data.k, sizeArg, reArg, imArg, data.config, data.id
+                data.k, size, reArg, imArg, data.config, data.id
               );
             }
             break;
           case 'adaptive':
             if (webGPUAvailable && gpuSafe) {
               board = new AdaptiveGpuBoard(
-                data.k, sizeArg, reArg, imArg, data.config, data.id
+                data.k, size, reArg, imArg, data.config, data.id
               );
             } else {
               console.warn(
                 'AdaptiveGpuBoard requested but not available, falling back to OctZhuoranBoard'
               );
               board = new OctZhuoranBoard(
-                data.k, sizeArg, reArg, imArg, data.config, data.id
+                data.k, size, reArg, imArg, data.config, data.id
               );
             }
             break;
           case 'octcpu':
             board = new OctCpuBoard(
-              data.k, sizeArg, reArg, imArg, data.config, data.id
+              data.k, size, reArg, imArg, data.config, data.id
             );
             break;
           default:
             console.error(`Unknown board type: ${forcedBoardType}, falling back to CpuBoard`);
-            board = new CpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+            board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
         }
       } else if (enableGPU && webGPUAvailable && gpuSafe) {
         // Two-tier strategy with WebGPU:
         // - Shallow zooms: GpuBoard with simple float32 iteration
         // - Deep zooms: GpuZhuoranBoard with quad precision reference + float32 perturbations
-        board = new GpuBoardClass(data.k, sizeArg, reArg, imArg, data.config, data.id);
+        board = new GpuBoardClass(data.k, size, reArg, imArg, data.config, data.id);
       } else {
         if (enableGPU && webGPUAvailable && !gpuSafe) {
           const dimsArea = data.config.dimsArea;
@@ -10334,20 +10315,20 @@ self.onmessage = async function(e) {
         // PerturbationBoard uses quad precision reference for medium zooms
         // OctZhuoranBoard uses oct precision (~212 bits) for deepest zooms
         if (pixelSize > 1e-15) {
-          board = new CpuBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+          board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
         } else if (pixelSize > 1e-30) {
-          board = new PerturbationBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+          board = new PerturbationBoard(data.k, size, reArg, imArg, data.config, data.id);
         } else {
-          board = new OctZhuoranBoard(data.k, sizeArg, reArg, imArg, data.config, data.id);
+          board = new OctZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
         }
       }
 
       boards.set(data.k, board);
 
-      // Restore oct centers if provided
-      if (data.sizeOct || data.reOct || data.imOct) {
+      // Restore oct centers if provided (size is already double, coords are oct)
+      if (data.reOct || data.imOct) {
         board.sizesOct = [
-          data.sizeOct || board.sizeOct || toOct(sizeScalar),
+          size,
           data.reOct || board.re || toOct(reArg),
           data.imOct || board.im || toOct(imArg)
         ];

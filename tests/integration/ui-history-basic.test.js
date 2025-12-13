@@ -167,14 +167,12 @@ describe('Browser History Basic Tests', () => {
       const grid = window.explorer.grid;
       const config = window.explorer.config;
 
-      // Helper to convert sizesOct to state format [size, reOct, imOct]
-      const toStateSize = (v) => [octToNumber(v.sizesOct[0]), v.sizesOct[1], v.sizesOct[2]];
-
+      // sizesOct is already in state format [sizeDouble, reOct, imOct]
       const state = {
         sizes: [
-          toStateSize(grid.views[0]),  // Preserve exact oct coords
-          toStateSize(grid.views[1]),  // Preserve exact oct coords
-          toStateSize(grid.views[2]),  // Preserve exact oct coords
+          grid.views[0].sizesOct,  // Preserve exact coords
+          grid.views[1].sizesOct,  // Preserve exact coords
+          grid.views[2].sizesOct,  // Preserve exact coords
           [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.66, 0, 0, 0], [0.26, 0, 0, 0]]
         ],
         hidden: []
@@ -197,14 +195,12 @@ describe('Browser History Basic Tests', () => {
       const grid = window.explorer.grid;
       const config = window.explorer.config;
 
-      // Helper to convert sizesOct to state format [size, reOct, imOct]
-      const toStateSize = (v) => [octToNumber(v.sizesOct[0]), v.sizesOct[1], v.sizesOct[2]];
-
+      // sizesOct is already in state format [sizeDouble, reOct, imOct]
       const state = {
         sizes: [
-          toStateSize(grid.views[0]),
-          toStateSize(grid.views[1]),
-          toStateSize(grid.views[2]),
+          grid.views[0].sizesOct,
+          grid.views[1].sizesOct,
+          grid.views[2].sizesOct,
           [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.67, 0, 0, 0], [0.27, 0, 0, 0]]  // Different!
         ],
         hidden: []
