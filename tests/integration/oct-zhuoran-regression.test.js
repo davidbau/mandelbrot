@@ -70,8 +70,6 @@ describe('GpuZhuoran Regression Tests', () => {
         };
       });
 
-      console.log('Stats:', JSON.stringify(stats, null, 2));
-
       // Key assertion: there should be multiple different iteration counts
       // Not all pixels diverging at the same iteration (which would indicate a bug)
       expect(stats.uniqueIterCount).toBeGreaterThan(3);
@@ -122,8 +120,6 @@ describe('GpuZhuoran Regression Tests', () => {
           uniqueIterCount: uniqueIters
         };
       });
-
-      console.log('Deep zoom stats:', JSON.stringify(stats, null, 2));
 
       // Should have computed significant pixels
       expect(stats.di).toBeGreaterThan(100);

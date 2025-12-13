@@ -174,15 +174,6 @@ describe('Parent-child view iteration matching', () => {
       };
     });
 
-    console.log('View 0 stats:', comparison.v0Stats);
-    console.log('View 1 stats:', comparison.v1Stats);
-    console.log('View 0 board type:', comparison.v0BoardType);
-    console.log('View 1 board type:', comparison.v1BoardType);
-    console.log('Zoom factor:', comparison.zoomFactor);
-    console.log(`Exact matches: ${comparison.exactMatches}/${comparison.totalSamples} (${(comparison.exactRate * 100).toFixed(1)}%)`);
-    console.log(`Close matches (±5): ${comparison.closeMatches}/${comparison.totalSamples} (${(comparison.closeRate * 100).toFixed(1)}%)`);
-    console.log('Sample details:', JSON.stringify(comparison.samples.slice(0, 10), null, 2));
-
     // At z=1e35, we need oct precision - expect at least 80% close matches
     expect(comparison.closeRate).toBeGreaterThan(0.8);
   }, PARENT_CHILD_TIMEOUT);

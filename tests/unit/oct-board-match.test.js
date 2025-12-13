@@ -164,11 +164,8 @@ describe('oct board iteration match', () => {
 
     // Compute reference orbit at center
     const { orbitR, orbitI } = computeRefOrbit(centerOctR, centerOctI, MAX_ITER);
-    console.log(`Reference orbit length: ${orbitR.length}`);
 
     let matches = 0;
-    let mismatches = 0;
-    const diffs = {};
 
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
@@ -181,21 +178,11 @@ describe('oct board iteration match', () => {
         const directIter = iterateDirect(cr, ci, MAX_ITER);
         const perturbIter = iteratePerturbation(cr, ci, orbitR, orbitI, MAX_ITER);
 
-        const diff = perturbIter - directIter;
-        diffs[diff] = (diffs[diff] || 0) + 1;
-
         if (directIter === perturbIter) {
           matches++;
-        } else {
-          mismatches++;
         }
       }
     }
-
-    console.log(`\nResults for ${GRID_SIZE}x${GRID_SIZE} = ${GRID_SIZE * GRID_SIZE} pixels:`);
-    console.log(`  Matches: ${matches}`);
-    console.log(`  Mismatches: ${mismatches}`);
-    console.log('  Diff distribution:', diffs);
 
     // All pixels should match exactly
     expect(matches).toBe(GRID_SIZE * GRID_SIZE);
@@ -210,10 +197,8 @@ describe('oct board iteration match', () => {
     const centerOctI = toOct(centerI);
 
     const { orbitR, orbitI } = computeRefOrbit(centerOctR, centerOctI, MAX_ITER);
-    console.log(`Reference orbit length: ${orbitR.length}`);
 
     let matches = 0;
-    const diffs = {};
 
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
@@ -226,16 +211,9 @@ describe('oct board iteration match', () => {
         const directIter = iterateDirect(cr, ci, MAX_ITER);
         const perturbIter = iteratePerturbation(cr, ci, orbitR, orbitI, MAX_ITER);
 
-        const diff = perturbIter - directIter;
-        diffs[diff] = (diffs[diff] || 0) + 1;
-
         if (directIter === perturbIter) matches++;
       }
     }
-
-    console.log(`\nResults for ${GRID_SIZE}x${GRID_SIZE} = ${GRID_SIZE * GRID_SIZE} pixels:`);
-    console.log(`  Matches: ${matches}/${GRID_SIZE * GRID_SIZE}`);
-    console.log('  Diff distribution:', diffs);
 
     expect(matches).toBe(GRID_SIZE * GRID_SIZE);
   });

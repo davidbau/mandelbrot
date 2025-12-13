@@ -110,13 +110,6 @@ describe('QD-style oct precision tests', () => {
     const exact = 1 + 3e-10 + 2e-20;
     const computed = p + e;
 
-    console.log('TwoProduct test:');
-    console.log('  p:', p);
-    console.log('  e:', e);
-    console.log('  p+e:', computed);
-    console.log('  exact:', exact);
-    console.log('  error:', Math.abs(computed - exact));
-
     // Error should be essentially zero (just floating point representation)
     expect(Math.abs(computed - exact)).toBeLessThan(1e-30);
   });
@@ -127,30 +120,17 @@ describe('QD-style oct precision tests', () => {
     const eps = 1e-45;
     let oct = toOctAdd(toOct(1), [eps, 0, 0, 0]);
 
-    const errors = [];
-
-    for (let n = 0; n < 20; n++) {
-      const power = Math.pow(2, n);
-      // Expected: (1 + eps)^(2^n) ≈ 1 + 2^n * eps (for small eps)
-      const expected = 1 + power * eps;
-      const actual = octSum(oct);
-      const relError = Math.abs(actual - expected) / expected;
-
-      errors.push({ n, power, expected, actual, relError });
-
-      if (n < 15) {
-        oct = toOctSquare(oct);
-      }
+    for (let n = 0; n < 10; n++) {
+      oct = toOctSquare(oct);
     }
 
-    console.log('Multiplication error accumulation:');
-    errors.slice(0, 15).forEach(e => {
-      console.log(`  n=${e.n}: expected=${e.expected.toExponential(6)}, ` +
-                  `actual=${e.actual.toExponential(6)}, relError=${e.relError.toExponential(3)}`);
-    });
+    // After 10 squarings, check relative error
+    const power = Math.pow(2, 10);
+    const expected = 1 + power * eps;
+    const actual = octSum(oct);
+    const relError = Math.abs(actual - expected) / expected;
 
-    // After 10 squarings, error should still be small
-    expect(errors[10].relError).toBeLessThan(1e-40);
+    expect(relError).toBeLessThan(1e-40);
   });
 
   test('oct multiplication preserves small differences', () => {
@@ -173,12 +153,6 @@ describe('QD-style oct precision tests', () => {
     // Expected difference: 1.5 * pixelDiff = 3e-34
     const expectedDiff = 1.5 * pixelDiff;
 
-    console.log('Small difference preservation:');
-    console.log('  Input diff:', pixelDiff.toExponential(3));
-    console.log('  Output diff:', diffSum.toExponential(3));
-    console.log('  Expected diff:', expectedDiff.toExponential(3));
-    console.log('  Relative error:', Math.abs(diffSum - expectedDiff) / expectedDiff);
-
     // Oct should preserve this difference accurately
     expect(Math.abs(diffSum - expectedDiff) / expectedDiff).toBeLessThan(1e-10);
   });
@@ -191,10 +165,6 @@ describe('QD-style oct precision tests', () => {
 
     const diff = toOctSub(a, almostOne);
     const diffSum = octSum(diff);
-
-    console.log('Cancellation test:');
-    console.log('  Expected:', (1e-50).toExponential(3));
-    console.log('  Actual:', diffSum.toExponential(3));
 
     expect(Math.abs(diffSum - 1e-50) / 1e-50).toBeLessThan(0.01);
   });
@@ -214,25 +184,10 @@ describe('QD-style oct precision tests', () => {
     const a = [1, 1e-16, 1e-32, 1e-48];  // Non-trivial oct value
     const b = [1, 1e-16, 1e-32, 1e-48];
 
-    // Expected: a² with all terms
-    // a[0]*b[0] = 1
-    // 2*a[0]*b[1] = 2e-16
-    // a[1]*b[1] + 2*a[0]*b[2] = 1e-32 + 2e-32 = 3e-32
-    // 2*a[0]*b[3] + 2*a[1]*b[2] = 2e-48 + 2e-48 = 4e-48
-    // etc.
-
     const result = toOctSquare(a);
-
-    console.log('Oct square result:');
-    console.log('  [0]:', result[0]);
-    console.log('  [1]:', result[1]);
-    console.log('  [2]:', result[2]);
-    console.log('  [3]:', result[3]);
-    console.log('  Sum:', octSum(result));
 
     // The sum should be close to (1 + 1e-16 + 1e-32 + 1e-48)²
     const approxExpected = Math.pow(1 + 1e-16, 2);  // Higher terms too small for double
-    console.log('  Approx expected:', approxExpected);
 
     // Check that components have reasonable magnitudes
     expect(result[0]).toBeCloseTo(1, 10);
@@ -252,14 +207,6 @@ describe('QD-style oct precision tests', () => {
     // Expected: (1 + 1e-32)² = 1 + 2e-32 + 1e-64
     // The 2e-32 term comes from a[0]*b[2] + a[2]*b[0]
     // These are computed with plain multiplication in our code!
-
-    console.log('Cross-term test (a[0]*b[2]):');
-    console.log('  Input: [1, 0, 1e-32, 0]');
-    console.log('  Result:');
-    console.log('    [0]:', result[0]);
-    console.log('    [1]:', result[1]);  // Should capture 2e-32 (cross term)
-    console.log('    [2]:', result[2]);  // Should capture 1e-64 (1e-32 squared)
-    console.log('    [3]:', result[3]);
 
     // After renormalization, 2e-32 appears in result[1], and 1e-64 in result[2]
     expect(Math.abs(result[1] - 2e-32) / 2e-32).toBeLessThan(0.01);
@@ -307,7 +254,6 @@ describe('QD-style oct precision tests', () => {
       const mag2 = octSum(toOctAdd(toOctSquare(z2r), toOctSquare(z2i)));
 
       if (mag1 > 4 || mag2 > 4) {
-        console.log(`  Escaped at iter ${iter}`);
         break;
       }
 
@@ -317,12 +263,6 @@ describe('QD-style oct precision tests', () => {
 
       diffs.push({ iter, diffR, diffI, totalDiff });
     }
-
-    console.log('Mandelbrot iteration precision:');
-    console.log('  Initial diff:', pixelDiff.toExponential(3));
-    diffs.slice(0, 10).forEach(d => {
-      console.log(`  iter ${d.iter}: diff=${d.totalDiff.toExponential(3)}`);
-    });
 
     // After some iterations, the difference should still be non-zero
     // (unless trajectories diverge, which is fine)
@@ -335,19 +275,6 @@ describe('QD-style oct precision tests', () => {
   test('component independence verification', () => {
     // Verify that oct components don't contaminate each other
     // Set only one component and verify others stay zero
-
-    const tests = [
-      { input: [1, 0, 0, 0], name: 'only [0]' },
-      { input: [0, 1e-16, 0, 0], name: 'only [1]' },
-      { input: [0, 0, 1e-32, 0], name: 'only [2]' },
-      { input: [0, 0, 0, 1e-48], name: 'only [3]' }
-    ];
-
-    console.log('Component independence:');
-    tests.forEach(t => {
-      const squared = toOctSquare(t.input);
-      console.log(`  ${t.name}² = [${squared.map(x => x.toExponential(3)).join(', ')}]`);
-    });
 
     // When squaring [1,0,0,0], result should be [1,0,0,0]
     const sq1 = toOctSquare([1, 0, 0, 0]);
@@ -393,18 +320,9 @@ describe('QD-style oct precision tests', () => {
     const actualDiff = toOctSub(b2, a2);
     const actualDiffSum = octSum(actualDiff);
 
-    console.log('Cross-term preservation test (deep zoom bug detector):');
-    console.log(`  a = [${a.map(x => x.toExponential(6)).join(', ')}]`);
-    console.log(`  b = [${b.map(x => x.toExponential(6)).join(', ')}]`);
-    console.log(`  a² = [${a2.map(x => x.toExponential(6)).join(', ')}]`);
-    console.log(`  b² = [${b2.map(x => x.toExponential(6)).join(', ')}]`);
-    console.log(`  Expected diff (b² - a²): ${expectedDiff.toExponential(6)}`);
-    console.log(`  Actual diff: ${actualDiffSum.toExponential(6)}`);
-
     // The difference should be preserved, not zero
     // Allow 10% relative error due to FP approximations
     const relError = Math.abs(actualDiffSum - expectedDiff) / Math.abs(expectedDiff);
-    console.log(`  Relative error: ${(relError * 100).toFixed(2)}%`);
 
     expect(actualDiffSum).not.toBe(0);  // Must not be exactly zero
     expect(relError).toBeLessThan(0.1);  // Within 10% of expected
@@ -420,8 +338,6 @@ describe('QD-style oct precision tests', () => {
       { base: 0.5, diff: 1e-40, desc: 'z=1e38 typical' },
       { base: -2.0, diff: 1e-45, desc: 'z=1e43 typical' },
     ];
-
-    console.log('Cross-term preservation at multiple magnitudes:');
 
     for (const tc of testCases) {
       const a = toOct(tc.base);
@@ -439,11 +355,6 @@ describe('QD-style oct precision tests', () => {
                          Math.sign(actualDiff) === Math.sign(expectedDiff) &&
                          Math.abs(Math.log10(Math.abs(actualDiff)) -
                                  Math.log10(Math.abs(expectedDiff))) < 1;
-
-      console.log(`  ${tc.desc}:`);
-      console.log(`    base=${tc.base}, diff=${tc.diff.toExponential(1)}`);
-      console.log(`    expected=${expectedDiff.toExponential(3)}, actual=${actualDiff.toExponential(3)}`);
-      console.log(`    preserved: ${isPreserved ? 'YES' : 'NO'}`);
 
       expect(isPreserved).toBe(true);
     }
