@@ -14,16 +14,17 @@ The basic pattern:
 
 A typical Mandelbrot frame might dispatch 640,000 threads (for a 800×800 image) across 10,000 workgroups of 64 threads each.
 
-## The Two GPU Boards
+## The Three GPU Boards
 
-The explorer has two GPU implementations, selected based on zoom depth:
+The explorer has three GPU implementations, selected based on zoom depth:
 
 | Board | Pixel Size | Precision | Use Case |
 |-------|------------|-----------|----------|
-| **GpuBoard** | > 1e-6 | float32 | Shallow zoom (up to ~10^6 magnification) |
-| **GpuZhuoranBoard** | ≤ 1e-6 | float32 + perturbation | Deep zoom (10^6 to 10^30+) |
+| **GpuBoard** | > 1e-7 | float32 | Shallow zoom (up to ~10^7 magnification) |
+| **GpuZhuoranBoard** | 1e-30 to 1e-7 | float32 perturbation, quad reference | Deep zoom (10^7 to 10^30) |
+| **AdaptiveGpuBoard** | < 1e-30 | float32 perturbation, oct reference | Ultra-deep zoom (10^30+) |
 
-The threshold of 1e-6 reflects float32's precision limit (~7 decimal digits). Beyond this, raw float32 iteration breaks down—neighboring pixels become indistinguishable.
+The threshold of 1e-7 reflects float32's precision limit (~7 decimal digits). Beyond this, raw float32 iteration breaks down—neighboring pixels become indistinguishable. At extreme depths (> 10^30), AdaptiveGpuBoard uses oct-precision references and per-pixel adaptive scaling to handle coordinates that exceed float32's exponent range.
 
 ## GpuBoard: The Simple Shader
 

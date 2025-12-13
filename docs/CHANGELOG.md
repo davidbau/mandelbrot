@@ -110,10 +110,11 @@ The result: WebGPU support with massive parallelism, plus significant UI enhance
 
 ### GPU Computation
 
-- **GpuBoard**: WebGPU compute shaders for shallow zooms (pixel size > 10^-6)
+- **GpuBoard**: WebGPU compute shaders for shallow zooms (pixel size > 10^-7)
 - **GpuZhuoranBoard**: GPU perturbation with quad-precision reference orbits for
-  deep zooms, falling back to PerturbationBoard on CPU at extreme depths where
-  float32 precision fails
+  deep zooms up to 10^30
+- **AdaptiveGpuBoard**: GPU perturbation with oct-precision reference for ultra-deep
+  zooms beyond 10^30, using per-pixel adaptive scaling
 
 ### Zhuoran's Rebasing
 
@@ -123,6 +124,13 @@ on fractalforums.org in December 2021. When pixel orbits approach critical point
 they "rebase" to restart from the reference, avoiding the numerical glitches that
 plague traditional perturbation methods. This eliminated visual artifacts at
 extreme zoom depths.
+
+### Oct Precision (60+ Digits)
+
+Extended precision from ~31 decimal digits (quad-double) to ~62 decimal digits
+(oct-double, using four doubles). This enables zoom depths beyond 10^60:
+- **OctZhuoranBoard**: CPU perturbation with oct-precision reference orbits
+- Seamless transition from quad to oct precision at z > 10^30
 
 ### Performance Optimizations
 
@@ -152,8 +160,8 @@ extreme zoom depths.
 | 2009 | Table-cell and canvas rendering, cycle detection |
 | 2020 | High DPI, orbit visualization |
 | 2022 | Keyboard controls |
-| 2024 | Quad precision, perturbation, movies, web workers |
-| 2025 | WebGPU acceleration, i18n, aspect ratio, fullscreen |
+| 2024 | Quad precision (~31 digits), perturbation, movies, web workers |
+| 2025 | WebGPU acceleration, oct precision (~62 digits), i18n, fullscreen |
 
 ## The Philosophy
 

@@ -6,12 +6,11 @@ While quad-precision (~31 decimal digits) handles zooms up to 10^30, exploring e
 
 The explorer automatically selects the appropriate board type based on zoom level:
 
-| Zoom Level | Board Type | Precision | Decimal Digits |
-|------------|------------|-----------|----------------|
-| z < 10^7   | GpuBoard   | float32   | ~7 digits      |
-| 10^7 - 10^13 | GpuQuadBoard | float32 + perturbation | ~13 digits |
-| 10^13 - 10^30 | QuadCpuBoard | double-double | ~31 digits |
-| > 10^30   | OctCpuBoard | quad-double | ~62 digits |
+| Zoom Level | Board Type (GPU) | Board Type (CPU) | Precision |
+|------------|------------------|------------------|-----------|
+| z < 10^7   | GpuBoard         | CpuBoard         | float32/64 direct |
+| 10^7 - 10^30 | GpuZhuoranBoard | PerturbationBoard | float32/64 perturbation, quad reference |
+| > 10^30   | AdaptiveGpuBoard | OctZhuoranBoard  | float32/64 perturbation, oct reference (~62 digits) |
 
 ## The Quad-Double Representation
 
