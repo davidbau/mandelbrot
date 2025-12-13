@@ -572,8 +572,6 @@ class StateStore {
         aspectRatio: 1.0,         // Default aspect ratio
 
         // Initial view parameters
-        firstr: [-0.5, 0],        // Initial center real (quad precision)
-        firstj: [0.0, 0],         // Initial center imaginary (quad precision)
         firstsize: 3.0,           // Initial view size
 
         // Platform detection
@@ -808,9 +806,6 @@ class Config {
   static FEIGENBAUM_POINT = [-1.4011551890920506, 3.1858157e-17];
 
   constructor(store) {
-    if (!store) {
-      throw new Error('Config requires a StateStore instance');
-    }
     this.store = store;
 
     // Initialize viewport width
@@ -831,8 +826,6 @@ class Config {
       exponent: 2,
       enableGPU: true,
       forceBoard: null,
-      firstr: [-0.5, 0],
-      firstj: [0.0, 0],
       firstrOct: [-0.5, 0, 0, 0],
       firstjOct: [0.0, 0, 0, 0],
       firstsize: 3.0,
@@ -863,8 +856,6 @@ class Config {
   get exponent() { return this.store.getState().config.exponent; }
   get enableGPU() { return this.store.getState().config.enableGPU; }
   get forceBoard() { return this.store.getState().config.forceBoard; }
-  get firstr() { return this.store.getState().config.firstr; }
-  get firstj() { return this.store.getState().config.firstj; }
   get firstrOct() { return this.store.getState().config.firstrOct; }
   get firstjOct() { return this.store.getState().config.firstjOct; }
 
@@ -1029,11 +1020,11 @@ class Config {
 
   updateExponent(newExponent) {
     if (newExponent < 2) { return; }
-    // Bulk update all three properties at once
+    // Bulk update exponent and initial center (origin for z^n, n>2)
     this.store.dispatch(this.store.actions.updateConfig({
       exponent: newExponent,
-      firstr: [newExponent > 2 ? 0.0 : -0.5, 0],
-      firstj: [0.0, 0]
+      firstrOct: [newExponent > 2 ? 0.0 : -0.5, 0, 0, 0],
+      firstjOct: [0.0, 0, 0, 0]
     }));
     for (const el of document.querySelectorAll('.exponent')) {
       el.innerText = newExponent;
@@ -1199,15 +1190,6 @@ class View {
   draw(ctx, colorview = null, unknownColor = 'transparent') {
     if (colorview === null) {
       colorview = this;
-    }
-
-    // Validate colorview has valid histogram
-    if (!colorview.hi || colorview.hi.length === 0) {
-      console.warn('draw() called with invalid colorview histogram:', {
-        thisK: this.k, thisId: this.id,
-        colorviewK: colorview.k, colorviewId: colorview.id,
-        colorviewHi: colorview.hi
-      });
     }
 
     // Draw composite: parent pixels + local pixels
@@ -1414,19 +1396,8 @@ class View {
   makecolor(i, histogram = null, scale = null, unknownColor = 'transparent') {
     if (i === 0) return unknownColor;  // Color for uncomputed pixels
     if (i < 0) return 'black';
-    // Use own histogram for consistent palette at this resolution
     const hi = histogram || this.hi;
     const size = scale || this.size;
-    // Validate histogram structure
-    if (!hi || !Array.isArray(hi) || hi.length === 0 || !Array.isArray(hi[0]) || hi[0].length < 4) {
-      console.warn('Invalid histogram structure:', { hi, viewK: this.k, viewId: this.id });
-      return unknownColor;
-    }
-    // Validate histogram values are in expected ranges
-    const [iter, uFrac, dFrac, est] = hi[0];
-    if (uFrac < 0 || uFrac > 1 || dFrac < 0 || dFrac > 1 || isNaN(uFrac) || isNaN(dFrac)) {
-      console.warn('Invalid histogram values:', { hi0: hi[0], viewK: this.k, viewId: this.id, hiLen: hi.length });
-    }
     const fracs = View.lookupHistogram(i, hi);
     return this.config.colorThemes[this.config.theme](
        i, fracs.fracK, fracs.fracD, fracs.fracL, size);
@@ -2625,7 +2596,7 @@ class URLHandler {
         parse: (val, configUpdates) => {
           const exponent = Math.max(2, parseInt(val));
           configUpdates.exponent = exponent;
-          if (exponent > 2) { configUpdates.firstr = [0.0, 0]; }
+          if (exponent > 2) { configUpdates.firstrOct = [0.0, 0, 0, 0]; }
           // DOM update (side effect, not state)
           for (const el of document.querySelectorAll('.exponent')) {
             el.innerText = exponent;
