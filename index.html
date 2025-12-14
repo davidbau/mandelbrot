@@ -10754,7 +10754,17 @@ function decimalToOct(decimalString) {
     const limbBigInt = float64ToBigIntScaled(limb, internalScale);
     residual = residual - limbBigInt;
   }
-  return limbs;
+  // Normalize the result to ensure consistent representation across all oct operations.
+  // Without this, limbs may not satisfy |limb[i]| < ulp(limb[i-1])/2, causing
+  // AoctAdd/toOctAdd to produce different representations when adding zero.
+  // Uses quickTwoSum cascade to renormalize (fully inlined to avoid dependency issues).
+  let s0 = limbs[0] + limbs[1], e0 = limbs[1] - (s0 - limbs[0]);
+  let s1 = e0 + limbs[2], e1 = limbs[2] - (s1 - e0);
+  let s2 = e1 + limbs[3], s3 = limbs[3] - (s2 - e1);
+  let t0 = s0 + s1; s1 = s1 - (t0 - s0); s0 = t0;
+  t0 = s1 + s2; s2 = s2 - (t0 - s1); s1 = t0;
+  t0 = s2 + s3; s3 = s3 - (t0 - s2); s2 = t0;
+  return [s0, s1, s2, s3];
 }
 
 // Convert oct value to decimal string with exact BigInt arithmetic.

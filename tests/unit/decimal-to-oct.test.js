@@ -203,30 +203,29 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
     const result = decimalToOct(input);
     const sum = sumLimbs(result);
 
-    // KNOWN BUG: The sum equals -1.8 due to float64 precision limits
+    // KNOWN LIMITATION: The sum equals -1.8 due to float64 precision limits
     // This documents the current behavior, not the desired behavior
     expect(sum).toBe(-1.8);
 
-    // The limbs individually are correctly computed
-    // limb[0] is the float64 approximation
-    expect(result[0]).toBeCloseTo(-1.7999999999999998, 15);
-    // limb[1] is the correction to get to -1.8
-    expect(result[1]).toBeCloseTo(-1.7763e-16, 10);
+    // After normalization, limb[0] is exactly -1.8
+    expect(result[0]).toBe(-1.8);
+    // limb[1] is a small positive correction (since -1.79999... > -1.8)
+    expect(result[1]).toBeGreaterThan(0);
   });
 
-  test('limbs preserve BigInt residual correctly', () => {
-    // The individual limbs ARE computed correctly - they just don't sum
-    // to the original input when the input is very close to a round number
+  test('limbs are normalized via quickTwoSum cascade', () => {
+    // After normalization, the limbs satisfy |limb[i]| < ulp(limb[i-1])/2
+    // This ensures consistent representation across all oct operations
     const input = '-1.79999999999999999999649';
     const result = decimalToOct(input);
 
-    // First limb is float64 approximation (NOT exactly -1.8)
-    expect(result[0]).not.toBe(-1.8);
-    expect(Math.abs(result[0] - (-1.7999999999999998))).toBeLessThan(1e-30);
+    // First limb is normalized to exactly -1.8 (the nearest float64 value)
+    expect(result[0]).toBe(-1.8);
 
-    // Later limbs are non-zero corrections
+    // Later limbs contain the correction terms (positive since -1.79999... > -1.8)
     expect(result[1]).not.toBe(0);
-    expect(Math.abs(result[1])).toBeGreaterThan(1e-17);
+    // The correction is positive (making it less negative than -1.8)
+    expect(result[1]).toBeGreaterThan(0);
   });
 
   test('documents limitation: values near -2 also round', () => {
