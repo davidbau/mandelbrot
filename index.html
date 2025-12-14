@@ -6828,8 +6828,9 @@ class GpuBoard extends GpuBaseBoard {
           }
           let zr2 = zr * zr;
           let zi2 = zi * zi;
-          // Check divergence (escape radius 2, so magnitude² > 4)
-          if (zr2 + zi2 > 4.0) {
+          let mag_sq = zr2 + zi2;
+          // Check divergence (escape radius 2, or NaN/Infinity from numerical errors)
+          if (mag_sq > 4.0 || !(mag_sq <= 1e38)) {  // NaN/Inf check: !(x <= large) catches both
             pixels[index].status = 1u;  // Diverged
             break;
           }
@@ -7733,7 +7734,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           let curr_total_i = refi + dzi;
           let curr_mag_sq = curr_total_r * curr_total_r + curr_total_i * curr_total_i;
 
-          if (curr_mag_sq > 4.0) {
+          // Check divergence (escape radius 2, or NaN/Infinity from numerical errors)
+          if (curr_mag_sq > 4.0 || !(curr_mag_sq <= 1e38)) {  // NaN/Inf check: !(x <= large) catches both
             pixels[index].status = 1u;
             pixels[index].period = pp;
             break;
@@ -8810,7 +8812,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           // Always check escape: when scale < -126, dz is effectively 0, so z = ref
           // The magnitude check still works since zr, zi are computed above
           let z_mag_sq = zr * zr + zi * zi;
-          if (z_mag_sq > 4.0) {
+          // Check divergence (escape radius 2, or NaN/Infinity from numerical errors)
+          if (z_mag_sq > 4.0 || !(z_mag_sq <= 1e38)) {  // NaN/Inf check: !(x <= large) catches both
             pixels[index].status = 1;
             pixels[index].period = i32(pp);
             break;
