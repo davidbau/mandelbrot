@@ -234,19 +234,17 @@ The threading structure is computed on the CPU as the reference orbit extends, t
 
 ## Buffer Layout
 
-GpuZhuoranBoard uses several GPU buffers:
+GpuZhuoranBoard and AdaptiveGpuBoard use a consolidated 5-binding layout for better cache coherency:
 
-| Buffer | `@binding` | Contents | Size per Pixel |
-|--------|---|----------|---------------|
-| `iterations` | 1 | Current iteration count | 4 bytes (u32) |
-| `statusAndPeriod` | 2 | Status (0=computing, 1=diverged, 2=converged) + period | 8 bytes (2×u32) |
-| `dc` | 3 | Delta c (offset from reference c) | 8 bytes (2×f32) |
-| `dzAndCheckpoint` | 4 | Current δz, checkpoint δz, threading deltas | 24 bytes (6×f32) |
-| `refIterAndCheckpoint`| 5 | Reference iteration, checkpoint iteration, next thread position | 12 bytes (3×u32) |
-| `refOrbit` | 6 | Reference orbit positions (shared) | 8 bytes/iteration |
-| `threading` | 7 | Thread links and deltas (shared) | 16 bytes/iteration |
+| Buffer | `@binding` | Contents | Size |
+|--------|---|----------|------|
+| `params` | 0 | Uniform parameters (dims, batch size, checkpoints, etc.) | 128 bytes |
+| `intState` | 1 | Per-pixel integer state: iter, status, period, ref_iter, checkpoint indices, spares | 32 bytes/pixel (8×u32) |
+| `floatState` | 2 | Per-pixel float state: δz, checkpoint δz, δc | 32 bytes/pixel (8×f32) |
+| `refOrbit` | 3 | Reference orbit positions (shared across all pixels) | 8 bytes/iteration (2×f32) |
+| `threading` | 4 | Thread links and deltas for cycle detection (shared) | 16 bytes/iteration (4×f32) |
 
-The `params` uniform buffer is at `@binding(0)`. The total memory per pixel is about 56 bytes. For a 1920×1080 view, that's ~116 MB of GPU memory.
+The consolidated layout packs all per-pixel data into two buffers with uniform ×8 stride, improving GPU cache performance compared to separate buffers with varying strides. Total memory per pixel is 64 bytes. For a 1920×1080 view, that's ~133 MB of GPU memory.
 
 ## CPU-GPU Coordination
 
