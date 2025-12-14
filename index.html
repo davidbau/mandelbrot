@@ -6714,7 +6714,7 @@ class GpuBaseBoard extends Board {
 
 // WebGPU board using float32 arithmetic for shallow zoom depths.
 class GpuBoard extends GpuBaseBoard {
-  static BYTES_PER_PIXEL = 8;  // 2x vec2<f32> (zValues or baseValues buffer)
+  static BYTES_PER_PIXEL = 28;  // 3 u32 + 4 f32 (consolidated PixelState struct)
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
@@ -6731,6 +6731,7 @@ class GpuBoard extends GpuBaseBoard {
 
   async createComputePipeline() {
     // Mandelbrot shader with period detection for convergence
+    // Consolidated 3-binding layout: params, pixels (PixelState struct), active_pixels
     const shaderCode = `
       struct Params {
         center_re: f32,
@@ -6757,18 +6758,21 @@ class GpuBoard extends GpuBaseBoard {
         ckpt7: u32,
       }
 
+      // Consolidated per-pixel state: 3 u32 + 4 f32 = 28 bytes
+      struct PixelState {
+        iter: u32,
+        status: u32,
+        period: u32,
+        zr: f32,
+        zi: f32,
+        base_r: f32,
+        base_i: f32,
+      }
+
       @group(0) @binding(0) var<uniform> params: Params;
-      @group(0) @binding(1) var<storage, read_write> iterations: array<u32>;
-      // [zr0, zi0, zr1, zi1, ...]
-      @group(0) @binding(2) var<storage, read_write> z_values: array<f32>;
-      // 0=computing, 1=diverged, 2=converged
-      @group(0) @binding(3) var<storage, read_write> status: array<u32>;
-      // Sparse list of active pixel indices
-      @group(0) @binding(4) var<storage, read> active_pixels: array<u32>;
-      // base = checkpoint z for period detection
-      @group(0) @binding(5) var<storage, read_write> base_values: array<f32>;
-      // p = iter when convergence first detected
-      @group(0) @binding(6) var<storage, read_write> period: array<u32>;
+      @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
+      @group(0) @binding(2) var<storage, read> active_pixels: array<u32>;
+
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // 2D dispatch: calculate linear index from 2D coordinates
@@ -6785,14 +6789,13 @@ class GpuBoard extends GpuBaseBoard {
         let yFrac = f32(i32(params.dims_height / 2u) - i32(y)) / f32(params.dims_height);
         let cr = params.center_re + xFrac * params.pixel_size;
         let ci = params.center_im + yFrac * (params.pixel_size / params.aspect_ratio);
-        // Continue from current z value
-        var zr = z_values[index * 2u];
-        var zi = z_values[index * 2u + 1u];
-        var iter = iterations[index];
-        // Load base values for period detection
-        var base_r = base_values[index * 2u];
-        var base_i = base_values[index * 2u + 1u];
-        var p = period[index];
+        // Load pixel state
+        var zr = pixels[index].zr;
+        var zi = pixels[index].zi;
+        var iter = pixels[index].iter;
+        var base_r = pixels[index].base_r;
+        var base_i = pixels[index].base_i;
+        var p = pixels[index].period;
         // If this is the first batch and base is still zero, initialize it
         if (iter == 0u && base_r == 0.0 && base_i == 0.0) {
           base_r = zr;  // Initialize to starting z (which is 0,0)
@@ -6827,7 +6830,7 @@ class GpuBoard extends GpuBaseBoard {
           let zi2 = zi * zi;
           // Check divergence (escape radius 2, so magnitude² > 4)
           if (zr2 + zi2 > 4.0) {
-            status[index] = 1u;  // Diverged
+            pixels[index].status = 1u;  // Diverged
             break;
           }
           // z = z^exponent + c (generalized Mandelbrot)
@@ -6849,19 +6852,19 @@ class GpuBoard extends GpuBaseBoard {
               p = iter;  // Record iter when convergence first detected
             }
             if (db <= params.epsilon) {
-              status[index] = 2u;  // Converged (periodic)
+              pixels[index].status = 2u;  // Converged (periodic)
               break;
             }
           }
           iter++;
         }
         // Save state
-        z_values[index * 2u] = zr;
-        z_values[index * 2u + 1u] = zi;
-        base_values[index * 2u] = base_r;
-        base_values[index * 2u + 1u] = base_i;
-        iterations[index] = iter;
-        period[index] = p;
+        pixels[index].zr = zr;
+        pixels[index].zi = zi;
+        pixels[index].base_r = base_r;
+        pixels[index].base_i = base_i;
+        pixels[index].iter = iter;
+        pixels[index].period = p;
       }
     `;
 
@@ -6888,44 +6891,30 @@ class GpuBoard extends GpuBaseBoard {
       this.device.limits.maxBufferSize,
       this.device.limits.maxStorageBufferBindingSize
     );
-    const largestBufferSize = dimsArea * 2 * 4;  // zValues or baseValues buffer (8 bytes/pixel)
+    // PixelState struct: 3 u32 + 4 f32 = 28 bytes per pixel
+    const BYTES_PER_PIXEL = 28;
+    const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
 
-    if (largestBufferSize > maxBufferSize) {
+    if (pixelBufferSize > maxBufferSize) {
       throw new Error(
-        `Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) ` +
+        `Buffer size (${(pixelBufferSize / (1024 * 1024)).toFixed(1)} MB) ` +
         `exceeds WebGPU limit (${(maxBufferSize / (1024 * 1024)).toFixed(1)} MB). ` +
         `Board ${this.config.dimsWidth}x${this.config.dimsHeight} is too large ` +
         `for GPU acceleration.`);
     }
 
     // Uniform buffer for shader parameters
-    // struct Params { 12 base fields + 8 checkpoint offsets } = 20 u32s =
-    // 80 bytes, rounded to 128 for alignment
     this.buffers.params = this.device.createBuffer({
       size: 128,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: 'Parameters buffer'
     });
 
-    // Storage buffer for iteration counts (one u32 per pixel)
-    this.buffers.iterations = this.device.createBuffer({
-      size: dimsArea * 4,  // 4 bytes per u32
+    // Consolidated pixel state buffer (PixelState struct: iter, status, period, zr, zi, base_r, base_i)
+    this.buffers.pixels = this.device.createBuffer({
+      size: pixelBufferSize,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Iterations buffer'
-    });
-
-    // Storage buffer for z values (two f32 per pixel: zr, zi)
-    this.buffers.zValues = this.device.createBuffer({
-      size: dimsArea * 2 * 4,  // 2 floats per pixel, 4 bytes per float
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Z values buffer'
-    });
-
-    // Storage buffer for status flags (one u32 per pixel: 0=computing, 1=diverged)
-    this.buffers.status = this.device.createBuffer({
-      size: dimsArea * 4,  // 4 bytes per u32
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Status buffer'
+      label: 'Pixel state buffer'
     });
 
     // Storage buffer for active pixel indices (sparse list, max size = dimsArea)
@@ -6935,58 +6924,32 @@ class GpuBoard extends GpuBaseBoard {
       label: 'Active pixels buffer'
     });
 
-    // Storage buffer for base values (period detection)
-    this.buffers.baseValues = this.device.createBuffer({
-      size: dimsArea * 2 * 4,  // 2 floats per pixel
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      label: 'Base values buffer'
-    });
-
-    // Storage buffer for period values
-    this.buffers.period = this.device.createBuffer({
-      size: dimsArea * 4,  // 4 bytes per u32
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Period buffer'
-    });
-
-    // Persistent staging buffers for reading results back to CPU
-    this.buffers.stagingIterations = this.device.createBuffer({
-      size: dimsArea * 4,
+    // Staging buffer for reading pixel state back to CPU
+    this.buffers.stagingPixels = this.device.createBuffer({
+      size: pixelBufferSize,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      label: 'Staging iterations buffer'
+      label: 'Staging pixels buffer'
     });
 
-    this.buffers.stagingStatus = this.device.createBuffer({
-      size: dimsArea * 4,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      label: 'Staging status buffer'
-    });
+    // Initialize pixel state buffer using overlapping typed array views
+    // PixelState struct layout: [iter(u32), status(u32), period(u32), zr(f32), zi(f32), base_r(f32), base_i(f32)]
+    const pixelData = new ArrayBuffer(pixelBufferSize);
+    const pixelU32 = new Uint32Array(pixelData);
+    const pixelF32 = new Float32Array(pixelData);
 
-    this.buffers.stagingZValues = this.device.createBuffer({
-      size: dimsArea * 2 * 4,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      label: 'Staging z-values buffer'
-    });
-
-    this.buffers.stagingPeriod = this.device.createBuffer({
-      size: dimsArea * 4,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      label: 'Staging period buffer'
-    });
-
-    // Initialize all buffers
-    const zeroData = new Float32Array(dimsArea * 2).fill(0);
-    this.device.queue.writeBuffer(this.buffers.zValues, 0, zeroData);
-    this.device.queue.writeBuffer(this.buffers.baseValues, 0, zeroData);
-
-    const statusData = new Uint32Array(dimsArea).fill(0);
-    this.device.queue.writeBuffer(this.buffers.status, 0, statusData);
-
-    const iterData = new Uint32Array(dimsArea).fill(0);
-    this.device.queue.writeBuffer(this.buffers.iterations, 0, iterData);
-
-    const periodData = new Uint32Array(dimsArea).fill(0);
-    this.device.queue.writeBuffer(this.buffers.period, 0, periodData);
+    for (let i = 0; i < dimsArea; i++) {
+      const idx7 = i * 7;  // 7 x 4-byte values per pixel
+      // Integer fields (offsets 0-2)
+      pixelU32[idx7 + 0] = 0;  // iter
+      pixelU32[idx7 + 1] = 0;  // status (0 = computing)
+      pixelU32[idx7 + 2] = 0;  // period
+      // Float fields (offsets 3-6)
+      pixelF32[idx7 + 3] = 0;  // zr
+      pixelF32[idx7 + 4] = 0;  // zi
+      pixelF32[idx7 + 5] = 0;  // base_r
+      pixelF32[idx7 + 6] = 0;  // base_i
+    }
+    this.device.queue.writeBuffer(this.buffers.pixels, 0, pixelData);
 
     // Initialize active pixels list (all pixels start active)
     const activePixels = new Uint32Array(dimsArea);
@@ -6997,38 +6960,13 @@ class GpuBoard extends GpuBaseBoard {
   }
 
   createBindGroup() {
-    // Create bind group with all buffers
+    // Consolidated 3-binding layout
     this.bindGroup = this.device.createBindGroup({
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
-        {
-          binding: 0,
-          resource: { buffer: this.buffers.params }
-        },
-        {
-          binding: 1,
-          resource: { buffer: this.buffers.iterations }
-        },
-        {
-          binding: 2,
-          resource: { buffer: this.buffers.zValues }
-        },
-        {
-          binding: 3,
-          resource: { buffer: this.buffers.status }
-        },
-        {
-          binding: 4,
-          resource: { buffer: this.buffers.activePixels }
-        },
-        {
-          binding: 5,
-          resource: { buffer: this.buffers.baseValues }
-        },
-        {
-          binding: 6,
-          resource: { buffer: this.buffers.period }
-        }
+        { binding: 0, resource: { buffer: this.buffers.params } },
+        { binding: 1, resource: { buffer: this.buffers.pixels } },
+        { binding: 2, resource: { buffer: this.buffers.activePixels } }
       ],
       label: 'Mandelbrot bind group'
     });
@@ -7043,6 +6981,7 @@ class GpuBoard extends GpuBaseBoard {
     try {
     const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
     const workgroupSize = 64;
+    const BYTES_PER_PIXEL = 28;  // 7 x 4-byte values per pixel
 
     // Prepare parameters for GPU
     const re_double = qdToNumber(this.re);
@@ -7098,8 +7037,8 @@ class GpuBoard extends GpuBaseBoard {
     }
     const checkpointCount = Math.min(checkpointOffsets.length, 8);
 
-    // Upload parameters to uniform buffer (21 u32s with checkpoint fields + aspect ratio)
-    const paramsBuffer = new ArrayBuffer(128);  // Extended to accommodate new fields
+    // Upload parameters to uniform buffer
+    const paramsBuffer = new ArrayBuffer(128);
     const paramsF32 = new Float32Array(paramsBuffer);
     const paramsU32 = new Uint32Array(paramsBuffer);
 
@@ -7140,27 +7079,27 @@ class GpuBoard extends GpuBaseBoard {
     passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);  // 2D dispatch
     passEncoder.end();
 
-    // Batch all buffer copies into single command encoder for efficiency
+    // Copy consolidated pixel buffer to staging
     commandEncoder.copyBufferToBuffer(
-      this.buffers.iterations, 0, this.buffers.stagingIterations, 0, dimsArea * 4);
-    commandEncoder.copyBufferToBuffer(
-      this.buffers.status, 0, this.buffers.stagingStatus, 0, dimsArea * 4);
+      this.buffers.pixels, 0, this.buffers.stagingPixels, 0, dimsArea * BYTES_PER_PIXEL);
 
-    // Submit compute + buffer copies in single batch
+    // Submit compute + buffer copy in single batch
     this.device.queue.submit([commandEncoder.finish()]);
     await this.device.queue.onSubmittedWorkDone();
 
     // Update iteration counter (before processing results, like CPU implementations)
     this.it += iterationsPerBatch;
 
-    // First pass: read lightweight buffers (iterations and status)
-    await this.buffers.stagingIterations.mapAsync(GPUMapMode.READ);
-    const iterationsData = new Uint32Array(this.buffers.stagingIterations.getMappedRange()).slice();
-    this.buffers.stagingIterations.unmap();
+    // Read consolidated pixel state buffer
+    await this.buffers.stagingPixels.mapAsync(GPUMapMode.READ);
+    const pixelData = new ArrayBuffer(dimsArea * BYTES_PER_PIXEL);
+    const srcData = this.buffers.stagingPixels.getMappedRange();
+    new Uint8Array(pixelData).set(new Uint8Array(srcData));
+    this.buffers.stagingPixels.unmap();
 
-    await this.buffers.stagingStatus.mapAsync(GPUMapMode.READ);
-    const statusData = new Uint32Array(this.buffers.stagingStatus.getMappedRange()).slice();
-    this.buffers.stagingStatus.unmap();
+    // Create typed array views for reading pixel state
+    const pixelU32 = new Uint32Array(pixelData);
+    const pixelF32 = new Float32Array(pixelData);
 
     // Initialize lastReportedIters if needed
     if (!this.lastReportedIters) {
@@ -7170,14 +7109,14 @@ class GpuBoard extends GpuBaseBoard {
     // Find pixels that NEWLY diverged or converged this batch
     const pixelsByIteration = new Map(); // For diverged: iter -> [indices]
     const convergedByIteration = new Map(); // For converged: iter -> [{index, z, p}]
-    let newlyDiverged = 0;
-    let newlyConverged = 0;
-    let hasConverged = false;
 
-    // First pass: process diverged pixels and detect if any converged
     for (const i of activePixels) {
-      const iters = iterationsData[i];
-      const status = statusData[i];
+      const idx7 = i * 7;
+      const iters = pixelU32[idx7 + 0];   // iter
+      const status = pixelU32[idx7 + 1];  // status
+      const period = pixelU32[idx7 + 2];  // period
+      const zr = pixelF32[idx7 + 3];      // zr
+      const zi = pixelF32[idx7 + 4];      // zi
       const lastIters = this.lastReportedIters[i];
 
       // Update CPU-side status tracking
@@ -7194,7 +7133,6 @@ class GpuBoard extends GpuBaseBoard {
           }
           pixelsByIteration.get(iters).push(i);
           this.lastReportedIters[i] = iters;
-          newlyDiverged++;
 
           // Decrement ch if this pixel was in the spike
           if (this.inSpike && this.inSpike[i] && this.ch > 0) {
@@ -7202,45 +7140,9 @@ class GpuBoard extends GpuBaseBoard {
           }
         }
       } else if (status === 2) {
-        // Converged - mark that we need to read heavy buffers
-        hasConverged = true;
-      }
-    }
-
-    // Second pass: only read heavy buffers if we have converged pixels OR spike pixels to debug
-    const needHeavyBuffers = hasConverged || (this.spikePixelsToDebug && this.spikePixelsToDebug.length > 0);
-    let zValuesData, periodData;
-
-    if (needHeavyBuffers) {
-      // Create a new command encoder for heavy buffer readback
-      const heavyEncoder = this.device.createCommandEncoder();
-      heavyEncoder.copyBufferToBuffer(
-        this.buffers.zValues, 0, this.buffers.stagingZValues, 0, dimsArea * 2 * 4);
-      heavyEncoder.copyBufferToBuffer(
-        this.buffers.period, 0, this.buffers.stagingPeriod, 0, dimsArea * 4);
-      this.device.queue.submit([heavyEncoder.finish()]);
-      await this.device.queue.onSubmittedWorkDone();
-
-      await this.buffers.stagingZValues.mapAsync(GPUMapMode.READ);
-      zValuesData = new Float32Array(this.buffers.stagingZValues.getMappedRange()).slice();
-      this.buffers.stagingZValues.unmap();
-
-      await this.buffers.stagingPeriod.mapAsync(GPUMapMode.READ);
-      periodData = new Uint32Array(this.buffers.stagingPeriod.getMappedRange()).slice();
-      this.buffers.stagingPeriod.unmap();
-
-      // Process converged pixels
-      for (const i of activePixels) {
-        const iters = iterationsData[i];
-        const status = statusData[i];
-        const lastIters = this.lastReportedIters[i];
-
-        if (status === 2 && (lastIters === 0 || iters !== lastIters)) {
+        // Converged - newly converged in this batch?
+        if (lastIters === 0 || iters !== lastIters) {
           this.nn[i] = -iters;  // Negative iteration for converged pixels
-
-          const zr = zValuesData[i * 2];
-          const zi = zValuesData[i * 2 + 1];
-          const period = periodData[i];
 
           // Add 1 because GPU shader increments iter before setting checkpoint,
           // so period value is 1 less than what CPU board would store
@@ -7255,7 +7157,6 @@ class GpuBoard extends GpuBaseBoard {
             p: this.pp[i]
           });
           this.lastReportedIters[i] = iters;
-          newlyConverged++;
 
           // Decrement ch if this pixel was in the spike
           if (this.inSpike && this.inSpike[i] && this.ch > 0) {
@@ -7263,7 +7164,6 @@ class GpuBoard extends GpuBaseBoard {
           }
         }
       }
-
     }
 
     // Count total finished pixels across entire grid (for statistics)
