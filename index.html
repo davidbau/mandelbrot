@@ -8928,16 +8928,83 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           }
 
           // === PERTURBATION ITERATION ===
-          let linear_r = 2.0 * (refr * dzr - refi * dzi);
-          let linear_i = 2.0 * (refr * dzi + refi * dzr);
-          let quad_r = ldexp(dzr * dzr - dzi * dzi, scale);
-          let quad_i = ldexp(2.0 * dzr * dzi, scale);
+          // Binomial expansion: (Z+δz)^n - Z^n = Σ C(n,k)·Z^(n-k)·δz^k
+          // All terms computed in scaled coordinates to avoid float32 overflow
+          var new_dzr: f32;
+          var new_dzi: f32;
           let scale_diff = params.initial_scale - scale;
           let dc_r = ldexp(dcr, scale_diff);
           let dc_i = ldexp(dci, scale_diff);
 
-          var new_dzr = linear_r + quad_r + dc_r;
-          var new_dzi = linear_i + quad_i + dc_i;
+          if (params.exponent == 2u) {
+            // z² + c: 2·Z·δz + δz²
+            let linear_r = 2.0 * (refr * dzr - refi * dzi);
+            let linear_i = 2.0 * (refr * dzi + refi * dzr);
+            let quad_r = ldexp(dzr * dzr - dzi * dzi, scale);
+            let quad_i = ldexp(2.0 * dzr * dzi, scale);
+            new_dzr = linear_r + quad_r + dc_r;
+            new_dzi = linear_i + quad_i + dc_i;
+          } else if (params.exponent == 3u) {
+            // z³ + c: 3·Z²·δz + 3·Z·δz² + δz³
+            let ref2_r = refr * refr - refi * refi;
+            let ref2_i = 2.0 * refr * refi;
+            let t1_r = 3.0 * (ref2_r * dzr - ref2_i * dzi);
+            let t1_i = 3.0 * (ref2_r * dzi + ref2_i * dzr);
+            let dz2_r = dzr * dzr - dzi * dzi;
+            let dz2_i = 2.0 * dzr * dzi;
+            let t2_r = ldexp(3.0 * (refr * dz2_r - refi * dz2_i), scale);
+            let t2_i = ldexp(3.0 * (refr * dz2_i + refi * dz2_r), scale);
+            let dz3_r = dzr * dz2_r - dzi * dz2_i;
+            let dz3_i = dzr * dz2_i + dzi * dz2_r;
+            let t3_r = ldexp(dz3_r, scale + scale);
+            let t3_i = ldexp(dz3_i, scale + scale);
+            new_dzr = t1_r + t2_r + t3_r + dc_r;
+            new_dzi = t1_i + t2_i + t3_i + dc_i;
+          } else if (params.exponent == 4u) {
+            // z⁴ + c: 4·Z³·δz + 6·Z²·δz² + 4·Z·δz³ + δz⁴
+            let ref2_r = refr * refr - refi * refi;
+            let ref2_i = 2.0 * refr * refi;
+            let ref3_r = refr * ref2_r - refi * ref2_i;
+            let ref3_i = refr * ref2_i + refi * ref2_r;
+            let t1_r = 4.0 * (ref3_r * dzr - ref3_i * dzi);
+            let t1_i = 4.0 * (ref3_r * dzi + ref3_i * dzr);
+            let dz2_r = dzr * dzr - dzi * dzi;
+            let dz2_i = 2.0 * dzr * dzi;
+            let t2_r = ldexp(6.0 * (ref2_r * dz2_r - ref2_i * dz2_i), scale);
+            let t2_i = ldexp(6.0 * (ref2_r * dz2_i + ref2_i * dz2_r), scale);
+            let dz3_r = dzr * dz2_r - dzi * dz2_i;
+            let dz3_i = dzr * dz2_i + dzi * dz2_r;
+            let t3_r = ldexp(4.0 * (refr * dz3_r - refi * dz3_i), scale + scale);
+            let t3_i = ldexp(4.0 * (refr * dz3_i + refi * dz3_r), scale + scale);
+            let dz4_r = dz2_r * dz2_r - dz2_i * dz2_i;
+            let dz4_i = 2.0 * dz2_r * dz2_i;
+            let t4_r = ldexp(dz4_r, scale + scale + scale);
+            let t4_i = ldexp(dz4_i, scale + scale + scale);
+            new_dzr = t1_r + t2_r + t3_r + t4_r + dc_r;
+            new_dzi = t1_i + t2_i + t3_i + t4_i + dc_i;
+          } else {
+            // Higher exponents: use direct computation (less efficient)
+            let dzr_actual = ldexp(dzr, scale);
+            let dzi_actual = ldexp(dzi, scale);
+            var zr = refr + dzr_actual;
+            var zi = refi + dzi_actual;
+            var zn_r = zr;
+            var zn_i = zi;
+            for (var p = 1u; p < params.exponent; p++) {
+              let temp_r = zn_r * zr - zn_i * zi;
+              zn_i = zn_r * zi + zn_i * zr;
+              zn_r = temp_r;
+            }
+            var refn_r = refr;
+            var refn_i = refi;
+            for (var p = 1u; p < params.exponent; p++) {
+              let temp_r = refn_r * refr - refn_i * refi;
+              refn_i = refn_r * refi + refn_i * refr;
+              refn_r = temp_r;
+            }
+            new_dzr = (zn_r - refn_r) + dc_r;
+            new_dzi = (zn_i - refn_i) + dc_i;
+          }
           var new_scale = scale;
 
           // === ADAPTIVE RESCALING ===
