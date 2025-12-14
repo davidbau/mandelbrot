@@ -41,9 +41,22 @@ const qdFuncs = createTestEnvironment([
   // Constant needed by qdFormat
   'ddTen',
   'qdFormat',
-  // Spline interpolation
-  'catmullRom1D',
-  'catmullRomSpline',
+  // Spline interpolation (QD = quad-double precision)
+  'catmullRom1DQD',
+  'catmullRomSplineQD',
+  'toQD',
+  'toQDAdd',
+  'toQDSub',
+  'toQDScale',
+  'ArqdAdd',
+  'ArqdMul',
+  'ArqdSet',
+  'ArqdRenorm',
+  'ArqdThreeSum',
+  'ArqdTwoProduct',
+  'AquickTwoSum',
+  'AsymmetricTwoSum',
+  'AtwoProduct',
   // Complex quad-double operations
   'toDDc',
   'qdcAdd',
@@ -227,62 +240,62 @@ describe('Quad-Double Round-trip', () => {
   });
 });
 
-describe('Catmull-Rom Spline Interpolation', () => {
-  test('catmullRom1D should interpolate at t=0 to p1', () => {
-    const p0 = qdFuncs.toDD(0);
-    const p1 = qdFuncs.toDD(1);
-    const p2 = qdFuncs.toDD(2);
-    const p3 = qdFuncs.toDD(3);
+describe('Catmull-Rom Spline Interpolation (QD)', () => {
+  test('catmullRom1DQD should interpolate at t=0 to p1', () => {
+    const p0 = qdFuncs.toQD(0);
+    const p1 = qdFuncs.toQD(1);
+    const p2 = qdFuncs.toQD(2);
+    const p3 = qdFuncs.toQD(3);
 
-    const result = qdFuncs.catmullRom1D(p0, p1, p2, p3, 0);
+    const result = qdFuncs.catmullRom1DQD(p0, p1, p2, p3, 0);
     expect(result[0]).toBeCloseTo(1, 10);
   });
 
-  test('catmullRom1D should interpolate at t=1 to p2', () => {
-    const p0 = qdFuncs.toDD(0);
-    const p1 = qdFuncs.toDD(1);
-    const p2 = qdFuncs.toDD(2);
-    const p3 = qdFuncs.toDD(3);
+  test('catmullRom1DQD should interpolate at t=1 to p2', () => {
+    const p0 = qdFuncs.toQD(0);
+    const p1 = qdFuncs.toQD(1);
+    const p2 = qdFuncs.toQD(2);
+    const p3 = qdFuncs.toQD(3);
 
-    const result = qdFuncs.catmullRom1D(p0, p1, p2, p3, 1);
+    const result = qdFuncs.catmullRom1DQD(p0, p1, p2, p3, 1);
     expect(result[0]).toBeCloseTo(2, 10);
   });
 
-  test('catmullRom1D should interpolate smoothly at t=0.5', () => {
-    const p0 = qdFuncs.toDD(0);
-    const p1 = qdFuncs.toDD(1);
-    const p2 = qdFuncs.toDD(2);
-    const p3 = qdFuncs.toDD(3);
+  test('catmullRom1DQD should interpolate smoothly at t=0.5', () => {
+    const p0 = qdFuncs.toQD(0);
+    const p1 = qdFuncs.toQD(1);
+    const p2 = qdFuncs.toQD(2);
+    const p3 = qdFuncs.toQD(3);
 
-    const result = qdFuncs.catmullRom1D(p0, p1, p2, p3, 0.5);
+    const result = qdFuncs.catmullRom1DQD(p0, p1, p2, p3, 0.5);
     // For uniformly spaced points, midpoint should be close to average of p1 and p2
     expect(result[0]).toBeCloseTo(1.5, 1);
   });
 
-  test('catmullRomSpline should interpolate 2D points at endpoints', () => {
-    const p0 = [qdFuncs.toDD(0), qdFuncs.toDD(0)];
-    const p1 = [qdFuncs.toDD(1), qdFuncs.toDD(1)];
-    const p2 = [qdFuncs.toDD(2), qdFuncs.toDD(2)];
-    const p3 = [qdFuncs.toDD(3), qdFuncs.toDD(3)];
+  test('catmullRomSplineQD should interpolate 2D points at endpoints', () => {
+    const p0 = [qdFuncs.toQD(0), qdFuncs.toQD(0)];
+    const p1 = [qdFuncs.toQD(1), qdFuncs.toQD(1)];
+    const p2 = [qdFuncs.toQD(2), qdFuncs.toQD(2)];
+    const p3 = [qdFuncs.toQD(3), qdFuncs.toQD(3)];
 
-    const result = qdFuncs.catmullRomSpline(p0, p1, p2, p3, 0);
+    const result = qdFuncs.catmullRomSplineQD(p0, p1, p2, p3, 0);
     expect(result[0][0]).toBeCloseTo(1, 10);  // x at t=0
     expect(result[1][0]).toBeCloseTo(1, 10);  // y at t=0
 
-    const resultEnd = qdFuncs.catmullRomSpline(p0, p1, p2, p3, 1);
+    const resultEnd = qdFuncs.catmullRomSplineQD(p0, p1, p2, p3, 1);
     expect(resultEnd[0][0]).toBeCloseTo(2, 10);  // x at t=1
     expect(resultEnd[1][0]).toBeCloseTo(2, 10);  // y at t=1
   });
 
-  test('catmullRomSpline should handle non-linear paths', () => {
+  test('catmullRomSplineQD should handle non-linear paths', () => {
     // Points forming a corner
-    const p0 = [qdFuncs.toDD(0), qdFuncs.toDD(0)];
-    const p1 = [qdFuncs.toDD(1), qdFuncs.toDD(0)];
-    const p2 = [qdFuncs.toDD(1), qdFuncs.toDD(1)];
-    const p3 = [qdFuncs.toDD(0), qdFuncs.toDD(1)];
+    const p0 = [qdFuncs.toQD(0), qdFuncs.toQD(0)];
+    const p1 = [qdFuncs.toQD(1), qdFuncs.toQD(0)];
+    const p2 = [qdFuncs.toQD(1), qdFuncs.toQD(1)];
+    const p3 = [qdFuncs.toQD(0), qdFuncs.toQD(1)];
 
     // At t=0.5, should be somewhere between p1 and p2
-    const result = qdFuncs.catmullRomSpline(p0, p1, p2, p3, 0.5);
+    const result = qdFuncs.catmullRomSplineQD(p0, p1, p2, p3, 0.5);
     expect(result[0][0]).toBeCloseTo(1, 0);  // x should be near 1
     expect(result[1][0]).toBeGreaterThan(0);
     expect(result[1][0]).toBeLessThan(1);

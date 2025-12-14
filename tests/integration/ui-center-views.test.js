@@ -96,8 +96,8 @@ describe('Center Views 1% Tolerance Tests', () => {
 
     // Get deepest view's center before C
     const deepestCenter = await page.evaluate(() => ({
-      re: window.explorer.grid.views[1].sizesOct[1],
-      im: window.explorer.grid.views[1].sizesOct[2]
+      re: window.explorer.grid.views[1].sizesQD[1],
+      im: window.explorer.grid.views[1].sizesQD[2]
     }));
 
     // Press C to center
@@ -111,8 +111,8 @@ describe('Center Views 1% Tolerance Tests', () => {
 
     // The deepest view's center should be unchanged
     const afterDeepest = await page.evaluate(() => ({
-      re: window.explorer.grid.views[1].sizesOct[1],
-      im: window.explorer.grid.views[1].sizesOct[2]
+      re: window.explorer.grid.views[1].sizesQD[1],
+      im: window.explorer.grid.views[1].sizesQD[2]
     }));
     expect(afterDeepest.re[0]).toBeCloseTo(deepestCenter.re[0], 10);
     expect(afterDeepest.im[0]).toBeCloseTo(deepestCenter.im[0], 10);

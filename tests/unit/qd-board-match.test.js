@@ -1,51 +1,51 @@
 /**
- * Test that OctZhuoranBoard (perturbation) matches OctCpuBoard (direct) iteration counts.
+ * Test that QDZhuoranBoard (perturbation) matches QDCpuBoard (direct) iteration counts.
  * Uses extracted functions to test the core iteration logic on a small 8x8 grid.
  */
 
 const { createTestEnvironment } = require('../utils/extract-code');
 
 const {
-  toOct,
-  toOctAdd,
-  toOctSub,
-  toOctMul,
-  toOctScale,
-  toOctSquare,
-  toOctDouble,
-  octToNumber,
-  AoctAdd,
-  AoctMul,
-  AoctSquare,
+  toQD,
+  toQDAdd,
+  toQDSub,
+  toQDMul,
+  toQDScale,
+  toQDSquare,
+  toQDDouble,
+  qdToNumber,
+  ArqdAdd,
+  ArqdMul,
+  ArqdSquare,
   AsymmetricTwoSum,
   AquickTwoSum,
-  AthreeSum,
-  AoctTwoProduct,
-  AoctTwoSquare,
-  AoctRenorm,
-  AoctSet,
+  ArqdThreeSum,
+  ArqdTwoProduct,
+  ArqdTwoSquare,
+  ArqdRenorm,
+  ArqdSet,
   AtwoProduct,
   AtwoSquare,
   ArddSplit
 } = createTestEnvironment([
-  'toOct',
-  'toOctAdd',
-  'toOctSub',
-  'toOctMul',
-  'toOctScale',
-  'toOctSquare',
-  'toOctDouble',
-  'octToNumber',
-  'AoctAdd',
-  'AoctMul',
-  'AoctSquare',
+  'toQD',
+  'toQDAdd',
+  'toQDSub',
+  'toQDMul',
+  'toQDScale',
+  'toQDSquare',
+  'toQDDouble',
+  'qdToNumber',
+  'ArqdAdd',
+  'ArqdMul',
+  'ArqdSquare',
   'AsymmetricTwoSum',
   'AquickTwoSum',
-  'AthreeSum',
-  'AoctTwoProduct',
-  'AoctTwoSquare',
-  'AoctRenorm',
-  'AoctSet',
+  'ArqdThreeSum',
+  'ArqdTwoProduct',
+  'ArqdTwoSquare',
+  'ArqdRenorm',
+  'ArqdSet',
   'AtwoProduct',
   'AtwoSquare',
   'ArddSplit'
@@ -57,46 +57,46 @@ describe('oct board iteration match', () => {
   const ESCAPE_RADIUS = 4;
 
   // Helper: sum oct components
-  const octSum = (o) => o[0] + o[1] + o[2] + o[3];
+  const qdSum = (o) => o[0] + o[1] + o[2] + o[3];
 
-  // Direct iteration (like OctCpuBoard)
+  // Direct iteration (like QDCpuBoard)
   function iterateDirect(cr, ci, maxIter) {
     let zr = cr.slice();
     let zi = ci.slice();
 
     for (let i = 0; i < maxIter; i++) {
-      const zr2 = toOctSquare(zr);
-      const zi2 = toOctSquare(zi);
-      const mag = octSum(toOctAdd(zr2, zi2));
+      const zr2 = toQDSquare(zr);
+      const zi2 = toQDSquare(zi);
+      const mag = qdSum(toQDAdd(zr2, zi2));
 
       if (mag > ESCAPE_RADIUS) {
         return i + 1;  // Escaped at iteration i+1
       }
 
-      const zri = toOctMul(zr, zi);
-      zr = toOctAdd(toOctSub(zr2, zi2), cr);
-      zi = toOctAdd(toOctDouble(zri), ci);
+      const zri = toQDMul(zr, zi);
+      zr = toQDAdd(toQDSub(zr2, zi2), cr);
+      zi = toQDAdd(toQDDouble(zri), ci);
     }
 
     return 0;  // Didn't escape
   }
 
-  // Perturbation iteration (like OctZhuoranBoard)
+  // Perturbation iteration (like QDZhuoranBoard)
   // Uses reference orbit + delta iteration
   function iteratePerturbation(cr, ci, refOrbitR, refOrbitI, maxIter) {
     // Delta from reference center
-    const dr = toOctSub(cr, refOrbitR[0]);
-    const di = toOctSub(ci, refOrbitI[0]);
+    const dr = toQDSub(cr, refOrbitR[0]);
+    const di = toQDSub(ci, refOrbitI[0]);
 
     let deltaR = dr.slice();
     let deltaI = di.slice();
 
     for (let i = 0; i < maxIter && i < refOrbitR.length - 1; i++) {
       // Full z = reference + delta
-      const zr = toOctAdd(refOrbitR[i], deltaR);
-      const zi = toOctAdd(refOrbitI[i], deltaI);
+      const zr = toQDAdd(refOrbitR[i], deltaR);
+      const zi = toQDAdd(refOrbitI[i], deltaI);
 
-      const mag = octSum(toOctAdd(toOctSquare(zr), toOctSquare(zi)));
+      const mag = qdSum(toQDAdd(toQDSquare(zr), toQDSquare(zi)));
       if (mag > ESCAPE_RADIUS) {
         return i + 1;
       }
@@ -107,24 +107,24 @@ describe('oct board iteration match', () => {
       const refR = refOrbitR[i];
       const refI = refOrbitI[i];
 
-      const twoRefR = toOctDouble(refR);
-      const twoRefI = toOctDouble(refI);
-      const deltaR2 = toOctSquare(deltaR);
-      const deltaI2 = toOctSquare(deltaI);
-      const deltaRI = toOctMul(deltaR, deltaI);
+      const twoRefR = toQDDouble(refR);
+      const twoRefI = toQDDouble(refI);
+      const deltaR2 = toQDSquare(deltaR);
+      const deltaI2 = toQDSquare(deltaI);
+      const deltaRI = toQDMul(deltaR, deltaI);
 
-      const newDeltaR = toOctAdd(
-        toOctAdd(
-          toOctSub(toOctMul(twoRefR, deltaR), toOctMul(twoRefI, deltaI)),
-          toOctSub(deltaR2, deltaI2)
+      const newDeltaR = toQDAdd(
+        toQDAdd(
+          toQDSub(toQDMul(twoRefR, deltaR), toQDMul(twoRefI, deltaI)),
+          toQDSub(deltaR2, deltaI2)
         ),
         dr
       );
 
-      const newDeltaI = toOctAdd(
-        toOctAdd(
-          toOctAdd(toOctMul(twoRefR, deltaI), toOctMul(twoRefI, deltaR)),
-          toOctDouble(deltaRI)
+      const newDeltaI = toQDAdd(
+        toQDAdd(
+          toQDAdd(toQDMul(twoRefR, deltaI), toQDMul(twoRefI, deltaR)),
+          toQDDouble(deltaRI)
         ),
         di
       );
@@ -145,15 +145,15 @@ describe('oct board iteration match', () => {
     let zi = ci.slice();
 
     for (let i = 0; i < maxIter; i++) {
-      const zr2 = toOctSquare(zr);
-      const zi2 = toOctSquare(zi);
-      const mag = octSum(toOctAdd(zr2, zi2));
+      const zr2 = toQDSquare(zr);
+      const zi2 = toQDSquare(zi);
+      const mag = qdSum(toQDAdd(zr2, zi2));
 
       if (mag > ESCAPE_RADIUS) break;
 
-      const zri = toOctMul(zr, zi);
-      zr = toOctAdd(toOctSub(zr2, zi2), cr);
-      zi = toOctAdd(toOctDouble(zri), ci);
+      const zri = toQDMul(zr, zi);
+      zr = toQDAdd(toQDSub(zr2, zi2), cr);
+      zi = toQDAdd(toQDDouble(zri), ci);
 
       orbitR.push(zr.slice());
       orbitI.push(zi.slice());
@@ -167,8 +167,8 @@ describe('oct board iteration match', () => {
     const centerI = 0;
     const size = 1e-40;
 
-    const centerOctR = toOct(centerR);
-    const centerOctI = toOct(centerI);
+    const centerOctR = toQD(centerR);
+    const centerOctI = toQD(centerI);
 
     // Compute reference orbit at center
     const { orbitR, orbitI } = computeRefOrbit(centerOctR, centerOctI, MAX_ITER);
@@ -180,8 +180,8 @@ describe('oct board iteration match', () => {
         const rFrac = (x / GRID_SIZE) - 0.5;
         const iFrac = 0.5 - (y / GRID_SIZE);
 
-        const cr = toOctAdd(centerOctR, toOctScale(toOct(size), rFrac));
-        const ci = toOctAdd(centerOctI, toOctScale(toOct(size), iFrac));
+        const cr = toQDAdd(centerOctR, toQDScale(toQD(size), rFrac));
+        const ci = toQDAdd(centerOctI, toQDScale(toQD(size), iFrac));
 
         const directIter = iterateDirect(cr, ci, MAX_ITER);
         const perturbIter = iteratePerturbation(cr, ci, orbitR, orbitI, MAX_ITER);
@@ -201,8 +201,8 @@ describe('oct board iteration match', () => {
     const centerI = 0;
     const size = 1e-32;
 
-    const centerOctR = toOct(centerR);
-    const centerOctI = toOct(centerI);
+    const centerOctR = toQD(centerR);
+    const centerOctI = toQD(centerI);
 
     const { orbitR, orbitI } = computeRefOrbit(centerOctR, centerOctI, MAX_ITER);
 
@@ -213,8 +213,8 @@ describe('oct board iteration match', () => {
         const rFrac = (x / GRID_SIZE) - 0.5;
         const iFrac = 0.5 - (y / GRID_SIZE);
 
-        const cr = toOctAdd(centerOctR, toOctScale(toOct(size), rFrac));
-        const ci = toOctAdd(centerOctI, toOctScale(toOct(size), iFrac));
+        const cr = toQDAdd(centerOctR, toQDScale(toQD(size), rFrac));
+        const ci = toQDAdd(centerOctI, toQDScale(toQD(size), iFrac));
 
         const directIter = iterateDirect(cr, ci, MAX_ITER);
         const perturbIter = iteratePerturbation(cr, ci, orbitR, orbitI, MAX_ITER);

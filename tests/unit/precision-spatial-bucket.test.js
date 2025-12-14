@@ -49,7 +49,7 @@ function ddSub(a, b) {
 }
 
 // Mock oct arithmetic using array-based operations
-function AoctAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
+function ArqdAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   // Simplified oct add - accumulates with error tracking
   let s1 = a1 + b1;
   let e1 = (a1 - s1) + b1;
@@ -64,7 +64,7 @@ function AoctAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   r[i + 3] = s4;
 }
 
-function toOct(a) {
+function toQD(a) {
   if (Array.isArray(a)) {
     if (a.length >= 4) return a.slice(0, 4);
     if (a.length === 2) return [a[0], a[1], 0, 0];
@@ -73,21 +73,21 @@ function toOct(a) {
   return [a, 0, 0, 0];
 }
 
-function toOctAdd(a, b) {
-  const aa = toOct(a);
-  const bb = toOct(b);
+function toQDAdd(a, b) {
+  const aa = toQD(a);
+  const bb = toQD(b);
   const out = new Array(4);
-  AoctAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+  ArqdAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
   return out;
 }
 
-function toOctSub(a, b) {
-  const bb = toOct(b);
-  return toOctAdd(a, [-bb[0], -bb[1], -bb[2], -bb[3]]);
+function toQDSub(a, b) {
+  const bb = toQD(b);
+  return toQDAdd(a, [-bb[0], -bb[1], -bb[2], -bb[3]]);
 }
 
-function octToNumber(o) {
-  const v = toOct(o);
+function qdToNumber(o) {
+  const v = toQD(o);
   return v[0] + v[1] + v[2] + v[3];
 }
 
@@ -262,18 +262,18 @@ class OctSpatialBucket extends SpatialBucket {
     if (!pi || !pj) return null;
 
     // Proper oct subtraction to avoid catastrophic cancellation
-    const deltaReOct = toOctSub(
+    const deltaReOct = toQDSub(
       [pi[0], pi[1], pi[2], pi[3]],
       [pj[0], pj[1], pj[2], pj[3]]
     );
-    const deltaImOct = toOctSub(
+    const deltaImOct = toQDSub(
       [pi[4], pi[5], pi[6], pi[7]],
       [pj[4], pj[5], pj[6], pj[7]]
     );
 
     // Sum oct result to f64
-    const deltaRe = octToNumber(deltaReOct);
-    const deltaIm = octToNumber(deltaImOct);
+    const deltaRe = qdToNumber(deltaReOct);
+    const deltaIm = qdToNumber(deltaImOct);
 
     // Check L∞ distance
     if (Math.max(Math.abs(deltaRe), Math.abs(deltaIm)) <= this.threadingEpsilon) {

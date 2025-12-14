@@ -44,9 +44,9 @@ When filtering tests by name:
 
 These guidelines emerged from successful debugging sessions on this codebase:
 
-1. **Use slow-but-correct implementations as ground truth** - Compare fast GPU code against slow CPU implementations (e.g., OctZhuoranBoard vs AdaptiveGpuBoard). When results differ, the simpler implementation is usually right.
+1. **Use slow-but-correct implementations as ground truth** - Compare fast GPU code against slow CPU implementations (e.g., QDZhuoranBoard vs AdaptiveGpuBoard). When results differ, the simpler implementation is usually right.
 
-2. **Understand mathematical invariants** - Know the constraints your data structures must satisfy (e.g., oct limbs must satisfy `|limb[i]| < ulp(limb[i-1])/2`). Violations cause subtle bugs that only appear at extreme zoom.
+2. **Understand mathematical invariants** - Know the constraints your data structures must satisfy (e.g., QD limbs must satisfy `|limb[i]| < ulp(limb[i-1])/2`). Violations cause subtle bugs that only appear at extreme zoom.
 
 3. **Compare against authoritative sources** - For algorithms like quad-double arithmetic, find the original papers or reference implementations (e.g., Bailey/Hida/Li QD library) and verify your code matches.
 
@@ -54,7 +54,7 @@ These guidelines emerged from successful debugging sessions on this codebase:
 
 5. **Trace code paths in shaders** - When GPU code misbehaves, trace through the WGSL shader logic step by step. Look for conditions that skip important checks (e.g., `scale < -126` skipping escape detection).
 
-6. **Understand float32/float64 boundaries** - Know where numeric limits matter: float32 underflows at scale < -126, float64 loses precision around 1e-15, oct extends to ~1e-60.
+6. **Understand float32/float64 boundaries** - Know where numeric limits matter: float32 underflows at scale < -126, float64 loses precision around 1e-15, QD extends to ~1e-60.
 
 7. **Create targeted debug scripts** - Write standalone `tests/debug-*.js` scripts for deep investigation rather than fighting test framework timeouts.
 

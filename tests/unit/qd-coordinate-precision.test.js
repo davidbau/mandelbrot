@@ -1,170 +1,170 @@
 /**
- * Test oct coordinate precision in OctCpuBoard
+ * Test oct coordinate precision in QDCpuBoard
  *
- * This tests whether the coordinate calculation in OctCpuBoard maintains
+ * This tests whether the coordinate calculation in QDCpuBoard maintains
  * sufficient precision to distinguish adjacent pixels at deep zoom.
  */
 
 const { createTestEnvironment } = require('../utils/extract-code');
 
 const {
-  toOct,
-  toOctAdd,
-  toOctSub,
-  toOctMul,
-  toOctScale,
-  toOctSquare,
-  AoctAdd,
-  AoctMul,
-  AoctSquare,
+  toQD,
+  toQDAdd,
+  toQDSub,
+  toQDMul,
+  toQDScale,
+  toQDSquare,
+  ArqdAdd,
+  ArqdMul,
+  ArqdSquare,
   AsymmetricTwoSum,
   AquickTwoSum,
-  AthreeSum,
-  AoctTwoProduct,
-  AoctTwoSquare,
-  AoctRenorm,
-  AoctSet,
+  ArqdThreeSum,
+  ArqdTwoProduct,
+  ArqdTwoSquare,
+  ArqdRenorm,
+  ArqdSet,
   AtwoProduct,
   AtwoSquare,
   ArddSplit
 } = createTestEnvironment([
-  'toOct',
-  'toOctAdd',
-  'toOctSub',
-  'toOctMul',
-  'toOctScale',
-  'toOctSquare',
-  'AoctAdd',
-  'AoctMul',
-  'AoctSquare',
+  'toQD',
+  'toQDAdd',
+  'toQDSub',
+  'toQDMul',
+  'toQDScale',
+  'toQDSquare',
+  'ArqdAdd',
+  'ArqdMul',
+  'ArqdSquare',
   'AsymmetricTwoSum',
   'AquickTwoSum',
-  'AthreeSum',
-  'AoctTwoProduct',
-  'AoctTwoSquare',
-  'AoctRenorm',
-  'AoctSet',
+  'ArqdThreeSum',
+  'ArqdTwoProduct',
+  'ArqdTwoSquare',
+  'ArqdRenorm',
+  'ArqdSet',
   'AtwoProduct',
   'AtwoSquare',
   'ArddSplit'
 ]);
 
 describe('oct coordinate precision', () => {
-  const octSum = (o) => o[0] + o[1] + o[2] + o[3];
+  const qdSum = (o) => o[0] + o[1] + o[2] + o[3];
   const width = 224;
   const height = 224;
 
-  test('toOctScale precision at z=1e20', () => {
+  test('toQDScale precision at z=1e20', () => {
     // At z=1e20, size ~ 2e-22
     const size = 2e-22;
-    const sizeOct = toOct(size);
+    const sizeOct = toQD(size);
 
     // Adjacent pixel difference
     const rFrac0 = (0 / width) - 0.5;  // -0.5
     const rFrac1 = (1 / width) - 0.5;  // -0.5 + 1/224
 
-    const offset0 = toOctScale(sizeOct, rFrac0);
-    const offset1 = toOctScale(sizeOct, rFrac1);
-    const diff = toOctSub(offset1, offset0);
-    const diffSum = octSum(diff);
+    const offset0 = toQDScale(sizeOct, rFrac0);
+    const offset1 = toQDScale(sizeOct, rFrac1);
+    const diff = toQDSub(offset1, offset0);
+    const diffSum = qdSum(diff);
 
     const expectedDiff = size / width;
     expect(Math.abs(diffSum - expectedDiff) / expectedDiff).toBeLessThan(0.01);
   });
 
-  test('toOctScale precision at z=1e32', () => {
+  test('toQDScale precision at z=1e32', () => {
     // At z=1e32, size ~ 2e-34
     // This is where we expect to see precision loss
     const size = 2e-34;
-    const sizeOct = toOct(size);
+    const sizeOct = toQD(size);
 
     // Adjacent pixel difference
     const rFrac0 = (0 / width) - 0.5;  // -0.5
     const rFrac1 = (1 / width) - 0.5;  // -0.5 + 1/224
 
-    const offset0 = toOctScale(sizeOct, rFrac0);
-    const offset1 = toOctScale(sizeOct, rFrac1);
-    const diff = toOctSub(offset1, offset0);
-    const diffSum = octSum(diff);
+    const offset0 = toQDScale(sizeOct, rFrac0);
+    const offset1 = toQDScale(sizeOct, rFrac1);
+    const diff = toQDSub(offset1, offset0);
+    const diffSum = qdSum(diff);
 
     const expectedDiff = size / width;
-    // This might fail if toOctScale has precision loss!
+    // This might fail if toQDScale has precision loss!
     expect(Math.abs(diffSum - expectedDiff) / expectedDiff).toBeLessThan(0.01);
   });
 
-  test('toOctMul precision at z=1e32', () => {
-    // Compare toOctScale with toOctMul for the same operation
+  test('toQDMul precision at z=1e32', () => {
+    // Compare toQDScale with toQDMul for the same operation
     const size = 2e-34;
-    const sizeOct = toOct(size);
+    const sizeOct = toQD(size);
 
     const rFrac0 = (0 / width) - 0.5;
     const rFrac1 = (1 / width) - 0.5;
 
-    // Using toOctMul instead of toOctScale
-    const offset0 = toOctMul(sizeOct, toOct(rFrac0));
-    const offset1 = toOctMul(sizeOct, toOct(rFrac1));
-    const diff = toOctSub(offset1, offset0);
-    const diffSum = octSum(diff);
+    // Using toQDMul instead of toQDScale
+    const offset0 = toQDMul(sizeOct, toQD(rFrac0));
+    const offset1 = toQDMul(sizeOct, toQD(rFrac1));
+    const diff = toQDSub(offset1, offset0);
+    const diffSum = qdSum(diff);
 
     const expectedDiff = size / width;
     expect(Math.abs(diffSum - expectedDiff) / expectedDiff).toBeLessThan(0.01);
   });
 
-  test('analyze toOctScale vs toOctMul difference', () => {
+  test('analyze toQDScale vs toQDMul difference', () => {
     // Detailed comparison of the two methods
     const size = 2e-34;
-    const sizeOct = toOct(size);
+    const sizeOct = toQD(size);
     const scale = 0.12345678901234567;  // Some fractional value
 
-    const resultScale = toOctScale(sizeOct, scale);
-    const resultMul = toOctMul(sizeOct, toOct(scale));
+    const resultScale = toQDScale(sizeOct, scale);
+    const resultMul = toQDMul(sizeOct, toQD(scale));
 
-    const diff = toOctSub(resultMul, resultScale);
+    const diff = toQDSub(resultMul, resultScale);
     // Both methods should produce similar results
-    expect(Math.abs(octSum(diff))).toBeLessThan(Math.abs(size * scale * 1e-10));
+    expect(Math.abs(qdSum(diff))).toBeLessThan(Math.abs(size * scale * 1e-10));
   });
 
   test('full coordinate calculation comparison', () => {
-    // Simulate the exact coordinate calculation from OctCpuBoard
+    // Simulate the exact coordinate calculation from QDCpuBoard
     const size = 2e-34;
     const centerRe = -1.8;
-    const sizeOct = toOct(size);
-    const reOct = toOct(centerRe);
+    const sizeOct = toQD(size);
+    const reOct = toQD(centerRe);
 
-    // Calculate coordinates for adjacent pixels using toOctScale (current method)
+    // Calculate coordinates for adjacent pixels using toQDScale (current method)
     const x0 = 100;
     const x1 = 101;
     const rFrac0 = (x0 / width) - 0.5;
     const rFrac1 = (x1 / width) - 0.5;
 
-    const c0_scale = toOctAdd(reOct, toOctScale(sizeOct, rFrac0));
-    const c1_scale = toOctAdd(reOct, toOctScale(sizeOct, rFrac1));
-    const diff_scale = toOctSub(c1_scale, c0_scale);
+    const c0_scale = toQDAdd(reOct, toQDScale(sizeOct, rFrac0));
+    const c1_scale = toQDAdd(reOct, toQDScale(sizeOct, rFrac1));
+    const diff_scale = toQDSub(c1_scale, c0_scale);
 
-    // Same calculation using toOctMul
-    const c0_mul = toOctAdd(reOct, toOctMul(sizeOct, toOct(rFrac0)));
-    const c1_mul = toOctAdd(reOct, toOctMul(sizeOct, toOct(rFrac1)));
-    const diff_mul = toOctSub(c1_mul, c0_mul);
+    // Same calculation using toQDMul
+    const c0_mul = toQDAdd(reOct, toQDMul(sizeOct, toQD(rFrac0)));
+    const c1_mul = toQDAdd(reOct, toQDMul(sizeOct, toQD(rFrac1)));
+    const diff_mul = toQDSub(c1_mul, c0_mul);
 
     const expectedPixelDiff = size / width;
 
     // Both methods should produce pixel differences close to expected
-    expect(Math.abs(octSum(diff_scale) - expectedPixelDiff) / expectedPixelDiff).toBeLessThan(0.01);
-    expect(Math.abs(octSum(diff_mul) - expectedPixelDiff) / expectedPixelDiff).toBeLessThan(0.01);
+    expect(Math.abs(qdSum(diff_scale) - expectedPixelDiff) / expectedPixelDiff).toBeLessThan(0.01);
+    expect(Math.abs(qdSum(diff_mul) - expectedPixelDiff) / expectedPixelDiff).toBeLessThan(0.01);
   });
 
   test('quantization analysis at z=1e32', () => {
     // Check if coordinates collapse to a limited number of unique values
     const size = 2e-34;
     const centerRe = -1.8;
-    const sizeOct = toOct(size);
-    const reOct = toOct(centerRe);
+    const sizeOct = toQD(size);
+    const reOct = toQD(centerRe);
 
     // Calculate first 20 x coordinates
     const coordOcts = [];
     for (let x = 0; x < 20; x++) {
       const rFrac = (x / width) - 0.5;
-      const coord = toOctAdd(reOct, toOctScale(sizeOct, rFrac));
+      const coord = toQDAdd(reOct, toQDScale(sizeOct, rFrac));
       coordOcts.push(coord.slice());  // Store the full oct representation
     }
 
@@ -175,24 +175,24 @@ describe('oct coordinate precision', () => {
     expect(uniqueOcts.size).toBe(20);
   });
 
-  test('toOctScale vs toOctMul precision loss', () => {
-    // Test whether toOctScale loses precision compared to toOctMul
-    // This matters because toOctScale just does component-wise multiplication
-    // while toOctMul uses TwoProduct to capture error terms
+  test('toQDScale vs toQDMul precision loss', () => {
+    // Test whether toQDScale loses precision compared to toQDMul
+    // This matters because toQDScale just does component-wise multiplication
+    // while toQDMul uses TwoProduct to capture error terms
 
     const size = 2e-34;
-    const sizeOct = toOct(size);
+    const sizeOct = toQD(size);
 
     // Test with various scale factors
     const scales = [-0.5, -0.25, 0.1, 0.333333333333333, 0.12345678901234567];
 
     for (const scale of scales) {
-      const resultScale = toOctScale(sizeOct, scale);
-      const resultMul = toOctMul(sizeOct, toOct(scale));
+      const resultScale = toQDScale(sizeOct, scale);
+      const resultMul = toQDMul(sizeOct, toQD(scale));
 
-      const octSumLocal = (o) => o[0] + o[1] + o[2] + o[3];
-      const diff = toOctSub(resultMul, resultScale);
-      const diffSum = Math.abs(octSumLocal(diff));
+      const qdSumLocal = (o) => o[0] + o[1] + o[2] + o[3];
+      const diff = toQDSub(resultMul, resultScale);
+      const diffSum = Math.abs(qdSumLocal(diff));
 
       // Difference should be small relative to result
       expect(diffSum).toBeLessThan(Math.abs(size * scale * 1e-10));
@@ -203,23 +203,23 @@ describe('oct coordinate precision', () => {
     // Test at a coordinate that actually escapes (outside the Mandelbrot set)
     // c = -2.1 + 0i escapes quickly
     const size = 2e-34;
-    const sizeOct = toOct(size);
-    const centerRe = toOct(-2.1);  // Outside the set - will escape
-    const centerIm = toOct(0);
+    const sizeOct = toQD(size);
+    const centerRe = toQD(-2.1);  // Outside the set - will escape
+    const centerIm = toQD(0);
 
     const x0 = 112;  // Middle of screen
     const x1 = 113;
     const rFrac0 = (x0 / width) - 0.5;
     const rFrac1 = (x1 / width) - 0.5;
 
-    // Compute c values using toOctScale (current method)
-    const c0r_scale = toOctAdd(centerRe, toOctScale(sizeOct, rFrac0));
-    const c1r_scale = toOctAdd(centerRe, toOctScale(sizeOct, rFrac1));
+    // Compute c values using toQDScale (current method)
+    const c0r_scale = toQDAdd(centerRe, toQDScale(sizeOct, rFrac0));
+    const c1r_scale = toQDAdd(centerRe, toQDScale(sizeOct, rFrac1));
     const c0i = centerIm;
 
-    // Also compute using toOctMul for comparison
-    const c0r_mul = toOctAdd(centerRe, toOctMul(sizeOct, toOct(rFrac0)));
-    const c1r_mul = toOctAdd(centerRe, toOctMul(sizeOct, toOct(rFrac1)));
+    // Also compute using toQDMul for comparison
+    const c0r_mul = toQDAdd(centerRe, toQDMul(sizeOct, toQD(rFrac0)));
+    const c1r_mul = toQDAdd(centerRe, toQDMul(sizeOct, toQD(rFrac1)));
 
     // Run iteration to find escape counts
     function iterateToEscape(cr, ci, maxIter = 100) {
@@ -227,16 +227,16 @@ describe('oct coordinate precision', () => {
       let zi = ci.slice();
 
       for (let i = 0; i < maxIter; i++) {
-        const zr2 = toOctSquare(zr);
-        const zi2 = toOctSquare(zi);
-        const mag2 = toOctAdd(zr2, zi2);
-        const mag2Sum = octSum(mag2);
+        const zr2 = toQDSquare(zr);
+        const zi2 = toQDSquare(zi);
+        const mag2 = toQDAdd(zr2, zi2);
+        const mag2Sum = qdSum(mag2);
 
         if (mag2Sum > 4) return i;
 
-        const zri = toOctMul(zr, zi);
-        const newZr = toOctAdd(toOctSub(zr2, zi2), cr);
-        const newZi = toOctAdd(toOctScale(zri, 2), ci);
+        const zri = toQDMul(zr, zi);
+        const newZr = toQDAdd(toQDSub(zr2, zi2), cr);
+        const newZi = toQDAdd(toQDScale(zri, 2), ci);
         zr = newZr;
         zi = newZi;
       }
@@ -256,16 +256,16 @@ describe('oct coordinate precision', () => {
     expect(iter0_mul).toBeGreaterThanOrEqual(0);
   });
 
-  test('toOctMul error term analysis', () => {
-    // Analyze the error term that toOctMul captures but toOctScale doesn't
+  test('toQDMul error term analysis', () => {
+    // Analyze the error term that toQDMul captures but toQDScale doesn't
 
     // When multiplying a*b, the error is approximately (a*b) * eps where eps ~ 1e-16
     // So for 2e-34 * 0.5, the error should be ~ 1e-34 * 1e-16 = 1e-50
 
-    const a = toOct(2e-34);
-    const b = toOct(0.5);
+    const a = toQD(2e-34);
+    const b = toQD(0.5);
 
-    const resultMul = toOctMul(a, b);
+    const resultMul = toQDMul(a, b);
 
     // Result should be close to 1e-34
     expect(resultMul[0]).toBeCloseTo(1e-34, 49);

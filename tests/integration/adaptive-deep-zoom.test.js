@@ -1,6 +1,6 @@
 /**
  * Integration tests for AdaptiveGpuBoard at deep zoom (z=1e35)
- * Compares adaptive board to OctZhuoranBoard reference.
+ * Compares adaptive board to QDZhuoranBoard reference.
  */
 
 const puppeteer = require('puppeteer');

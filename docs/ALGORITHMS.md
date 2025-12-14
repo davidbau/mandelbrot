@@ -220,8 +220,8 @@ The `Scheduler` automatically selects the best algorithm for the job:
 | > 1e-15 | No | **CpuBoard** | Simple `float64` iteration on the CPU. |
 | 1e-30 to 1e-7 | Yes | **GpuZhuoranBoard** | GPU perturbation with quad-precision reference orbit, `float32` deltas, and rebasing. |
 | 1e-30 to 1e-15 | No | **PerturbationBoard** | CPU perturbation with quad-precision reference, `float64` deltas. |
-| < 1e-30 | Yes | **AdaptiveGpuBoard** | GPU perturbation with oct-precision reference (~62 digits) and per-pixel adaptive scaling. |
-| < 1e-30 | No | **OctZhuoranBoard** | CPU perturbation with oct-precision reference (~62 digits). |
+| < 1e-30 | Yes | **AdaptiveGpuBoard** | GPU perturbation with QD-precision reference (~62 digits) and per-pixel adaptive scaling. |
+| < 1e-30 | No | **QDZhuoranBoard** | CPU perturbation with QD-precision reference (~62 digits). |
 
 ## Unsolved Problems
 
@@ -239,7 +239,7 @@ Points can have periods of millions of iterations. With Fibonacci checkpoints, d
 
 ### Precision Limits
 
-Beyond 10^30 magnification, quad precision (~31 digits) starts to degrade. The explorer automatically switches to oct precision (4-double, ~62 digits) for zooms beyond 10^30, enabling exploration to 10^60 magnification and beyond.
+Beyond 10^30 magnification, quad precision (~31 digits) starts to degrade. The explorer automatically switches to QD precision (4-double, ~62 digits) for zooms beyond 10^30, enabling exploration to 10^60 magnification and beyond.
 
 ## References
 

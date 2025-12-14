@@ -1,34 +1,34 @@
 const { createTestEnvironment } = require('../utils/extract-code');
 
 const {
-  AoctAdd,
-  AoctMul,
-  AoctSquare,
-  AoctSet,
-  AoctcCopy,
-  AoctcGet,
+  ArqdAdd,
+  ArqdMul,
+  ArqdSquare,
+  ArqdSet,
+  ArqdcCopy,
+  ArqdcGet,
   AsymmetricTwoSum,
   AquickTwoSum,
-  AthreeSum,
-  AoctTwoProduct,
-  AoctTwoSquare,
-  AoctRenorm,
+  ArqdThreeSum,
+  ArqdTwoProduct,
+  ArqdTwoSquare,
+  ArqdRenorm,
   AtwoProduct,
   AtwoSquare,
   ArddSplit
 } = createTestEnvironment([
-  'AoctAdd',
-  'AoctMul',
-  'AoctSquare',
-  'AoctSet',
-  'AoctcCopy',
-  'AoctcGet',
+  'ArqdAdd',
+  'ArqdMul',
+  'ArqdSquare',
+  'ArqdSet',
+  'ArqdcCopy',
+  'ArqdcGet',
   'AsymmetricTwoSum',
   'AquickTwoSum',
-  'AthreeSum',
-  'AoctTwoProduct',
-  'AoctTwoSquare',
-  'AoctRenorm',
+  'ArqdThreeSum',
+  'ArqdTwoProduct',
+  'ArqdTwoSquare',
+  'ArqdRenorm',
   'AtwoProduct',
   'AtwoSquare',
   'ArddSplit'
@@ -57,19 +57,19 @@ function sumParts(parts) {
 }
 
 describe('oct-double arithmetic helpers', () => {
-  test('AoctSet and AoctcCopy round-trip complex tuples', () => {
+  test('ArqdSet and ArqdcCopy round-trip complex tuples', () => {
     const buf = new Array(8).fill(0);
-    AoctSet(buf, 0, 1, 2, 3, 4);
-    AoctSet(buf, 4, -1, -2, -3, -4);
+    ArqdSet(buf, 0, 1, 2, 3, 4);
+    ArqdSet(buf, 4, -1, -2, -3, -4);
 
     const dest = new Array(8).fill(0);
-    AoctcCopy(dest, 0, buf, 0);
+    ArqdcCopy(dest, 0, buf, 0);
 
     expect(dest).toEqual(buf);
-    expect(AoctcGet(dest, 0)).toEqual(buf);
+    expect(ArqdcGet(dest, 0)).toEqual(buf);
   });
 
-  test('AoctAdd preserves deep cancellation components', () => {
+  test('ArqdAdd preserves deep cancellation components', () => {
     const aCoeffs = [
       { coeff: 1, exp: 0 },
       { coeff: 5, exp: 16 },
@@ -87,7 +87,7 @@ describe('oct-double arithmetic helpers', () => {
     const b = bCoeffs.map(c => toMagnitude(c.coeff, c.exp));
 
     const result = new Array(4).fill(0);
-    AoctAdd(result, 0, ...a, ...b);
+    ArqdAdd(result, 0, ...a, ...b);
 
     const expected = exactValue([...aCoeffs, ...bCoeffs]);
     const actual = sumParts(result);
@@ -95,7 +95,7 @@ describe('oct-double arithmetic helpers', () => {
     expect(Math.abs(actual - expected)).toBeLessThan(1e-30);
   });
 
-  test('AoctMul tracks cross-terms beyond double precision', () => {
+  test('ArqdMul tracks cross-terms beyond double precision', () => {
     const xCoeffs = [
       { coeff: 1, exp: 0 },
       { coeff: 2, exp: 16 },
@@ -119,13 +119,13 @@ describe('oct-double arithmetic helpers', () => {
     const expectedProduct = Number(productNum) / Number(productScale);
 
     const result = new Array(4).fill(0);
-    AoctMul(result, 0, ...x, ...y);
+    ArqdMul(result, 0, ...x, ...y);
     const actual = sumParts(result);
 
     expect(Math.abs(actual - expectedProduct)).toBeLessThan(1e-28);
   });
 
-  test('AoctSquare matches AoctMul self-products', () => {
+  test('ArqdSquare matches ArqdMul self-products', () => {
     const coeffs = [
       { coeff: 3, exp: 0 },
       { coeff: -4, exp: 16 },
@@ -136,30 +136,30 @@ describe('oct-double arithmetic helpers', () => {
 
     const expected = sumParts((() => {
       const tmp = new Array(4).fill(0);
-      AoctMul(tmp, 0, ...parts, ...parts);
+      ArqdMul(tmp, 0, ...parts, ...parts);
       return tmp;
     })());
 
     const result = new Array(4).fill(0);
-    AoctSquare(result, 0, ...parts);
+    ArqdSquare(result, 0, ...parts);
     const actual = sumParts(result);
 
     expect(Math.abs(actual - expected)).toBeLessThan(1e-32);
   });
 
-  test('AoctTwoProduct captures error term for wide-magnitude factors', () => {
+  test('ArqdTwoProduct captures error term for wide-magnitude factors', () => {
     const a = 1e16;
     const b = 1e-16 + 1e-32;
-    const [p, e] = AoctTwoProduct(a, b);
+    const [p, e] = ArqdTwoProduct(a, b);
     const expected = a * b; // true value: 1 + 1e-16
     expect(p + e).toBeCloseTo(expected);
     expect(Math.abs(e)).toBeGreaterThan(0);
   });
 
-  test('AoctRenorm flattens five-term sums into four limbs', () => {
+  test('ArqdRenorm flattens five-term sums into four limbs', () => {
     const out = new Array(4).fill(0);
     // Force cascading renormalization with mixed magnitudes
-    AoctRenorm(out, 0, 1, 1e-12, 1e-24, 1e-36, 1e-48);
+    ArqdRenorm(out, 0, 1, 1e-12, 1e-24, 1e-36, 1e-48);
     expect(out.length).toBe(4);
     // Sum should match the original components
     const total = 1 + 1e-12 + 1e-24 + 1e-36 + 1e-48;

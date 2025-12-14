@@ -85,7 +85,7 @@ When you click to zoom, the `Scheduler` picks a worker and sends a `createBoard`
 | Pixel Size | Zoom Level | Board | Precision |
 |------------|------------|-------|-----------|
 | > 1e-7 | < ~10⁷ | `GpuBoard` | float32 (~7 digits) direct iteration |
-| 1e-30 to 1e-7 | ~10⁷ to ~10³⁰ | `GpuZhuoranBoard` | float32 perturbation, quad reference |
+| 1e-30 to 1e-7 | ~10⁷ to ~10³⁰ | `GpuZhuoranBoard` | float32 perturbation, DD reference |
 | < 1e-30 | > ~10³⁰ | `AdaptiveGpuBoard` | float32 perturbation, oct reference, adaptive per-pixel scaling |
 
 #### CPU Fallback (no GPU available)
@@ -93,8 +93,8 @@ When you click to zoom, the `Scheduler` picks a worker and sends a `createBoard`
 | Pixel Size | Zoom Level | Board | Precision |
 |------------|------------|-------|-----------|
 | > 1e-15 | < ~10¹⁵ | `CpuBoard` | float64 (~15 digits) direct iteration |
-| 1e-30 to 1e-15 | ~10¹⁵ to ~10³⁰ | `PerturbationBoard` | float64 perturbation, quad reference |
-| < 1e-30 | > ~10³⁰ | `OctZhuoranBoard` | float64 perturbation, oct reference |
+| 1e-30 to 1e-15 | ~10¹⁵ to ~10³⁰ | `PerturbationBoard` | float64 perturbation, DD reference |
+| < 1e-30 | > ~10³⁰ | `QDZhuoranBoard` | float64 perturbation, oct reference |
 
 The GPU thresholds are lower than CPU because `float32` has ~7 decimal digits vs `float64`'s ~15 digits. At deep zooms (> 10³⁰), `AdaptiveGpuBoard` uses adaptive per-pixel scaling to correctly detect escape even when the scale exponent exceeds float32's range.
 

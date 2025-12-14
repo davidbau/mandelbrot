@@ -137,9 +137,9 @@ and debugging the different computation engines.
 ?board=zhuoran      # ZhuoranBoard (CPU with rebasing)
 ?board=gpuzhuoran   # GpuZhuoranBoard (GPU with rebasing)
 ?board=perturbation # PerturbationBoard (CPU quad precision)
-?board=octzhuoran   # OctZhuoranBoard (CPU oct precision, z > 10^30)
-?board=adaptive     # AdaptiveGpuBoard (GPU oct precision, z > 10^30)
-?board=octcpu       # OctCpuBoard (CPU oct precision)
+?board=qdzhuoran    # QDZhuoranBoard (CPU QD precision, z > 10^30)
+?board=adaptive     # AdaptiveGpuBoard (GPU QD precision, z > 10^30)
+?board=qdcpu        # QDCpuBoard (CPU QD precision)
 ```
 
 ## Localization

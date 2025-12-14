@@ -167,12 +167,12 @@ describe('Browser History Basic Tests', () => {
       const grid = window.explorer.grid;
       const config = window.explorer.config;
 
-      // sizesOct is already in state format [sizeDouble, reOct, imOct]
+      // sizesQD is already in state format [sizeDouble, reOct, imOct]
       const state = {
         sizes: [
-          grid.views[0].sizesOct,  // Preserve exact coords
-          grid.views[1].sizesOct,  // Preserve exact coords
-          grid.views[2].sizesOct,  // Preserve exact coords
+          grid.views[0].sizesQD,  // Preserve exact coords
+          grid.views[1].sizesQD,  // Preserve exact coords
+          grid.views[2].sizesQD,  // Preserve exact coords
           [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.66, 0, 0, 0], [0.26, 0, 0, 0]]
         ],
         hidden: []
@@ -195,12 +195,12 @@ describe('Browser History Basic Tests', () => {
       const grid = window.explorer.grid;
       const config = window.explorer.config;
 
-      // sizesOct is already in state format [sizeDouble, reOct, imOct]
+      // sizesQD is already in state format [sizeDouble, reOct, imOct]
       const state = {
         sizes: [
-          grid.views[0].sizesOct,
-          grid.views[1].sizesOct,
-          grid.views[2].sizesOct,
+          grid.views[0].sizesQD,
+          grid.views[1].sizesQD,
+          grid.views[2].sizesQD,
           [config.firstsize / Math.pow(config.zoomfactor, 3), [-0.67, 0, 0, 0], [0.27, 0, 0, 0]]  // Different!
         ],
         hidden: []

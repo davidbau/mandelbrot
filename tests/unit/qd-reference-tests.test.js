@@ -9,44 +9,44 @@
 const { createTestEnvironment } = require('../utils/extract-code');
 
 const {
-  toOct,
-  toOctAdd,
-  toOctSub,
-  toOctMul,
-  toOctSquare,
-  octToNumber,
-  toOctScale,
-  AoctAdd,
-  AoctMul,
-  AoctSquare,
+  toQD,
+  toQDAdd,
+  toQDSub,
+  toQDMul,
+  toQDSquare,
+  qdToNumber,
+  toQDScale,
+  ArqdAdd,
+  ArqdMul,
+  ArqdSquare,
   AsymmetricTwoSum,
   AquickTwoSum,
-  AthreeSum,
-  AoctTwoProduct,
-  AoctTwoSquare,
-  AoctRenorm,
-  AoctSet,
+  ArqdThreeSum,
+  ArqdTwoProduct,
+  ArqdTwoSquare,
+  ArqdRenorm,
+  ArqdSet,
   AtwoProduct,
   AtwoSquare,
   ArddSplit
 } = createTestEnvironment([
-  'toOct',
-  'toOctAdd',
-  'toOctSub',
-  'toOctMul',
-  'toOctSquare',
-  'octToNumber',
-  'toOctScale',
-  'AoctAdd',
-  'AoctMul',
-  'AoctSquare',
+  'toQD',
+  'toQDAdd',
+  'toQDSub',
+  'toQDMul',
+  'toQDSquare',
+  'qdToNumber',
+  'toQDScale',
+  'ArqdAdd',
+  'ArqdMul',
+  'ArqdSquare',
   'AsymmetricTwoSum',
   'AquickTwoSum',
-  'AthreeSum',
-  'AoctTwoProduct',
-  'AoctTwoSquare',
-  'AoctRenorm',
-  'AoctSet',
+  'ArqdThreeSum',
+  'ArqdTwoProduct',
+  'ArqdTwoSquare',
+  'ArqdRenorm',
+  'ArqdSet',
   'AtwoProduct',
   'AtwoSquare',
   'ArddSplit'
@@ -54,41 +54,41 @@ const {
 
 describe('QD-style oct precision tests', () => {
   // Helper: sum oct components
-  const octSum = (o) => o[0] + o[1] + o[2] + o[3];
+  const qdSum = (o) => o[0] + o[1] + o[2] + o[3];
 
   // Helper: oct division (a / b) using Newton-Raphson
-  function toOctDiv(a, b) {
+  function toQDDiv(a, b) {
     // Initial approximation: 1/b[0]
     let x = [1 / b[0], 0, 0, 0];
 
     // Newton-Raphson: x_new = x * (2 - b * x)
     for (let iter = 0; iter < 5; iter++) {
-      const bx = toOctMul(b, x);
-      const twominusbx = toOctSub([2, 0, 0, 0], bx);
-      x = toOctMul(x, twominusbx);
+      const bx = toQDMul(b, x);
+      const twominusbx = toQDSub([2, 0, 0, 0], bx);
+      x = toQDMul(x, twominusbx);
     }
 
-    return toOctMul(a, x);
+    return toQDMul(a, x);
   }
 
   // Helper: compute arctan(1/n) using Taylor series
   // arctan(x) = x - x³/3 + x⁵/5 - x⁷/7 + ...
   function octArctan(oneOverN) {
-    const x = toOctDiv([1, 0, 0, 0], toOct(oneOverN));
-    const x2 = toOctSquare(x);
+    const x = toQDDiv([1, 0, 0, 0], toQD(oneOverN));
+    const x2 = toQDSquare(x);
 
     let sum = x.slice();
     let term = x.slice();
 
     for (let k = 1; k <= 100; k++) {
-      term = toOctMul(term, x2);
-      term = toOctScale(term, -1); // Alternate signs
+      term = toQDMul(term, x2);
+      term = toQDScale(term, -1); // Alternate signs
       const divisor = 2 * k + 1;
-      const contribution = toOctDiv(term, toOct(divisor));
-      sum = toOctAdd(sum, contribution);
+      const contribution = toQDDiv(term, toQD(divisor));
+      sum = toQDAdd(sum, contribution);
 
       // Check convergence
-      if (Math.abs(octSum(contribution)) < 1e-70) break;
+      if (Math.abs(qdSum(contribution)) < 1e-70) break;
     }
 
     return sum;
@@ -126,16 +126,16 @@ describe('QD-style oct precision tests', () => {
     // Test: multiply (1 + ε) by itself repeatedly
     // After n multiplications, result should be (1 + ε)^(2^n)
     const eps = 1e-45;
-    let oct = toOctAdd(toOct(1), [eps, 0, 0, 0]);
+    let oct = toQDAdd(toQD(1), [eps, 0, 0, 0]);
 
     for (let n = 0; n < 10; n++) {
-      oct = toOctSquare(oct);
+      oct = toQDSquare(oct);
     }
 
     // After 10 squarings, check relative error
     const power = Math.pow(2, 10);
     const expected = 1 + power * eps;
-    const actual = octSum(oct);
+    const actual = qdSum(oct);
     const relError = Math.abs(actual - expected) / expected;
 
     expect(relError).toBeLessThan(1e-40);
@@ -147,16 +147,16 @@ describe('QD-style oct precision tests', () => {
     // After multiplying by values near 1, this difference must be preserved
 
     const pixelDiff = 2e-34;
-    const a = toOct(1.5);  // Typical z value magnitude
-    const b1 = toOctAdd(toOct(1.5), [pixelDiff, 0, 0, 0]);
-    const b2 = toOct(1.5);
+    const a = toQD(1.5);  // Typical z value magnitude
+    const b1 = toQDAdd(toQD(1.5), [pixelDiff, 0, 0, 0]);
+    const b2 = toQD(1.5);
 
     // Multiply both by a value
-    const result1 = toOctMul(a, b1);
-    const result2 = toOctMul(a, b2);
+    const result1 = toQDMul(a, b1);
+    const result2 = toQDMul(a, b2);
 
-    const diff = toOctSub(result1, result2);
-    const diffSum = octSum(diff);
+    const diff = toQDSub(result1, result2);
+    const diffSum = qdSum(diff);
 
     // Expected difference: 1.5 * pixelDiff = 3e-34
     const expectedDiff = 1.5 * pixelDiff;
@@ -168,11 +168,11 @@ describe('QD-style oct precision tests', () => {
   test('oct addition precision near cancellation', () => {
     // Test: add two nearly equal numbers of opposite sign
     // This tests precision when significant bits cancel
-    const a = toOct(1.0);
-    const almostOne = toOctSub(toOct(1.0), [1e-50, 0, 0, 0]);
+    const a = toQD(1.0);
+    const almostOne = toQDSub(toQD(1.0), [1e-50, 0, 0, 0]);
 
-    const diff = toOctSub(a, almostOne);
-    const diffSum = octSum(diff);
+    const diff = toQDSub(a, almostOne);
+    const diffSum = qdSum(diff);
 
     expect(Math.abs(diffSum - 1e-50) / 1e-50).toBeLessThan(0.01);
   });
@@ -182,7 +182,7 @@ describe('QD-style oct precision tests', () => {
     // 1. two_prod for a[0]*b[0], a[0]*b[1], a[1]*b[0], a[0]*b[2], a[1]*b[1], a[2]*b[0]
     // 2. Plain multiply for a[0]*b[3] + a[1]*b[2] + a[2]*b[1] + a[3]*b[0]
     //
-    // Our AoctMul computes:
+    // Our ArqdMul computes:
     // 1. two_prod for a[0]*b[0], a[0]*b[1], a[1]*b[0] (only 3!)
     // 2. Plain multiply for rest
     //
@@ -192,7 +192,7 @@ describe('QD-style oct precision tests', () => {
     const a = [1, 1e-16, 1e-32, 1e-48];  // Non-trivial oct value
     const b = [1, 1e-16, 1e-32, 1e-48];
 
-    const result = toOctSquare(a);
+    const result = toQDSquare(a);
 
     // The sum should be close to (1 + 1e-16 + 1e-32 + 1e-48)²
     const approxExpected = Math.pow(1 + 1e-16, 2);  // Higher terms too small for double
@@ -210,7 +210,7 @@ describe('QD-style oct precision tests', () => {
     const a = [1, 0, 1e-32, 0];  // 1 + 1e-32
     const b = [1, 0, 1e-32, 0];  // 1 + 1e-32
 
-    const result = toOctSquare(a);
+    const result = toQDSquare(a);
 
     // Expected: (1 + 1e-32)² = 1 + 2e-32 + 1e-64
     // The 2e-32 term comes from a[0]*b[2] + a[2]*b[0] (level-2, computed with TwoProduct)
@@ -232,7 +232,7 @@ describe('QD-style oct precision tests', () => {
     const a = [1, 0, 0, 1e-48];  // 1 + 1e-48
     const b = [1, 0, 0, 1e-48];  // 1 + 1e-48
 
-    const result = toOctSquare(a);
+    const result = toQDSquare(a);
 
     // Expected: (1 + 1e-48)² = 1 + 2e-48 + 1e-96
     // The 2e-48 term comes from a[0]*b[3] + a[3]*b[0] (level-3)
@@ -251,7 +251,7 @@ describe('QD-style oct precision tests', () => {
     const a = [1.5, 1e-16, 1e-32, 1e-48];
     const b = [0.7, 2e-17, 3e-33, 4e-49];
 
-    const result = toOctMul(a, b);
+    const result = toQDMul(a, b);
 
     // Level-3 terms: a[0]*b[3] + a[1]*b[2] + a[2]*b[1] + a[3]*b[0]
     // = 1.5*4e-49 + 1e-16*3e-33 + 1e-32*2e-17 + 1e-48*0.7
@@ -280,45 +280,45 @@ describe('QD-style oct precision tests', () => {
     const pixelDiff = 2e-34;
 
     // Two c values differing by pixelDiff
-    const c1 = toOct(-1.5);
-    const c2 = toOctAdd(toOct(-1.5), [pixelDiff, 0, 0, 0]);
+    const c1 = toQD(-1.5);
+    const c2 = toQDAdd(toQD(-1.5), [pixelDiff, 0, 0, 0]);
 
     // Start with z = c
-    let z1r = c1.slice(), z1i = toOct(0);
-    let z2r = c2.slice(), z2i = toOct(0);
+    let z1r = c1.slice(), z1i = toQD(0);
+    let z2r = c2.slice(), z2i = toQD(0);
 
     // Track the difference over iterations
     const diffs = [];
 
     for (let iter = 0; iter < 50; iter++) {
       // z² = (zr + zi*i)² = zr² - zi² + 2*zr*zi*i
-      const z1r2 = toOctSquare(z1r);
-      const z1i2 = toOctSquare(z1i);
-      const z1ri = toOctMul(z1r, z1i);
+      const z1r2 = toQDSquare(z1r);
+      const z1i2 = toQDSquare(z1i);
+      const z1ri = toQDMul(z1r, z1i);
 
-      const newZ1r = toOctAdd(toOctSub(z1r2, z1i2), c1);
-      const newZ1i = toOctAdd(toOctMul(z1ri, [2, 0, 0, 0]), toOct(0));
+      const newZ1r = toQDAdd(toQDSub(z1r2, z1i2), c1);
+      const newZ1i = toQDAdd(toQDMul(z1ri, [2, 0, 0, 0]), toQD(0));
 
-      const z2r2 = toOctSquare(z2r);
-      const z2i2 = toOctSquare(z2i);
-      const z2ri = toOctMul(z2r, z2i);
+      const z2r2 = toQDSquare(z2r);
+      const z2i2 = toQDSquare(z2i);
+      const z2ri = toQDMul(z2r, z2i);
 
-      const newZ2r = toOctAdd(toOctSub(z2r2, z2i2), c2);
-      const newZ2i = toOctAdd(toOctMul(z2ri, [2, 0, 0, 0]), toOct(0));
+      const newZ2r = toQDAdd(toQDSub(z2r2, z2i2), c2);
+      const newZ2i = toQDAdd(toQDMul(z2ri, [2, 0, 0, 0]), toQD(0));
 
       z1r = newZ1r; z1i = newZ1i;
       z2r = newZ2r; z2i = newZ2i;
 
       // Check magnitude
-      const mag1 = octSum(toOctAdd(toOctSquare(z1r), toOctSquare(z1i)));
-      const mag2 = octSum(toOctAdd(toOctSquare(z2r), toOctSquare(z2i)));
+      const mag1 = qdSum(toQDAdd(toQDSquare(z1r), toQDSquare(z1i)));
+      const mag2 = qdSum(toQDAdd(toQDSquare(z2r), toQDSquare(z2i)));
 
       if (mag1 > 4 || mag2 > 4) {
         break;
       }
 
-      const diffR = octSum(toOctSub(z2r, z1r));
-      const diffI = octSum(toOctSub(z2i, z1i));
+      const diffR = qdSum(toQDSub(z2r, z1r));
+      const diffI = qdSum(toQDSub(z2i, z1i));
       const totalDiff = Math.sqrt(diffR*diffR + diffI*diffI);
 
       diffs.push({ iter, diffR, diffI, totalDiff });
@@ -337,7 +337,7 @@ describe('QD-style oct precision tests', () => {
     // Set only one component and verify others stay zero
 
     // When squaring [1,0,0,0], result should be [1,0,0,0]
-    const sq1 = toOctSquare([1, 0, 0, 0]);
+    const sq1 = toQDSquare([1, 0, 0, 0]);
     expect(sq1[0]).toBe(1);
     expect(sq1[1]).toBe(0);
     expect(sq1[2]).toBe(0);
@@ -345,7 +345,7 @@ describe('QD-style oct precision tests', () => {
   });
 
   test('cross-term preservation when main term has large error', () => {
-    // This test catches a specific bug in AoctMul where small cross terms
+    // This test catches a specific bug in ArqdMul where small cross terms
     // are lost because the TwoProduct error (e0) from the main product
     // swamps them during renormalization.
     //
@@ -365,20 +365,20 @@ describe('QD-style oct precision tests', () => {
     const tinyDiff = 1e-35;
 
     // Create two oct values that differ by tinyDiff
-    const a = toOct(base);
+    const a = toQD(base);
     const b = [base, tinyDiff, 0, 0];  // base + tinyDiff
 
     // Square both
-    const a2 = toOctSquare(a);
-    const b2 = toOctSquare(b);
+    const a2 = toQDSquare(a);
+    const b2 = toQDSquare(b);
 
     // The difference between b² and a² should be:
     // (base + tinyDiff)² - base² = 2 * base * tinyDiff + tinyDiff²
     // ≈ 2 * (-1.8) * 1e-35 = -3.6e-35 (tinyDiff² is negligible)
     const expectedDiff = 2 * base * tinyDiff;
 
-    const actualDiff = toOctSub(b2, a2);
-    const actualDiffSum = octSum(actualDiff);
+    const actualDiff = toQDSub(b2, a2);
+    const actualDiffSum = qdSum(actualDiff);
 
     // The difference should be preserved, not zero
     // Allow 10% relative error due to FP approximations
@@ -400,14 +400,14 @@ describe('QD-style oct precision tests', () => {
     ];
 
     for (const tc of testCases) {
-      const a = toOct(tc.base);
+      const a = toQD(tc.base);
       const b = [tc.base, tc.diff, 0, 0];
 
-      const a2 = toOctSquare(a);
-      const b2 = toOctSquare(b);
+      const a2 = toQDSquare(a);
+      const b2 = toQDSquare(b);
 
       const expectedDiff = 2 * tc.base * tc.diff;
-      const actualDiff = octSum(toOctSub(b2, a2));
+      const actualDiff = qdSum(toQDSub(b2, a2));
 
       // For very small diffs, we need to check if the result is non-zero
       // and in the right ballpark

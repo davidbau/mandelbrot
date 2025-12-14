@@ -73,7 +73,7 @@ describe('AdaptiveGpuBoard', () => {
 
   const TEST_CENTER = '-0.74543+0.11301i';
 
-  test('at z=1e20, should match OctZhuoranBoard >95%', async () => {
+  test('at z=1e20, should match QDZhuoranBoard >95%', async () => {
     const octResult = await runBoard('octzhuoran', '1e20', TEST_CENTER, 200);
     expect(octResult.diverged).toBeGreaterThan(0);
 

@@ -1029,5 +1029,5 @@ for (const test of testCases) {
 ## References
 
 - [SCALED-GPU-PERTURBATION.md](SCALED-GPU-PERTURBATION.md): Original global scaling approach
-- [OCT-PRECISION.md](OCT-PRECISION.md): Oct-precision reference orbits
+- [QD-PRECISION.md](QD-PRECISION.md): Oct-precision reference orbits
 - WGSL ldexp specification: https://www.w3.org/TR/WGSL/#float-builtin-functions

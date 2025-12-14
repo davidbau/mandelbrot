@@ -826,8 +826,8 @@ class Config {
       exponent: 2,
       enableGPU: true,
       forceBoard: null,
-      firstrOct: [-0.5, 0, 0, 0],
-      firstjOct: [0.0, 0, 0, 0],
+      firstrQD: [-0.5, 0, 0, 0],
+      firstjQD: [0.0, 0, 0, 0],
       firstsize: 3.0,
       pixelRatio,
       zoomfactor: Config.DEFAULT_ZOOM_FACTOR,
@@ -856,8 +856,8 @@ class Config {
   get exponent() { return this.store.getState().config.exponent; }
   get enableGPU() { return this.store.getState().config.enableGPU; }
   get forceBoard() { return this.store.getState().config.forceBoard; }
-  get firstrOct() { return this.store.getState().config.firstrOct; }
-  get firstjOct() { return this.store.getState().config.firstjOct; }
+  get firstrQD() { return this.store.getState().config.firstrQD; }
+  get firstjQD() { return this.store.getState().config.firstjQD; }
 
   // Backward compatibility computed property
   get dimsArea() { return this.dimsWidth * this.dimsHeight; }
@@ -1023,8 +1023,8 @@ class Config {
     // Bulk update exponent and initial center (origin for z^n, n>2)
     this.store.dispatch(this.store.actions.updateConfig({
       exponent: newExponent,
-      firstrOct: [newExponent > 2 ? 0.0 : -0.5, 0, 0, 0],
-      firstjOct: [0.0, 0, 0, 0]
+      firstrQD: [newExponent > 2 ? 0.0 : -0.5, 0, 0, 0],
+      firstjQD: [0.0, 0, 0, 0]
     }));
     for (const el of document.querySelectorAll('.exponent')) {
       el.innerText = newExponent;
@@ -1032,7 +1032,7 @@ class Config {
   }
 
   firststate() {
-    return {sizes:[[this.firstsize, this.firstrOct, this.firstjOct]], hidden:[]};
+    return {sizes:[[this.firstsize, this.firstrQD, this.firstjQD]], hidden:[]};
   }
 }
 
@@ -1057,11 +1057,11 @@ class View {
     this.exponent = config.exponent;
   }
 
-  // Getter properties that derive from sizesOct (the authoritative source)
-  // sizesOct format: [sizeDouble, reOct, imOct]
-  get size() { return this.sizesOct[0]; }
-  get re() { return this.sizesOct[1]; }
-  get im() { return this.sizesOct[2]; }
+  // Getter properties that derive from sizesQD (the authoritative source)
+  // sizesQD format: [sizeDouble, reQD, imQD]
+  get size() { return this.sizesQD[0]; }
+  get re() { return this.sizesQD[1]; }
+  get im() { return this.sizesQD[2]; }
 
   // Derived scalar properties
   get pixelSize() { return this.size / this.config.dimsWidth; }
@@ -1083,7 +1083,7 @@ class View {
 
   initview(size, re, im) {
     // Store size as double (sufficient for scaling), coordinates as oct
-    this.sizesOct = [typeof size === 'number' ? size : octToNumber(size), toOct(re), toOct(im)];
+    this.sizesQD = [typeof size === 'number' ? size : qdToNumber(size), toQD(re), toQD(im)];
     this.nn = new Array(this.config.dimsArea).fill(0);
     this.un = this.config.dimsArea;
     this.di = 0;
@@ -1153,10 +1153,10 @@ class View {
     const rFrac = (x / dimsWidth) - Config.CENTER_COORDINATE;
     const jFrac = Config.CENTER_COORDINATE - (y / dimsHeight);
     // Use oct precision for scaling to preserve accuracy at deep zoom
-    const rOct = toOctAdd(this.re, toOctScale(this.size, rFrac));
-    const iOct = toOctAdd(this.im, toOctScale(this.size, jFrac / aspectRatio));
+    const rQD = toQDAdd(this.re, toQDScale(this.size, rFrac));
+    const iOct = toQDAdd(this.im, toQDScale(this.size, jFrac / aspectRatio));
     // Return oct format (8 elements: 4 real + 4 imaginary) for full precision
-    return [rOct[0], rOct[1], rOct[2], rOct[3], iOct[0], iOct[1], iOct[2], iOct[3]];
+    return [rQD[0], rQD[1], rQD[2], rQD[3], iOct[0], iOct[1], iOct[2], iOct[3]];
   }
 
   currentz(j) {
@@ -1226,22 +1226,22 @@ class View {
     const parent = this.parentView;
     const { dimsWidth, dimsHeight, aspectRatio } = this.config;
 
-    const [childSizeOct, childCenterROct, childCenterIOct] = this.sizesOct;
-    const [parentSizeOct, parentCenterROct, parentCenterIOct] = parent.sizesOct;
+    const [childSizeOct, childCenterROct, childCenterIOct] = this.sizesQD;
+    const [parentSizeOct, parentCenterROct, parentCenterIOct] = parent.sizesQD;
 
-    const childSize = octToNumber(childSizeOct);
-    const parentSize = octToNumber(parentSizeOct);
+    const childSize = qdToNumber(childSizeOct);
+    const parentSize = qdToNumber(parentSizeOct);
     const parentHeight = parentSize / aspectRatio;
 
     // sx = ((childCenterR - parentCenterR) + (parentSize - childSize)/2) / parentSize * dimsWidth
-    const deltaR = toOctSub(childCenterROct, parentCenterROct);
-    const deltaRNum = octToNumber(deltaR);
+    const deltaR = toQDSub(childCenterROct, parentCenterROct);
+    const deltaRNum = qdToNumber(deltaR);
     const sx = ((deltaRNum + (parentSize - childSize) / 2) / parentSize) * dimsWidth;
 
     // sy = (deltaI + (parentHeight - childHeight)/2) / parentHeight * dimsHeight
     const childHeight = childSize / aspectRatio;
-    const deltaI = toOctSub(parentCenterIOct, childCenterIOct);
-    const deltaINum = octToNumber(deltaI);
+    const deltaI = toQDSub(parentCenterIOct, childCenterIOct);
+    const deltaINum = qdToNumber(deltaI);
     const sy = ((deltaINum + (parentHeight - childHeight) / 2) / parentHeight) * dimsHeight;
 
     const sw = (childSize / parentSize) * dimsWidth;
@@ -1602,7 +1602,7 @@ class Grid {
       if (this.hiddencanvas(k)) {
         state.hidden.push(k);
       }
-      // State format: [sizeScalar, reOct, imOct] for backward compatibility
+      // State format: [sizeScalar, reQD, imQD] for backward compatibility
       state.sizes.push([this.views[k].size, this.views[k].re, this.views[k].im]);
     }
     return state;
@@ -1665,7 +1665,7 @@ class Grid {
 
     // Helper to check if a view matches target coordinates, dimensions, AND exponent
     const viewMatchesTarget = (view, targetSizes) => {
-      if (!view || !view.sizesOct || !targetSizes) return false;
+      if (!view || !view.sizesQD || !targetSizes) return false;
 
       // Check exponent matches (views computed with different exponent are incompatible)
       if (view.exponent !== targetExponent) return false;
@@ -1674,8 +1674,8 @@ class Grid {
       const viewArea = view.nn?.length || 0;
       if (viewArea !== targetArea) return false;
 
-      const [viewSizeOct, viewReOct, viewImOct] = view.sizesOct;
-      const viewSize = octToNumber(viewSizeOct);
+      const [viewSizeOct, viewReOct, viewImOct] = view.sizesQD;
+      const viewSize = qdToNumber(viewSizeOct);
       const [targetSize, targetRe, targetIm] = targetSizes;
 
       // Check zoom level - must be within 1%
@@ -1685,8 +1685,8 @@ class Grid {
       // Check coordinates - tolerance is 1% of view extent
       // Use oct precision for comparison
       const tolerance = viewSize * 0.01;
-      const viewReVal = octToNumber(viewReOct);
-      const viewImVal = octToNumber(viewImOct);
+      const viewReVal = qdToNumber(viewReOct);
+      const viewImVal = qdToNumber(viewImOct);
       const targetReVal = targetRe[0] + (targetRe[1] || 0);
       const targetImVal = targetIm[0] + (targetIm[1] || 0);
       return Math.abs(targetReVal - viewReVal) < tolerance &&
@@ -2105,14 +2105,14 @@ class ZoomManager {
     for (let k = 0; k < this.grid.views.length; k++) {
       if (this.grid.hiddencanvas(k)) { continue; }
       const view = this.grid.views[k];
-      if (!view || !view.sizesOct) { continue; }
-      const [currSizeOct, currReOct, currImOct] = view.sizesOct;
+      if (!view || !view.sizesQD) { continue; }
+      const [currSizeOct, currReOct, currImOct] = view.sizesQD;
       if (prevSizeOct !== null) {
-        const prevSize = octToNumber(prevSizeOct);
-        let x = octToNumber(toOctSub(currReOct, prevReOct)) / prevSize + 0.5;
-        let y = 0.5 - octToNumber(toOctSub(currImOct, prevImOct)) / (prevSize / this.config.aspectRatio);
+        const prevSize = qdToNumber(prevSizeOct);
+        let x = qdToNumber(toQDSub(currReOct, prevReOct)) / prevSize + 0.5;
+        let y = 0.5 - qdToNumber(toQDSub(currImOct, prevImOct)) / (prevSize / this.config.aspectRatio);
 
-        let zf = prevSize / octToNumber(currSizeOct);
+        let zf = prevSize / qdToNumber(currSizeOct);
         this.showZoomRect(prevK, x, y, zf);
       }
       prevSizeOct = currSizeOct;
@@ -2129,18 +2129,18 @@ class ZoomManager {
     let k = this.grid.views.length - 1;
     if (this.grid.views[k].uninteresting()) { return; }
     let osize = this.grid.views[k].size;
-    let oreOct = this.grid.views[k].re;
-    let oimOct = this.grid.views[k].im;
-    let ore = octToQd(oreOct);
-    let oim = octToQd(oimOct);
+    let oreQD = this.grid.views[k].re;
+    let oimQD = this.grid.views[k].im;
+    let ore = qdToDD(oreQD);
+    let oim = qdToDD(oimQD);
     let rre = Config.CENTER_COORDINATE;
     if (k === 0 && ddEq(ore, -0.5) && ddEq(oim, 0)) {
       // Myreberg / Feigenbaum point
       const baseRe = this.grid.views[0].re;
-      oreOct = Config.FEIGENBAUM_POINT_OCT;
-      ore = octToQd(oreOct);
-      rre = octToNumber(toOctAdd(
-        toOctScale(toOctSub(oreOct, baseRe), 1 / this.grid.views[0].size),
+      oreQD = Config.FEIGENBAUM_POINT_OCT;
+      ore = qdToDD(oreQD);
+      rre = qdToNumber(toQDAdd(
+        toQDScale(toQDSub(oreQD, baseRe), 1 / this.grid.views[0].size),
         Config.CENTER_COORDINATE
       ));
     }
@@ -2166,7 +2166,7 @@ class ZoomManager {
     setTimeout(() => {
       // Pass oct coordinates directly to preserve full precision at deep zoom
       let newView = this.grid.makeView(
-        k + 1, nsize, oreOct, oimOct, true
+        k + 1, nsize, oreQD, oimQD, true
       );
       this.grid.notifyurl();
 
@@ -2203,9 +2203,9 @@ class ZoomManager {
     // Compute fractional offsets from center (both as simple fractions)
     const offsetX = (cx / this.config.dimsWidth) - 0.5;
     const offsetY = 0.5 - rectY;
-    // Scale offsets by size to preserve accuracy at deep zoom (toOctScale handles conversion)
-    const nreOct = toOctAdd(ore, toOctScale(osize, offsetX));
-    const nimOct = toOctAdd(oim, toOctScale(osize, offsetY / this.config.aspectRatio));
+    // Scale offsets by size to preserve accuracy at deep zoom (toQDScale handles conversion)
+    const nreQD = toQDAdd(ore, toQDScale(osize, offsetX));
+    const nimQD = toQDAdd(oim, toQDScale(osize, offsetY / this.config.aspectRatio));
 
     // Stage 1: Create DOM and scroll immediately (instant visual feedback)
     // Pass nsize to makecanvas so the zoom label shows correct scientific notation
@@ -2226,7 +2226,7 @@ class ZoomManager {
     // Stage 2: Create view structure
     // Pass oct precision coordinates to preserve full precision at deep zoom
     setTimeout(() => {
-      let newView = this.grid.makeView(k + 1, nsize, nreOct, nimOct, true);
+      let newView = this.grid.makeView(k + 1, nsize, nreQD, nimQD, true);
       this.grid.showcanvas(k + 1);
       this.grid.notifyurl();
       document.body.className = '';
@@ -2241,22 +2241,22 @@ class ZoomManager {
 
   centerViews(includeFirst) {
     let k = this.grid.views.length - 1;
-    let oreOct = this.grid.views[k].re;
-    let oimOct = this.grid.views[k].im;
+    let oreQD = this.grid.views[k].re;
+    let oimQD = this.grid.views[k].im;
     if (!includeFirst) {
       const invPrevSize = 1 / this.grid.views[0].size;
       this.showZoomRect(
         0,
-        octToNumber(toOctAdd(
-          toOct(0.5),
-          toOctScale(
-            toOctSub(oreOct, this.grid.views[0].re),
+        qdToNumber(toQDAdd(
+          toQD(0.5),
+          toQDScale(
+            toQDSub(oreQD, this.grid.views[0].re),
             invPrevSize
           ))),
-        octToNumber(toOctAdd(
-          toOct(0.5),
-          toOctScale(
-            toOctSub(this.grid.views[0].im, oimOct),
+        qdToNumber(toQDAdd(
+          toQD(0.5),
+          toQDScale(
+            toQDSub(this.grid.views[0].im, oimQD),
             invPrevSize * this.config.aspectRatio
           ))),
            this.grid.views[0].size / this.grid.views[1].size);
@@ -2266,10 +2266,10 @@ class ZoomManager {
     const isWithinTolerance = (view, targetReOct, targetImOct) => {
       const viewSize = view.size;
       const tolerance = viewSize * 0.01; // 1% of view extent
-      const viewRe = octToNumber(view.re);
-      const viewIm = octToNumber(view.im);
-      const targetRe = octToNumber(targetReOct);
-      const targetIm = octToNumber(targetImOct);
+      const viewRe = qdToNumber(view.re);
+      const viewIm = qdToNumber(view.im);
+      const targetRe = qdToNumber(targetReOct);
+      const targetIm = qdToNumber(targetImOct);
       return Math.abs(targetRe - viewRe) < tolerance &&
              Math.abs(targetIm - viewIm) < tolerance;
     };
@@ -2277,18 +2277,18 @@ class ZoomManager {
     for (k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
       this.showZoomRect(
           k, 0.5, 0.5, this.grid.views[k].size / this.grid.views[k+1].size);
-      if (octCompare(this.grid.views[k].re, oreOct) ||
-          octCompare(this.grid.views[k].im, oimOct)) {
+      if (octCompare(this.grid.views[k].re, oreQD) ||
+          octCompare(this.grid.views[k].im, oimQD)) {
         // View center differs from target - check if within 1% tolerance
-        if (isWithinTolerance(this.grid.views[k], oreOct, oimOct)) {
+        if (isWithinTolerance(this.grid.views[k], oreQD, oimQD)) {
           // Within tolerance: update coordinates to exact target without recreating
-          this.grid.views[k].sizesOct[1] = oreOct;
-          this.grid.views[k].sizesOct[2] = oimOct;
+          this.grid.views[k].sizesQD[1] = oreQD;
+          this.grid.views[k].sizesQD[2] = oimQD;
         } else {
           // Beyond tolerance: recreate the view
           this.grid.scheduler.removeBoardFromWorker(k);
           let nsize = this.grid.views[k].size;
-          this.grid.makeView(k, nsize, oreOct, oimOct);
+          this.grid.makeView(k, nsize, oreQD, oimQD);
           this.grid.views[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
           this.grid.clearseq(k);
         }
@@ -2334,7 +2334,7 @@ class URLHandler {
 
     // Fill in default base view if no centers specified in URL
     if (targetState.sizes.length === 0) {
-      targetState.sizes = [[null, this.config.firstrOct, this.config.firstjOct]];
+      targetState.sizes = [[null, this.config.firstrQD, this.config.firstjQD]];
     }
 
     // Build pool of all reusable views (union of stableViews and current views)
@@ -2352,10 +2352,10 @@ class URLHandler {
 
     // Build currentState from reusable views array
     // The indices here must match reusableViews array indices
-    // State format: [sizeDouble, reOct, imOct] - matches sizesOct storage format
+    // State format: [sizeDouble, reQD, imQD] - matches sizesQD storage format
     const currentState = { hidden: [], sizes: [] };
     for (const view of reusableViews) {
-      currentState.sizes.push(view.sizesOct);
+      currentState.sizes.push(view.sizesQD);
     }
 
     // Find views to keep vs recreate by comparing coordinates
@@ -2468,8 +2468,8 @@ class URLHandler {
       // Compute difference in oct precision first, then convert magnitude to double
       // (converting coords to double first would lose precision at deep zooms)
       const tolerance = currentSize * 0.01;
-      const reDiff = Math.abs(octToNumber(toOctSub(targetRe, currentRe)));
-      const imDiff = Math.abs(octToNumber(toOctSub(targetIm, currentIm)));
+      const reDiff = Math.abs(qdToNumber(toQDSub(targetRe, currentRe)));
+      const imDiff = Math.abs(qdToNumber(toQDSub(targetIm, currentIm)));
       return reDiff < tolerance && imDiff < tolerance;
     };
 
@@ -2594,7 +2594,7 @@ class URLHandler {
         parse: (val, configUpdates) => {
           const exponent = Math.max(2, parseInt(val));
           configUpdates.exponent = exponent;
-          if (exponent > 2) { configUpdates.firstrOct = [0.0, 0, 0, 0]; }
+          if (exponent > 2) { configUpdates.firstrQD = [0.0, 0, 0, 0]; }
           // DOM update (side effect, not state)
           for (const el of document.querySelectorAll('.exponent')) {
             el.innerText = exponent;
@@ -2612,8 +2612,8 @@ class URLHandler {
         parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
           const validTypes = [
-            'cpu', 'zhuoran', 'octzhuoran', 'perturbation', 'gpu', 'gpuzhuoran',
-            'octgpuzhuoran', 'scaledgpuzhuoran', 'adaptive', 'octcpu'
+            'cpu', 'zhuoran', 'qdzhuoran', 'perturbation', 'gpu', 'gpuzhuoran',
+            'adaptive', 'qdcpu'
           ];
           if (validTypes.includes(boardType)) {
             configUpdates.forceBoard = boardType;
@@ -2734,9 +2734,9 @@ class URLHandler {
         startstate.sizes.push([
           null,  // Placeholder - will be filled in after initSizes()
           m && m[1] ? decimalToOct(m[1]) : (startstate.sizes.length > 0 ?
-              startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstrOct),
+              startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstrQD),
           m && m[2] ? decimalToOct(m[2]) : (startstate.sizes.length > 0 ?
-              startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstjOct)
+              startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstjQD)
         ]);
       }
     }
@@ -2756,15 +2756,15 @@ class URLHandler {
     let state = this.grid.currentGridState();
     let compactc = '';
     let commas = '';
-    let prev = [this.config.firstrOct, this.config.firstjOct];
+    let prev = [this.config.firstrQD, this.config.firstjQD];
     let prevj = -1;
     for (let j = 0; j <= state.sizes.length; j++) {
       const view = this.grid.views[j];
       const viewReOct = view ? view.re : state.sizes[j]?.[1];
       const viewImOct = view ? view.im : state.sizes[j]?.[2];
       if (j < state.sizes.length &&
-          !ddCompare(octToQd(viewReOct), octToQd(prev[0])) &&
-          !ddCompare(octToQd(viewImOct), octToQd(prev[1]))) {
+          !ddCompare(qdToDD(viewReOct), qdToDD(prev[0])) &&
+          !ddCompare(qdToDD(viewImOct), qdToDD(prev[1]))) {
         commas += ',';
       } else {
         if (prevj >= 0) {
@@ -3606,7 +3606,7 @@ class MovieMode {
     const p3 = k+2 < this.explorer.grid.views.length ? [
         this.explorer.grid.views[k+2].re,
         this.explorer.grid.views[k+2].im] : targetCenter;
-    const interpolatedCenter = catmullRomSplineOct(p0, p1, p2, p3, t);
+    const interpolatedCenter = catmullRomSplineQD(p0, p1, p2, p3, t);
 
     // Clear the movie canvas with black (so unfinished pixels appear black)
     this.movieCtx.fillStyle = 'black';
@@ -3614,10 +3614,10 @@ class MovieMode {
 
     // Draw the current frame
     const scale = sourceSize / interpolatedSize;
-    const offsetX = octToNumber(toOctScale(toOctSub(interpolatedCenter[0], sourceCenter[0]),
+    const offsetX = qdToNumber(toQDScale(toQDSub(interpolatedCenter[0], sourceCenter[0]),
                           this.explorer.config.dimsWidth / sourceSize));
     const sourceHeight = sourceSize / this.explorer.config.aspectRatio;
-    const offsetY = octToNumber(toOctScale(toOctSub(sourceCenter[1], interpolatedCenter[1]),
+    const offsetY = qdToNumber(toQDScale(toQDSub(sourceCenter[1], interpolatedCenter[1]),
                           this.explorer.config.dimsHeight / sourceHeight));
     this.movieCtx.save();
     this.movieCtx.imageSmoothingEnabled = true;
@@ -3642,10 +3642,10 @@ class MovieMode {
     // Draw the next frame
     if (k < this.explorer.grid.views.length - 1) {
       const targetScale = targetSize / interpolatedSize;
-      const targetOffsetX = octToNumber(toOctScale(toOctSub(interpolatedCenter[0], targetCenter[0]),
+      const targetOffsetX = qdToNumber(toQDScale(toQDSub(interpolatedCenter[0], targetCenter[0]),
                                   this.explorer.config.dimsWidth / targetSize));
       const targetHeight = targetSize / this.explorer.config.aspectRatio;
-      const targetOffsetY = octToNumber(toOctScale(toOctSub(targetCenter[1], interpolatedCenter[1]),
+      const targetOffsetY = qdToNumber(toQDScale(toQDSub(targetCenter[1], interpolatedCenter[1]),
                                   this.explorer.config.dimsHeight / targetHeight));
       this.movieCtx.save();
       this.movieCtx.imageSmoothingEnabled = true;
@@ -3735,7 +3735,7 @@ class Scheduler {
            '// <\/script>\n';
   }
 
-  assignBoardToWorker(k, size, reOct, imOct, config, id) {
+  assignBoardToWorker(k, size, reQD, imQD, config, id) {
     let [workerNumber, minLoad] = this.findLeastLoadedWorker();
     if (workerNumber == -1 || (minLoad > 0 && this.workers.length < this.workerCount)) {
       if (this.addWorker()) {
@@ -3749,8 +3749,8 @@ class Scheduler {
     this.assignments[k] = workerNumber;
 
     // Ensure oct coordinates are properly formatted
-    reOct = toOct(reOct);
-    imOct = toOct(imOct);
+    reQD = toQD(reQD);
+    imQD = toQD(imQD);
 
     if (!isFinite(size)) {
       console.warn(`Board ${k}: non-finite size`, size);
@@ -3760,8 +3760,8 @@ class Scheduler {
       data: {
         k,
         size,
-        reOct,
-        imOct,
+        reQD,
+        imQD,
         config: {
           dimsArea: config.dimsArea,
           dimsWidth: config.dimsWidth,
@@ -4134,17 +4134,17 @@ class OrbitComputer {
     // Result stores 8 elements per point (oct format)
     let result = [r[0], r[1], r[2], r[3], j[0], j[1], j[2], j[3]];
     while (result.length < len * 8) {
-      let j2 = toOctSquare(j);
-      let ja = toOctMul(toOctDouble(r), j);
-      let r2 = toOctSquare(r);
-      let ra = toOctSub(r2, j2);
+      let j2 = toQDSquare(j);
+      let ja = toQDMul(toQDDouble(r), j);
+      let r2 = toQDSquare(r);
+      let ra = toQDSub(r2, j2);
       for (let ord = 2; ord < this.explorer.config.exponent; ord++) {
-        let rt = toOctSub(toOctMul(r, ra), toOctMul(j, ja));
-        ja = toOctAdd(toOctMul(r, ja), toOctMul(j, ra));
+        let rt = toQDSub(toQDMul(r, ra), toQDMul(j, ja));
+        ja = toQDAdd(toQDMul(r, ja), toQDMul(j, ra));
         ra = rt;
       }
-      r = toOctAdd(ra, cr);
-      j = toOctAdd(ja, cj);
+      r = toQDAdd(ra, cr);
+      j = toQDAdd(ja, cj);
       result.push(r[0], r[1], r[2], r[3], j[0], j[1], j[2], j[3]);
     }
     return result;
@@ -4159,15 +4159,15 @@ class OrbitComputer {
     // Use oct values for full precision
     const view = this.explorer.grid.views[k];
     const s = view.size;
-    const crOct = view.re;
-    const cjOct = view.im;
+    const crQD = view.re;
+    const cjQD = view.im;
     // seq is in oct format: 8 elements per point
     for (let i = 0; i < seq.length; i += 8) {
       let r = [seq[i], seq[i+1], seq[i+2], seq[i+3]];
       let j = [seq[i+4], seq[i+5], seq[i+6], seq[i+7]];
-      let x = (octToNumber(toOctSub(r, crOct)) / s + 0.5) * this.explorer.config.dimsWidth;
+      let x = (qdToNumber(toQDSub(r, crQD)) / s + 0.5) * this.explorer.config.dimsWidth;
       const sHeight = s / this.explorer.config.aspectRatio;
-      let y = (octToNumber(toOctSub(cjOct, j)) / sHeight + 0.5) * this.explorer.config.dimsHeight;
+      let y = (qdToNumber(toQDSub(cjQD, j)) / sHeight + 0.5) * this.explorer.config.dimsHeight;
       const w = this.explorer.config.dimsWidth;
       const h = this.explorer.config.dimsHeight;
       if (x >= 0 && y >= 0 && x < w && y < h) {
@@ -4301,14 +4301,14 @@ function formatcomplex(k, re, im) {
   let digits = Math.max(0, -Math.floor(Math.log10(pix)));
 
   // Use BigInt-based conversion for exact decimal output
-  const reOct = Array.isArray(re) ? re : [re, 0, 0, 0];
-  const imOct = Array.isArray(im) ? im : [im, 0, 0, 0];
+  const reQD = Array.isArray(re) ? re : [re, 0, 0, 0];
+  const imQD = Array.isArray(im) ? im : [im, 0, 0, 0];
 
-  let rd = octToDecimalString(reOct, digits);
-  let id = octToDecimalString(imOct, digits);
+  let rd = qdToDecimalString(reQD, digits);
+  let id = qdToDecimalString(imQD, digits);
 
-  let rs = reOct[0] < 0.0 ? '-' : '+';
-  let is = imOct[0] < 0.0 ? '-' : '+';
+  let rs = reQD[0] < 0.0 ? '-' : '+';
+  let is = imQD[0] < 0.0 ? '-' : '+';
   return rs + rd + is + id + 'i';
 }
 
@@ -4408,7 +4408,7 @@ class Board {
   constructor(k, size, re, im, config, id) {
     this.k = k;    // Number in explorer
     // Store size as double (sufficient for scaling), coordinates as oct
-    this.sizesOct = [typeof size === 'number' ? size : octToNumber(size), toOct(re), toOct(im)];
+    this.sizesQD = [typeof size === 'number' ? size : qdToNumber(size), toQD(re), toQD(im)];
     this.id = id;  // Random ID
     this.config = config;  // Global config
 
@@ -4438,11 +4438,11 @@ class Board {
     this.checkpointIter = new Array(this.config.dimsArea).fill(0);
   }
 
-  // Getter properties that derive from sizesOct (the authoritative source)
-  // sizesOct format: [sizeDouble, reOct, imOct]
-  get size() { return this.sizesOct[0]; }
-  get re() { return this.sizesOct[1]; }
-  get im() { return this.sizesOct[2]; }
+  // Getter properties that derive from sizesQD (the authoritative source)
+  // sizesQD format: [sizeDouble, reQD, imQD]
+  get size() { return this.sizesQD[0]; }
+  get re() { return this.sizesQD[1]; }
+  get im() { return this.sizesQD[2]; }
 
   // Derived scalar property
   get pixelSize() { return this.size / this.config.dimsWidth; }
@@ -4451,7 +4451,7 @@ class Board {
     return {
       type: this.constructor.name,
       k: this.k,
-      sizesOct: this.sizesOct,
+      sizesQD: this.sizesQD,
       id: this.id,
       config: this.config,
       it: this.it,
@@ -4477,9 +4477,9 @@ class Board {
   static fromSerialized(serialized) {
     const subclasses = new Map([
       ['CpuBoard', CpuBoard],
-      ['OctCpuBoard', OctCpuBoard],
+      ['QDCpuBoard', QDCpuBoard],
       ['PerturbationBoard', PerturbationBoard],
-      ['OctPerturbationBoard', OctPerturbationBoard],
+      ['QDPerturbationBoard', QDPerturbationBoard],
       ['ZhuoranBoard', ZhuoranBoard],
       ['GpuBoard', GpuBoard],
       ['GpuZhuoranBoard', GpuZhuoranBoard],
@@ -4515,8 +4515,8 @@ class CpuBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
     const sizeScalar = this.size;
-    const reDD = octToQd(this.re);
-    const imDD = octToQd(this.im);
+    const reDD = qdToDD(this.re);
+    const imDD = qdToDD(this.im);
     // Initialize board: cc = c values, zz = current z, bb = checkpoint z, ss = active pixel indices
     for (let y = 0; y < this.config.dimsHeight; y++) {
       const jFrac = (0.5 - (y / this.config.dimsHeight));
@@ -4538,9 +4538,9 @@ class CpuBoard extends Board {
   static fromSerialized(serialized) {
     const board = new CpuBoard(
       serialized.k,
-      serialized.sizesOct[0],
-      serialized.sizesOct[1],
-      serialized.sizesOct[2],
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
       serialized.config,
       serialized.id
     );
@@ -4705,7 +4705,7 @@ class CpuBoard extends Board {
 
 // CPU board using direct oct-precision iteration (no perturbation).
 // Very slow but maximally accurate - serves as ground truth for verification.
-class OctCpuBoard extends Board {
+class QDCpuBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
     // Override epsilon for oct precision - need much tighter thresholds
@@ -4717,27 +4717,27 @@ class OctCpuBoard extends Board {
     // Use oct-precision values from getters
     // IMPORTANT: At deep zoom (z > 1e30), double precision cannot represent
     // the pixel size or offset accurately. Must use oct precision throughout.
-    const reOct = this.re;
-    const imOct = this.im;
+    const reQD = this.re;
+    const imQD = this.im;
     // Pre-compute size/aspectRatio in oct precision for y offsets
-    // Use toOctMul instead of toOctScale to capture error terms at deep zoom
-    const aspectRecipOct = toOct(1 / this.config.aspectRatio);
-    const sizeOverAspect = toOctMul(this.size, aspectRecipOct);
+    // Use toQDMul instead of toQDScale to capture error terms at deep zoom
+    const aspectRecipOct = toQD(1 / this.config.aspectRatio);
+    const sizeOverAspect = toQDMul(this.size, aspectRecipOct);
     // Initialize board: cc = c values (8 floats per pixel), zz = current z (8 floats per pixel)
     // bb = checkpoint z, ss = active pixel indices
     // Format: [r0, r1, r2, r3, i0, i1, i2, i3] for each complex number
     for (let y = 0; y < this.config.dimsHeight; y++) {
       const jFrac = (0.5 - (y / this.config.dimsHeight));
-      // Use toOctMul instead of toOctScale to capture error terms
-      const jOct = toOctAdd(imOct, toOctMul(sizeOverAspect, toOct(jFrac)));
+      // Use toQDMul instead of toQDScale to capture error terms
+      const jQD = toQDAdd(imQD, toQDMul(sizeOverAspect, toQD(jFrac)));
       for (let x = 0; x < this.config.dimsWidth; x++) {
         const rFrac = ((x / this.config.dimsWidth) - 0.5);
-        // Use toOctMul instead of toOctScale to capture error terms
-        const rOct = toOctAdd(reOct, toOctMul(this.size, toOct(rFrac)));
+        // Use toQDMul instead of toQDScale to capture error terms
+        const rQD = toQDAdd(reQD, toQDMul(this.size, toQD(rFrac)));
         // Store c as 8 floats: [r0, r1, r2, r3, i0, i1, i2, i3]
-        this.cc.push(rOct[0], rOct[1], rOct[2], rOct[3], jOct[0], jOct[1], jOct[2], jOct[3]);
-        const r = rOct[0] + rOct[1] + rOct[2] + rOct[3];
-        const j = jOct[0] + jOct[1] + jOct[2] + jOct[3];
+        this.cc.push(rQD[0], rQD[1], rQD[2], rQD[3], jQD[0], jQD[1], jQD[2], jQD[3]);
+        const r = rQD[0] + rQD[1] + rQD[2] + rQD[3];
+        const j = jQD[0] + jQD[1] + jQD[2] + jQD[3];
         if (this.inspike(r, j)) {
           this.ch += 1;
         }
@@ -4749,11 +4749,11 @@ class OctCpuBoard extends Board {
   }
 
   static fromSerialized(serialized) {
-    const board = new OctCpuBoard(
+    const board = new QDCpuBoard(
       serialized.k,
-      serialized.sizesOct[0],
-      serialized.sizesOct[1],
-      serialized.sizesOct[2],
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
       serialized.config,
       serialized.id
     );
@@ -4859,35 +4859,35 @@ class OctCpuBoard extends Board {
 
     // Mandelbrot iteration: z = z² + c using oct precision
     // z² = (zr + zi*i)² = zr² - zi² + 2*zr*zi*i
-    const zr2 = toOctSquare(zr);      // zr²
-    const zi2 = toOctSquare(zi);      // zi²
-    const zri = toOctMul(zr, zi);     // zr * zi
+    const zr2 = toQDSquare(zr);      // zr²
+    const zi2 = toQDSquare(zi);      // zi²
+    const zri = toQDMul(zr, zi);     // zr * zi
 
     // Check escape: |z|² > 4 using FULL oct precision comparison
     // IMPORTANT: Cannot sum components to double and compare - this loses precision
     // when |z|² ≈ 4 and differences are at 1e-34 scale. Adjacent pixels would escape
     // at the same iteration, creating vertical stripes in the output.
     // Instead, compute |z|² - 4 in oct precision and check if positive.
-    const mag2Oct = toOctAdd(zr2, zi2);  // |z|² in oct precision
-    const diffOct = toOctSub(mag2Oct, [4, 0, 0, 0]);  // |z|² - 4
+    const mag2Oct = toQDAdd(zr2, zi2);  // |z|² in oct precision
+    const diffQD = toQDSub(mag2Oct, [4, 0, 0, 0]);  // |z|² - 4
     // Check if diff > 0: find first non-zero component and check its sign
-    const escaped = diffOct[0] > 0 ||
-      (diffOct[0] === 0 && (diffOct[1] > 0 ||
-        (diffOct[1] === 0 && (diffOct[2] > 0 ||
-          (diffOct[2] === 0 && diffOct[3] > 0)))));
+    const escaped = diffQD[0] > 0 ||
+      (diffQD[0] === 0 && (diffQD[1] > 0 ||
+        (diffQD[1] === 0 && (diffQD[2] > 0 ||
+          (diffQD[2] === 0 && diffQD[3] > 0)))));
     if (escaped) {
       this.nn[m] = this.it;
       return 1;  // Diverged
     }
 
-    const newZr = toOctSub(zr2, zi2); // zr² - zi²
-    const newZi = toOctDouble(zri);   // 2 * zr * zi
+    const newZr = toQDSub(zr2, zi2); // zr² - zi²
+    const newZi = toQDDouble(zri);   // 2 * zr * zi
 
     // Add c
     const cr = [this.cc[m8], this.cc[m8+1], this.cc[m8+2], this.cc[m8+3]];
     const ci = [this.cc[m8+4], this.cc[m8+5], this.cc[m8+6], this.cc[m8+7]];
-    const finalZr = toOctAdd(newZr, cr);
-    const finalZi = toOctAdd(newZi, ci);
+    const finalZr = toQDAdd(newZr, cr);
+    const finalZi = toQDAdd(newZi, ci);
 
     // Store back
     this.zz[m8] = finalZr[0]; this.zz[m8+1] = finalZr[1];
@@ -4901,8 +4901,8 @@ class OctCpuBoard extends Board {
     // cancellation when z ≈ 2 (fixed point) and differences are at 1e-35 scale.
     const bbR = [this.bb[m8], this.bb[m8+1], this.bb[m8+2], this.bb[m8+3]];
     const bbI = [this.bb[m8+4], this.bb[m8+5], this.bb[m8+6], this.bb[m8+7]];
-    const diffR = toOctSub(finalZr, bbR);
-    const diffI = toOctSub(finalZi, bbI);
+    const diffR = toQDSub(finalZr, bbR);
+    const diffI = toQDSub(finalZi, bbI);
     const db = Math.abs(diffR[0] + diffR[1] + diffR[2] + diffR[3]) +
                Math.abs(diffI[0] + diffI[1] + diffI[2] + diffI[3]);
     if (db <= this.epsilon2) {
@@ -5005,9 +5005,9 @@ class PerturbationBoard extends Board {
   static fromSerialized(serialized) {
     const board = new PerturbationBoard(
       serialized.k,
-      serialized.sizesOct[0],
-      serialized.sizesOct[1],
-      serialized.sizesOct[2],
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
       serialized.config,
       serialized.id
     );
@@ -5321,10 +5321,10 @@ class PerturbationBoard extends Board {
 }
 
 // Oct-precision CPU board using perturbation theory (oct-double anchors)
-class OctPerturbationBoard extends Board {
+class QDPerturbationBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    this.octIndexes = [];   // Pixels computed in oct precision
+    this.qdIndexes = [];   // Pixels computed in oct precision
     this.tt = new Array(32).fill(0);           // Working array for oct operations
     this.effort = 4;        // Higher cost than quad perturbation
     this.initOctBoard(size, re, im);
@@ -5344,10 +5344,10 @@ class OctPerturbationBoard extends Board {
     const im_o = Array.isArray(im) && im.length === 4 ? im : [im, 0, 0, 0];
     for (let y = 0; y < this.config.dimsHeight; y++) {
       const jFrac = (0.5 - (y / this.config.dimsHeight));
-      const cj = toOctAdd(im_o, toOctScale(toOct(jFrac), size / this.config.aspectRatio));
+      const cj = toQDAdd(im_o, toQDScale(toQD(jFrac), size / this.config.aspectRatio));
       for (let x = 0; x < this.config.dimsWidth; x++) {
         const rFrac = ((x / this.config.dimsWidth) - 0.5);
-        const cr = toOctAdd(re_o, toOctScale(toOct(rFrac), size));
+        const cr = toQDAdd(re_o, toQDScale(toQD(rFrac), size));
         const idx = y * this.config.dimsWidth + x;
         const m8 = idx * 8;
         this.cc[m8] = cr[0]; this.cc[m8+1] = cr[1]; this.cc[m8+2] = cr[2]; this.cc[m8+3] = cr[3];
@@ -5356,7 +5356,7 @@ class OctPerturbationBoard extends Board {
         this.zz[m8+4] = cj[0]; this.zz[m8+5] = cj[1]; this.zz[m8+6] = cj[2]; this.zz[m8+7] = cj[3];
         this.bb[m8] = cr[0]; this.bb[m8+1] = cr[1]; this.bb[m8+2] = cr[2]; this.bb[m8+3] = cr[3];
         this.bb[m8+4] = cj[0]; this.bb[m8+5] = cj[1]; this.bb[m8+6] = cj[2]; this.bb[m8+7] = cj[3];
-        this.octIndexes.push(idx);
+        this.qdIndexes.push(idx);
         if (this.inspikeDDA(cr[0], cr[1], cj[0], cj[1])) {
           this.ch += 1;
         }
@@ -5365,11 +5365,11 @@ class OctPerturbationBoard extends Board {
   }
 
   static fromSerialized(serialized) {
-    const board = new OctPerturbationBoard(
+    const board = new QDPerturbationBoard(
       serialized.k,
-      serialized.sizesOct[0],
-      serialized.sizesOct[1],
-      serialized.sizesOct[2],
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
       serialized.config,
       serialized.id
     );
@@ -5385,7 +5385,7 @@ class OctPerturbationBoard extends Board {
     board.nz = [];
     board.bb = [];
     board.pp = [];
-    const octIdx = serialized.octIndexes || serialized.quadIndexes || [];
+    const octIdx = serialized.qdIndexes || serialized.quadIndexes || [];
     for (let i = 0; i < octIdx.length; i++) {
       const index = octIdx[i];
       for (let j = 0; j < 8; j++) {
@@ -5413,11 +5413,11 @@ class OctPerturbationBoard extends Board {
   serialize() {
     return {
       ...super.serialize(),
-      octIndexes: this.octIndexes,
+      qdIndexes: this.qdIndexes,
       pertIndexes: this.pertIndexes,
-      zz: this.octIndexes.flatMap(i => this.zz.slice(i*8, i*8+8)),
-      bb: this.octIndexes.flatMap(i => this.bb.slice(i*8, i*8+8)),
-      pp: this.octIndexes.map(index => this.pp[index]),
+      zz: this.qdIndexes.flatMap(i => this.zz.slice(i*8, i*8+8)),
+      bb: this.qdIndexes.flatMap(i => this.bb.slice(i*8, i*8+8)),
+      pp: this.qdIndexes.map(index => this.pp[index]),
       pertZZ: this.pertIndexes.flatMap(i => this.zz.slice(i*8, i*8+3)),
     };
   }
@@ -5438,7 +5438,7 @@ class OctPerturbationBoard extends Board {
       for (let t = 0; t < s.length; ++t) {
         const m = s[t];
         if (this.nn[m]) continue;
-        AoctcCopy(this.bb, m*8, this.zz, m*8);  // bb = checkpoint z position
+        ArqdcCopy(this.bb, m*8, this.zz, m*8);  // bb = checkpoint z position
         this.pp[m] = 0;  // Reset pp
       }
     }
@@ -5452,7 +5452,7 @@ class OctPerturbationBoard extends Board {
         if (result < 0) {
           changes.vv.push({
             index: index,
-            z: AoctcGet(this.zz, index*8),
+            z: ArqdcGet(this.zz, index*8),
             p: this.pp[index]  // period
           });
         } else {
@@ -5498,34 +5498,34 @@ class OctPerturbationBoard extends Board {
     const cj2 = this.cc[m8+5];
     const cj3 = this.cc[m8+6];
     const cj4 = this.cc[m8+7];
-    AoctSquare(tt, 0, r1, r2, r3, r4);
-    AoctSquare(tt, 4, j1, j2, j3, j4);
-    AoctAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
+    ArqdSquare(tt, 0, r1, r2, r3, r4);
+    ArqdSquare(tt, 4, j1, j2, j3, j4);
+    ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
     if (tt[8] > 4) {
       this.nn[m] = this.it;
       return 1;  // Diverged
     }
-    AoctMul(tt, 12, 2 * r1, 2 * r2, 2 * r3, 2 * r4, j1, j2, j3, j4);
-    AoctAdd(tt, 20, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);
+    ArqdMul(tt, 12, 2 * r1, 2 * r2, 2 * r3, 2 * r4, j1, j2, j3, j4);
+    ArqdAdd(tt, 20, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      AoctMul(tt, 0, j1, j2, j3, j4, tt[12], tt[13], tt[14], tt[15]);
-      AoctMul(tt, 4, r1, r2, r3, r4, tt[20], tt[21], tt[22], tt[23]);
-      AoctAdd(tt, 8, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);
-      AoctMul(tt, 0, r1, r2, r3, r4, tt[12], tt[13], tt[14], tt[15]);
-      AoctMul(tt, 4, j1, j2, j3, j4, tt[20], tt[21], tt[22], tt[23]);
-      AoctAdd(tt, 12, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
-      AoctSet(tt, 20, tt[8], tt[9], tt[10], tt[11]);
+      ArqdMul(tt, 0, j1, j2, j3, j4, tt[12], tt[13], tt[14], tt[15]);
+      ArqdMul(tt, 4, r1, r2, r3, r4, tt[20], tt[21], tt[22], tt[23]);
+      ArqdAdd(tt, 8, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);
+      ArqdMul(tt, 0, r1, r2, r3, r4, tt[12], tt[13], tt[14], tt[15]);
+      ArqdMul(tt, 4, j1, j2, j3, j4, tt[20], tt[21], tt[22], tt[23]);
+      ArqdAdd(tt, 12, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
+      ArqdSet(tt, 20, tt[8], tt[9], tt[10], tt[11]);
     }
-    AoctAdd(this.zz, m8, tt[20], tt[21], tt[22], tt[23], cr1, cr2, cr3, cr4);
-    AoctAdd(this.zz, m8+4, tt[12], tt[13], tt[14], tt[15], cj1, cj2, cj3, cj4);
+    ArqdAdd(this.zz, m8, tt[20], tt[21], tt[22], tt[23], cr1, cr2, cr3, cr4);
+    ArqdAdd(this.zz, m8+4, tt[12], tt[13], tt[14], tt[15], cj1, cj2, cj3, cj4);
     // Check convergence: compare current z to checkpoint
     const br1 = this.bb[m8];
     const br2 = this.bb[m8+1];
     const bj1 = this.bb[m8+4];
     const bj2 = this.bb[m8+5];
-    AoctAbsSub(tt, 0, br1, br2, this.zz[m8], this.zz[m8+1]);
-    AoctAbsSub(tt, 4, bj1, bj2, this.zz[m8+4], this.zz[m8+5]);
-    AoctAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
+    ArqdAbsSub(tt, 0, br1, br2, this.zz[m8], this.zz[m8+1]);
+    ArqdAbsSub(tt, 4, bj1, bj2, this.zz[m8+4], this.zz[m8+5]);
+    ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
     const db = tt[8] + tt[9];
     if (db <= this.epsilon2) {
       if (!this.pp[m]) { this.pp[m] = this.it; }
@@ -5705,13 +5705,13 @@ class DDSpatialBucket extends SpatialBucket {
  * Point format: [re0, re1, re2, re3, im0, im1, im2, im3]
  */
 class OctSpatialBucket extends SpatialBucket {
-  constructor(threadingEpsilon, getOctPoint) {
+  constructor(threadingEpsilon, getQDPoint) {
     super(threadingEpsilon);
-    this.getOctPoint = getOctPoint;
+    this.getQDPoint = getQDPoint;
   }
 
   getF64Point(i) {
-    const p = this.getOctPoint(i);
+    const p = this.getQDPoint(i);
     if (!p) return null;
     return {
       re: p[0] + p[1] + p[2] + p[3],
@@ -5720,23 +5720,23 @@ class OctSpatialBucket extends SpatialBucket {
   }
 
   verifyAndGetDelta(i, j) {
-    const pi = this.getOctPoint(i);
-    const pj = this.getOctPoint(j);
+    const pi = this.getQDPoint(i);
+    const pj = this.getQDPoint(j);
     if (!pi || !pj) return null;
 
     // Proper oct subtraction to avoid catastrophic cancellation
-    const deltaReOct = toOctSub(
+    const deltaReOct = toQDSub(
       [pi[0], pi[1], pi[2], pi[3]],
       [pj[0], pj[1], pj[2], pj[3]]
     );
-    const deltaImOct = toOctSub(
+    const deltaImOct = toQDSub(
       [pi[4], pi[5], pi[6], pi[7]],
       [pj[4], pj[5], pj[6], pj[7]]
     );
 
     // Sum oct result to f64
-    const deltaRe = octToNumber(deltaReOct);
-    const deltaIm = octToNumber(deltaImOct);
+    const deltaRe = qdToNumber(deltaReOct);
+    const deltaIm = qdToNumber(deltaImOct);
 
     // Check L∞ distance against actual threadingEpsilon
     if (Math.max(Math.abs(deltaRe), Math.abs(deltaIm)) <= this.threadingEpsilon) {
@@ -5830,8 +5830,8 @@ class ZhuoranBoard extends Board {
     this.refOrbitEscaped = false;
     this.refIterations = 0;  // Current length of reference orbit
     // Reference point (center of image) in quad precision
-    const refRe = octToQd(this.re);
-    const refIm = octToQd(this.im);
+    const refRe = qdToDD(this.re);
+    const refIm = qdToDD(this.im);
     this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
     // Per-pixel data (double precision)
     this.dc = [];  // Delta c from reference point [real, imag] pairs
@@ -5860,8 +5860,8 @@ class ZhuoranBoard extends Board {
 
   initPixels() {
     const sizeScalar = this.size;
-    const reDD = octToQd(this.re);
-    const imDD = octToQd(this.im);
+    const reDD = qdToDD(this.re);
+    const imDD = qdToDD(this.im);
     const pixW = sizeScalar / this.config.dimsWidth;
     const pixH = (sizeScalar / this.config.aspectRatio) / this.config.dimsHeight;
     const dimsWidth = this.config.dimsWidth;
@@ -5899,9 +5899,9 @@ class ZhuoranBoard extends Board {
   static fromSerialized(serialized) {
     const board = new ZhuoranBoard(
       serialized.k,
-      serialized.sizesOct[0],
-      serialized.sizesOct[1],
-      serialized.sizesOct[2],
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
       serialized.config,
       serialized.id
     );
@@ -6347,19 +6347,19 @@ class ZhuoranBoard extends Board {
 
 // Oct-precision perturbation board - extends ZhuoranBoard with oct precision reference orbit
 // Provides higher precision (~212 bits) for very deep zooms where quad precision is insufficient
-class OctZhuoranBoard extends ZhuoranBoard {
+class QDZhuoranBoard extends ZhuoranBoard {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
     // Build oct reference from the base class's oct values
-    const refReOct = this.re.slice();
-    const refImOct = this.im.slice();
+    const refReQD = this.re.slice();
+    const refImQD = this.im.slice();
     // Store oct-precision reference point
-    this.refC_oct = [...refReOct, ...refImOct];
+    this.refC_oct = [...refReQD, ...refImQD];
     // Initialize oct orbit array - stores full oct precision for each reference iteration
     // Each entry is [re0, re1, re2, re3, im0, im1, im2, im3]
     this.octOrbit = [
       [0, 0, 0, 0, 0, 0, 0, 0],  // Iteration 0: z = 0
-      [...refReOct, ...refImOct]  // Iteration 1: z = c
+      [...refReQD, ...refImQD]  // Iteration 1: z = c
     ];
     // Working array for oct precision operations
     this.tt = new Array(32);
@@ -6367,8 +6367,8 @@ class OctZhuoranBoard extends ZhuoranBoard {
     // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
     // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
     const threadingEpsilon = 10000 * this.epsilon;
-    const getOctPoint = (i) => this.octOrbit[i] || null;  // [re0..re3, im0..im3]
-    const spatialBucket = new OctSpatialBucket(threadingEpsilon, getOctPoint);
+    const getQDPoint = (i) => this.octOrbit[i] || null;  // [re0..re3, im0..im3]
+    const spatialBucket = new OctSpatialBucket(threadingEpsilon, getQDPoint);
     this.threading = new ReferenceOrbitThreading(spatialBucket);
     this.threading.addPoint(0);
     this.threading.addPoint(1);
@@ -6428,36 +6428,36 @@ class OctZhuoranBoard extends ZhuoranBoard {
 
     // Compute z^n for general exponent
     // z^2 = (zr + zi*i)^2 = zr^2 - zi^2 + 2*zr*zi*i
-    AoctSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
-    AoctSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
-    AoctMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3], ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
-    AoctAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
+    ArqdSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
+    ArqdSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
+    ArqdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3], ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
+    ArqdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
 
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      AoctMul(tt, 0, ri[0], ri[1], ri[2], ri[3], tt[8], tt[9], tt[10], tt[11]);         // j * ja
-      AoctMul(tt, 4, rr[0], rr[1], rr[2], rr[3], tt[16], tt[17], tt[18], tt[19]);       // r * ra
-      AoctAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
-      AoctMul(tt, 0, rr[0], rr[1], rr[2], rr[3], tt[8], tt[9], tt[10], tt[11]);         // r * ja
-      AoctMul(tt, 4, ri[0], ri[1], ri[2], ri[3], tt[16], tt[17], tt[18], tt[19]);       // j * ra
-      AoctAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
-      AoctSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);                                   // ra = rt
+      ArqdMul(tt, 0, ri[0], ri[1], ri[2], ri[3], tt[8], tt[9], tt[10], tt[11]);         // j * ja
+      ArqdMul(tt, 4, rr[0], rr[1], rr[2], rr[3], tt[16], tt[17], tt[18], tt[19]);       // r * ra
+      ArqdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
+      ArqdMul(tt, 0, rr[0], rr[1], rr[2], rr[3], tt[8], tt[9], tt[10], tt[11]);         // r * ja
+      ArqdMul(tt, 4, ri[0], ri[1], ri[2], ri[3], tt[16], tt[17], tt[18], tt[19]);       // j * ra
+      ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
+      ArqdSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);                                   // ra = rt
     }
 
     // Add c to get next z
-    const nzrOct = new Array(4);
-    const nziOct = new Array(4);
-    AoctAdd(nzrOct, 0, tt[16], tt[17], tt[18], tt[19],
+    const nzrQD = new Array(4);
+    const nziQD = new Array(4);
+    ArqdAdd(nzrQD, 0, tt[16], tt[17], tt[18], tt[19],
       this.refC_oct[0], this.refC_oct[1], this.refC_oct[2], this.refC_oct[3]);
-    AoctAdd(nziOct, 0, tt[8], tt[9], tt[10], tt[11],
+    ArqdAdd(nziQD, 0, tt[8], tt[9], tt[10], tt[11],
       this.refC_oct[4], this.refC_oct[5], this.refC_oct[6], this.refC_oct[7]);
 
     // Store in oct orbit
-    this.octOrbit.push([nzrOct[0], nzrOct[1], nzrOct[2], nzrOct[3],
-                        nziOct[0], nziOct[1], nziOct[2], nziOct[3]]);
+    this.octOrbit.push([nzrQD[0], nzrQD[1], nzrQD[2], nzrQD[3],
+                        nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
 
     // Convert to quad precision for refOrbit (used by perturbation iterations)
-    const nzrDD = octToQd(nzrOct);
-    const nziDD = octToQd(nziOct);
+    const nzrDD = qdToDD(nzrQD);
+    const nziDD = qdToDD(nziQD);
     this.refOrbit.push([nzrDD[0], nzrDD[1], nziDD[0], nziDD[1]]);
     this.refIterations++;
 
@@ -6473,11 +6473,11 @@ class OctZhuoranBoard extends ZhuoranBoard {
   }
 
   static fromSerialized(serialized) {
-    return new OctZhuoranBoard(
+    return new QDZhuoranBoard(
       serialized.k,
-      serialized.sizesOct[0],
-      serialized.sizesOct[1],
-      serialized.sizesOct[2],
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
       serialized.config,
       serialized.id
     );
@@ -6494,7 +6494,7 @@ class GpuBaseBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
-    // Note: size, re, im are available via inherited getters from Board (computed from sizesOct)
+    // Note: size, re, im are available via inherited getters from Board (computed from sizesQD)
 
     // WebGPU state (shared by all GPU board implementations)
     this.device = null;
@@ -7045,8 +7045,8 @@ class GpuBoard extends GpuBaseBoard {
     const workgroupSize = 64;
 
     // Prepare parameters for GPU
-    const re_double = octToNumber(this.re);
-    const im_double = octToNumber(this.im);
+    const re_double = qdToNumber(this.re);
+    const im_double = qdToNumber(this.im);
     const pixel_size = this.size;
 
     // Initialize CPU-side status tracking if needed
@@ -7309,9 +7309,9 @@ class GpuBoard extends GpuBaseBoard {
   static fromSerialized(serialized) {
     return new GpuBoard(
       serialized.k,
-      serialized.sizesOct[0],
-      serialized.sizesOct[1],
-      serialized.sizesOct[2],
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
       serialized.config,
       serialized.id
     );
@@ -8420,9 +8420,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   static fromSerialized(serialized) {
     return new GpuZhuoranBoard(
       serialized.k,
-      serialized.sizesOct[0],
-      serialized.sizesOct[1],
-      serialized.sizesOct[2],
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
       serialized.config,
       serialized.id
     );
@@ -8459,14 +8459,14 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     this.maxRefIterations = 10000;
 
     // Build oct reference point
-    const refReOct = toOct(re);
-    const refImOct = toOct(im);
+    const refReQD = toQD(re);
+    const refImQD = toQD(im);
 
     // Reference point (center of image) in oct precision
-    this.refC_oct = [...refReOct, ...refImOct];
+    this.refC_oct = [...refReQD, ...refImQD];
 
     // Reference orbit in oct precision: [r0, r1, r2, r3, i0, i1, i2, i3] per iteration
-    this.refOrbit = [[0, 0, 0, 0, 0, 0, 0, 0], [...refReOct, ...refImOct]];
+    this.refOrbit = [[0, 0, 0, 0, 0, 0, 0, 0], [...refReQD, ...refImQD]];
     this.refIterations = 1;
 
     // Working array for quad precision operations
@@ -8476,8 +8476,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
     // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
     const threadingEpsilon = 10000 * this.epsilon;
-    const getOctPoint = (i) => this.refOrbit[i] || null;  // [re0..re3, im0..im3]
-    const spatialBucket = new OctSpatialBucket(threadingEpsilon, getOctPoint);
+    const getQDPoint = (i) => this.refOrbit[i] || null;  // [re0..re3, im0..im3]
+    const spatialBucket = new OctSpatialBucket(threadingEpsilon, getQDPoint);
     this.threading = new ReferenceOrbitThreading(spatialBucket);
     this.threading.addPoint(0);
     this.threading.addPoint(1);
@@ -8507,31 +8507,31 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     }
 
     // Compute z^2 = (zr + zi*i)^2 = zr^2 - zi^2 + 2*zr*zi*i
-    AoctSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
-    AoctSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
-    AoctMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3], ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
-    AoctAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
+    ArqdSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
+    ArqdSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
+    ArqdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3], ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
+    ArqdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
 
     // For higher exponents (z^n where n > 2), multiply by z iteratively
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      AoctMul(tt, 0, ri[0], ri[1], ri[2], ri[3], tt[8], tt[9], tt[10], tt[11]);         // j * ja
-      AoctMul(tt, 4, rr[0], rr[1], rr[2], rr[3], tt[16], tt[17], tt[18], tt[19]);       // r * ra
-      AoctAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
-      AoctMul(tt, 0, rr[0], rr[1], rr[2], rr[3], tt[8], tt[9], tt[10], tt[11]);         // r * ja
-      AoctMul(tt, 4, ri[0], ri[1], ri[2], ri[3], tt[16], tt[17], tt[18], tt[19]);       // j * ra
-      AoctAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
-      AoctSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);                                   // ra = rt
+      ArqdMul(tt, 0, ri[0], ri[1], ri[2], ri[3], tt[8], tt[9], tt[10], tt[11]);         // j * ja
+      ArqdMul(tt, 4, rr[0], rr[1], rr[2], rr[3], tt[16], tt[17], tt[18], tt[19]);       // r * ra
+      ArqdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
+      ArqdMul(tt, 0, rr[0], rr[1], rr[2], rr[3], tt[8], tt[9], tt[10], tt[11]);         // r * ja
+      ArqdMul(tt, 4, ri[0], ri[1], ri[2], ri[3], tt[16], tt[17], tt[18], tt[19]);       // j * ra
+      ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
+      ArqdSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);                                   // ra = rt
     }
 
-    const nzrOct = new Array(4);
-    const nziOct = new Array(4);
-    AoctAdd(nzrOct, 0, tt[16], tt[17], tt[18], tt[19],
+    const nzrQD = new Array(4);
+    const nziQD = new Array(4);
+    ArqdAdd(nzrQD, 0, tt[16], tt[17], tt[18], tt[19],
       this.refC_oct[0], this.refC_oct[1], this.refC_oct[2], this.refC_oct[3]);
-    AoctAdd(nziOct, 0, tt[8], tt[9], tt[10], tt[11],
+    ArqdAdd(nziQD, 0, tt[8], tt[9], tt[10], tt[11],
       this.refC_oct[4], this.refC_oct[5], this.refC_oct[6], this.refC_oct[7]);
 
-    this.refOrbit.push([nzrOct[0], nzrOct[1], nzrOct[2], nzrOct[3],
-                        nziOct[0], nziOct[1], nziOct[2], nziOct[3]]);
+    this.refOrbit.push([nzrQD[0], nzrQD[1], nzrQD[2], nzrQD[3],
+                        nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
     this.refIterations++;
 
     if (this.refIterations >= 2584) {
@@ -9353,9 +9353,9 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
   static fromSerialized(serialized) {
     return new AdaptiveGpuBoard(
       serialized.k,
-      serialized.sizesOct[0],
-      serialized.sizesOct[1],
-      serialized.sizesOct[2],
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
       serialized.config,
       serialized.id
     );
@@ -9400,8 +9400,8 @@ self.onmessage = async function(e) {
         console.warn(`Board ${data.k}: non-finite size`, size);
       }
       let board;
-      const reArg = data.reOct;
-      const imArg = data.imOct;
+      const reArg = data.reQD;
+      const imArg = data.imQD;
       const pixelSize = size / data.config.dimsWidth;
       const GpuBoardClass = GpuBaseBoard.getBoardClass(pixelSize);
       const bytesPerPixel = GpuBoardClass.BYTES_PER_PIXEL;
@@ -9423,8 +9423,8 @@ self.onmessage = async function(e) {
           case 'zhuoran':
             board = new ZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
             break;
-          case 'octzhuoran':
-            board = new OctZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
+          case 'qdzhuoran':
+            board = new QDZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
             break;
           case 'perturbation':
             board = new PerturbationBoard(
@@ -9460,15 +9460,15 @@ self.onmessage = async function(e) {
               );
             } else {
               console.warn(
-                'AdaptiveGpuBoard requested but not available, falling back to OctZhuoranBoard'
+                'AdaptiveGpuBoard requested but not available, falling back to QDZhuoranBoard'
               );
-              board = new OctZhuoranBoard(
+              board = new QDZhuoranBoard(
                 data.k, size, reArg, imArg, data.config, data.id
               );
             }
             break;
-          case 'octcpu':
-            board = new OctCpuBoard(
+          case 'qdcpu':
+            board = new QDCpuBoard(
               data.k, size, reArg, imArg, data.config, data.id
             );
             break;
@@ -9496,31 +9496,31 @@ self.onmessage = async function(e) {
         // WebGPU disabled or unavailable - use CPU-based boards
         // CpuBoard uses double precision (float64, ~15 digits), good to ~1e-15 pixel size
         // PerturbationBoard uses quad precision reference for medium zooms
-        // OctZhuoranBoard uses oct precision (~212 bits) for deepest zooms
+        // QDZhuoranBoard uses oct precision (~212 bits) for deepest zooms
         if (pixelSize > 1e-15) {
           board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
         } else if (pixelSize > 1e-30) {
           board = new PerturbationBoard(data.k, size, reArg, imArg, data.config, data.id);
         } else {
-          board = new OctZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
+          board = new QDZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
         }
       }
 
       boards.set(data.k, board);
 
       // Store oct-precision coordinates
-      board.sizesOct = [size, data.reOct, data.imOct];
+      board.sizesQD = [size, data.reQD, data.imQD];
 
       // Show coordinates - use full precision only for very deep zoom (pixelSize < 1e-45)
       let coordStr;
       if (pixelSize < 1e-45) {
         const digits = Math.ceil(-Math.log10(pixelSize)) + 3;
-        const re_str = octToDecimalString(data.reOct, digits);
-        const im_str = octToDecimalString(data.imOct, digits);
+        const re_str = qdToDecimalString(data.reQD, digits);
+        const im_str = qdToDecimalString(data.imQD, digits);
         coordStr = `c=(${re_str}, ${im_str})`;
       } else {
-        const re_val = octToNumber(data.reOct);
-        const im_val = octToNumber(data.imOct);
+        const re_val = qdToNumber(data.reQD);
+        const im_val = qdToNumber(data.imQD);
         const precision = Math.max(3, Math.min(15, Math.ceil(-Math.log10(pixelSize)) + 2));
         coordStr = `(${re_val.toExponential(precision)}, ${im_val.toExponential(precision)})`;
       }
@@ -9531,10 +9531,10 @@ self.onmessage = async function(e) {
 
       // Log refC_oct at full precision for deep zoom boards to debug click vs URL differences
       if (board.refC_oct && pixelSize < 1e-45) {
-        const refReOct = [board.refC_oct[0], board.refC_oct[1], board.refC_oct[2], board.refC_oct[3]];
-        const refImOct = [board.refC_oct[4], board.refC_oct[5], board.refC_oct[6], board.refC_oct[7]];
+        const refReQD = [board.refC_oct[0], board.refC_oct[1], board.refC_oct[2], board.refC_oct[3]];
+        const refImQD = [board.refC_oct[4], board.refC_oct[5], board.refC_oct[6], board.refC_oct[7]];
         const digits = Math.ceil(-Math.log10(pixelSize)) + 3;
-        console.log(`  refC_oct: (${octToDecimalString(refReOct, digits)}, ${octToDecimalString(refImOct, digits)})`);
+        console.log(`  refC_oct: (${qdToDecimalString(refReQD, digits)}, ${qdToDecimalString(refImQD, digits)})`);
       }
 
       // Send board type info once on creation
@@ -9698,58 +9698,58 @@ function toDDc(c) {
 }
 
 // Oct helpers for both main thread and workers (via mathCode)
-function toOct(x) {
+function toQD(x) {
   if (!Array.isArray(x)) return [x, 0, 0, 0];
   if (x.length >= 4) return [x[0], x[1], x[2], x[3]];
   if (x.length === 3) return [x[0], x[1], x[2], 0];
   return [x[0], x[1] || 0, 0, 0];
 }
 
-function toOctScale(a, s) {
-  const o = toOct(a);
+function toQDScale(a, s) {
+  const o = toQD(a);
   return [o[0] * s, o[1] * s, o[2] * s, o[3] * s];
 }
 
-function toOctAdd(a, b) {
-  const aa = toOct(a);
-  const bb = toOct(b);
+function toQDAdd(a, b) {
+  const aa = toQD(a);
+  const bb = toQD(b);
   const out = new Array(4);
-  AoctAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+  ArqdAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
   return out;
 }
 
-function toOctSub(a, b) {
-  const bb = toOct(b);
-  return toOctAdd(a, [-bb[0], -bb[1], -bb[2], -bb[3]]);
+function toQDSub(a, b) {
+  const bb = toQD(b);
+  return toQDAdd(a, [-bb[0], -bb[1], -bb[2], -bb[3]]);
 }
 
-function toOctMul(a, b) {
-  const aa = toOct(a);
-  const bb = toOct(b);
+function toQDMul(a, b) {
+  const aa = toQD(a);
+  const bb = toQD(b);
   const out = new Array(4);
-  AoctMul(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+  ArqdMul(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
   return out;
 }
 
-function toOctSquare(a) {
-  const aa = toOct(a);
+function toQDSquare(a) {
+  const aa = toQD(a);
   const out = new Array(4);
-  AoctSquare(out, 0, aa[0], aa[1], aa[2], aa[3]);
+  ArqdSquare(out, 0, aa[0], aa[1], aa[2], aa[3]);
   return out;
 }
 
-function toOctDouble(a) {
-  const aa = toOct(a);
+function toQDDouble(a) {
+  const aa = toQD(a);
   return [aa[0] * 2, aa[1] * 2, aa[2] * 2, aa[3] * 2];
 }
 
-function octToNumber(o) {
-  const v = toOct(o);
+function qdToNumber(o) {
+  const v = toQD(o);
   return v[0] + v[1] + v[2] + v[3];
 }
 
-function octToQd(o) {
-  const v = toOct(o);
+function qdToDD(o) {
+  const v = toQD(o);
   return [v[0], v[1] + v[2] + v[3]];
 }
 
@@ -9825,7 +9825,7 @@ function decimalToOct(decimalString) {
   }
   // Normalize the result to ensure consistent representation across all oct operations.
   // Without this, limbs may not satisfy |limb[i]| < ulp(limb[i-1])/2, causing
-  // AoctAdd/toOctAdd to produce different representations when adding zero.
+  // ArqdAdd/toQDAdd to produce different representations when adding zero.
   // Uses quickTwoSum cascade to renormalize (fully inlined to avoid dependency issues).
   let s0 = limbs[0] + limbs[1], e0 = limbs[1] - (s0 - limbs[0]);
   let s1 = e0 + limbs[2], e1 = limbs[2] - (s1 - e0);
@@ -9837,7 +9837,7 @@ function decimalToOct(decimalString) {
 }
 
 // Convert oct value to decimal string with exact BigInt arithmetic.
-function octToDecimalString(oct, digits) {
+function qdToDecimalString(oct, digits) {
   const o = Array.isArray(oct) ? oct : [oct, 0, 0, 0];
   const internalScale = 60;
   let total = 0n;
@@ -10270,7 +10270,7 @@ function AsymmetricTwoSum(a, b) {
 
 // Three-sum from QD library: combines three values with proper error propagation
 // Returns [sum, err1, err2] where sum + err1 + err2 = a + b + c (exactly)
-function AthreeSum(a, b, c) {
+function ArqdThreeSum(a, b, c) {
   let [t1, t2] = AsymmetricTwoSum(a, b);
   let [newA, t3] = AsymmetricTwoSum(c, t1);
   let [newB, newC] = AsymmetricTwoSum(t2, t3);
@@ -10330,13 +10330,13 @@ function ArddAbsSub(r, i, a1, a2, b1, b2) {
 
 // Oct-double (four-limb) helpers for deeper precision
 
-function AoctTwoProduct(a, b) {
+function ArqdTwoProduct(a, b) {
   const tmp = [];
   AtwoProduct(tmp, 0, a, b);
   return [tmp[0], tmp[1]];
 }
 
-function AoctTwoSquare(a) {
+function ArqdTwoSquare(a) {
   const tmp = [];
   AtwoSquare(tmp, 0, a);
   return [tmp[0], tmp[1]];
@@ -10344,7 +10344,7 @@ function AoctTwoSquare(a) {
 
 // Renormalization algorithm from QD library (Hida, Li, Bailey)
 // Takes 5 inputs and produces 4 normalized outputs
-function AoctRenorm(r, i, c0, c1, c2, c3, c4) {
+function ArqdRenorm(r, i, c0, c1, c2, c3, c4) {
   let t0, t1, t2, t3, s;
 
   // First pass: propagate from bottom to top, collecting errors
@@ -10364,17 +10364,17 @@ function AoctRenorm(r, i, c0, c1, c2, c3, c4) {
 
   c3 = t0 + t1;
 
-  AoctSet(r, i, c0, c1, c2, c3);
+  ArqdSet(r, i, c0, c1, c2, c3);
 }
 
-function AoctSet(r, i, a1, a2, a3, a4) {
+function ArqdSet(r, i, a1, a2, a3, a4) {
   r[i] = a1;
   r[i+1] = a2;
   r[i+2] = a3;
   r[i+3] = a4;
 }
 
-function AoctcCopy(r, i, s, si) {
+function ArqdcCopy(r, i, s, si) {
   r[i] = s[si];
   r[i+1] = s[si+1];
   r[i+2] = s[si+2];
@@ -10385,11 +10385,11 @@ function AoctcCopy(r, i, s, si) {
   r[i+7] = s[si+7];
 }
 
-function AoctcGet(s, si) {
+function ArqdcGet(s, si) {
   return s.slice(si, si+8);
 }
 
-function AoctAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
+function ArqdAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   let s0, s1, s2, s3, s4, t0, t1, t2;
   [s0, t0] = AsymmetricTwoSum(a1, b1);
   [s1, t1] = AsymmetricTwoSum(a2, b2);
@@ -10414,28 +10414,28 @@ function AoctAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   [s2, s3] = AquickTwoSum(s2, s3);
   [s1, s2] = AquickTwoSum(s1, s2);
 
-  AoctSet(r, i, s0, s1, s2, s3);
+  ArqdSet(r, i, s0, s1, s2, s3);
 }
 
 // QD library sloppy_mul algorithm (Hida, Li, Bailey)
 // Uses TwoProduct for 6 products (levels 0-2) for nearly full 212-bit precision
-function AoctMul(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
+function ArqdMul(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   // Level 0: a[0]*b[0]
-  let [p0, q0] = AoctTwoProduct(a1, b1);
+  let [p0, q0] = ArqdTwoProduct(a1, b1);
 
   // Level 1: a[0]*b[1], a[1]*b[0]
-  let [p1, q1] = AoctTwoProduct(a1, b2);
-  let [p2, q2] = AoctTwoProduct(a2, b1);
+  let [p1, q1] = ArqdTwoProduct(a1, b2);
+  let [p2, q2] = ArqdTwoProduct(a2, b1);
 
   // Level 2: a[0]*b[2], a[1]*b[1], a[2]*b[0]
-  let [p3, q3] = AoctTwoProduct(a1, b3);
-  let [p4, q4] = AoctTwoProduct(a2, b2);
-  let [p5, q5] = AoctTwoProduct(a3, b1);
+  let [p3, q3] = ArqdTwoProduct(a1, b3);
+  let [p4, q4] = ArqdTwoProduct(a2, b2);
+  let [p5, q5] = ArqdTwoProduct(a3, b1);
 
   // Accumulate terms using three_sum
-  [p1, p2, q0] = AthreeSum(p1, p2, q0);
-  [p2, q1, q2] = AthreeSum(p2, q1, q2);
-  [p3, p4, p5] = AthreeSum(p3, p4, p5);
+  [p1, p2, q0] = ArqdThreeSum(p1, p2, q0);
+  [p2, q1, q2] = ArqdThreeSum(p2, q1, q2);
+  [p3, p4, p5] = ArqdThreeSum(p3, p4, p5);
 
   // Further combining
   let [s0, t0] = AsymmetricTwoSum(p2, p3);
@@ -10448,28 +10448,28 @@ function AoctMul(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   s1 += a1 * b4 + a2 * b3 + a3 * b2 + a4 * b1 + q0 + q3 + q4 + q5;
 
   // Renormalize
-  AoctRenorm(r, i, p0, p1, s0, s1, s2);
+  ArqdRenorm(r, i, p0, p1, s0, s1, s2);
 }
 
 // QD library optimized sqr algorithm (Hida, Li, Bailey)
 // Exploits symmetry: a[i]*a[j] = a[j]*a[i], so compute once and double
 // Uses TwoSquare (cheaper than TwoProduct) where possible
-function AoctSquare(r, i, a1, a2, a3, a4) {
+function ArqdSquare(r, i, a1, a2, a3, a4) {
   // Level 0: a[0]² - use TwoSquare
-  let [p0, q0] = AoctTwoSquare(a1);
+  let [p0, q0] = ArqdTwoSquare(a1);
 
   // Level 1: 2*a[0]*a[1] - single TwoProduct with doubled arg
-  let [p1, q1] = AoctTwoProduct(2 * a1, a2);
+  let [p1, q1] = ArqdTwoProduct(2 * a1, a2);
 
   // Level 2: 2*a[0]*a[2] + a[1]²
-  let [p2, q2] = AoctTwoProduct(2 * a1, a3);
-  let [p3, q3] = AoctTwoSquare(a2);
+  let [p2, q2] = ArqdTwoProduct(2 * a1, a3);
+  let [p3, q3] = ArqdTwoSquare(a2);
 
   // Accumulate level 1
-  [p1, p2, q0] = AthreeSum(p1, q0, p2);
+  [p1, p2, q0] = ArqdThreeSum(p1, q0, p2);
 
   // Accumulate level 2
-  [p2, q1, q2] = AthreeSum(p2, q1, q2);
+  [p2, q1, q2] = ArqdThreeSum(p2, q1, q2);
   [p3, q3] = AsymmetricTwoSum(p3, q3);
 
   // Combine accumulated values
@@ -10483,13 +10483,13 @@ function AoctSquare(r, i, a1, a2, a3, a4) {
   s1 += 2 * a1 * a4 + 2 * a2 * a3 + q0;
 
   // Renormalize
-  AoctRenorm(r, i, p0, p1, s0, s1, s2);
+  ArqdRenorm(r, i, p0, p1, s0, s1, s2);
 }
 
 // Oct-precision absolute difference: r = |a - b|
-// Used for cycle detection in OctPerturbationBoard
-function AoctAbsSub(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
-  AoctAdd(r, i, a1, a2, a3, a4, -b1, -b2, -b3, -b4);
+// Used for cycle detection in QDPerturbationBoard
+function ArqdAbsSub(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
+  ArqdAdd(r, i, a1, a2, a3, a4, -b1, -b2, -b3, -b4);
   if (r[i] + r[i+1] + r[i+2] + r[i+3] < 0) {
     r[i] = -r[i];
     r[i+1] = -r[i+1];
@@ -10521,48 +10521,25 @@ function fibonacciPeriod(iteration) {
 }
 
 // Catmull-Rom spline interpolation for smooth movie camera paths.
-// Uses quad-precision for numerical stability with close control points.
-function catmullRom1D(p0, p1, p2, p3, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const c0 = (-t3 + 2*t2 - t) / 2;
-  // c1 = (3*t3 - 5*t2 + 2) / 2; // unneeded since p1 = 0
-  const c2 = (-3*t3 + 4*t2 + t) / 2;
-  const c3 = (t3 - t2) / 2;
-  // Compute offsets from p1 for numerical stability.
-  const s0 = ddSub(p0, p1);
-  const s2 = ddSub(p2, p1);
-  const s3 = ddSub(p3, p1);
-  return ddAdd(ddAdd(ddAdd(ddScale(s0, c0),
-           ddScale(s3, c3)), ddScale(s2, c2)), p1);
-}
-
-function catmullRomSpline(p0, p1, p2, p3, t) {
-  return [
-    catmullRom1D(p0[0], p1[0], p2[0], p3[0], t),
-    catmullRom1D(p0[1], p1[1], p2[1], p3[1], t)
-  ];
-}
-
-// Oct-precision Catmull-Rom spline for deep zoom movie interpolation
-function catmullRom1DOct(p0, p1, p2, p3, t) {
+// Uses quad-double precision for numerical stability at deep zoom.
+function catmullRom1DQD(p0, p1, p2, p3, t) {
   const t2 = t * t;
   const t3 = t2 * t;
   const c0 = (-t3 + 2*t2 - t) / 2;
   const c2 = (-3*t3 + 4*t2 + t) / 2;
   const c3 = (t3 - t2) / 2;
   // Compute offsets from p1 for numerical stability
-  const s0 = toOctSub(p0, p1);
-  const s2 = toOctSub(p2, p1);
-  const s3 = toOctSub(p3, p1);
-  return toOctAdd(toOctAdd(toOctAdd(toOctScale(s0, c0),
-           toOctScale(s3, c3)), toOctScale(s2, c2)), p1);
+  const s0 = toQDSub(p0, p1);
+  const s2 = toQDSub(p2, p1);
+  const s3 = toQDSub(p3, p1);
+  return toQDAdd(toQDAdd(toQDAdd(toQDScale(s0, c0),
+           toQDScale(s3, c3)), toQDScale(s2, c2)), p1);
 }
 
-function catmullRomSplineOct(p0, p1, p2, p3, t) {
+function catmullRomSplineQD(p0, p1, p2, p3, t) {
   return [
-    catmullRom1DOct(p0[0], p1[0], p2[0], p3[0], t),
-    catmullRom1DOct(p0[1], p1[1], p2[1], p3[1], t)
+    catmullRom1DQD(p0[0], p1[0], p2[0], p3[0], t),
+    catmullRom1DQD(p0[1], p1[1], p2[1], p3[1], t)
   ];
 }
 

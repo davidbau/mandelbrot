@@ -96,14 +96,14 @@ describe('Parent-child view iteration matching', () => {
       const config = window.explorer.config;
 
       // Get view centers and sizes
-      // sizesOct format: [sizeDouble, reOct, imOct]
-      const v0Size = view0.sizesOct[0];  // size is stored as double
-      const v0CenterROct = view0.sizesOct[1];
-      const v0CenterIOct = view0.sizesOct[2];
+      // sizesQD format: [sizeDouble, reOct, imOct]
+      const v0Size = view0.sizesQD[0];  // size is stored as double
+      const v0CenterROct = view0.sizesQD[1];
+      const v0CenterIOct = view0.sizesQD[2];
 
-      const v1Size = view1.sizesOct[0];  // size is stored as double
-      const v1CenterROct = view1.sizesOct[1];
-      const v1CenterIOct = view1.sizesOct[2];
+      const v1Size = view1.sizesQD[0];  // size is stored as double
+      const v1CenterROct = view1.sizesQD[1];
+      const v1CenterIOct = view1.sizesQD[2];
       const zoomFactor = v0Size / v1Size;
 
       // For each pixel in view 1, find the corresponding pixel in view 0
@@ -128,17 +128,17 @@ describe('Parent-child view iteration matching', () => {
           // Get the complex coordinate of this pixel in view 1
           const v1PixelC = view1.currentc(v1idx);
           // v1PixelC is oct format: [r0, r1, r2, r3, i0, i1, i2, i3]
-          const pixelROct = [v1PixelC[0], v1PixelC[1], v1PixelC[2], v1PixelC[3]];
-          const pixelIOct = [v1PixelC[4], v1PixelC[5], v1PixelC[6], v1PixelC[7]];
+          const pixelRQD = [v1PixelC[0], v1PixelC[1], v1PixelC[2], v1PixelC[3]];
+          const pixelIQD = [v1PixelC[4], v1PixelC[5], v1PixelC[6], v1PixelC[7]];
 
           // Convert this coordinate to a pixel position in view 0
           // x = (pixelR - v0CenterR) / v0Size + 0.5
           // y = 0.5 - (pixelI - v0CenterI) / (v0Size / aspectRatio)
-          const deltaR = toOctSub(pixelROct, v0CenterROct);
-          const deltaI = toOctSub(pixelIOct, v0CenterIOct);
+          const deltaR = toQDSub(pixelRQD, v0CenterROct);
+          const deltaI = toQDSub(pixelIQD, v0CenterIOct);
 
-          const v0x = Math.round((octToNumber(deltaR) / v0Size + 0.5) * dimsWidth);
-          const v0y = Math.round((0.5 - octToNumber(deltaI) * aspectRatio / v0Size) * dimsHeight);
+          const v0x = Math.round((qdToNumber(deltaR) / v0Size + 0.5) * dimsWidth);
+          const v0y = Math.round((0.5 - qdToNumber(deltaI) * aspectRatio / v0Size) * dimsHeight);
 
           // Check if this pixel is within view 0's bounds
           if (v0x >= 0 && v0x < dimsWidth && v0y >= 0 && v0y < dimsHeight) {
@@ -157,8 +157,8 @@ describe('Parent-child view iteration matching', () => {
               samples.push({
                 v1x, v1y, v0x, v0y,
                 v0iter, v1iter, diff,
-                pixelR: octToNumber(pixelROct),
-                pixelI: octToNumber(pixelIOct)
+                pixelR: qdToNumber(pixelRQD),
+                pixelI: qdToNumber(pixelIQD)
               });
             }
           }
@@ -233,13 +233,13 @@ describe('Parent-child view iteration matching', () => {
       const view1 = window.explorer.grid.views[1];
       const config = window.explorer.config;
 
-      const v0Size = view0.sizesOct[0];
-      const v0CenterROct = view0.sizesOct[1];
-      const v0CenterIOct = view0.sizesOct[2];
+      const v0Size = view0.sizesQD[0];
+      const v0CenterROct = view0.sizesQD[1];
+      const v0CenterIOct = view0.sizesQD[2];
 
-      const v1Size = view1.sizesOct[0];
-      const v1CenterROct = view1.sizesOct[1];
-      const v1CenterIOct = view1.sizesOct[2];
+      const v1Size = view1.sizesQD[0];
+      const v1CenterROct = view1.sizesQD[1];
+      const v1CenterIOct = view1.sizesQD[2];
       const zoomFactor = v0Size / v1Size;
 
       const samples = [];
@@ -259,14 +259,14 @@ describe('Parent-child view iteration matching', () => {
           const v1idx = v1y * dimsWidth + v1x;
 
           const v1PixelC = view1.currentc(v1idx);
-          const pixelROct = [v1PixelC[0], v1PixelC[1], v1PixelC[2], v1PixelC[3]];
-          const pixelIOct = [v1PixelC[4], v1PixelC[5], v1PixelC[6], v1PixelC[7]];
+          const pixelRQD = [v1PixelC[0], v1PixelC[1], v1PixelC[2], v1PixelC[3]];
+          const pixelIQD = [v1PixelC[4], v1PixelC[5], v1PixelC[6], v1PixelC[7]];
 
-          const deltaR = toOctSub(pixelROct, v0CenterROct);
-          const deltaI = toOctSub(pixelIOct, v0CenterIOct);
+          const deltaR = toQDSub(pixelRQD, v0CenterROct);
+          const deltaI = toQDSub(pixelIQD, v0CenterIOct);
 
-          const v0x = Math.round((octToNumber(deltaR) / v0Size + 0.5) * dimsWidth);
-          const v0y = Math.round((0.5 - octToNumber(deltaI) * aspectRatio / v0Size) * dimsHeight);
+          const v0x = Math.round((qdToNumber(deltaR) / v0Size + 0.5) * dimsWidth);
+          const v0y = Math.round((0.5 - qdToNumber(deltaI) * aspectRatio / v0Size) * dimsHeight);
 
           if (v0x >= 0 && v0x < dimsWidth && v0y >= 0 && v0y < dimsHeight) {
             const v0idx = v0y * dimsWidth + v0x;

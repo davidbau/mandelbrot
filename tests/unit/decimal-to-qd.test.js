@@ -11,11 +11,11 @@ const { createTestEnvironment } = require('../utils/extract-code');
 const {
   decimalToOct,
   float64ToBigIntScaled,
-  octToDecimalString
+  qdToDecimalString
 } = createTestEnvironment([
   'decimalToOct',
   'float64ToBigIntScaled',
-  'octToDecimalString'
+  'qdToDecimalString'
 ]);
 
 function sumLimbs(limbs) {
@@ -290,19 +290,19 @@ describe('decimalToOct edge cases', () => {
   });
 });
 
-describe('octToDecimalString', () => {
+describe('qdToDecimalString', () => {
   test('returns absolute value without sign prefix for negative numbers', () => {
     // This test catches the double-negative URL bug where formatcomplex adds
-    // its own sign prefix, so octToDecimalString must return unsigned value
+    // its own sign prefix, so qdToDecimalString must return unsigned value
     const negativeOct = [-1.8, 0, 0, 0];
-    const result = octToDecimalString(negativeOct, 5);
+    const result = qdToDecimalString(negativeOct, 5);
     expect(result).toBe('1.8');
     expect(result[0]).not.toBe('-');
   });
 
   test('returns absolute value without sign prefix for positive numbers', () => {
     const positiveOct = [1.8, 0, 0, 0];
-    const result = octToDecimalString(positiveOct, 5);
+    const result = qdToDecimalString(positiveOct, 5);
     expect(result).toBe('1.8');
     expect(result[0]).not.toBe('+');
   });
@@ -310,7 +310,7 @@ describe('octToDecimalString', () => {
   test('handles deep zoom coordinates near -1.8', () => {
     // Coordinate from the regression test URL
     const oct = decimalToOct('-1.799999999999999999999999999999999997574325104259492');
-    const result = octToDecimalString(oct, 50);
+    const result = qdToDecimalString(oct, 50);
     expect(result).not.toMatch(/^-/);  // Must not start with minus
     expect(result).toMatch(/^1\.799/);  // Should start with the absolute value
   });

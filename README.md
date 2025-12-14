@@ -16,8 +16,8 @@ The popup shows details at a point.
 
 Written by David Bau as a Javascript example in 2009; updated in 2020
 to handle high device pixel ratios, show orbits, and calculate
-periodicity. Updated again in 2024 to add double-double quad precision.
-Updated in 2025 to add GPU support and oct precision for zooms beyond 10^30.
+periodicity. Updated again in 2024 to add double-double (DD) precision for zooms to 10^30.
+Updated in 2025 to add GPU support and quad-double (QD) precision for zooms beyond 10^60.
 
 URL parameter options: use `?grid=3` to select 3-column view,
                    `c=-0.14-0.65i` to set center,
@@ -34,9 +34,9 @@ infinite number of iterations to render crisp fractals over time.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) - How the code is organized
-- [Algorithms](docs/ALGORITHMS.md) - Perturbation theory, cycle detection, double-double precision
-- [Math](docs/MATH.md) - Deep dive into the quad-precision arithmetic
-- [Oct Precision](docs/OCT-PRECISION.md) - Ultra-deep zoom with quad-double (62 digits)
+- [Algorithms](docs/ALGORITHMS.md) - Perturbation theory, cycle detection, double-double (DD) precision
+- [Math](docs/MATH.md) - Deep dive into the double-double (DD) arithmetic
+- [Quad-Double Precision](docs/QD-PRECISION.md) - Ultra-deep zoom with quad-double (QD, 62 digits)
 - [Computation](docs/COMPUTATION.md) - Workers, GPU acceleration, scheduling
 - [GPU Shaders](docs/GPU-SHADERS.md) - In-depth explanation of the WebGPU shader implementation
 - [Colors](docs/COLORS.md) - Histogram-based coloring, HCL color space
