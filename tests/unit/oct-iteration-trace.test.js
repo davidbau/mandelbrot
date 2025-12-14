@@ -25,7 +25,7 @@ const {
   AoctSet,
   AtwoProduct,
   AtwoSquare,
-  AqdSplit
+  ArddSplit
 } = createTestEnvironment([
   'toOct',
   'toOctAdd',
@@ -46,7 +46,7 @@ const {
   'AoctSet',
   'AtwoProduct',
   'AtwoSquare',
-  'AqdSplit'
+  'ArddSplit'
 ]);
 
 describe('oct iteration trace', () => {

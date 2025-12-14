@@ -265,19 +265,19 @@ describe('Worker Blob Line Number Alignment', () => {
     const blob = buildWorkerBlob();
     const lines = blob.split('\n');
 
-    // Find qdDouble function (a simple 3-line function in mathCode)
-    const qdDoubleIndex = lines.findIndex(l => l.includes('function qdDouble'));
-    expect(qdDoubleIndex).toBeGreaterThan(0);
+    // Find ddDouble function (a simple 3-line function in mathCode)
+    const ddDoubleIndex = lines.findIndex(l => l.includes('function ddDouble'));
+    expect(ddDoubleIndex).toBeGreaterThan(0);
 
     // Verify the function content is on expected subsequent lines
-    expect(lines[qdDoubleIndex]).toContain('function qdDouble(a)');
-    expect(lines[qdDoubleIndex + 1]).toContain('return [a[0] * 2, a[1] * 2]');
-    expect(lines[qdDoubleIndex + 2]).toBe('}');
+    expect(lines[ddDoubleIndex]).toContain('function ddDouble(a)');
+    expect(lines[ddDoubleIndex + 1]).toContain('return [a[0] * 2, a[1] * 2]');
+    expect(lines[ddDoubleIndex + 2]).toBe('}');
 
     // Find CpuBoard class (in workerCode)
     const cpuBoardIndex = lines.findIndex(l => l.includes('class CpuBoard'));
     expect(cpuBoardIndex).toBeGreaterThan(0);
-    expect(cpuBoardIndex).toBeLessThan(qdDoubleIndex); // workerCode before mathCode
+    expect(cpuBoardIndex).toBeLessThan(ddDoubleIndex); // workerCode before mathCode
   });
 
   test('workerCode.js and mathCode.js are extracted correctly', () => {
@@ -296,6 +296,6 @@ describe('Worker Blob Line Number Alignment', () => {
     // workerCode should contain Board class
     expect(workerCode).toContain('class Board');
     // mathCode should contain quad-double functions
-    expect(mathCode).toContain('qdAdd');
+    expect(mathCode).toContain('ddAdd');
   });
 });

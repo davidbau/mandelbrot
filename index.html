@@ -1120,7 +1120,7 @@ class View {
       for (const entry of vv) {
         const { index, z, p } = entry;
         this.nn[index] = -iter;
-        this.convergedData.set(index, { z: toQdc(z), p });
+        this.convergedData.set(index, { z: toDDc(z), p });
         changedIndices.push(index);
       }
       this.di += nn.length;
@@ -2134,7 +2134,7 @@ class ZoomManager {
     let ore = octToQd(oreOct);
     let oim = octToQd(oimOct);
     let rre = Config.CENTER_COORDINATE;
-    if (k === 0 && qdEq(ore, -0.5) && qdEq(oim, 0)) {
+    if (k === 0 && ddEq(ore, -0.5) && ddEq(oim, 0)) {
       // Myreberg / Feigenbaum point
       const baseRe = this.grid.views[0].re;
       oreOct = Config.FEIGENBAUM_POINT_OCT;
@@ -2763,8 +2763,8 @@ class URLHandler {
       const viewReOct = view ? view.re : state.sizes[j]?.[1];
       const viewImOct = view ? view.im : state.sizes[j]?.[2];
       if (j < state.sizes.length &&
-          !qdCompare(octToQd(viewReOct), octToQd(prev[0])) &&
-          !qdCompare(octToQd(viewImOct), octToQd(prev[1]))) {
+          !ddCompare(octToQd(viewReOct), octToQd(prev[0])) &&
+          !ddCompare(octToQd(viewImOct), octToQd(prev[1]))) {
         commas += ',';
       } else {
         if (prevj >= 0) {
@@ -4496,7 +4496,7 @@ class Board {
             this.config.exponent == 2);
   }
 
-  inspikeQdA(re1, re2, im1, im2) {
+  inspikeDDA(re1, re2, im1, im2) {
     // We do not iterate infinitely for chaotic points in the spike.
     // -1.401155 is the Feigenbaum point boundary
     return (im1 + im2 == 0.0 && re1 >= -2.0 && re1 < -1.401155 &&
@@ -4515,15 +4515,15 @@ class CpuBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
     const sizeScalar = this.size;
-    const reQd = octToQd(this.re);
-    const imQd = octToQd(this.im);
+    const reDD = octToQd(this.re);
+    const imDD = octToQd(this.im);
     // Initialize board: cc = c values, zz = current z, bb = checkpoint z, ss = active pixel indices
     for (let y = 0; y < this.config.dimsHeight; y++) {
       const jFrac = (0.5 - (y / this.config.dimsHeight));
-      const j = jFrac * (sizeScalar / this.config.aspectRatio) + imQd[0];  // Scale by height
+      const j = jFrac * (sizeScalar / this.config.aspectRatio) + imDD[0];  // Scale by height
       for (let x = 0; x < this.config.dimsWidth; x++) {
         const rFrac = ((x / this.config.dimsWidth) - 0.5);
-        const r = rFrac * sizeScalar + reQd[0];  // Scale by width
+        const r = rFrac * sizeScalar + reDD[0];  // Scale by width
         this.cc.push(r, j);
         if (this.inspike(r, j)) {
           this.ch += 1;
@@ -4945,20 +4945,20 @@ class PerturbationBoard extends Board {
     const pixW = size / this.config.dimsWidth;
     const pixH = (size / this.config.aspectRatio) / this.config.dimsHeight;
     const cc = this.cc;
-    re = toQd(re);
-    im = toQd(im);
+    re = toDD(re);
+    im = toDD(im);
 
     // Initialize reference points and perturbations
     for (let gy = 0; gy < gridSizeY; gy++) {
       const ry = Math.round(gy * stepY + offsetY);
       const jFrac = (0.5 - (ry / this.config.dimsHeight));
-      const cj = qdAdd(im, qdScale(toQd(jFrac), size / this.config.aspectRatio))
+      const cj = ddAdd(im, ddScale(toDD(jFrac), size / this.config.aspectRatio))
       for (let gx = 0; gx < gridSizeX; gx++) {
         const rx = Math.round(gx * stepX + offsetX);
         const rFrac = ((rx / this.config.dimsWidth) - 0.5);
         const refIndex = (ry * this.config.dimsWidth + rx);
         const ri = refIndex * 4;
-        const cr = qdAdd(re, qdScale(toQd(rFrac), size));
+        const cr = ddAdd(re, ddScale(toDD(rFrac), size));
 
         // Initialize reference point
         cc[ri] = cr[0];
@@ -4966,7 +4966,7 @@ class PerturbationBoard extends Board {
         cc[ri+2] = cj[0];
         cc[ri+3] = cj[1];
         this.quadIndexes.push(refIndex);
-        let refspike = this.inspikeQdA(cr[0], cr[1], cj[0], cj[1]);
+        let refspike = this.inspikeDDA(cr[0], cr[1], cj[0], cj[1]);
         if (refspike) {
           this.ch += 1;
         }
@@ -5069,7 +5069,7 @@ class PerturbationBoard extends Board {
     const isCheckpoint = fibonacciPeriod(this.it) === 1;
     for (const index of this.quadIndexes) {
       if (isCheckpoint && !this.nn[index]) {
-        AqdcCopy(this.bb, index*4, this.zz, index*4);  // bb = checkpoint z
+        ArddcCopy(this.bb, index*4, this.zz, index*4);  // bb = checkpoint z
         this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
       }
       let r = this.precomputeQuad(index);
@@ -5081,7 +5081,7 @@ class PerturbationBoard extends Board {
         if (r < 0) {
           changes.vv.push({
             index: index,
-            z: AqdcGet(this.nz, index*4),
+            z: ArddcGet(this.nz, index*4),
             p: this.pp[index]  // period
           });
         } else {
@@ -5130,7 +5130,7 @@ class PerturbationBoard extends Board {
     }
     // Finally update quad-precision z with precomputed values
     for (const index of this.quadIndexes) {
-      AqdcCopy(this.zz, index*4, this.nz, index*4);
+      ArddcCopy(this.zz, index*4, this.nz, index*4);
     }
     // Tally progress
     let diverged = results[2];
@@ -5176,37 +5176,37 @@ class PerturbationBoard extends Board {
     const br2 = this.bb[m4+1];
     const bj1 = this.bb[m4+2];
     const bj2 = this.bb[m4+3];
-    AqdSquare(tt, 0, r1, r2);                    // 0: rsq = r**2
-    AqdSquare(tt, 2, j1, j2);                    // 2: jsq = j**2
-    AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // 4: d = rsq+jsq
+    AddSquare(tt, 0, r1, r2);                    // 0: rsq = r**2
+    AddSquare(tt, 2, j1, j2);                    // 2: jsq = j**2
+    AddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // 4: d = rsq+jsq
     if (tt[4] > 4) {  // Check divergence: |z|² > 4
       this.nn[m] = this.it;
-      AqdcCopy(nz, m4, this.zz, m4);
+      ArddcCopy(nz, m4, this.zz, m4);
       return 1;  // Diverged
     }
-    AqdMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // 6: ja = 2*r*j
-    AqdAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // 8: ra = rsq-jsq
+    AddMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // 6: ja = 2*r*j
+    AddAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // 8: ra = rsq-jsq
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      AqdMul(tt, 0, j1, j2, tt[6], tt[7]);         // 0: j * ja
-      AqdMul(tt, 2, r1, r2, tt[8], tt[9]);         // 2: r * ra
-      AqdAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // 4: rt = r*ra - j*ja
-      AqdMul(tt, 0, r1, r2, tt[6], tt[7]);         // 0: r * ja
-      AqdMul(tt, 2, j1, j2, tt[8], tt[9]);         // 2: j * ra
-      AqdAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // 6: ja = r*ja + j*ra
-      AqdSet(tt, 8, tt[4], tt[5]);                 // 8: ra = rt
+      AddMul(tt, 0, j1, j2, tt[6], tt[7]);         // 0: j * ja
+      AddMul(tt, 2, r1, r2, tt[8], tt[9]);         // 2: r * ra
+      AddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // 4: rt = r*ra - j*ja
+      AddMul(tt, 0, r1, r2, tt[6], tt[7]);         // 0: r * ja
+      AddMul(tt, 2, j1, j2, tt[8], tt[9]);         // 2: j * ra
+      AddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // 6: ja = r*ja + j*ra
+      ArddSet(tt, 8, tt[4], tt[5]);                 // 8: ra = rt
     }
-    AqdAdd(nz, m4, tt[8], tt[9], cr1, cr2);        // nz: nzr = ra + cr
-    AqdAdd(nz, m4+2, tt[6], tt[7], cj1, cj2);      // nz+2: nzj = ja + cj
+    AddAdd(nz, m4, tt[8], tt[9], cr1, cr2);        // nz: nzr = ra + cr
+    AddAdd(nz, m4+2, tt[6], tt[7], cj1, cj2);      // nz+2: nzj = ja + cj
     // Check convergence: compare new z to checkpoint
-    AqdAbsSub(tt, 0, br1, br2, nz[m4], nz[m4+1]);  // 0: abs(nzr - br)
-    AqdAbsSub(tt, 2, bj1, bj2, nz[m4+2], nz[m4+3]);// 2: abs(nzj - bj)
-    AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);     // 4: db = abs(nzr-br)+abs(nzj-bj)
+    ArddAbsSub(tt, 0, br1, br2, nz[m4], nz[m4+1]);  // 0: abs(nzr - br)
+    ArddAbsSub(tt, 2, bj1, bj2, nz[m4+2], nz[m4+3]);// 2: abs(nzj - bj)
+    AddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);     // 4: db = abs(nzr-br)+abs(nzj-bj)
     const db = tt[4] + tt[5]  // distance from checkpoint
     if (db <= this.epsilon2) {
       if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
-        if (this.inspikeQdA(cr1, cr2, cj1, cj2) && this.ch > 0) {
+        if (this.inspikeDDA(cr1, cr2, cj1, cj2) && this.ch > 0) {
           this.ch -= 1;
         }
         return -1;  // Converged
@@ -5303,10 +5303,10 @@ class PerturbationBoard extends Board {
     const ci = this.cc[m4+1];
     const refIndex = this.cc[m4+2];
     const ri4 = refIndex * 4;
-    AqdAdd(this.zz, m4, dr, 0, this.zz[ri4], this.zz[ri4+1])
-    AqdAdd(this.zz, m4+2, di, 0, this.zz[ri4+2], this.zz[ri4+3])
-    AqdAdd(this.cc, m4, cr, 0, this.cc[ri4], this.cc[ri4+1])
-    AqdAdd(this.cc, m4+2, ci, 0, this.cc[ri4+2], this.cc[ri4+3])
+    AddAdd(this.zz, m4, dr, 0, this.zz[ri4], this.zz[ri4+1])
+    AddAdd(this.zz, m4+2, di, 0, this.zz[ri4+2], this.zz[ri4+3])
+    AddAdd(this.cc, m4, cr, 0, this.cc[ri4], this.cc[ri4+1])
+    AddAdd(this.cc, m4+2, ci, 0, this.cc[ri4+2], this.cc[ri4+3])
   }
 
   initAsQuadPrecision(index, refcc) {
@@ -5315,8 +5315,8 @@ class PerturbationBoard extends Board {
     const ci = this.cc[m4+1];
     const refIndex = this.cc[m4+2];
     const ri4 = refIndex * 4;
-    AqdAdd(this.cc, m4, cr, 0, refcc[ri4], refcc[ri4+1])
-    AqdAdd(this.cc, m4+2, ci, 0, refcc[ri4+2], refcc[ri4+3])
+    AddAdd(this.cc, m4, cr, 0, refcc[ri4], refcc[ri4+1])
+    AddAdd(this.cc, m4+2, ci, 0, refcc[ri4+2], refcc[ri4+3])
   }
 }
 
@@ -5357,7 +5357,7 @@ class OctPerturbationBoard extends Board {
         this.bb[m8] = cr[0]; this.bb[m8+1] = cr[1]; this.bb[m8+2] = cr[2]; this.bb[m8+3] = cr[3];
         this.bb[m8+4] = cj[0]; this.bb[m8+5] = cj[1]; this.bb[m8+6] = cj[2]; this.bb[m8+7] = cj[3];
         this.octIndexes.push(idx);
-        if (this.inspikeQdA(cr[0], cr[1], cj[0], cj[1])) {
+        if (this.inspikeDDA(cr[0], cr[1], cj[0], cj[1])) {
           this.ch += 1;
         }
       }
@@ -5531,7 +5531,7 @@ class OctPerturbationBoard extends Board {
       if (!this.pp[m]) { this.pp[m] = this.it; }
       if (db <= this.epsilon) {
         this.nn[m] = -this.it;
-        if (this.inspikeQdA(cr1, cr2, cj1, cj2) && this.ch > 0) {
+        if (this.inspikeDDA(cr1, cr2, cj1, cj2) && this.ch > 0) {
           this.ch -= 1;
         }
         return -1;  // Converged
@@ -5664,29 +5664,29 @@ class SpatialBucket {
 }
 
 /**
- * QdSpatialBucket - for quad-double precision points
+ * DDSpatialBucket - for quad-double precision points
  * Point format: [re_hi, re_lo, im_hi, im_lo]
  */
-class QdSpatialBucket extends SpatialBucket {
-  constructor(threadingEpsilon, getQdPoint) {
+class DDSpatialBucket extends SpatialBucket {
+  constructor(threadingEpsilon, getDDPoint) {
     super(threadingEpsilon);
-    this.getQdPoint = getQdPoint;
+    this.getDDPoint = getDDPoint;
   }
 
   getF64Point(i) {
-    const p = this.getQdPoint(i);
+    const p = this.getDDPoint(i);
     if (!p) return null;
     return { re: p[0] + p[1], im: p[2] + p[3] };
   }
 
   verifyAndGetDelta(i, j) {
-    const pi = this.getQdPoint(i);
-    const pj = this.getQdPoint(j);
+    const pi = this.getDDPoint(i);
+    const pj = this.getDDPoint(j);
     if (!pi || !pj) return null;
 
     // Proper qd subtraction to avoid catastrophic cancellation
-    const deltaReQd = qdSub([pi[0], pi[1]], [pj[0], pj[1]]);
-    const deltaImQd = qdSub([pi[2], pi[3]], [pj[2], pj[3]]);
+    const deltaReQd = ddSub([pi[0], pi[1]], [pj[0], pj[1]]);
+    const deltaImQd = ddSub([pi[2], pi[3]], [pj[2], pj[3]]);
 
     // Sum qd result to f64
     const deltaRe = deltaReQd[0] + deltaReQd[1];
@@ -5749,7 +5749,7 @@ class OctSpatialBucket extends SpatialBucket {
 // Reference Orbit Threading - enables robust cycle detection despite rebasing
 class ReferenceOrbitThreading {
   /**
-   * @param {SpatialBucket} spatialBucket - A precision-aware spatial bucket (QdSpatialBucket or OctSpatialBucket)
+   * @param {SpatialBucket} spatialBucket - A precision-aware spatial bucket (DDSpatialBucket or OctSpatialBucket)
    */
   constructor(spatialBucket) {
     const maxCycleLength = 1e5;
@@ -5849,8 +5849,8 @@ class ZhuoranBoard extends Board {
     // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
     // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
     const threadingEpsilon = 10000 * this.epsilon;
-    const getQdPoint = (i) => this.refOrbit[i] || null;  // [re_hi, re_lo, im_hi, im_lo]
-    const spatialBucket = new QdSpatialBucket(threadingEpsilon, getQdPoint);
+    const getDDPoint = (i) => this.refOrbit[i] || null;  // [re_hi, re_lo, im_hi, im_lo]
+    const spatialBucket = new DDSpatialBucket(threadingEpsilon, getDDPoint);
     this.threading = new ReferenceOrbitThreading(spatialBucket);
     this.threading.addPoint(0);  // iter 0
     this.threading.addPoint(1);  // iter 1
@@ -5860,8 +5860,8 @@ class ZhuoranBoard extends Board {
 
   initPixels() {
     const sizeScalar = this.size;
-    const reQd = octToQd(this.re);
-    const imQd = octToQd(this.im);
+    const reDD = octToQd(this.re);
+    const imDD = octToQd(this.im);
     const pixW = sizeScalar / this.config.dimsWidth;
     const pixH = (sizeScalar / this.config.aspectRatio) / this.config.dimsHeight;
     const dimsWidth = this.config.dimsWidth;
@@ -5869,8 +5869,8 @@ class ZhuoranBoard extends Board {
     const refRe = this.refC[0] + this.refC[1];
     const refIm = this.refC[2] + this.refC[3];
     // Convert quad precision arrays to doubles for perturbation deltas
-    const re_double = reQd[0] + reQd[1];
-    const im_double = imQd[0] + imQd[1];
+    const re_double = reDD[0] + reDD[1];
+    const im_double = imDD[0] + imDD[1];
     // Initialize all pixels as perturbations from the reference point
     for (let y = 0; y < dimsHeight; y++) {
       const yFrac = (0.5 - y / dimsHeight);
@@ -6008,9 +6008,9 @@ class ZhuoranBoard extends Board {
     const j2 = last[3];
 
     // Check for escape
-    AqdSquare(tt, 0, r1, r2);                    // rsq = r**2
-    AqdSquare(tt, 2, j1, j2);                    // jsq = j**2
-    AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
+    AddSquare(tt, 0, r1, r2);                    // rsq = r**2
+    AddSquare(tt, 2, j1, j2);                    // jsq = j**2
+    AddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
 
     // tt[4] is the high part of the magnitude squared (tt[5] is just the low correction)
     // Use very large escape radius for reference orbit to support all pixel iterations
@@ -6021,23 +6021,23 @@ class ZhuoranBoard extends Board {
     }
 
     // Compute z^n for general exponent
-    AqdMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // ja = 2*r*j
-    AqdAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // ra = rsq - jsq
+    AddMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // ja = 2*r*j
+    AddAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // ra = rsq - jsq
 
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      AqdMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
-      AqdMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
-      AqdAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
-      AqdMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
-      AqdMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
-      AqdAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
-      AqdSet(tt, 8, tt[4], tt[5]);                 // ra = rt
+      AddMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
+      AddMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
+      AddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
+      AddMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
+      AddMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
+      AddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
+      ArddSet(tt, 8, tt[4], tt[5]);                 // ra = rt
     }
 
     // Add c to get next z
     const newZ = [0, 0, 0, 0];
-    AqdAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
-    AqdAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
+    AddAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
+    AddAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
 
     this.refOrbit.push(newZ);
     this.refIterations++;
@@ -6456,9 +6456,9 @@ class OctZhuoranBoard extends ZhuoranBoard {
                         nziOct[0], nziOct[1], nziOct[2], nziOct[3]]);
 
     // Convert to quad precision for refOrbit (used by perturbation iterations)
-    const nzrQd = octToQd(nzrOct);
-    const nziQd = octToQd(nziOct);
-    this.refOrbit.push([nzrQd[0], nzrQd[1], nziQd[0], nziQd[1]]);
+    const nzrDD = octToQd(nzrOct);
+    const nziDD = octToQd(nziOct);
+    this.refOrbit.push([nzrDD[0], nzrDD[1], nziDD[0], nziDD[1]]);
     this.refIterations++;
 
     // Build thread-following map after the orbit settles (first 2000 iterations)
@@ -7335,8 +7335,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.maxRefIterations = 10000;
 
     // Reference point (center of image)
-    const refRe = Array.isArray(re) ? re : toQd(re);
-    const refIm = Array.isArray(im) ? im : toQd(im);
+    const refRe = Array.isArray(re) ? re : toDD(re);
+    const refIm = Array.isArray(im) ? im : toDD(im);
     this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
 
     // Initialize reference orbit: iteration 0 is z=0, iteration 1 is z=c
@@ -7351,8 +7351,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
     // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
     const threadingEpsilon = 10000 * this.epsilon;
-    const getQdPoint = (i) => this.refOrbit[i] || null;  // [re_hi, re_lo, im_hi, im_lo]
-    const spatialBucket = new QdSpatialBucket(threadingEpsilon, getQdPoint);
+    const getDDPoint = (i) => this.refOrbit[i] || null;  // [re_hi, re_lo, im_hi, im_lo]
+    const spatialBucket = new DDSpatialBucket(threadingEpsilon, getDDPoint);
     this.threading = new ReferenceOrbitThreading(spatialBucket);
     this.threading.addPoint(0);
     this.threading.addPoint(1);
@@ -7370,12 +7370,12 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const dimsArea = this.config.dimsArea;
 
     // Convert re/im to quad precision if needed
-    const re_qd = Array.isArray(re) ? re : toQd(re);
-    const im_qd = Array.isArray(im) ? im : toQd(im);
+    const re_qd = Array.isArray(re) ? re : toDD(re);
+    const im_qd = Array.isArray(im) ? im : toDD(im);
     // Convert size to scalar if it's an oct array (fixes NaN when size is array)
     const size_scalar = Array.isArray(size) ? size.reduce((a, b) => a + (b || 0), 0) : size;
-    const size_qd = toQd(size_scalar);
-    const sizeY_qd = toQd(size_scalar / this.config.aspectRatio);
+    const size_qd = toDD(size_scalar);
+    const sizeY_qd = toDD(size_scalar / this.config.aspectRatio);
 
     // Per-pixel data arrays
     this.dc = new Float32Array(dimsArea * 2);  // Delta c from reference [real, imag] pairs
@@ -7395,22 +7395,22 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       const yFrac = (dimsHeight / 2 - y) / dimsHeight;
 
       // ci_qd = im_qd + yFrac * sizeY_qd (in quad precision)
-      AqdMul(temp, 0, toQd(yFrac)[0], toQd(yFrac)[1], sizeY_qd[0], sizeY_qd[1]);
-      AqdAdd(ci_qd, 0, im_qd[0], im_qd[1], temp[0], temp[1]);
+      AddMul(temp, 0, toDD(yFrac)[0], toDD(yFrac)[1], sizeY_qd[0], sizeY_qd[1]);
+      AddAdd(ci_qd, 0, im_qd[0], im_qd[1], temp[0], temp[1]);
 
       // dci_qd = ci_qd - refC_imag
-      AqdAdd(dci_qd, 0, ci_qd[0], ci_qd[1], -this.refC[2], -this.refC[3]);
+      AddAdd(dci_qd, 0, ci_qd[0], ci_qd[1], -this.refC[2], -this.refC[3]);
 
       for (let x = 0; x < dimsWidth; x++) {
         // Use integer arithmetic to avoid float64 rounding: (x - dims/2) / dims
         const xFrac = (x - dimsWidth / 2) / dimsWidth;
 
         // cr_qd = re_qd + xFrac * size_qd (in quad precision)
-        AqdMul(temp, 0, toQd(xFrac)[0], toQd(xFrac)[1], size_qd[0], size_qd[1]);
-        AqdAdd(cr_qd, 0, re_qd[0], re_qd[1], temp[0], temp[1]);
+        AddMul(temp, 0, toDD(xFrac)[0], toDD(xFrac)[1], size_qd[0], size_qd[1]);
+        AddAdd(cr_qd, 0, re_qd[0], re_qd[1], temp[0], temp[1]);
 
         // dcr_qd = cr_qd - refC_real
-        AqdAdd(dcr_qd, 0, cr_qd[0], cr_qd[1], -this.refC[0], -this.refC[1]);
+        AddAdd(dcr_qd, 0, cr_qd[0], cr_qd[1], -this.refC[0], -this.refC[1]);
 
         const index = y * dimsWidth + x;
         const index2 = index * 2;
@@ -7596,9 +7596,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const j2 = last[3];
 
     // Check for escape
-    AqdSquare(tt, 0, r1, r2);                    // rsq = r**2
-    AqdSquare(tt, 2, j1, j2);                    // jsq = j**2
-    AqdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
+    AddSquare(tt, 0, r1, r2);                    // rsq = r**2
+    AddSquare(tt, 2, j1, j2);                    // jsq = j**2
+    AddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
 
     // Use very large escape radius for reference orbit
     if (tt[4] > 1e10) {
@@ -7607,22 +7607,22 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     }
 
     // Compute z^exponent using quad precision
-    AqdSet(tt, 8, r1, r2);  // ra = r
-    AqdSet(tt, 6, j1, j2);  // ja = j
+    ArddSet(tt, 8, r1, r2);  // ra = r
+    ArddSet(tt, 6, j1, j2);  // ja = j
     for (let ex = 1; ex < this.config.exponent; ex++) {
-      AqdMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
-      AqdMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
-      AqdAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
-      AqdMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
-      AqdMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
-      AqdAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
-      AqdSet(tt, 8, tt[4], tt[5]);                 // ra = rt
+      AddMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
+      AddMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
+      AddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
+      AddMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
+      AddMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
+      AddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
+      ArddSet(tt, 8, tt[4], tt[5]);                 // ra = rt
     }
 
     // Add c to get next z
     const newZ = [0, 0, 0, 0];
-    AqdAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
-    AqdAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
+    AddAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
+    AddAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
 
     this.refOrbit.push(newZ);
     this.refIterations++;
@@ -7674,8 +7674,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Compute delta in quad precision
     const closestPt = this.refOrbit[closestIter];
     const tt = this.tt;
-    AqdAdd(tt, 0, endpoint[0], endpoint[1], -closestPt[0], -closestPt[1]); // real delta
-    AqdAdd(tt, 2, endpoint[2], endpoint[3], -closestPt[2], -closestPt[3]); // imag delta
+    AddAdd(tt, 0, endpoint[0], endpoint[1], -closestPt[0], -closestPt[1]); // real delta
+    AddAdd(tt, 2, endpoint[2], endpoint[3], -closestPt[2], -closestPt[3]); // imag delta
 
     // Store loop parameters
     this.refOrbitLoop = {
@@ -8621,8 +8621,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     const mantissa = Math.pow(2, log2_pixelSize - this.initialScale);
 
     // Convert re/im to quad precision if needed
-    const re_qd = Array.isArray(re) ? re : toQd(re);
-    const im_qd = Array.isArray(im) ? im : toQd(im);
+    const re_qd = Array.isArray(re) ? re : toDD(re);
+    const im_qd = Array.isArray(im) ? im : toDD(im);
 
     // Per-pixel data arrays
     this.dc = new Float32Array(dimsArea * 2);       // Delta c [real, imag] pairs
@@ -9686,14 +9686,14 @@ async function iterateBoards() {
 <script id="mathCode">
 //////////// quad-precision (qd, double double) utilities ///////////
 
-function toQd(x) {
+function toDD(x) {
   return Array.isArray(x) ? x : [x, 0];
 }
 
-function toQdc(c) {
+function toDDc(c) {
   if (c.length == 4) { return c; }
-  const r = toQd(c[0]);
-  const j = toQd(c[1]);
+  const r = toDD(c[0]);
+  const j = toDD(c[1]);
   return [r[0], r[1], j[0], j[1]];
 }
 
@@ -9889,7 +9889,7 @@ function slow2Sum(a, b) {
   return [s, (a - (s - c)) + (b - c)];
 }
 
-function qdSplit(a) {
+function ddSplit(a) {
   const c = (134217729) * a;  // 2^27 + 1, Veltkamp-Dekker constant
   const x = c - (c - a);
   const y = a - x;
@@ -9898,20 +9898,20 @@ function qdSplit(a) {
 
 function twoProduct(a, b) {
   let p = a * b;
-  let [ah, al] = qdSplit(a);
-  let [bh, bl] = qdSplit(b);
+  let [ah, al] = ddSplit(a);
+  let [bh, bl] = ddSplit(b);
   let err = ((ah * bh - p) + ah * bl + al * bh) + al * bl;
   return [p, err];
 }
 
 function twoSquare(a) {
   let p = a * a;
-  let [ah, al] = qdSplit(a);
+  let [ah, al] = ddSplit(a);
   let err = ((ah * ah - p) + 2 * ah * al) + al * al;
   return [p, err];
 }
 
-function qdAdd(a, b) {
+function ddAdd(a, b) {
   let [a1, a0] = a;
   let [b1, b0] = b;
   let [h1, h2] = slow2Sum(a1, b1);
@@ -9920,24 +9920,24 @@ function qdAdd(a, b) {
   return fast2Sum(v1, v2 + l2);
 }
 
-function qdMul(a, b) {
+function ddMul(a, b) {
   let [a1, a0] = a;
   let [b1, b0] = b;
   let [p1, p2] = twoProduct(a1, b1);
   return fast2Sum(p1, p2 + a1 * b0 + b1 * a0);
 }
 
-function qdDouble(a) {
+function ddDouble(a) {
   return [a[0] * 2, a[1] * 2];
 }
 
-function qdScale(q, s) {
+function ddScale(q, s) {
   let [q1, q0] = q;
   let [p1, p2] = twoProduct(q1, s);
   return fast2Sum(p1, p2 + s * q0);
 }
 
-function qdSquare(a) {
+function ddSquare(a) {
   let [a1, a0] = a;
   let [p1, p2] = twoSquare(a1);
   return fast2Sum(p1, p2 + 2 * a1 * a0);
@@ -9945,90 +9945,90 @@ function qdSquare(a) {
 
 function qdcPow(q, n) {
   if (n === 1) return q;
-  if (n === 2) return qdcSquare(q);
-  if (n === 3) return qdcMul(qdcSquare(q), q);
+  if (n === 2) return ddcSquare(q);
+  if (n === 3) return ddcMul(ddcSquare(q), q);
   let result = [1, 0, 0, 0];
   let base = q;
   while (n > 0) {
-    if (n % 2 === 1) { result = qdcMul(result, base); }
-    base = qdcSquare(base);
+    if (n % 2 === 1) { result = ddcMul(result, base); }
+    base = ddcSquare(base);
     n = Math.floor(n / 2);
   }
   return result;
 }
 
-function qdNegate(a) {
+function ddNegate(a) {
   let [a1, a0] = a;
   return [-a1, -a0];
 }
 
-function qdSub(a, b) {
-  return qdAdd(a, qdNegate(b));
+function ddSub(a, b) {
+  return ddAdd(a, ddNegate(b));
 }
 
 function qdDiv(a, b) {
-  let reciprocal = qdReciprocal(b);
-  return qdMul(a, reciprocal);
+  let reciprocal = ddReciprocal(b);
+  return ddMul(a, reciprocal);
 }
 
-function qdReciprocal(b, iters = 2) {
+function ddReciprocal(b, iters = 2) {
   if (b[0] === 0 && b[1] === 0) {
     return [NaN, 0];  // Return NaN for division by zero
   }
   // Refine the approximation using Newton-Raphson iteration
   let x = [1 / b[0], 0];
   for (let i = 0; i < iters; i++) {
-    x = qdMul(x, qdSub([2, 0], qdMul(x, b)));
+    x = ddMul(x, ddSub([2, 0], ddMul(x, b)));
   }
   return x;
 }
 
 // Complex operations in quad precision
 function qdcAdd(a, b) {
-  let realSum = qdAdd([a[0], a[1]], [b[0], b[1]]);
-  let imagSum = qdAdd([a[2], a[3]], [b[2], b[3]]);
+  let realSum = ddAdd([a[0], a[1]], [b[0], b[1]]);
+  let imagSum = ddAdd([a[2], a[3]], [b[2], b[3]]);
   return [realSum[0], realSum[1], imagSum[0], imagSum[1]];
 }
 
 // Complex subtraction in quad precision
 function qdcSub(a, b) {
-  let realDiff = qdSub([a[0], a[1]], [b[0], b[1]]);
-  let imagDiff = qdSub([a[2], a[3]], [b[2], b[3]]);
+  let realDiff = ddSub([a[0], a[1]], [b[0], b[1]]);
+  let imagDiff = ddSub([a[2], a[3]], [b[2], b[3]]);
   return [realDiff[0], realDiff[1], imagDiff[0], imagDiff[1]];
 }
 
 // Complex multiplication in quad precision
-function qdcMul(a, b) {
-  let ac = qdMul([a[0], a[1]], [b[0], b[1]]);
-  let bd = qdMul([a[2], a[3]], [b[2], b[3]]);
-  let adbc = qdMul(qdAdd([a[0], a[1]], [a[2], a[3]]), qdAdd([b[0], b[1]], [b[2], b[3]]));
-  let real = qdSub(ac, bd);
-  let imag = qdSub(adbc, qdAdd(ac, bd));
+function ddcMul(a, b) {
+  let ac = ddMul([a[0], a[1]], [b[0], b[1]]);
+  let bd = ddMul([a[2], a[3]], [b[2], b[3]]);
+  let adbc = ddMul(ddAdd([a[0], a[1]], [a[2], a[3]]), ddAdd([b[0], b[1]], [b[2], b[3]]));
+  let real = ddSub(ac, bd);
+  let imag = ddSub(adbc, ddAdd(ac, bd));
   return [real[0], real[1], imag[0], imag[1]];
 }
 
 // Complex doubling in quad precision
 function qdcDouble(a) {
-  let realDouble = qdDouble([a[0], a[1]]);
-  let imagDouble = qdDouble([a[2], a[3]]);
+  let realDouble = ddDouble([a[0], a[1]]);
+  let imagDouble = ddDouble([a[2], a[3]]);
   return [realDouble[0], realDouble[1], imagDouble[0], imagDouble[1]];
 }
 
 // Complex squaring in quad precision
-function qdcSquare(a) {
-  let a0a0 = qdSquare([a[0], a[1]]);
-  let a1a1 = qdSquare([a[2], a[3]]);
-  let a0a1 = qdMul([a[0], a[1]], [a[2], a[3]]);
-  let real = qdSub(a0a0, a1a1);
-  let imag = qdDouble(a0a1);
+function ddcSquare(a) {
+  let a0a0 = ddSquare([a[0], a[1]]);
+  let a1a1 = ddSquare([a[2], a[3]]);
+  let a0a1 = ddMul([a[0], a[1]], [a[2], a[3]]);
+  let real = ddSub(a0a0, a1a1);
+  let imag = ddDouble(a0a1);
   return [real[0], real[1], imag[0], imag[1]];
 }
 
 // Complex absolute value in quad precision
 function qdcAbs(a) {
-  let a0a0 = qdSquare([a[0], a[1]]);
-  let a1a1 = qdSquare([a[2], a[3]]);
-  return qdAdd(a0a0, a1a1);
+  let a0a0 = ddSquare([a[0], a[1]]);
+  let a1a1 = ddSquare([a[2], a[3]]);
+  return ddAdd(a0a0, a1a1);
 }
 
 function qdParse(s) {
@@ -10058,36 +10058,36 @@ function qdParse(s) {
   if (s === '') return [0, 0];
   let result = [0, 0];
   for (let digit of s) {
-    result = qdAdd(qdMul(result, [10, 0]), [parseInt(digit), 0]);
+    result = ddAdd(ddMul(result, [10, 0]), [parseInt(digit), 0]);
   }
   if (e !== 0) {
-    result = qdMul(result, qdPow10(e));
+    result = ddMul(result, qdPow10(e));
   }
   if (sign === -1) {
-    result = qdNegate(result);
+    result = ddNegate(result);
   }
   return result;
 }
 
 function qdPow10(e) {
-  if (e < 0) return qdReciprocal(qdPow10(-e));
+  if (e < 0) return ddReciprocal(qdPow10(-e));
   // Up to 1e16, the second component is zero.
   if (e <= 16) { return [10 ** e, 0]; }
-  if (e % 2) { return qdMul([1e15, 0], qdPow10(e - 15)) };
-  return qdSquare(qdPow10(e / 2));
+  if (e % 2) { return ddMul([1e15, 0], qdPow10(e - 15)) };
+  return ddSquare(qdPow10(e / 2));
 }
 
 function qdFloor(q) {
   let [a, b] = q;
   let fl = Math.floor(a);
-  let [r0, r1] = qdAdd([a, b], [-fl, 0]);
+  let [r0, r1] = ddAdd([a, b], [-fl, 0]);
   if (r0 < 0 || (r0 === 0 && r1 < 0)) {
     fl -= 1;
   }
   return [fl, 0];
 }
 
-function qdCompare(a, b) {
+function ddCompare(a, b) {
   if (a[0] < b[0]) return -1;
   if (a[0] > b[0]) return 1;
   if (a[1] < b[1]) return -1;
@@ -10099,12 +10099,12 @@ function qdLt(a, s) {
   return a[0] < s || (a[0] == s && a[1] < 0);
 }
 
-function qdEq(a, s) {
+function ddEq(a, s) {
   return a[0] == s && a[1] == 0;
 }
 
 function qdAbs(q) {
-  return (q[0] + q[1] < 0) ? qdNegate(q) : q;
+  return (q[0] + q[1] < 0) ? ddNegate(q) : q;
 }
 
 function qdFixed(q, digits = 0) {
@@ -10112,7 +10112,7 @@ function qdFixed(q, digits = 0) {
   return qdFormat(q, digits, true);
 }
 
-const qdTen = [10, 0];
+const ddTen = [10, 0];
 
 function qdFormat(q, digits = 'auto', useFixedPoint = false) {
   // With scientific notation, digits specifies the number of significant digits.
@@ -10131,11 +10131,11 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
   }
   // Scale q to be between 1 and 10
   let e = parseInt(q[0].toExponential().match(/e([+-]\d+)/)[1]);
-  if (qdCompare(q, qdPow10(e)) < 0) { e -= 1; }
-  if (qdCompare(q, qdPow10(1+e)) >= 0) { e += 1; }
-  if (e) { q = qdMul(q, qdPow10(-e)); }
+  if (ddCompare(q, qdPow10(e)) < 0) { e -= 1; }
+  if (ddCompare(q, qdPow10(1+e)) >= 0) { e += 1; }
+  if (e) { q = ddMul(q, qdPow10(-e)); }
   if (!qdLt(q, 10)) { // Hit boundary condition
-    q = qdDiv(q, qdTen);
+    q = qdDiv(q, ddTen);
     e += 1;
   }
   let result = '';
@@ -10147,8 +10147,8 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
     let floorQ = qdFloor(q);
     let digit = floorQ[0];
     result += digit;
-    q = qdSub(q, floorQ);
-    q = qdMul(q, qdTen);
+    q = ddSub(q, floorQ);
+    q = ddMul(q, ddTen);
   }
   // Rounding
   if (nonzeroDigits < 0) {
@@ -10226,7 +10226,7 @@ function Aslow2Sum(r, i, a, b) {
   r[i+1] = (a - (s - c)) + (b - c);
 }
 
-function AqdSplit(r, i, a) {
+function ArddSplit(r, i, a) {
   const c = (134217729) * a;  // 2^27 + 1, Veltkamp-Dekker constant
   const x = c - (c - a);
   const y = a - x;
@@ -10236,10 +10236,10 @@ function AqdSplit(r, i, a) {
 
 function AtwoProduct(r, i, a, b) {
   const p = a * b;
-  AqdSplit(r, i, a);
+  ArddSplit(r, i, a);
   const ah = r[i];
   const al = r[i+1];
-  AqdSplit(r, i, b);
+  ArddSplit(r, i, b);
   const bh = r[i];
   const bl = r[i+1];
   const err = ((ah * bh - p) + ah * bl + al * bh) + al * bl;
@@ -10249,7 +10249,7 @@ function AtwoProduct(r, i, a, b) {
 
 function AtwoSquare(r, i, a) {
   const p = a * a;
-  AqdSplit(r, i, a);
+  ArddSplit(r, i, a);
   const ah = r[i];
   const al = r[i+1];
   const err = ((ah * ah - p) + 2 * ah * al) + al * al;
@@ -10277,7 +10277,7 @@ function AthreeSum(a, b, c) {
   return [newA, newB, newC];
 }
 
-function AqdAdd(r, i, a1, a2, b1, b2) {
+function AddAdd(r, i, a1, a2, b1, b2) {
   Aslow2Sum(r, i, a1, b1);
   const h1 = r[i];
   const h2 = r[i+1];
@@ -10290,38 +10290,38 @@ function AqdAdd(r, i, a1, a2, b1, b2) {
   Afast2Sum(r, i, v1, v2 + l2);
 }
 
-function AqdMul(r, i, a1, a2, b1, b2) {
+function AddMul(r, i, a1, a2, b1, b2) {
   AtwoProduct(r, i, a1, b1);
   const p1 = r[i];
   const p2 = r[i+1];
   Afast2Sum(r, i, p1, p2 + a1 * b2 + b1 * a2);
 }
 
-function AqdSet(r, i, a1, a2) {
+function ArddSet(r, i, a1, a2) {
   r[i] = a1;
   r[i+1] = a2;
 }
 
-function AqdcCopy(r, i, s, si) {
+function ArddcCopy(r, i, s, si) {
   r[i] = s[si];
   r[i+1] = s[si+1];
   r[i+2] = s[si+2];
   r[i+3] = s[si+3];
 }
 
-function AqdcGet(s, si) {
+function ArddcGet(s, si) {
   return s.slice(si, si+4);
 }
 
-function AqdSquare(r, i, a1, a2) {
+function AddSquare(r, i, a1, a2) {
   AtwoSquare(r, i, a1);
   const p1 = r[i];
   const p2 = r[i+1];
   Afast2Sum(r, i, p1, p2 + 2 * a1 * a2);
 }
 
-function AqdAbsSub(r, i, a1, a2, b1, b2) {
-  AqdAdd(r, i, a1, a2, -b1, -b2);
+function ArddAbsSub(r, i, a1, a2, b1, b2) {
+  AddAdd(r, i, a1, a2, -b1, -b2);
   if (r[i] + r[i+1] < 0) {
     r[i] = -r[i];
     r[i+1] = -r[i+1];
@@ -10530,11 +10530,11 @@ function catmullRom1D(p0, p1, p2, p3, t) {
   const c2 = (-3*t3 + 4*t2 + t) / 2;
   const c3 = (t3 - t2) / 2;
   // Compute offsets from p1 for numerical stability.
-  const s0 = qdSub(p0, p1);
-  const s2 = qdSub(p2, p1);
-  const s3 = qdSub(p3, p1);
-  return qdAdd(qdAdd(qdAdd(qdScale(s0, c0),
-           qdScale(s3, c3)), qdScale(s2, c2)), p1);
+  const s0 = ddSub(p0, p1);
+  const s2 = ddSub(p2, p1);
+  const s3 = ddSub(p3, p1);
+  return ddAdd(ddAdd(ddAdd(ddScale(s0, c0),
+           ddScale(s3, c3)), ddScale(s2, c2)), p1);
 }
 
 function catmullRomSpline(p0, p1, p2, p3, t) {

@@ -15,7 +15,7 @@ const {
   AoctRenorm,
   AtwoProduct,
   AtwoSquare,
-  AqdSplit
+  ArddSplit
 } = createTestEnvironment([
   'AoctAdd',
   'AoctMul',
@@ -31,7 +31,7 @@ const {
   'AoctRenorm',
   'AtwoProduct',
   'AtwoSquare',
-  'AqdSplit'
+  'ArddSplit'
 ]);
 
 const toMagnitude = (coeff, exp) => coeff * Math.pow(10, -exp);

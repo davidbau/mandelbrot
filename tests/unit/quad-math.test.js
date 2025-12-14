@@ -51,26 +51,26 @@ describe('Quad-Double Arithmetic', () => {
   });
 
   describe('Quad-Double Addition (In-Place)', () => {
-    test('AqdAdd should add two quad-doubles correctly', () => {
+    test('AddAdd should add two quad-doubles correctly', () => {
       const result = new Float64Array(2);
 
       // 1.0 + 0.5 = 1.5
-      qd.AqdAdd(result, 0, 1.0, 0.0, 0.5, 0.0);
+      qd.AddAdd(result, 0, 1.0, 0.0, 0.5, 0.0);
       expect(result[0] + result[1]).toBe(1.5);
     });
 
-    test('AqdAdd should handle high-precision addition', () => {
+    test('AddAdd should handle high-precision addition', () => {
       const result = new Float64Array(2);
 
       // Add a large number and a tiny number that would be lost in float64
-      qd.AqdAdd(result, 0, 1.0, 1e-17, 1e-16, 0.0);
+      qd.AddAdd(result, 0, 1.0, 1e-17, 1e-16, 0.0);
 
       // The sum should preserve both the high and low precision parts
       expect(result[0]).toBeCloseTo(1.0, 15);
       expect(result[0] + result[1]).toBeCloseTo(1.0 + 1e-16 + 1e-17, 25);
     });
 
-    test('AqdAdd should accumulate small values precisely', () => {
+    test('AddAdd should accumulate small values precisely', () => {
       const result = new Float64Array(2);
 
       // Start with zero
@@ -79,7 +79,7 @@ describe('Quad-Double Arithmetic', () => {
 
       // Add 0.1 ten times
       for (let i = 0; i < 10; i++) {
-        qd.AqdAdd(result, 0, result[0], result[1], 0.1, 0.0);
+        qd.AddAdd(result, 0, result[0], result[1], 0.1, 0.0);
       }
 
       // Should be exactly 1.0 (or very close due to quad-double precision)
@@ -88,19 +88,19 @@ describe('Quad-Double Arithmetic', () => {
   });
 
   describe('Quad-Double Multiplication (In-Place)', () => {
-    test('AqdMul should multiply two quad-doubles', () => {
+    test('AddMul should multiply two quad-doubles', () => {
       const result = new Float64Array(2);
 
       // 3.0 * 7.0 = 21.0
-      qd.AqdMul(result, 0, 3.0, 0.0, 7.0, 0.0);
+      qd.AddMul(result, 0, 3.0, 0.0, 7.0, 0.0);
       expect(result[0] + result[1]).toBe(21.0);
     });
 
-    test('AqdMul should handle high-precision multiplication', () => {
+    test('AddMul should handle high-precision multiplication', () => {
       const result = new Float64Array(2);
 
       // Multiply two values with low-order bits
-      qd.AqdMul(result, 0, 1.0, 1e-16, 2.0, 0.0);
+      qd.AddMul(result, 0, 1.0, 1e-16, 2.0, 0.0);
 
       // Result should be 2.0 + 2e-16
       expect(result[0]).toBeCloseTo(2.0, 15);
@@ -109,19 +109,19 @@ describe('Quad-Double Arithmetic', () => {
   });
 
   describe('Quad-Double Square (In-Place)', () => {
-    test('AqdSquare should compute square accurately', () => {
+    test('AddSquare should compute square accurately', () => {
       const result = new Float64Array(2);
 
       // 3.0^2 = 9.0
-      qd.AqdSquare(result, 0, 3.0, 0.0);
+      qd.AddSquare(result, 0, 3.0, 0.0);
       expect(result[0] + result[1]).toBe(9.0);
     });
 
-    test('AqdSquare should preserve precision', () => {
+    test('AddSquare should preserve precision', () => {
       const result = new Float64Array(2);
 
       // Square a value with low-order bits
-      qd.AqdSquare(result, 0, 1.0, 1e-16);
+      qd.AddSquare(result, 0, 1.0, 1e-16);
 
       // (1 + 1e-16)^2 ≈ 1 + 2e-16 + 1e-32
       expect(result[0]).toBeCloseTo(1.0, 15);
@@ -131,44 +131,44 @@ describe('Quad-Double Arithmetic', () => {
   });
 
   describe('Quad-Double Absolute Difference (In-Place)', () => {
-    test('AqdAbsSub should compute absolute difference', () => {
+    test('ArddAbsSub should compute absolute difference', () => {
       const result = new Float64Array(2);
 
       // |5.0 - 3.0| = 2.0
-      qd.AqdAbsSub(result, 0, 5.0, 0.0, 3.0, 0.0);
+      qd.ArddAbsSub(result, 0, 5.0, 0.0, 3.0, 0.0);
       expect(result[0] + result[1]).toBe(2.0);
     });
 
-    test('AqdAbsSub should handle negative differences', () => {
+    test('ArddAbsSub should handle negative differences', () => {
       const result = new Float64Array(2);
 
       // |3.0 - 5.0| = 2.0
-      qd.AqdAbsSub(result, 0, 3.0, 0.0, 5.0, 0.0);
+      qd.ArddAbsSub(result, 0, 3.0, 0.0, 5.0, 0.0);
       expect(result[0] + result[1]).toBe(2.0);
     });
   });
 
   describe('Quad-Double Array Utilities', () => {
-    test('AqdSet should set values in a Float64Array', () => {
+    test('ArddSet should set values in a Float64Array', () => {
       const r = new Float64Array(2);
-      qd.AqdSet(r, 0, 3.14, 1e-10);
+      qd.ArddSet(r, 0, 3.14, 1e-10);
       expect(r[0]).toBe(3.14);
       expect(r[1]).toBe(1e-10);
     });
 
-    test('AqdcCopy should copy complex quad values', () => {
+    test('ArddcCopy should copy complex quad values', () => {
       const src = new Float64Array([1.0, 0.1, 2.0, 0.2]);
       const dest = new Float64Array(4);
-      qd.AqdcCopy(dest, 0, src, 0);
+      qd.ArddcCopy(dest, 0, src, 0);
       expect(dest[0]).toBe(1.0);
       expect(dest[1]).toBe(0.1);
       expect(dest[2]).toBe(2.0);
       expect(dest[3]).toBe(0.2);
     });
 
-    test('AqdcGet should return a slice of the array', () => {
+    test('ArddcGet should return a slice of the array', () => {
       const src = new Float64Array([1.0, 0.1, 2.0, 0.2]);
-      const val = qd.AqdcGet(src, 0);
+      const val = qd.ArddcGet(src, 0);
       expect(val).toBeInstanceOf(Float64Array);
       expect(val).toHaveLength(4);
       expect(val[0]).toBe(1.0);
@@ -187,10 +187,10 @@ describe('Quad-Double Arithmetic', () => {
       a[1] = 1e-16;
 
       // b = a * a (should be (1 + 1e-16)^2)
-      qd.AqdMul(b, 0, a[0], a[1], a[0], a[1]);
+      qd.AddMul(b, 0, a[0], a[1], a[0], a[1]);
 
       // c = b + a (should be (1 + 1e-16)^2 + (1 + 1e-16))
-      qd.AqdAdd(c, 0, b[0], b[1], a[0], a[1]);
+      qd.AddAdd(c, 0, b[0], b[1], a[0], a[1]);
 
       // Expected: 1 + 2e-16 + 1e-32 + 1 + 1e-16 = 2 + 3e-16 + 1e-32
       expect(c[0]).toBeCloseTo(2.0, 15);
@@ -202,7 +202,7 @@ describe('Quad-Double Arithmetic', () => {
       const result = new Float64Array(2);
 
       // Compute (1 + 1e-10) - 1 which would lose precision in float64
-      qd.AqdAdd(result, 0, 1.0, 1e-10, -1.0, 0.0);
+      qd.AddAdd(result, 0, 1.0, 1e-10, -1.0, 0.0);
 
       expect(result[0] + result[1]).toBeCloseTo(1e-10, 12);
     });
@@ -211,54 +211,54 @@ describe('Quad-Double Arithmetic', () => {
   // --- Pure Math Operations ---
 
   describe('Scalar Arithmetic (Pure)', () => {
-    test('qdDouble should double a number', () => {
-      const one = qd.toQd(1);
-      const res = qd.qdDouble(one);
+    test('ddDouble should double a number', () => {
+      const one = qd.toDD(1);
+      const res = qd.ddDouble(one);
       expect(res[0]).toBe(2);
     });
-    test('qdScale should scale a number', () => {
-      const one = qd.toQd(1);
-      const res = qd.qdScale(one, 0.5);
+    test('ddScale should scale a number', () => {
+      const one = qd.toDD(1);
+      const res = qd.ddScale(one, 0.5);
       expect(res[0]).toBe(0.5);
     });
-    test('qdSquare should square a number', () => {
-      const three = qd.toQd(3);
-      const res = qd.qdSquare(three);
+    test('ddSquare should square a number', () => {
+      const three = qd.toDD(3);
+      const res = qd.ddSquare(three);
       expect(res[0]).toBe(9);
     });
-    test('toQd should handle array input', () => {
+    test('toDD should handle array input', () => {
       const arr = [1, 0];
-      expect(qd.toQd(arr)).toBe(arr); // Should return same object if array
+      expect(qd.toDD(arr)).toBe(arr); // Should return same object if array
     });
   });
 
   describe('Pure Math Functions: Edge Cases', () => {
-    const one = qd.toQd(1);
-    const two = qd.toQd(2);
-    const zero = qd.toQd(0);
-    const negOne = qd.toQd(-1);
-    const posInf = qd.toQd(Infinity);
-    const negInf = qd.toQd(-Infinity);
-    const nan = qd.toQd(NaN);
+    const one = qd.toDD(1);
+    const two = qd.toDD(2);
+    const zero = qd.toDD(0);
+    const negOne = qd.toDD(-1);
+    const posInf = qd.toDD(Infinity);
+    const negInf = qd.toDD(-Infinity);
+    const nan = qd.toDD(NaN);
 
     describe('Special Value Arithmetic', () => {
       test('Addition with Infinity', () => {
-        expect(isQdNaN(qd.qdAdd(posInf, one))).toBe(true);
-        expect(isQdNaN(qd.qdAdd(negInf, one))).toBe(true);
-        expect(isQdNaN(qd.qdAdd(posInf, negInf))).toBe(true);
+        expect(isQdNaN(qd.ddAdd(posInf, one))).toBe(true);
+        expect(isQdNaN(qd.ddAdd(negInf, one))).toBe(true);
+        expect(isQdNaN(qd.ddAdd(posInf, negInf))).toBe(true);
       });
 
       test('Multiplication with Infinity', () => {
-        expect(isQdNaN(qd.qdMul(posInf, two))).toBe(true);
-        expect(isQdNaN(qd.qdMul(negInf, two))).toBe(true);
-        expect(isQdNaN(qd.qdMul(posInf, negOne))).toBe(true);
-        expect(isQdNaN(qd.qdMul(posInf, zero))).toBe(true);
+        expect(isQdNaN(qd.ddMul(posInf, two))).toBe(true);
+        expect(isQdNaN(qd.ddMul(negInf, two))).toBe(true);
+        expect(isQdNaN(qd.ddMul(posInf, negOne))).toBe(true);
+        expect(isQdNaN(qd.ddMul(posInf, zero))).toBe(true);
       });
 
       test('Division with Infinity and by zero', () => {
         // The library's reciprocal and division do not handle Infinity, resulting in NaN.
-        expect(isQdNaN(qd.qdReciprocal(posInf))).toBe(true);
-        expect(isQdNaN(qd.qdReciprocal(negInf))).toBe(true);
+        expect(isQdNaN(qd.ddReciprocal(posInf))).toBe(true);
+        expect(isQdNaN(qd.ddReciprocal(negInf))).toBe(true);
         expect(isQdNaN(qd.qdDiv(one, posInf))).toBe(true);
         expect(isQdNaN(qd.qdDiv(one, negInf))).toBe(true);
         expect(isQdNaN(qd.qdDiv(posInf, one))).toBe(true);
@@ -270,9 +270,9 @@ describe('Quad-Double Arithmetic', () => {
       });
 
       test('Operations with NaN', () => {
-        expect(isQdNaN(qd.qdAdd(nan, one))).toBe(true);
-        expect(isQdNaN(qd.qdAdd(one, nan))).toBe(true);
-        expect(isQdNaN(qd.qdMul(nan, two))).toBe(true);
+        expect(isQdNaN(qd.ddAdd(nan, one))).toBe(true);
+        expect(isQdNaN(qd.ddAdd(one, nan))).toBe(true);
+        expect(isQdNaN(qd.ddMul(nan, two))).toBe(true);
         expect(isQdNaN(qd.qdDiv(nan, two))).toBe(true);
         expect(isQdNaN(qd.qdDiv(two, nan))).toBe(true);
       });
@@ -280,15 +280,15 @@ describe('Quad-Double Arithmetic', () => {
 
     describe('Inverse and Identity Properties', () => {
       test('Adding the negative should result in zero', () => {
-        const five = qd.toQd(5);
-        const negFive = qd.qdNegate(five);
-        const result = qd.qdAdd(five, negFive);
+        const five = qd.toDD(5);
+        const negFive = qd.ddNegate(five);
+        const result = qd.ddAdd(five, negFive);
         expect(result[0]).toBe(0);
         expect(result[1]).toBe(0);
       });
 
       test('Dividing by itself should result in one', () => {
-        const seven = qd.toQd(7);
+        const seven = qd.toDD(7);
         const result = qd.qdDiv(seven, seven);
         expect(result[0]).toBeCloseTo(1);
         expect(result[1]).toBeCloseTo(0);
@@ -296,29 +296,29 @@ describe('Quad-Double Arithmetic', () => {
     });
 
     describe('Comparison', () => {
-      test('qdCompare should correctly order numbers', () => {
-        const three = qd.toQd(3);
-        const four = qd.toQd(4);
-        expect(qd.qdCompare(three, four)).toBe(-1);
-        expect(qd.qdCompare(four, three)).toBe(1);
-        expect(qd.qdCompare(three, three)).toBe(0);
+      test('ddCompare should correctly order numbers', () => {
+        const three = qd.toDD(3);
+        const four = qd.toDD(4);
+        expect(qd.ddCompare(three, four)).toBe(-1);
+        expect(qd.ddCompare(four, three)).toBe(1);
+        expect(qd.ddCompare(three, three)).toBe(0);
       });
 
-      test('qdCompare should handle numbers differing only in low part', () => {
+      test('ddCompare should handle numbers differing only in low part', () => {
         const a = [1.0, 1e-16];
         const b = [1.0, 2e-16];
-        expect(qd.qdCompare(a, b)).toBe(-1);
-        expect(qd.qdCompare(b, a)).toBe(1);
-        expect(qd.qdCompare(a, a)).toBe(0);
+        expect(qd.ddCompare(a, b)).toBe(-1);
+        expect(qd.ddCompare(b, a)).toBe(1);
+        expect(qd.ddCompare(a, a)).toBe(0);
       });
 
-      test('qdLt and qdEq helper functions', () => {
-        const one = qd.toQd(1);
-        const two = qd.toQd(2);
+      test('qdLt and ddEq helper functions', () => {
+        const one = qd.toDD(1);
+        const two = qd.toDD(2);
         expect(qd.qdLt(one, 2)).toBe(true);
         expect(qd.qdLt(two, 1)).toBe(false);
-        expect(qd.qdEq(one, 1)).toBe(true);
-        expect(qd.qdEq(one, 2)).toBe(false);
+        expect(qd.ddEq(one, 1)).toBe(true);
+        expect(qd.ddEq(one, 2)).toBe(false);
       });
     });
 
@@ -338,17 +338,17 @@ describe('Quad-Double Arithmetic', () => {
       });
 
       test('qdFixed wrapper', () => {
-        const pi = qd.toQd(3.14159);
+        const pi = qd.toDD(3.14159);
         expect(qd.qdFixed(pi, 2)).toBe('3.14');
       });
 
       test('qdFloor should round down', () => {
-        const num = qd.toQd(3.9);
+        const num = qd.toDD(3.9);
         const floored = qd.qdFloor(num);
         expect(floored[0]).toBe(3);
         expect(floored[1]).toBe(0);
 
-        const negNum = qd.toQd(-3.1);
+        const negNum = qd.toDD(-3.1);
         const negFloored = qd.qdFloor(negNum);
         expect(negFloored[0]).toBe(-4);
       });
@@ -356,8 +356,8 @@ describe('Quad-Double Arithmetic', () => {
 
     describe('Other Mathematical Functions', () => {
       test('qdAbs should return the absolute value', () => {
-          const five = qd.toQd(5);
-          const negFive = qd.toQd(-5);
+          const five = qd.toDD(5);
+          const negFive = qd.toDD(-5);
           expect(qd.qdAbs(five)[0]).toBe(5);
           expect(qd.qdAbs(negFive)[0]).toBe(5);
       });
@@ -371,8 +371,8 @@ describe('Quad-Double Arithmetic', () => {
     const cOne = [1, 0, 0, 0]; // 1 + 0i
     const cI = [0, 0, 1, 0];   // 0 + 1i
 
-    test('toQdc should convert scalars/arrays to complex quad', () => {
-      const c = qd.toQdc([1, 2]);
+    test('toDDc should convert scalars/arrays to complex quad', () => {
+      const c = qd.toDDc([1, 2]);
       expect(c).toHaveLength(4);
       expect(c[0]).toBe(1);
       expect(c[2]).toBe(2);
@@ -392,9 +392,9 @@ describe('Quad-Double Arithmetic', () => {
       expect(result[2]).toBe(-1);
     });
 
-    test('qdcMul should multiply two complex numbers', () => {
+    test('ddcMul should multiply two complex numbers', () => {
       // i * i = -1
-      const result = qd.qdcMul(cI, cI);
+      const result = qd.ddcMul(cI, cI);
       expect(result[0]).toBe(-1);
       expect(result[2]).toBe(0); // 0i
     });
@@ -407,10 +407,10 @@ describe('Quad-Double Arithmetic', () => {
       expect(result[2]).toBe(2);
     });
 
-    test('qdcSquare should square a complex number', () => {
+    test('ddcSquare should square a complex number', () => {
       // (1 + i)^2 = 1 + 2i - 1 = 2i
       const onePlusI = [1, 0, 1, 0];
-      const result = qd.qdcSquare(onePlusI);
+      const result = qd.ddcSquare(onePlusI);
       expect(result[0]).toBeCloseTo(0, 15);
       expect(result[2]).toBeCloseTo(2, 15);
     });
@@ -472,10 +472,10 @@ describe('Quad-Double Arithmetic', () => {
 
   describe('High-Precision & Correctness Verification', () => {
     // Veltkamp-Dekker Split verification
-    test('qdSplit should decompose a double into hi + lo exactly', () => {
+    test('ddSplit should decompose a double into hi + lo exactly', () => {
       // Use a number with full 53 bits of precision
       const a = 1.2345678901234567;
-      const [hi, lo] = qd.qdSplit(a);
+      const [hi, lo] = qd.ddSplit(a);
 
       // 1. Exact reconstruction
       expect(hi + lo).toBe(a);
@@ -493,10 +493,10 @@ describe('Quad-Double Arithmetic', () => {
       // 2^-53 is approx 1.11e-16, just below machine epsilon (2^-52)
       // In standard double, 1 + 2^-53 === 1.
       const epsBoundary = Math.pow(2, -53);
-      const one = qd.toQd(1);
-      const small = qd.toQd(epsBoundary);
+      const one = qd.toDD(1);
+      const small = qd.toDD(epsBoundary);
       
-      const sum = qd.qdAdd(one, small);
+      const sum = qd.ddAdd(one, small);
       
       // sum[0] should be 1 (standard double result)
       expect(sum[0]).toBe(1);
@@ -504,7 +504,7 @@ describe('Quad-Double Arithmetic', () => {
       expect(sum[1]).toBe(epsBoundary);
       
       // Verify that we can retrieve it back
-      const diff = qd.qdSub(sum, one);
+      const diff = qd.ddSub(sum, one);
       expect(diff[0]).toBe(epsBoundary);
     });
 
@@ -518,16 +518,16 @@ describe('Quad-Double Arithmetic', () => {
       // Since double has 53 bits, e^2 (bit -54) is lost relative to 1 (bit 0).
       
       const eVal = Math.pow(2, -27);
-      const onePlusE = qd.qdAdd(qd.toQd(1), qd.toQd(eVal));
+      const onePlusE = qd.ddAdd(qd.toDD(1), qd.toDD(eVal));
       
       // Square it
-      const squared = qd.qdSquare(onePlusE);
+      const squared = qd.ddSquare(onePlusE);
       
       // Construct 1 + 2e
-      const onePlus2E = qd.qdAdd(qd.toQd(1), qd.toQd(2 * eVal));
+      const onePlus2E = qd.ddAdd(qd.toDD(1), qd.toDD(2 * eVal));
       
       // Subtract: (1 + 2e + e^2) - (1 + 2e)
-      const result = qd.qdSub(squared, onePlus2E);
+      const result = qd.ddSub(squared, onePlus2E);
       
       // Expected: e^2 = 2^-54
       const expected = Math.pow(2, -54);
@@ -547,12 +547,12 @@ describe('Quad-Double Arithmetic', () => {
       // 0 to -52 (Hi), -53 to -105 (Lo).
       // -100 falls in the Lo part range. So it *should* work.
       
-      const A = qd.toQd(1);
-      const B = qd.toQd(Math.pow(2, -50));
-      const C = qd.toQd(Math.pow(2, -100));
+      const A = qd.toDD(1);
+      const B = qd.toDD(Math.pow(2, -50));
+      const C = qd.toDD(Math.pow(2, -100));
       
       // (A + B) + C
-      const sum1 = qd.qdAdd(qd.qdAdd(A, B), C);
+      const sum1 = qd.ddAdd(qd.ddAdd(A, B), C);
       
       // Check if C is present. 
       // sum1 should be roughly [1, 2^-50]. 
@@ -566,7 +566,7 @@ describe('Quad-Double Arithmetic', () => {
       // So yes, (2^-50 + 2^-100) fits in a standard double.
       
       // Subtract A and B to see if C remains
-      const rem = qd.qdSub(qd.qdSub(sum1, A), B);
+      const rem = qd.ddSub(qd.ddSub(sum1, A), B);
       
       expect(rem[0]).toBeCloseTo(Math.pow(2, -100), 110); // e-30 level
     });

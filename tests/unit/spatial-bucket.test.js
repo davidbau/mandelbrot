@@ -2,7 +2,7 @@
  * Unit tests for SpatialBucket base class
  *
  * Tests the core spatial bucketing logic using a simple F64SpatialBucket subclass.
- * For precision-aware tests (QdSpatialBucket, OctSpatialBucket), see precision-spatial-bucket.test.js
+ * For precision-aware tests (DDSpatialBucket, OctSpatialBucket), see precision-spatial-bucket.test.js
  */
 
 // Base SpatialBucket class (matches index.html implementation)

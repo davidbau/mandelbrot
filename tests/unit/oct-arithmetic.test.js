@@ -27,7 +27,7 @@ const {
   AoctTwoSquare,
   AtwoProduct,
   AtwoSquare,
-  AqdSplit
+  ArddSplit
 } = createTestEnvironment([
   'toOct',
   'toOctAdd',
@@ -47,7 +47,7 @@ const {
   'AoctTwoSquare',
   'AtwoProduct',
   'AtwoSquare',
-  'AqdSplit'
+  'ArddSplit'
 ]);
 
 describe('oct arithmetic basics', () => {

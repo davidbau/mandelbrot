@@ -1,5 +1,5 @@
 /**
- * Unit tests for QdSpatialBucket and OctSpatialBucket classes
+ * Unit tests for DDSpatialBucket and OctSpatialBucket classes
  *
  * These tests verify correct behavior with:
  * - Coarse grids (normal epsilon values)
@@ -31,7 +31,7 @@ function twoProduct(a, b) {
   return [p, a * b - p]; // Approximation for testing
 }
 
-function qdAdd(a, b) {
+function ddAdd(a, b) {
   let [a1, a0] = a;
   let [b1, b0] = b;
   let [h1, h2] = slow2Sum(a1, b1);
@@ -40,12 +40,12 @@ function qdAdd(a, b) {
   return fast2Sum(v1, v2 + l2);
 }
 
-function qdNegate(a) {
+function ddNegate(a) {
   return [-a[0], -a[1]];
 }
 
-function qdSub(a, b) {
-  return qdAdd(a, qdNegate(b));
+function ddSub(a, b) {
+  return ddAdd(a, ddNegate(b));
 }
 
 // Mock oct arithmetic using array-based operations
@@ -200,9 +200,9 @@ class SpatialBucket {
 }
 
 // ============================================================
-// QdSpatialBucket - for quad-double precision [re_hi, re_lo, im_hi, im_lo]
+// DDSpatialBucket - for quad-double precision [re_hi, re_lo, im_hi, im_lo]
 // ============================================================
-class QdSpatialBucket extends SpatialBucket {
+class DDSpatialBucket extends SpatialBucket {
   constructor(threadingEpsilon, getQdPoint) {
     super(threadingEpsilon);
     this.getQdPoint = getQdPoint;
@@ -223,8 +223,8 @@ class QdSpatialBucket extends SpatialBucket {
     if (!pi || !pj) return null;
 
     // Proper qd subtraction to avoid catastrophic cancellation
-    const deltaReQd = qdSub([pi[0], pi[1]], [pj[0], pj[1]]);
-    const deltaImQd = qdSub([pi[2], pi[3]], [pj[2], pj[3]]);
+    const deltaReQd = ddSub([pi[0], pi[1]], [pj[0], pj[1]]);
+    const deltaImQd = ddSub([pi[2], pi[3]], [pj[2], pj[3]]);
 
     // Sum qd result to f64
     const deltaRe = deltaReQd[0] + deltaReQd[1];
@@ -305,7 +305,7 @@ describe('SpatialBucket base class', () => {
   });
 });
 
-describe('QdSpatialBucket', () => {
+describe('DDSpatialBucket', () => {
   describe('coarse grid (normal epsilon)', () => {
     test('finds nearby qd points', () => {
       // QD format: [re_hi, re_lo, im_hi, im_lo]
@@ -314,7 +314,7 @@ describe('QdSpatialBucket', () => {
         [1.0001, 0, 0.5001, 0], // index 1: slightly different
         [5.0, 0, 5.0, 0],       // index 2: far away
       ];
-      const bucket = new QdSpatialBucket(0.01, i => points[i]);
+      const bucket = new DDSpatialBucket(0.01, i => points[i]);
 
       bucket.add(0);
       bucket.add(2);
@@ -331,7 +331,7 @@ describe('QdSpatialBucket', () => {
         [0, 0, 0, 0],
         [1, 0, 1, 0],  // distance 1.0 > 0.1
       ];
-      const bucket = new QdSpatialBucket(0.1, i => points[i]);
+      const bucket = new DDSpatialBucket(0.1, i => points[i]);
 
       bucket.add(0);
       const found = bucket.findAndRemoveNear(1);
@@ -357,7 +357,7 @@ describe('QdSpatialBucket', () => {
       ];
 
       // Bucket radius should clamp to MIN_BUCKET_SIZE since tinyDiff is too small
-      const bucket = new QdSpatialBucket(tinyDiff * 2, i => points[i]);
+      const bucket = new DDSpatialBucket(tinyDiff * 2, i => points[i]);
       expect(bucket.bucketRadius).toBe(SpatialBucket.MIN_BUCKET_SIZE);
 
       bucket.add(0);
@@ -388,7 +388,7 @@ describe('QdSpatialBucket', () => {
       ];
 
       // threadingEpsilon is 1e-17, but bucket will use MIN_BUCKET_SIZE
-      const bucket = new QdSpatialBucket(1e-17, i => points[i]);
+      const bucket = new DDSpatialBucket(1e-17, i => points[i]);
 
       bucket.add(1);  // 1e-15 away
       bucket.add(2);  // 1e-18 away
@@ -410,7 +410,7 @@ describe('QdSpatialBucket', () => {
         [0.101, 0, 0.5, 0],   // Just after boundary
       ];
 
-      const bucket = new QdSpatialBucket(0.1, i => points[i]);
+      const bucket = new DDSpatialBucket(0.1, i => points[i]);
       bucket.add(0);
 
       const found = bucket.findAndRemoveNear(1);
@@ -588,7 +588,7 @@ describe('Mixed precision scenarios', () => {
     const returnPoint = [0.123456789, 1.5e-17, -0.987654321, 2.3e-17];
 
     const points = [cyclePoint, returnPoint];
-    const bucket = new QdSpatialBucket(1e-15, i => points[i]);
+    const bucket = new DDSpatialBucket(1e-15, i => points[i]);
 
     bucket.add(0);
     const found = bucket.findAndRemoveNear(1);

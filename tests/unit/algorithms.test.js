@@ -17,40 +17,40 @@ const qdFuncs = createTestEnvironment([
   // Low-level helpers
   'fast2Sum',
   'slow2Sum',
-  'qdSplit',
+  'ddSplit',
   'twoProduct',
   'twoSquare',
   // Core qd functions
-  'toQd',
-  'qdAdd',
-  'qdMul',
-  'qdDouble',
-  'qdScale',
-  'qdSquare',
-  'qdNegate',
-  'qdSub',
+  'toDD',
+  'ddAdd',
+  'ddMul',
+  'ddDouble',
+  'ddScale',
+  'ddSquare',
+  'ddNegate',
+  'ddSub',
   'qdDiv',
-  'qdReciprocal',
+  'ddReciprocal',
   'qdParse',
   'qdPow10',
   'qdFloor',
-  'qdCompare',
+  'ddCompare',
   'qdLt',
-  'qdEq',
+  'ddEq',
   'qdAbs',
   // Constant needed by qdFormat
-  'qdTen',
+  'ddTen',
   'qdFormat',
   // Spline interpolation
   'catmullRom1D',
   'catmullRomSpline',
   // Complex quad-double operations
-  'toQdc',
+  'toDDc',
   'qdcAdd',
   'qdcSub',
-  'qdcMul',
+  'ddcMul',
   'qdcDouble',
-  'qdcSquare',
+  'ddcSquare',
   'qdcAbs',
   'qdcPow'
 ]);
@@ -229,30 +229,30 @@ describe('Quad-Double Round-trip', () => {
 
 describe('Catmull-Rom Spline Interpolation', () => {
   test('catmullRom1D should interpolate at t=0 to p1', () => {
-    const p0 = qdFuncs.toQd(0);
-    const p1 = qdFuncs.toQd(1);
-    const p2 = qdFuncs.toQd(2);
-    const p3 = qdFuncs.toQd(3);
+    const p0 = qdFuncs.toDD(0);
+    const p1 = qdFuncs.toDD(1);
+    const p2 = qdFuncs.toDD(2);
+    const p3 = qdFuncs.toDD(3);
 
     const result = qdFuncs.catmullRom1D(p0, p1, p2, p3, 0);
     expect(result[0]).toBeCloseTo(1, 10);
   });
 
   test('catmullRom1D should interpolate at t=1 to p2', () => {
-    const p0 = qdFuncs.toQd(0);
-    const p1 = qdFuncs.toQd(1);
-    const p2 = qdFuncs.toQd(2);
-    const p3 = qdFuncs.toQd(3);
+    const p0 = qdFuncs.toDD(0);
+    const p1 = qdFuncs.toDD(1);
+    const p2 = qdFuncs.toDD(2);
+    const p3 = qdFuncs.toDD(3);
 
     const result = qdFuncs.catmullRom1D(p0, p1, p2, p3, 1);
     expect(result[0]).toBeCloseTo(2, 10);
   });
 
   test('catmullRom1D should interpolate smoothly at t=0.5', () => {
-    const p0 = qdFuncs.toQd(0);
-    const p1 = qdFuncs.toQd(1);
-    const p2 = qdFuncs.toQd(2);
-    const p3 = qdFuncs.toQd(3);
+    const p0 = qdFuncs.toDD(0);
+    const p1 = qdFuncs.toDD(1);
+    const p2 = qdFuncs.toDD(2);
+    const p3 = qdFuncs.toDD(3);
 
     const result = qdFuncs.catmullRom1D(p0, p1, p2, p3, 0.5);
     // For uniformly spaced points, midpoint should be close to average of p1 and p2
@@ -260,10 +260,10 @@ describe('Catmull-Rom Spline Interpolation', () => {
   });
 
   test('catmullRomSpline should interpolate 2D points at endpoints', () => {
-    const p0 = [qdFuncs.toQd(0), qdFuncs.toQd(0)];
-    const p1 = [qdFuncs.toQd(1), qdFuncs.toQd(1)];
-    const p2 = [qdFuncs.toQd(2), qdFuncs.toQd(2)];
-    const p3 = [qdFuncs.toQd(3), qdFuncs.toQd(3)];
+    const p0 = [qdFuncs.toDD(0), qdFuncs.toDD(0)];
+    const p1 = [qdFuncs.toDD(1), qdFuncs.toDD(1)];
+    const p2 = [qdFuncs.toDD(2), qdFuncs.toDD(2)];
+    const p3 = [qdFuncs.toDD(3), qdFuncs.toDD(3)];
 
     const result = qdFuncs.catmullRomSpline(p0, p1, p2, p3, 0);
     expect(result[0][0]).toBeCloseTo(1, 10);  // x at t=0
@@ -276,10 +276,10 @@ describe('Catmull-Rom Spline Interpolation', () => {
 
   test('catmullRomSpline should handle non-linear paths', () => {
     // Points forming a corner
-    const p0 = [qdFuncs.toQd(0), qdFuncs.toQd(0)];
-    const p1 = [qdFuncs.toQd(1), qdFuncs.toQd(0)];
-    const p2 = [qdFuncs.toQd(1), qdFuncs.toQd(1)];
-    const p3 = [qdFuncs.toQd(0), qdFuncs.toQd(1)];
+    const p0 = [qdFuncs.toDD(0), qdFuncs.toDD(0)];
+    const p1 = [qdFuncs.toDD(1), qdFuncs.toDD(0)];
+    const p2 = [qdFuncs.toDD(1), qdFuncs.toDD(1)];
+    const p3 = [qdFuncs.toDD(0), qdFuncs.toDD(1)];
 
     // At t=0.5, should be somewhere between p1 and p2
     const result = qdFuncs.catmullRomSpline(p0, p1, p2, p3, 0.5);
@@ -292,7 +292,7 @@ describe('Catmull-Rom Spline Interpolation', () => {
 describe('Complex Quad-Double Arithmetic', () => {
   // Helper to create complex quad-double from real and imaginary parts
   function makeComplex(re, im) {
-    return qdFuncs.toQdc([re, im]);
+    return qdFuncs.toDDc([re, im]);
   }
 
   describe('qdcAdd - Complex Addition', () => {
@@ -329,12 +329,12 @@ describe('Complex Quad-Double Arithmetic', () => {
     });
   });
 
-  describe('qdcMul - Complex Multiplication', () => {
+  describe('ddcMul - Complex Multiplication', () => {
     test('should multiply two complex numbers', () => {
       // (1 + 2i) * (3 + 4i) = (1*3 - 2*4) + (1*4 + 2*3)i = -5 + 10i
       const a = makeComplex(1, 2);
       const b = makeComplex(3, 4);
-      const result = qdFuncs.qdcMul(a, b);
+      const result = qdFuncs.ddcMul(a, b);
 
       expect(result[0]).toBeCloseTo(-5, 10);
       expect(result[2]).toBeCloseTo(10, 10);
@@ -344,7 +344,7 @@ describe('Complex Quad-Double Arithmetic', () => {
       // (3 + 0i) * (4 + 0i) = 12 + 0i
       const a = makeComplex(3, 0);
       const b = makeComplex(4, 0);
-      const result = qdFuncs.qdcMul(a, b);
+      const result = qdFuncs.ddcMul(a, b);
 
       expect(result[0]).toBeCloseTo(12, 10);
       expect(result[2]).toBeCloseTo(0, 10);
@@ -354,18 +354,18 @@ describe('Complex Quad-Double Arithmetic', () => {
       // (0 + 2i) * (0 + 3i) = -6 + 0i
       const a = makeComplex(0, 2);
       const b = makeComplex(0, 3);
-      const result = qdFuncs.qdcMul(a, b);
+      const result = qdFuncs.ddcMul(a, b);
 
       expect(result[0]).toBeCloseTo(-6, 10);
       expect(result[2]).toBeCloseTo(0, 10);
     });
   });
 
-  describe('qdcSquare - Complex Squaring', () => {
+  describe('ddcSquare - Complex Squaring', () => {
     test('should square a complex number', () => {
       // (3 + 4i)^2 = 9 - 16 + 24i = -7 + 24i
       const a = makeComplex(3, 4);
-      const result = qdFuncs.qdcSquare(a);
+      const result = qdFuncs.ddcSquare(a);
 
       expect(result[0]).toBeCloseTo(-7, 10);
       expect(result[2]).toBeCloseTo(24, 10);
@@ -374,16 +374,16 @@ describe('Complex Quad-Double Arithmetic', () => {
     test('should square pure imaginary', () => {
       // (0 + 2i)^2 = -4 + 0i
       const a = makeComplex(0, 2);
-      const result = qdFuncs.qdcSquare(a);
+      const result = qdFuncs.ddcSquare(a);
 
       expect(result[0]).toBeCloseTo(-4, 10);
       expect(result[2]).toBeCloseTo(0, 10);
     });
 
-    test('should be consistent with qdcMul', () => {
+    test('should be consistent with ddcMul', () => {
       const a = makeComplex(2.5, -1.7);
-      const squared = qdFuncs.qdcSquare(a);
-      const multiplied = qdFuncs.qdcMul(a, a);
+      const squared = qdFuncs.ddcSquare(a);
+      const multiplied = qdFuncs.ddcMul(a, a);
 
       expect(squared[0]).toBeCloseTo(multiplied[0], 10);
       expect(squared[2]).toBeCloseTo(multiplied[2], 10);
@@ -429,10 +429,10 @@ describe('Complex Quad-Double Arithmetic', () => {
       expect(result[2]).toBeCloseTo(3, 10);
     });
 
-    test('should compute z^2 same as qdcSquare', () => {
+    test('should compute z^2 same as ddcSquare', () => {
       const a = makeComplex(2, 3);
       const pow2 = qdFuncs.qdcPow(a, 2);
-      const squared = qdFuncs.qdcSquare(a);
+      const squared = qdFuncs.ddcSquare(a);
 
       expect(pow2[0]).toBeCloseTo(squared[0], 10);
       expect(pow2[2]).toBeCloseTo(squared[2], 10);
@@ -464,7 +464,7 @@ describe('Complex Quad-Double Arithmetic', () => {
       let z = makeComplex(0, 0);
 
       for (let i = 0; i < 10; i++) {
-        z = qdFuncs.qdcAdd(qdFuncs.qdcSquare(z), c);
+        z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);
       }
 
       expect(z[0]).toBeCloseTo(0, 10);
@@ -476,13 +476,13 @@ describe('Complex Quad-Double Arithmetic', () => {
       const c = makeComplex(2, 0);
       let z = makeComplex(0, 0);
 
-      z = qdFuncs.qdcAdd(qdFuncs.qdcSquare(z), c);  // z1 = 0 + 2 = 2
+      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z1 = 0 + 2 = 2
       expect(z[0]).toBeCloseTo(2, 10);
 
-      z = qdFuncs.qdcAdd(qdFuncs.qdcSquare(z), c);  // z2 = 4 + 2 = 6
+      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z2 = 4 + 2 = 6
       expect(z[0]).toBeCloseTo(6, 10);
 
-      z = qdFuncs.qdcAdd(qdFuncs.qdcSquare(z), c);  // z3 = 36 + 2 = 38
+      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z3 = 36 + 2 = 38
       expect(z[0]).toBeCloseTo(38, 10);
     });
 
@@ -491,13 +491,13 @@ describe('Complex Quad-Double Arithmetic', () => {
       const c = makeComplex(-1, 0);
       let z = makeComplex(0, 0);
 
-      z = qdFuncs.qdcAdd(qdFuncs.qdcSquare(z), c);  // z1 = 0 + (-1) = -1
+      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z1 = 0 + (-1) = -1
       expect(z[0]).toBeCloseTo(-1, 10);
 
-      z = qdFuncs.qdcAdd(qdFuncs.qdcSquare(z), c);  // z2 = 1 + (-1) = 0
+      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z2 = 1 + (-1) = 0
       expect(z[0]).toBeCloseTo(0, 10);
 
-      z = qdFuncs.qdcAdd(qdFuncs.qdcSquare(z), c);  // z3 = 0 + (-1) = -1
+      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z3 = 0 + (-1) = -1
       expect(z[0]).toBeCloseTo(-1, 10);
     });
   });
@@ -544,90 +544,90 @@ describe('URL History - centersWereLost', () => {
 describe('Quad-Double Utility Functions', () => {
   describe('qdDiv - Division', () => {
     test('should divide two quad-doubles', () => {
-      const a = qdFuncs.toQd(10);
-      const b = qdFuncs.toQd(2);
+      const a = qdFuncs.toDD(10);
+      const b = qdFuncs.toDD(2);
       const result = qdFuncs.qdDiv(a, b);
 
       expect(result[0]).toBeCloseTo(5, 10);
     });
 
     test('should handle non-integer division', () => {
-      const a = qdFuncs.toQd(1);
-      const b = qdFuncs.toQd(3);
+      const a = qdFuncs.toDD(1);
+      const b = qdFuncs.toDD(3);
       const result = qdFuncs.qdDiv(a, b);
 
       expect(result[0]).toBeCloseTo(1/3, 14);
     });
   });
 
-  describe('qdReciprocal - Reciprocal', () => {
+  describe('ddReciprocal - Reciprocal', () => {
     test('should compute reciprocal', () => {
-      const a = qdFuncs.toQd(4);
-      const result = qdFuncs.qdReciprocal(a);
+      const a = qdFuncs.toDD(4);
+      const result = qdFuncs.ddReciprocal(a);
 
       expect(result[0]).toBeCloseTo(0.25, 14);
     });
 
     test('should return NaN for zero', () => {
-      const zero = qdFuncs.toQd(0);
-      const result = qdFuncs.qdReciprocal(zero);
+      const zero = qdFuncs.toDD(0);
+      const result = qdFuncs.ddReciprocal(zero);
 
       expect(isNaN(result[0])).toBe(true);
     });
   });
 
-  describe('qdCompare - Comparison', () => {
+  describe('ddCompare - Comparison', () => {
     test('should return -1 when a < b', () => {
-      const a = qdFuncs.toQd(1);
-      const b = qdFuncs.toQd(2);
-      expect(qdFuncs.qdCompare(a, b)).toBe(-1);
+      const a = qdFuncs.toDD(1);
+      const b = qdFuncs.toDD(2);
+      expect(qdFuncs.ddCompare(a, b)).toBe(-1);
     });
 
     test('should return 1 when a > b', () => {
-      const a = qdFuncs.toQd(5);
-      const b = qdFuncs.toQd(3);
-      expect(qdFuncs.qdCompare(a, b)).toBe(1);
+      const a = qdFuncs.toDD(5);
+      const b = qdFuncs.toDD(3);
+      expect(qdFuncs.ddCompare(a, b)).toBe(1);
     });
 
     test('should return 0 when a == b', () => {
-      const a = qdFuncs.toQd(7);
-      const b = qdFuncs.toQd(7);
-      expect(qdFuncs.qdCompare(a, b)).toBe(0);
+      const a = qdFuncs.toDD(7);
+      const b = qdFuncs.toDD(7);
+      expect(qdFuncs.ddCompare(a, b)).toBe(0);
     });
   });
 
   describe('qdLt - Less Than', () => {
     test('should return true when less than scalar', () => {
-      const a = qdFuncs.toQd(3);
+      const a = qdFuncs.toDD(3);
       expect(qdFuncs.qdLt(a, 5)).toBe(true);
     });
 
     test('should return false when greater than scalar', () => {
-      const a = qdFuncs.toQd(7);
+      const a = qdFuncs.toDD(7);
       expect(qdFuncs.qdLt(a, 5)).toBe(false);
     });
 
     test('should handle equal values', () => {
-      const a = qdFuncs.toQd(5);
+      const a = qdFuncs.toDD(5);
       expect(qdFuncs.qdLt(a, 5)).toBe(false);
     });
   });
 
   describe('qdFloor - Floor Function', () => {
     test('should floor positive numbers', () => {
-      const a = qdFuncs.toQd(3.7);
+      const a = qdFuncs.toDD(3.7);
       const result = qdFuncs.qdFloor(a);
       expect(result[0]).toBe(3);
     });
 
     test('should floor negative numbers', () => {
-      const a = qdFuncs.toQd(-2.3);
+      const a = qdFuncs.toDD(-2.3);
       const result = qdFuncs.qdFloor(a);
       expect(result[0]).toBe(-3);
     });
 
     test('should handle integers', () => {
-      const a = qdFuncs.toQd(5);
+      const a = qdFuncs.toDD(5);
       const result = qdFuncs.qdFloor(a);
       expect(result[0]).toBe(5);
     });
@@ -654,19 +654,19 @@ describe('Quad-Double Utility Functions', () => {
 
   describe('qdAbs - Absolute Value', () => {
     test('should return positive for positive input', () => {
-      const a = qdFuncs.toQd(5);
+      const a = qdFuncs.toDD(5);
       const result = qdFuncs.qdAbs(a);
       expect(result[0]).toBe(5);
     });
 
     test('should return positive for negative input', () => {
-      const a = qdFuncs.toQd(-5);
+      const a = qdFuncs.toDD(-5);
       const result = qdFuncs.qdAbs(a);
       expect(result[0]).toBe(5);
     });
 
     test('should handle zero', () => {
-      const a = qdFuncs.toQd(0);
+      const a = qdFuncs.toDD(0);
       const result = qdFuncs.qdAbs(a);
       expect(result[0]).toBe(0);
     });

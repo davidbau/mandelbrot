@@ -18,15 +18,15 @@ const {
   catmullRomSpline,
   catmullRom1DOct,
   catmullRomSplineOct,
-  toQd,
-  qdAdd,
-  qdSub,
-  qdScale,
-  qdNegate,
+  toDD,
+  ddAdd,
+  ddSub,
+  ddScale,
+  ddNegate,
   slow2Sum,
   fast2Sum,
   twoProduct,
-  qdSplit,
+  ddSplit,
   toOct,
   toOctAdd,
   toOctSub,
@@ -43,21 +43,21 @@ const {
   AoctSet,
   AtwoProduct,
   AtwoSquare,
-  AqdSplit
+  ArddSplit
 } = createTestEnvironment([
   'catmullRom1D',
   'catmullRomSpline',
   'catmullRom1DOct',
   'catmullRomSplineOct',
-  'toQd',
-  'qdAdd',
-  'qdSub',
-  'qdScale',
-  'qdNegate',
+  'toDD',
+  'ddAdd',
+  'ddSub',
+  'ddScale',
+  'ddNegate',
   'slow2Sum',
   'fast2Sum',
   'twoProduct',
-  'qdSplit',
+  'ddSplit',
   'toOct',
   'toOctAdd',
   'toOctSub',
@@ -74,7 +74,7 @@ const {
   'AoctSet',
   'AtwoProduct',
   'AtwoSquare',
-  'AqdSplit'
+  'ArddSplit'
 ]);
 
 // Helper: Sum quad-double components
@@ -89,10 +89,10 @@ describe('Catmull-Rom spline interpolation', () => {
 
     test('interpolates between p1 and p2', () => {
       // Create 4 control points on a simple curve
-      const p0 = toQd(0);
-      const p1 = toQd(1);
-      const p2 = toQd(2);
-      const p3 = toQd(3);
+      const p0 = toDD(0);
+      const p1 = toDD(1);
+      const p2 = toDD(2);
+      const p3 = toDD(3);
 
       // At t=0, should be at p1
       const at0 = catmullRom1D(p0, p1, p2, p3, 0);
@@ -109,10 +109,10 @@ describe('Catmull-Rom spline interpolation', () => {
 
     test('produces smooth curve for quadratic control points', () => {
       // Control points on y = x^2: [0,0], [1,1], [2,4], [3,9]
-      const p0 = toQd(0);
-      const p1 = toQd(1);
-      const p2 = toQd(4);
-      const p3 = toQd(9);
+      const p0 = toDD(0);
+      const p1 = toDD(1);
+      const p2 = toDD(4);
+      const p3 = toDD(9);
 
       // Sample at multiple points
       const samples = [];
@@ -136,10 +136,10 @@ describe('Catmull-Rom spline interpolation', () => {
       const base = -1.76894568;
       const epsilon = 1e-15;
 
-      const p0 = toQd(base - epsilon);
-      const p1 = toQd(base);
-      const p2 = toQd(base + epsilon);
-      const p3 = toQd(base + 2*epsilon);
+      const p0 = toDD(base - epsilon);
+      const p1 = toDD(base);
+      const p2 = toDD(base + epsilon);
+      const p3 = toDD(base + 2*epsilon);
 
       // Interpolation should still work smoothly
       const at0 = catmullRom1D(p0, p1, p2, p3, 0);
@@ -153,10 +153,10 @@ describe('Catmull-Rom spline interpolation', () => {
     });
 
     test('handles negative values correctly', () => {
-      const p0 = toQd(-3);
-      const p1 = toQd(-2);
-      const p2 = toQd(-1);
-      const p3 = toQd(0);
+      const p0 = toDD(-3);
+      const p1 = toDD(-2);
+      const p2 = toDD(-1);
+      const p3 = toDD(0);
 
       const at0 = catmullRom1D(p0, p1, p2, p3, 0);
       const at1 = catmullRom1D(p0, p1, p2, p3, 1);
@@ -170,10 +170,10 @@ describe('Catmull-Rom spline interpolation', () => {
 
     test('interpolates 2D points correctly', () => {
       // 2D control points: [x,y] pairs
-      const p0 = [toQd(0), toQd(0)];
-      const p1 = [toQd(1), toQd(1)];
-      const p2 = [toQd(2), toQd(0)];
-      const p3 = [toQd(3), toQd(1)];
+      const p0 = [toDD(0), toDD(0)];
+      const p1 = [toDD(1), toDD(1)];
+      const p2 = [toDD(2), toDD(0)];
+      const p3 = [toDD(3), toDD(1)];
 
       // At t=0, should be at p1
       const at0 = catmullRomSpline(p0, p1, p2, p3, 0);
@@ -188,10 +188,10 @@ describe('Catmull-Rom spline interpolation', () => {
 
     test('produces smooth 2D curve for spiral path', () => {
       // Simulate a zoom path with rotation
-      const p0 = [toQd(-2.0), toQd(0.0)];
-      const p1 = [toQd(-1.5), toQd(0.5)];
-      const p2 = [toQd(-1.0), toQd(0.0)];
-      const p3 = [toQd(-0.5), toQd(-0.5)];
+      const p0 = [toDD(-2.0), toDD(0.0)];
+      const p1 = [toDD(-1.5), toDD(0.5)];
+      const p2 = [toDD(-1.0), toDD(0.0)];
+      const p3 = [toDD(-0.5), toDD(-0.5)];
 
       // Sample and verify smoothness
       let prevX = -Infinity;
@@ -311,10 +311,10 @@ describe('Catmull-Rom spline interpolation', () => {
   describe('qd vs oct consistency', () => {
 
     test('qd and oct versions agree for normal-scale values', () => {
-      const p0qd = toQd(0);
-      const p1qd = toQd(1);
-      const p2qd = toQd(3);
-      const p3qd = toQd(4);
+      const p0qd = toDD(0);
+      const p1qd = toDD(1);
+      const p2qd = toDD(3);
+      const p3qd = toDD(4);
 
       const p0oct = toOct(0);
       const p1oct = toOct(1);
@@ -336,10 +336,10 @@ describe('Catmull-Rom spline interpolation', () => {
 
     test('collinear points produce straight line interpolation', () => {
       // When control points are on a line, curve should be linear between p1-p2
-      const p0 = toQd(0);
-      const p1 = toQd(1);
-      const p2 = toQd(2);
-      const p3 = toQd(3);
+      const p0 = toDD(0);
+      const p1 = toDD(1);
+      const p2 = toDD(2);
+      const p3 = toDD(3);
 
       // Sample at multiple points
       for (let t = 0; t <= 1; t += 0.1) {
@@ -353,10 +353,10 @@ describe('Catmull-Rom spline interpolation', () => {
       // When p1 and p2 are the same, curve is influenced by tangents from p0/p3
       // Catmull-Rom tangent at p1 uses (p2-p0)/2, at p2 uses (p3-p1)/2
       // So curve doesn't stay perfectly flat - it overshoots slightly
-      const p0 = toQd(0);
-      const p1 = toQd(5);
-      const p2 = toQd(5);  // Same as p1
-      const p3 = toQd(10);
+      const p0 = toDD(0);
+      const p1 = toDD(5);
+      const p2 = toDD(5);  // Same as p1
+      const p3 = toDD(10);
 
       // At boundaries t=0 and t=1, curve must pass through p1/p2
       expect(qdSum(catmullRom1D(p0, p1, p2, p3, 0))).toBeCloseTo(5, 10);
@@ -371,10 +371,10 @@ describe('Catmull-Rom spline interpolation', () => {
     test('non-uniform spacing: tight curve handling', () => {
       // Non-uniform control point spacing - tests numerical stability
       // Simulates movie keyframes at different zoom levels
-      const p0 = toQd(0);
-      const p1 = toQd(0.001);  // Very close to p0
-      const p2 = toQd(1);      // Far from p1
-      const p3 = toQd(1.001);  // Very close to p2
+      const p0 = toDD(0);
+      const p1 = toDD(0.001);  // Very close to p0
+      const p2 = toDD(1);      // Far from p1
+      const p3 = toDD(1.001);  // Very close to p2
 
       // Should still interpolate smoothly
       const at0 = catmullRom1D(p0, p1, p2, p3, 0);
@@ -390,10 +390,10 @@ describe('Catmull-Rom spline interpolation', () => {
 
     test('extreme values: large coordinates', () => {
       // Test behavior with large coordinate values
-      const p0 = toQd(1e10);
-      const p1 = toQd(2e10);
-      const p2 = toQd(3e10);
-      const p3 = toQd(4e10);
+      const p0 = toDD(1e10);
+      const p1 = toDD(2e10);
+      const p2 = toDD(3e10);
+      const p3 = toDD(4e10);
 
       const at0 = catmullRom1D(p0, p1, p2, p3, 0);
       const at1 = catmullRom1D(p0, p1, p2, p3, 1);
@@ -404,10 +404,10 @@ describe('Catmull-Rom spline interpolation', () => {
 
     test('oscillating control points: handles overshoot', () => {
       // Control points that oscillate - tests overshoot behavior
-      const p0 = toQd(0);
-      const p1 = toQd(1);
-      const p2 = toQd(0);  // Back toward start
-      const p3 = toQd(1);
+      const p0 = toDD(0);
+      const p1 = toDD(1);
+      const p2 = toDD(0);  // Back toward start
+      const p3 = toDD(1);
 
       // Sample the curve
       const samples = [];
@@ -422,10 +422,10 @@ describe('Catmull-Rom spline interpolation', () => {
 
     test('2D curve: circular arc approximation', () => {
       // Control points approximating a quarter circle
-      const p0 = [toQd(1), toQd(0)];
-      const p1 = [toQd(1), toQd(0.5)];
-      const p2 = [toQd(0.5), toQd(1)];
-      const p3 = [toQd(0), toQd(1)];
+      const p0 = [toDD(1), toDD(0)];
+      const p1 = [toDD(1), toDD(0.5)];
+      const p2 = [toDD(0.5), toDD(1)];
+      const p3 = [toDD(0), toDD(1)];
 
       // Sample and check curve stays roughly equidistant from origin
       for (let t = 0.2; t <= 0.8; t += 0.2) {
@@ -468,10 +468,10 @@ describe('Catmull-Rom spline interpolation', () => {
 
     test('boundary parameter values: exactly t=0 and t=1', () => {
       // Verify exact interpolation at boundaries (fundamental spline property)
-      const p0 = toQd(-5);
-      const p1 = toQd(Math.PI);  // Irrational value
-      const p2 = toQd(Math.E);   // Another irrational value
-      const p3 = toQd(10);
+      const p0 = toDD(-5);
+      const p1 = toDD(Math.PI);  // Irrational value
+      const p2 = toDD(Math.E);   // Another irrational value
+      const p3 = toDD(10);
 
       const atZero = catmullRom1D(p0, p1, p2, p3, 0);
       const atOne = catmullRom1D(p0, p1, p2, p3, 1);

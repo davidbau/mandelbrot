@@ -28,7 +28,7 @@ const {
   AoctSet,
   AtwoProduct,
   AtwoSquare,
-  AqdSplit
+  ArddSplit
 } = createTestEnvironment([
   'toOct',
   'toOctAdd',
@@ -49,7 +49,7 @@ const {
   'AoctSet',
   'AtwoProduct',
   'AtwoSquare',
-  'AqdSplit'
+  'ArddSplit'
 ]);
 
 describe('QD-style oct precision tests', () => {
