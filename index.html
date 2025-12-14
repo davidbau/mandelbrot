@@ -5825,73 +5825,279 @@ function float64ToBigIntScaled(x, scale) {
   return result;
 }
 
-// Reference Orbit Threading - enables robust cycle detection despite rebasing
-class ReferenceOrbitThreading {
-  constructor(epsilon) {
-    const floatPrecision = 1e-7;
-    const maxCycleLength = 1e5;
-    // epsilon3: as large as possible while keeping single-precision
-    // ability to calculate at epsilon precision
-    this.epsilon3 = epsilon * 1e7 / Math.sqrt(maxCycleLength);
-    this.bucketSize = 2 * this.epsilon3;
-    // Small window to limit bucket growth
-    this.threadingWindowSize = Math.min(1024, Math.floor(maxCycleLength));
-    this.refThreading = [];  // {next: index, deltaRe: f32, deltaIm: f32}
-    this.spatialBuckets = new Map();
-    this.minJump = 10;
+// Spatial bucket for O(1) lookup of nearby points in 2D
+// Uses a grid with cell size = 2*bucketRadius to guarantee 4-bucket coverage
+// Base class - subclasses implement precision-specific getF64Point and verifyAndGetDelta
+class SpatialBucket {
+  // Minimum bucket size to avoid f64 precision issues
+  static MIN_BUCKET_SIZE = 1e-12;
+
+  /**
+   * @param {number} threadingEpsilon - L∞ distance threshold for "nearby"
+   */
+  constructor(threadingEpsilon) {
+    this.threadingEpsilon = threadingEpsilon;
+    // Clamp bucket radius to avoid f64 precision problems
+    this.bucketRadius = Math.max(threadingEpsilon, SpatialBucket.MIN_BUCKET_SIZE);
+    this.gridSize = 2 * this.bucketRadius;  // Grid cells are 2× radius for 4-bucket guarantee
+    this.buckets = new Map();  // "bx,by" -> Set of indices
   }
 
-  addOrbitPoint(currentIndex, re, im, getPoint) {
-    // Find nearest past neighbor in spatial buckets
-    const bx = Math.floor(re / this.bucketSize);
-    const by = Math.floor(im / this.bucketSize);
-    let nearest = -1;
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const bucket = this.spatialBuckets.get(`${bx + dx},${by + dy}`);
-        if (!bucket) continue;
-        for (const j of bucket) {
-          if (j >= currentIndex) continue;  // Only thread to past iterations
-          const pt = getPoint(j);
-          if (!pt) continue;
-          const dist = Math.max(Math.abs(re - pt.re), Math.abs(im - pt.im));
-          if (dist <= this.epsilon3 && j > nearest) nearest = j;
+  // Subclasses must override: return {re, im} as f64 for coarse bucketing
+  getF64Point(i) { throw new Error("subclass must implement getF64Point"); }
+
+  // Subclasses must override: return {deltaRe, deltaIm} if within threadingEpsilon, else null
+  // Uses precision-aware subtraction to avoid catastrophic cancellation
+  verifyAndGetDelta(i, j) { throw new Error("subclass must implement verifyAndGetDelta"); }
+
+  _getBucket(re, im) {
+    const bx = Math.floor(re / this.gridSize);
+    const by = Math.floor(im / this.gridSize);
+    return { bx, by };
+  }
+
+  _getKey(bx, by) {
+    return `${bx},${by}`;
+  }
+
+  /**
+   * Add point at index i to the spatial structure
+   */
+  add(i) {
+    const pt = this.getF64Point(i);
+    if (!pt) return;
+    const { bx, by } = this._getBucket(pt.re, pt.im);
+    const key = this._getKey(bx, by);
+    if (!this.buckets.has(key)) {
+      this.buckets.set(key, new Set());
+    }
+    this.buckets.get(key).add(i);
+  }
+
+  /**
+   * Find all points within threadingEpsilon L∞ distance of point i,
+   * remove them from the structure, and return [{index, deltaRe, deltaIm}, ...].
+   * Uses precision-aware verification via verifyAndGetDelta.
+   * Does NOT remove point i itself (it may not even be in the structure).
+   */
+  findAndRemoveNear(i) {
+    const pt = this.getF64Point(i);
+    if (!pt) return [];
+
+    const { bx, by } = this._getBucket(pt.re, pt.im);
+
+    // Determine which 4 buckets to check based on position within bucket
+    // Since gridSize = 2*bucketRadius, checking 4 adjacent buckets guarantees
+    // we find all points within bucketRadius distance
+    const fracX = (pt.re / this.gridSize) - bx;
+    const fracY = (pt.im / this.gridSize) - by;
+    const dx = fracX < 0.5 ? -1 : 1;
+    const dy = fracY < 0.5 ? -1 : 1;
+
+    const bucketsToCheck = [
+      [bx, by],
+      [bx + dx, by],
+      [bx, by + dy],
+      [bx + dx, by + dy]
+    ];
+
+    const found = [];
+    for (const [checkBx, checkBy] of bucketsToCheck) {
+      const key = this._getKey(checkBx, checkBy);
+      const bucket = this.buckets.get(key);
+      if (!bucket) continue;
+
+      const toRemove = [];
+      for (const j of bucket) {
+        if (j === i) continue;  // Don't return the query point itself
+
+        // Use precision-aware verification
+        const delta = this.verifyAndGetDelta(i, j);
+        if (delta !== null) {
+          found.push({ index: j, deltaRe: delta.deltaRe, deltaIm: delta.deltaIm });
+          toRemove.push(j);
         }
+      }
+
+      for (const j of toRemove) {
+        bucket.delete(j);
+      }
+      if (bucket.size === 0) {
+        this.buckets.delete(key);
       }
     }
 
-    // Add thread
-    this.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});
-    if (nearest >= 0) {
-      const pt = getPoint(nearest);
-      this.refThreading[nearest] = {
+    return found;
+  }
+
+  /**
+   * Remove all indices older than (less than) minIndex
+   */
+  removeOlderThan(minIndex) {
+    for (const [key, bucket] of this.buckets) {
+      for (const j of bucket) {
+        if (j < minIndex) {
+          bucket.delete(j);
+        }
+      }
+      if (bucket.size === 0) {
+        this.buckets.delete(key);
+      }
+    }
+  }
+}
+
+/**
+ * QdSpatialBucket - for quad-double precision points
+ * Point format: [re_hi, re_lo, im_hi, im_lo]
+ */
+class QdSpatialBucket extends SpatialBucket {
+  constructor(threadingEpsilon, getQdPoint) {
+    super(threadingEpsilon);
+    this.getQdPoint = getQdPoint;
+  }
+
+  getF64Point(i) {
+    const p = this.getQdPoint(i);
+    if (!p) return null;
+    return { re: p[0] + p[1], im: p[2] + p[3] };
+  }
+
+  verifyAndGetDelta(i, j) {
+    const pi = this.getQdPoint(i);
+    const pj = this.getQdPoint(j);
+    if (!pi || !pj) return null;
+
+    // Proper qd subtraction to avoid catastrophic cancellation
+    const deltaReQd = qdSub([pi[0], pi[1]], [pj[0], pj[1]]);
+    const deltaImQd = qdSub([pi[2], pi[3]], [pj[2], pj[3]]);
+
+    // Sum qd result to f64
+    const deltaRe = deltaReQd[0] + deltaReQd[1];
+    const deltaIm = deltaImQd[0] + deltaImQd[1];
+
+    // Check L∞ distance against actual threadingEpsilon
+    if (Math.max(Math.abs(deltaRe), Math.abs(deltaIm)) <= this.threadingEpsilon) {
+      return { deltaRe, deltaIm };
+    }
+    return null;
+  }
+}
+
+/**
+ * OctSpatialBucket - for oct precision points
+ * Point format: [re0, re1, re2, re3, im0, im1, im2, im3]
+ */
+class OctSpatialBucket extends SpatialBucket {
+  constructor(threadingEpsilon, getOctPoint) {
+    super(threadingEpsilon);
+    this.getOctPoint = getOctPoint;
+  }
+
+  getF64Point(i) {
+    const p = this.getOctPoint(i);
+    if (!p) return null;
+    return {
+      re: p[0] + p[1] + p[2] + p[3],
+      im: p[4] + p[5] + p[6] + p[7]
+    };
+  }
+
+  verifyAndGetDelta(i, j) {
+    const pi = this.getOctPoint(i);
+    const pj = this.getOctPoint(j);
+    if (!pi || !pj) return null;
+
+    // Proper oct subtraction to avoid catastrophic cancellation
+    const deltaReOct = toOctSub(
+      [pi[0], pi[1], pi[2], pi[3]],
+      [pj[0], pj[1], pj[2], pj[3]]
+    );
+    const deltaImOct = toOctSub(
+      [pi[4], pi[5], pi[6], pi[7]],
+      [pj[4], pj[5], pj[6], pj[7]]
+    );
+
+    // Sum oct result to f64
+    const deltaRe = octToNumber(deltaReOct);
+    const deltaIm = octToNumber(deltaImOct);
+
+    // Check L∞ distance against actual threadingEpsilon
+    if (Math.max(Math.abs(deltaRe), Math.abs(deltaIm)) <= this.threadingEpsilon) {
+      return { deltaRe, deltaIm };
+    }
+    return null;
+  }
+}
+
+// Reference Orbit Threading - enables robust cycle detection despite rebasing
+class ReferenceOrbitThreading {
+  /**
+   * @param {SpatialBucket} spatialBucket - A precision-aware spatial bucket (QdSpatialBucket or OctSpatialBucket)
+   */
+  constructor(spatialBucket) {
+    const maxCycleLength = 1e5;
+    // Window size limits bucket growth
+    this.windowSize = Math.min(1024, Math.floor(maxCycleLength));
+    // Threading links: {next: index, deltaRe: f32, deltaIm: f32}
+    this.threads = [];
+    // Spatial index for finding nearby points (precision-aware)
+    this.spatialBucket = spatialBucket;
+  }
+
+  /**
+   * Add a new orbit point and create threading links.
+   * All nearby past points are threaded to point at this new point.
+   * The spatial bucket handles precision-aware distance checking and delta computation.
+   */
+  addPoint(currentIndex) {
+    // Find and remove all nearby past points from the bucket
+    // Returns [{index, deltaRe, deltaIm}, ...] with precision-aware deltas
+    const nearbyPast = this.spatialBucket.findAndRemoveNear(currentIndex);
+
+    // Add placeholder for this point's thread
+    this.threads.push({next: -1, deltaRe: 0, deltaIm: 0});
+
+    // Thread all nearby past points to this new point
+    // Note: deltaRe/deltaIm are (current - past), but we want (past -> current) delta
+    // So we negate the deltas returned by the bucket
+    for (const match of nearbyPast) {
+      this.threads[match.index] = {
         next: currentIndex,
-        deltaRe: Math.fround(re - pt.re),
-        deltaIm: Math.fround(im - pt.im)
+        deltaRe: Math.fround(-match.deltaRe),  // Negate: bucket returns (query - candidate)
+        deltaIm: Math.fround(-match.deltaIm)
       };
     }
 
-    // Update spatial buckets
-    const key = `${bx},${by}`;
-    if (!this.spatialBuckets.has(key)) this.spatialBuckets.set(key, []);
-    this.spatialBuckets.get(key).push(currentIndex);
+    // Add this point to the bucket for future lookups
+    this.spatialBucket.add(currentIndex);
 
-    // Cleanup old entries
-    if (currentIndex >= this.threadingWindowSize) {
-      const oldIdx = currentIndex - this.threadingWindowSize;
-      const oldPt = getPoint(oldIdx);
-      if (oldPt) {
-        const oldKey =
-          `${Math.floor(oldPt.re / this.bucketSize)},` +
-          `${Math.floor(oldPt.im / this.bucketSize)}`;
-        const bucket = this.spatialBuckets.get(oldKey);
-        if (bucket) {
-          const pos = bucket.indexOf(oldIdx);
-          if (pos >= 0) bucket.splice(pos, 1);
-          if (bucket.length === 0) this.spatialBuckets.delete(oldKey);
-        }
-      }
+    // Cleanup old entries outside the window
+    if (currentIndex >= this.windowSize) {
+      this.spatialBucket.removeOlderThan(currentIndex - this.windowSize);
     }
+  }
+
+  /**
+   * Get thread info for iteration i
+   */
+  getThread(i) {
+    return this.threads[i] || null;
+  }
+
+  /**
+   * Manually set a thread (used for loop configuration)
+   */
+  setThread(i, next, deltaRe, deltaIm) {
+    this.threads[i] = {
+      next,
+      deltaRe: Math.fround(deltaRe),
+      deltaIm: Math.fround(deltaIm)
+    };
+  }
+
+  get length() {
+    return this.threads.length;
   }
 }
 
@@ -5919,14 +6125,19 @@ class ZhuoranBoard extends Board {
     this.maxRefIter = 1;  // Track maximum refIter to avoid scanning all pixels
     // Working array for quad precision operations
     this.tt = new Array(16);
-    // Threading for robust cycle detection
-    this.threading = new ReferenceOrbitThreading(this.epsilon);
     // Initialize reference orbit with z = 0 and z = c
     this.refOrbit.push([0, 0, 0, 0]);  // Iteration 0: z = 0
     this.refOrbit.push(this.refC.slice());  // Iteration 1: z = 0^2 + c = c
     this.refIterations = 1;  // We have computed 1 iteration beyond z=0
-    this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});  // iter 0
-    this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});  // iter 1
+    // Threading for robust cycle detection
+    // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
+    // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
+    const threadingEpsilon = 10000 * this.epsilon;
+    const getQdPoint = (i) => this.refOrbit[i] || null;  // [re_hi, re_lo, im_hi, im_lo]
+    const spatialBucket = new QdSpatialBucket(threadingEpsilon, getQdPoint);
+    this.threading = new ReferenceOrbitThreading(spatialBucket);
+    this.threading.addPoint(0);  // iter 0
+    this.threading.addPoint(1);  // iter 1
     this.initPixels();
     this.effort = 2;  // Slightly lower than PerturbationBoard since simpler
   }
@@ -6117,14 +6328,7 @@ class ZhuoranBoard extends Board {
 
     // Build thread-following map after the orbit settles (first 2000 iterations)
     if (this.refIterations >= 2000) {
-      const re = newZ[0] + newZ[1];
-      const im = newZ[2] + newZ[3];
-      const getPoint = (i) => {
-        if (i < 0 || i >= this.refOrbit.length) return null;
-        const p = this.refOrbit[i];
-        return { re: p[0] + p[1], im: p[2] + p[3] };
-      };
-      this.threading.addOrbitPoint(this.refIterations, re, im, getPoint);
+      this.threading.addPoint(this.refIterations);
     }
 
     // Grow array if needed
@@ -6148,7 +6352,14 @@ class ZhuoranBoard extends Board {
       const currentZR = refR + dr;
       const currentZI = refI + di;
       const currentMag2 = currentZR * currentZR + currentZI * currentZI;
+      // Debug output for pixel 0 near escape (iter 190-220)
+      if (index === 0 && this.it >= 190 && this.it <= 220) {
+        console.log(`ZhuoranBoard pixel0 iter=${this.it}: ref_iter=${refIter}, dzr=${dr.toExponential(8)}, dzi=${di.toExponential(8)}, |z|²=${currentMag2.toFixed(6)}, refR=${refR.toExponential(8)}, refI=${refI.toExponential(8)}`);
+      }
       if (currentMag2 > 4) {
+        if (index === 0) {
+          console.log(`ZhuoranBoard ESCAPE pixel0 at iter=${this.it}: z=(${currentZR.toExponential(6)}, ${currentZI.toExponential(6)}), |z|²=${currentMag2.toFixed(6)}`);
+        }
         return 1;  // Diverged before iteration: report this.it
       }
     }
@@ -6315,7 +6526,7 @@ class ZhuoranBoard extends Board {
 
           // Follow threads forward from checkpoint
           while (steps < maxSteps && current < this.refOrbit.length) {
-            const thread = this.threading.refThreading[current];
+            const thread = this.threading.getThread(current);
             if (!thread || thread.next < 0) break;
 
             deltaRe += thread.deltaRe;
@@ -6443,6 +6654,15 @@ class OctZhuoranBoard extends ZhuoranBoard {
     ];
     // Working array for oct precision operations
     this.tt = new Array(32);
+    // Reinitialize threading with oct orbit
+    // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
+    // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
+    const threadingEpsilon = 10000 * this.epsilon;
+    const getOctPoint = (i) => this.octOrbit[i] || null;  // [re0..re3, im0..im3]
+    const spatialBucket = new OctSpatialBucket(threadingEpsilon, getOctPoint);
+    this.threading = new ReferenceOrbitThreading(spatialBucket);
+    this.threading.addPoint(0);
+    this.threading.addPoint(1);
     // Re-initialize pixels with oct-precision delta computation
     this.initPixelsOct();
   }
@@ -6534,14 +6754,7 @@ class OctZhuoranBoard extends ZhuoranBoard {
 
     // Build thread-following map after the orbit settles (first 2000 iterations)
     if (this.refIterations >= 2000) {
-      const reSum = nzrOct[0] + nzrOct[1] + nzrOct[2] + nzrOct[3];
-      const imSum = nziOct[0] + nziOct[1] + nziOct[2] + nziOct[3];
-      const getPoint = (i) => {
-        if (i < 0 || i >= this.octOrbit.length) return null;
-        const p = this.octOrbit[i];
-        return { re: p[0] + p[1] + p[2] + p[3], im: p[4] + p[5] + p[6] + p[7] };
-      };
-      this.threading.addOrbitPoint(this.refIterations, reSum, imSum, getPoint);
+      this.threading.addPoint(this.refIterations);
     }
 
     // Grow array if needed
@@ -7426,9 +7639,14 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.tt = new Array(16);
 
     // Threading for robust cycle detection
-    this.threading = new ReferenceOrbitThreading(this.epsilon);
-    this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});  // iter 0
-    this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});  // iter 1
+    // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
+    // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
+    const threadingEpsilon = 10000 * this.epsilon;
+    const getQdPoint = (i) => this.refOrbit[i] || null;  // [re_hi, re_lo, im_hi, im_lo]
+    const spatialBucket = new QdSpatialBucket(threadingEpsilon, getQdPoint);
+    this.threading = new ReferenceOrbitThreading(spatialBucket);
+    this.threading.addPoint(0);
+    this.threading.addPoint(1);
 
     // Initialize per-pixel perturbation data
     this.initPixels(size, re, im);
@@ -7543,20 +7761,20 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       label: 'Delta C buffer'
     });
 
-    // Storage buffer for dz, checkpoint bb, and threading deltas
+    // Storage buffer for dz, checkpoint bb, and original checkpoint_bb
     // (packed: 6 f32 per pixel)
     this.buffers.dzAndCheckpoint = this.device.createBuffer({
       // 6 f32 per pixel: dz.x, dz.y, bb.x, bb.y,
-      // threaded_delta_re, threaded_delta_im
+      // checkpoint_bb.x, checkpoint_bb.y (original dz at checkpoint for reset after rebase)
       size: dimsArea * 6 * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'DZ and checkpoint buffer'
     });
 
-    // Storage buffer for refIter, checkpointIter,
-    // and next_threaded_ref_iter (3 u32 per pixel)
+    // Storage buffer for refIter, checkpointRefidx,
+    // and pending_checkpoint_refidx (3 u32 per pixel)
     this.buffers.refIterAndCheckpoint = this.device.createBuffer({
-      size: dimsArea * 3 * 4,  // 3 u32 per pixel: [ref_iter, checkpoint_iter, next_threaded_ref_iter]
+      size: dimsArea * 3 * 4,  // 3 u32 per pixel: [ref_iter, checkpoint_refidx, pending_checkpoint_refidx]
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'RefIter and checkpoint buffer'
     });
@@ -7577,6 +7795,13 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       label: 'Threading buffer'
     });
 
+    // Debug buffer for tracing pixel 0 trajectory
+    this.buffers.debug = this.device.createBuffer({
+      size: 300 * 32,  // 300 iterations × 8 floats
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      label: 'Debug buffer'
+    });
+
     // Track last uploaded lengths for incremental uploads
     this.lastUploadedOrbitLength = -1;  // -1 means nothing uploaded yet
     this.lastUploadedThreadingLength = -1;
@@ -7590,25 +7815,25 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     // Initialize buffers with packed data
     // dzAndCheckpoint: [dz.x, dz.y, bb.x=0, bb.y=0,
-    // threaded_delta_re=0, threaded_delta_im=0] per pixel
+    // checkpoint_bb.x=0, checkpoint_bb.y=0] per pixel
     const dzAndCheckpointData = new Float32Array(dimsArea * 6);
     for (let i = 0; i < dimsArea; i++) {
       dzAndCheckpointData[i * 6] = this.dz[i * 2];      // dz.x
       dzAndCheckpointData[i * 6 + 1] = this.dz[i * 2 + 1];  // dz.y
       dzAndCheckpointData[i * 6 + 2] = 0;  // bb.x
       dzAndCheckpointData[i * 6 + 3] = 0;  // bb.y
-      dzAndCheckpointData[i * 6 + 4] = 0;  // threaded_delta_re
-      dzAndCheckpointData[i * 6 + 5] = 0;  // threaded_delta_im
+      dzAndCheckpointData[i * 6 + 4] = 0;  // checkpoint_bb.x
+      dzAndCheckpointData[i * 6 + 5] = 0;  // checkpoint_bb.y
     }
 
     // Initialize refIterAndCheckpoint:
-    // [ref_iter, checkpoint_iter, next_threaded_ref_iter] per pixel
+    // [ref_iter, checkpoint_refidx, pending_checkpoint_refidx] per pixel
     const refIterAndCheckpointData = new Uint32Array(dimsArea * 3);
     for (let i = 0; i < dimsArea; i++) {
       refIterAndCheckpointData[i * 3] = this.refIter[i];  // ref_iter
-      // checkpoint_iter: use sentinel for "no checkpoint yet"
+      // checkpoint_refidx: use sentinel for "no checkpoint yet"
       refIterAndCheckpointData[i * 3 + 1] = 0xFFFFFFFF;
-      // next_threaded_ref_iter: sentinel for "no thread yet"
+      // pending_checkpoint_refidx: sentinel for "no pending yet"
       refIterAndCheckpointData[i * 3 + 2] = 0xFFFFFFFF;
     }
 
@@ -7650,7 +7875,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         { binding: 4, resource: { buffer: this.buffers.dzAndCheckpoint } },
         { binding: 5, resource: { buffer: this.buffers.refIterAndCheckpoint } },
         { binding: 6, resource: { buffer: this.buffers.refOrbit } },
-        { binding: 7, resource: { buffer: this.buffers.threading } }
+        { binding: 7, resource: { buffer: this.buffers.threading } },
+        { binding: 8, resource: { buffer: this.buffers.debug } }
       ],
       label: 'Perturbation bind group'
     });
@@ -7703,14 +7929,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Threading: add new orbit point
     // Start threading at F(18) = 2584 and continue forever
     if (this.refIterations >= 2584) {
-      const re = newZ[0] + newZ[1];
-      const im = newZ[2] + newZ[3];
-      const getPoint = (i) => {
-        if (i < 0 || i >= this.refOrbit.length) return null;
-        const p = this.refOrbit[i];
-        return { re: p[0] + p[1], im: p[2] + p[3] };
-      };
-      this.threading.addOrbitPoint(this.refIterations, re, im, getPoint);
+      this.threading.addPoint(this.refIterations);
     }
 
     // Grow array if needed
@@ -7794,11 +8013,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
         if (dist <= epsilon3) {
           // Thread i -> j (wrapping through the loop)
-          this.threading.refThreading[i] = {
-            next: j,
-            deltaRe: Math.fround(jR - iR),
-            deltaIm: Math.fround(jI - iI)
-          };
+          this.threading.setThread(i, j, jR - iR, jI - iI);
           break;  // Take first match
         }
       }
@@ -7841,18 +8056,20 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       @group(0) @binding(2) var<storage, read_write> statusAndPeriod: array<vec2<u32>>;
       // Delta c (constant)
       @group(0) @binding(3) var<storage, read> dc: array<f32>;
-      // Note: Using array<f32> for 6-float structure to avoid
-      // padding issues
-      // Layout: [dz.x, dz.y, bb.x, bb.y, threaded_delta_re,
-      // threaded_delta_im] per pixel
+      // Note: Using array<f32> for 6-float structure to avoid padding issues
+      // Layout: [dz.x, dz.y, bb.x, bb.y, checkpoint_bb.x, checkpoint_bb.y] per pixel
+      // bb = current adjusted checkpoint position (modified by thread deltas)
+      // checkpoint_bb = original dz at checkpoint moment (for reset after rebase)
       @group(0) @binding(4) var<storage, read_write> dzAndCheckpoint: array<f32>;
-      // Layout: [ref_iter, checkpoint_iter, next_threaded_ref_iter]
-      // per pixel (stride 3)
+      // Layout: [ref_iter, checkpoint_refidx, pending_checkpoint_refidx] per pixel (stride 3)
+      // checkpoint_refidx = ref index at checkpoint moment
+      // pending_checkpoint_refidx = starts as checkpoint_refidx, advances via lazy threading
       @group(0) @binding(5) var<storage, read_write> refIterAndCheckpoint: array<u32>;
       // Reference orbit [r,i pairs] only
       @group(0) @binding(6) var<storage, read> refOrbit: array<f32>;
       // Threading [next, deltaR, deltaI, pad]
       @group(0) @binding(7) var<storage, read> threading: array<vec4<f32>>;
+      @group(0) @binding(8) var<storage, read_write> debug: array<f32>;
 
       // Get threading data from separate threading buffer
       // Returns vec3: [next_index_as_f32, deltaRe, deltaIm]
@@ -7879,18 +8096,18 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
         // Load iteration counter (initialized to 1 to match CpuBoard semantics)
         var iter = iterations[index];
-        // Unpack: dz = perturbation delta, bb = checkpoint dz, threading deltas
+        // Unpack: dz = perturbation delta, bb = adjusted checkpoint position
         var dzr = dzAndCheckpoint[index6];
         var dzi = dzAndCheckpoint[index6 + 1u];
-        var bbr = dzAndCheckpoint[index6 + 2u];  // checkpoint dz real
-        var bbi = dzAndCheckpoint[index6 + 3u];  // checkpoint dz imag
-        var threaded_delta_re = dzAndCheckpoint[index6 + 4u];
-        var threaded_delta_im = dzAndCheckpoint[index6 + 5u];
+        var bbr = dzAndCheckpoint[index6 + 2u];  // current adjusted checkpoint position (modified by thread deltas)
+        var bbi = dzAndCheckpoint[index6 + 3u];
+        var checkpoint_bb_r = dzAndCheckpoint[index6 + 4u];  // original dz at checkpoint (for reset after rebase)
+        var checkpoint_bb_i = dzAndCheckpoint[index6 + 5u];
         var ref_iter = refIterAndCheckpoint[index3];
         let dcr = dc[index2];
         let dci = dc[index2 + 1u];
-        var ckpt_iter = refIterAndCheckpoint[index3 + 1u];  // ref_iter when checkpoint was saved
-        var next_threaded_ref_iter = refIterAndCheckpoint[index3 + 2u];  // Next threaded position
+        var checkpoint_refidx = refIterAndCheckpoint[index3 + 1u];  // ref index at checkpoint moment (fixed)
+        var pending_checkpoint_refidx = refIterAndCheckpoint[index3 + 2u];  // advances via lazy threading
         var pp = statusAndPeriod[index].y;     // period = iter when convergence first detected
         // Convergence thresholds scale with pixel size for deep zooms
         // GPU uses float32 precision, so thresholds must be larger than CPU's float64
@@ -7925,7 +8142,14 @@ class GpuZhuoranBoard extends GpuBaseBoard {
               dzi = total_i_pre;
               ref_iter = 0u;  // Restart from beginning of reference orbit
 
-              // Keep the checkpoint unchanged; difference-based comparison works across rebases
+              // Reset lazy threading state after rebase:
+              // - pending_checkpoint_refidx back to checkpoint_refidx
+              // - bb back to checkpoint_bb (original dz at checkpoint)
+              if (checkpoint_refidx != 0xFFFFFFFFu) {
+                pending_checkpoint_refidx = checkpoint_refidx;
+                bbr = checkpoint_bb_r;
+                bbi = checkpoint_bb_i;
+              }
             }
           }
 
@@ -7941,6 +8165,25 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           let curr_total_r = refr + dzr;
           let curr_total_i = refi + dzi;
           let curr_mag_sq = curr_total_r * curr_total_r + curr_total_i * curr_total_i;
+
+          // === DEBUG OUTPUT for pixel 0, all iterations 1-250 ===
+          // Layout: 5 floats per iter: [iter, ref_iter, dzr, dzi, z_mag_sq]
+          if (index == 0u && iter >= 1u && iter < 250u) {
+            let debug_idx = iter * 5u;
+            debug[debug_idx + 0u] = f32(iter);
+            debug[debug_idx + 1u] = f32(ref_iter);
+            debug[debug_idx + 2u] = dzr;
+            debug[debug_idx + 3u] = dzi;
+            debug[debug_idx + 4u] = curr_mag_sq;
+          }
+          // Log escape for pixel 0 at offset 1250
+          if (index == 0u && curr_mag_sq > 4.0) {
+            debug[1250u] = f32(iter);  // Store escape iteration
+            debug[1251u] = curr_total_r;
+            debug[1252u] = curr_total_i;
+            debug[1253u] = curr_mag_sq;
+          }
+
           if (curr_mag_sq > 4.0) {
             statusAndPeriod[index] = vec2<u32>(1u, pp);
             break;
@@ -8016,32 +8259,20 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             // Check if current batch_iter matches this checkpoint
             if (batch_iter == checkpoint_offset) {
               just_updated = true;
+              // Store both bb (current) and checkpoint_bb (original, for reset after rebase)
               bbr = old_dzr;  // dz real at checkpoint (BEFORE iteration)
               bbi = old_dzi;  // dz imag at checkpoint
-              ckpt_iter = old_ref_iter;  // Store reference iteration
+              checkpoint_bb_r = old_dzr;  // Save original for reset
+              checkpoint_bb_i = old_dzi;
+              checkpoint_refidx = old_ref_iter;  // Store reference iteration (fixed)
+              pending_checkpoint_refidx = old_ref_iter;  // Start lazy threading at checkpoint
               pp = 0u;
               next_checkpoint_idx++;  // Move to next checkpoint
-
-              // Initialize threading: reset deltas at checkpoint and follow ONE thread
-              threaded_delta_re = 0.0;
-              threaded_delta_im = 0.0;
-              if (old_ref_iter >= 2584u && old_ref_iter < params.ref_orbit_length) {
-                let thread = getThread(old_ref_iter);
-                if (thread.x >= 0.0) {
-                  next_threaded_ref_iter = u32(thread.x);
-                  threaded_delta_re = thread.y;
-                  threaded_delta_im = thread.z;
-                } else {
-                  next_threaded_ref_iter = 0xFFFFFFFFu;
-                }
-              } else {
-                next_threaded_ref_iter = 0xFFFFFFFFu;
-              }
             }
           }
           // Check convergence (if we have a checkpoint and didn't just update it)
-          // Use 0xFFFFFFFF as sentinel for "no checkpoint yet" (allows ckpt_iter=0)
-          if (ckpt_iter != 0xFFFFFFFFu && !just_updated) {
+          // Use 0xFFFFFFFF as sentinel for "no checkpoint yet"
+          if (checkpoint_refidx != 0xFFFFFFFFu && !just_updated) {
             // Threading buffer capacity: 64MB / 16 bytes per iteration = 4,194,304 (2^22)
             const THREADING_CAPACITY = 1048576u;
 
@@ -8050,9 +8281,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
               // Compute absolute positions (accepts float32 precision loss)
               let z_total_r = refr + old_dzr;
               let z_total_i = refi + old_dzi;
-              let checkpoint_ref_offset = ckpt_iter * 2u;
-              let z_checkpoint_r = refOrbit[checkpoint_ref_offset] + bbr;
-              let z_checkpoint_i = refOrbit[checkpoint_ref_offset + 1u] + bbi;
+              let checkpoint_ref_offset = checkpoint_refidx * 2u;
+              let z_checkpoint_r = refOrbit[checkpoint_ref_offset] + checkpoint_bb_r;
+              let z_checkpoint_i = refOrbit[checkpoint_ref_offset + 1u] + checkpoint_bb_i;
 
               let diff_r = z_total_r - z_checkpoint_r;
               let diff_i = z_total_i - z_checkpoint_i;
@@ -8068,16 +8299,13 @@ class GpuZhuoranBoard extends GpuBaseBoard {
                 }
               }
             } else {
-              // Normal convergence check with threading (high precision)
-              // Check at checkpoint or at next threaded position
-              if (ref_iter == ckpt_iter ||
-                  (next_threaded_ref_iter != 0xFFFFFFFFu &&
-                   ref_iter == next_threaded_ref_iter)) {
+              // LAZY THREADING convergence check (high precision)
+              // Case 1: ref_iter == checkpoint_refidx (after rebasing or naturally arriving)
+              // Compare dz - bb directly (bb equals checkpoint_bb at this point)
+              if (ref_iter == checkpoint_refidx) {
                 let dz_diff_r = old_dzr - bbr;
                 let dz_diff_i = old_dzi - bbi;
-                let total_diff_r = threaded_delta_re + dz_diff_r;
-                let total_diff_i = threaded_delta_im + dz_diff_i;
-                let db = max(abs(total_diff_r), abs(total_diff_i));
+                let db = max(abs(dz_diff_r), abs(dz_diff_i));
 
                 if (db <= epsilon2) {
                   if (pp == 0u) {
@@ -8088,18 +8316,36 @@ class GpuZhuoranBoard extends GpuBaseBoard {
                     break;
                   }
                 }
+              }
 
-                // If at threaded position, step forward to next thread
-                if (ref_iter == next_threaded_ref_iter &&
-                    next_threaded_ref_iter < params.ref_orbit_length) {
-                  let thread = getThread(next_threaded_ref_iter);
-                  if (thread.x >= 0.0) {
-                    threaded_delta_re += thread.y;
-                    threaded_delta_im += thread.z;
-                    next_threaded_ref_iter = u32(thread.x);
-                  } else {
-                    next_threaded_ref_iter = 0xFFFFFFFFu;
+              // Case 2: Check if thread[pending_checkpoint_refidx].next == ref_iter
+              // This handles threading case where we lazily follow thread links
+              if (pending_checkpoint_refidx >= 2584u &&
+                  pending_checkpoint_refidx < params.ref_orbit_length) {
+                let thread = getThread(pending_checkpoint_refidx);
+                if (thread.x >= 0.0 && u32(thread.x) == ref_iter) {
+                  // Check convergence: add thread delta to diff (matches old code)
+                  // total_diff = threaded_delta + dz_diff = thread.delta + (dz - bb)
+                  let dz_diff_r = old_dzr - bbr + thread.y;
+                  let dz_diff_i = old_dzi - bbi + thread.z;
+                  let db = max(abs(dz_diff_r), abs(dz_diff_i));
+
+                  if (db <= epsilon2) {
+                    if (pp == 0u) {
+                      pp = iter;
+                    }
+                    if (db <= epsilon) {
+                      statusAndPeriod[index] = vec2<u32>(2u, pp);  // Converged!
+                      break;
+                    }
                   }
+
+                  // Update bb for future checks: bb -= thread.delta
+                  // So future: dz - bb_new + next_delta = dz - (bb - delta) + next_delta
+                  //          = (dz - bb) + delta + next_delta (accumulated)
+                  bbr -= thread.y;
+                  bbi -= thread.z;
+                  pending_checkpoint_refidx = ref_iter;
                 }
               }
             }
@@ -8121,11 +8367,11 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         dzAndCheckpoint[index6 + 1u] = dzi;
         dzAndCheckpoint[index6 + 2u] = bbr;
         dzAndCheckpoint[index6 + 3u] = bbi;
-        dzAndCheckpoint[index6 + 4u] = threaded_delta_re;
-        dzAndCheckpoint[index6 + 5u] = threaded_delta_im;
+        dzAndCheckpoint[index6 + 4u] = checkpoint_bb_r;
+        dzAndCheckpoint[index6 + 5u] = checkpoint_bb_i;
         refIterAndCheckpoint[index3] = ref_iter;
-        refIterAndCheckpoint[index3 + 1u] = ckpt_iter;
-        refIterAndCheckpoint[index3 + 2u] = next_threaded_ref_iter;
+        refIterAndCheckpoint[index3 + 1u] = checkpoint_refidx;
+        refIterAndCheckpoint[index3 + 2u] = pending_checkpoint_refidx;
         // Write back pp even if not converged (so it persists across batches)
         if (statusAndPeriod[index].x == 0u) {
           statusAndPeriod[index] = vec2<u32>(0u, pp);
@@ -8260,7 +8506,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
         for (let i = 0; i < count; i++) {
           const threadIdx = startIdx + i;
-          const thread = this.threading.refThreading[threadIdx];
+          const thread = this.threading.getThread(threadIdx);
           if (!thread) {
             // No threading data yet (before iteration 2584) - use -1 sentinel
             threadF32[i * 4] = -1;
@@ -8519,6 +8765,15 @@ class OctGpuZhuoranBoard extends GpuZhuoranBoard {
     // Full oct reference orbit retained to downcast to f32 right before upload
     this.octOrbit = [[0, 0, 0, 0, 0, 0, 0, 0], [...refReOct, ...refImOct]];
     this.refC_oct = [...refReOct, ...refImOct];
+    // Reinitialize threading with oct orbit
+    // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
+    // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
+    const threadingEpsilon = 10000 * this.epsilon;
+    const getOctPoint = (i) => this.octOrbit[i] || null;  // [re0..re3, im0..im3]
+    const spatialBucket = new OctSpatialBucket(threadingEpsilon, getOctPoint);
+    this.threading = new ReferenceOrbitThreading(spatialBucket);
+    this.threading.addPoint(0);
+    this.threading.addPoint(1);
   }
 
   extendReferenceOrbit() {
@@ -8569,14 +8824,7 @@ class OctGpuZhuoranBoard extends GpuZhuoranBoard {
     this.refIterations++;
 
     if (this.refIterations >= 2584) {
-      const reSum = nzrOct[0] + nzrOct[1] + nzrOct[2] + nzrOct[3];
-      const imSum = nziOct[0] + nziOct[1] + nziOct[2] + nziOct[3];
-      const getPoint = (i) => {
-        if (i < 0 || i >= this.octOrbit.length) return null;
-        const p = this.octOrbit[i];
-        return { re: p[0] + p[1] + p[2] + p[3], im: p[4] + p[5] + p[6] + p[7] };
-      };
-      this.threading.addOrbitPoint(this.refIterations, reSum, imSum, getPoint);
+      this.threading.addPoint(this.refIterations);
     }
   }
 
@@ -8767,15 +9015,15 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
         var iter = iterations[index];
         var dzr = dzAndCheckpoint[index6];
         var dzi = dzAndCheckpoint[index6 + 1u];
-        var bbr = dzAndCheckpoint[index6 + 2u];
+        var bbr = dzAndCheckpoint[index6 + 2u];  // current adjusted checkpoint position
         var bbi = dzAndCheckpoint[index6 + 3u];
-        var threaded_delta_re = dzAndCheckpoint[index6 + 4u];
-        var threaded_delta_im = dzAndCheckpoint[index6 + 5u];
+        var checkpoint_bb_r = dzAndCheckpoint[index6 + 4u];  // original dz at checkpoint
+        var checkpoint_bb_i = dzAndCheckpoint[index6 + 5u];
         var ref_iter = refIterAndCheckpoint[index3];
         let dcr = dc[index2];
         let dci = dc[index2 + 1u];
-        var ckpt_iter = refIterAndCheckpoint[index3 + 1u];
-        var next_threaded_ref_iter = refIterAndCheckpoint[index3 + 2u];
+        var checkpoint_refidx = refIterAndCheckpoint[index3 + 1u];  // fixed ref index at checkpoint
+        var pending_checkpoint_refidx = refIterAndCheckpoint[index3 + 2u];  // advances via lazy threading
         var pp = statusAndPeriod[index].y;
 
         let epsilon = min(1e-7, params.pixel_size / 10.0);
@@ -8809,6 +9057,13 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
               dzr = ldexp(total_r_pre, -params.log2_scale);
               dzi = ldexp(total_i_pre, -params.log2_scale);
               ref_iter = 0u;
+
+              // Reset lazy threading state after rebase
+              if (checkpoint_refidx != 0xFFFFFFFFu) {
+                pending_checkpoint_refidx = checkpoint_refidx;
+                bbr = checkpoint_bb_r;
+                bbi = checkpoint_bb_i;
+              }
             }
           }
 
@@ -8876,31 +9131,20 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
 
             if (batch_iter == checkpoint_offset) {
               just_updated = true;
+              // Store both bb (current) and checkpoint_bb (original, for reset after rebase)
               bbr = old_dzr;
               bbi = old_dzi;
-              ckpt_iter = old_ref_iter;
+              checkpoint_bb_r = old_dzr;
+              checkpoint_bb_i = old_dzi;
+              checkpoint_refidx = old_ref_iter;
+              pending_checkpoint_refidx = old_ref_iter;  // Start lazy threading at checkpoint
               pp = 0u;
               next_checkpoint_idx++;
-
-              threaded_delta_re = 0.0;
-              threaded_delta_im = 0.0;
-              if (old_ref_iter >= 2584u && old_ref_iter < params.ref_orbit_length) {
-                let thread = getThread(old_ref_iter);
-                if (thread.x >= 0.0) {
-                  next_threaded_ref_iter = u32(thread.x);
-                  threaded_delta_re = thread.y;
-                  threaded_delta_im = thread.z;
-                } else {
-                  next_threaded_ref_iter = 0xFFFFFFFFu;
-                }
-              } else {
-                next_threaded_ref_iter = 0xFFFFFFFFu;
-              }
             }
           }
 
-          // Convergence detection
-          if (ckpt_iter != 0xFFFFFFFFu && !just_updated) {
+          // Convergence detection with lazy threading
+          if (checkpoint_refidx != 0xFFFFFFFFu && !just_updated) {
             const THREADING_CAPACITY = 1048576u;
 
             if (ref_iter >= THREADING_CAPACITY) {
@@ -8909,9 +9153,9 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
               let dzi_act = ldexp(old_dzi, params.log2_scale);
               let z_total_r = refr + dzr_act;
               let z_total_i = refi + dzi_act;
-              let checkpoint_ref_offset = ckpt_iter * 2u;
-              let bbr_act = ldexp(bbr, params.log2_scale);
-              let bbi_act = ldexp(bbi, params.log2_scale);
+              let checkpoint_ref_offset = checkpoint_refidx * 2u;
+              let bbr_act = ldexp(checkpoint_bb_r, params.log2_scale);
+              let bbi_act = ldexp(checkpoint_bb_i, params.log2_scale);
               let z_checkpoint_r = refOrbit[checkpoint_ref_offset] + bbr_act;
               let z_checkpoint_i = refOrbit[checkpoint_ref_offset + 1u] + bbi_act;
 
@@ -8928,20 +9172,11 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
                 }
               }
             } else {
-              // Standard threading-based convergence
-              var target_ref_iter = old_ref_iter;
-              var target_delta_re = 0.0;
-              var target_delta_im = 0.0;
-
-              if (next_threaded_ref_iter != 0xFFFFFFFFu) {
-                target_ref_iter = next_threaded_ref_iter;
-                target_delta_re = threaded_delta_re;
-                target_delta_im = threaded_delta_im;
-              }
-
-              if (target_ref_iter == ckpt_iter) {
-                let diff_r = old_dzr - bbr - target_delta_re;
-                let diff_i = old_dzi - bbi - target_delta_im;
+              // LAZY THREADING convergence check
+              // Case 1: ref_iter == checkpoint_refidx (after rebasing or naturally arriving)
+              if (ref_iter == checkpoint_refidx) {
+                let diff_r = old_dzr - bbr;
+                let diff_i = old_dzi - bbi;
                 let db = max(abs(diff_r), abs(diff_i));
 
                 if (db <= epsilon2) {
@@ -8954,15 +9189,29 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
                 }
               }
 
-              if (next_threaded_ref_iter != 0xFFFFFFFFu &&
-                  next_threaded_ref_iter < params.ref_orbit_length) {
-                let thread = getThread(next_threaded_ref_iter);
-                if (thread.x >= 0.0) {
-                  next_threaded_ref_iter = u32(thread.x);
-                  threaded_delta_re += thread.y;
-                  threaded_delta_im += thread.z;
-                } else {
-                  next_threaded_ref_iter = 0xFFFFFFFFu;
+              // Case 2: Check if thread[pending_checkpoint_refidx].next == ref_iter
+              if (pending_checkpoint_refidx >= 2584u &&
+                  pending_checkpoint_refidx < params.ref_orbit_length) {
+                let thread = getThread(pending_checkpoint_refidx);
+                if (thread.x >= 0.0 && u32(thread.x) == ref_iter) {
+                  // Check convergence: add thread delta to diff (matches old code)
+                  let diff_r = old_dzr - bbr + thread.y;
+                  let diff_i = old_dzi - bbi + thread.z;
+                  let db = max(abs(diff_r), abs(diff_i));
+
+                  if (db <= epsilon2) {
+                    if (pp == 0u) { pp = iter; }
+                    if (db <= epsilon) {
+                      let period = iter - pp;
+                      statusAndPeriod[index] = vec2<u32>(2u, period);
+                      break;
+                    }
+                  }
+
+                  // Update bb for future checks: bb -= thread.delta
+                  bbr -= thread.y;
+                  bbi -= thread.z;
+                  pending_checkpoint_refidx = ref_iter;
                 }
               }
             }
@@ -8978,11 +9227,11 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
         dzAndCheckpoint[index6 + 1u] = dzi;
         dzAndCheckpoint[index6 + 2u] = bbr;
         dzAndCheckpoint[index6 + 3u] = bbi;
-        dzAndCheckpoint[index6 + 4u] = threaded_delta_re;
-        dzAndCheckpoint[index6 + 5u] = threaded_delta_im;
+        dzAndCheckpoint[index6 + 4u] = checkpoint_bb_r;
+        dzAndCheckpoint[index6 + 5u] = checkpoint_bb_i;
         refIterAndCheckpoint[index3] = ref_iter;
-        refIterAndCheckpoint[index3 + 1u] = ckpt_iter;
-        refIterAndCheckpoint[index3 + 2u] = next_threaded_ref_iter;
+        refIterAndCheckpoint[index3 + 1u] = checkpoint_refidx;
+        refIterAndCheckpoint[index3 + 2u] = pending_checkpoint_refidx;
         statusAndPeriod[index] = vec2<u32>(statusAndPeriod[index].x, pp);
       }
     `;
@@ -9050,17 +9299,20 @@ class ScaledGpuZhuoranBoard extends OctGpuZhuoranBoard {
         this.lastUploadedOrbitLength = -1;  // Reset after resize
       }
       // Upload ref orbit incrementally (oct format from octOrbit: [r0,r1,r2,r3,i0,i1,i2,i3])
-      if (this.lastUploadedOrbitLength < totalIters) {
+      // lastUploadedOrbitLength tracks the highest index uploaded (not count)
+      if (this.lastUploadedOrbitLength < this.refIterations) {
         const startIdx = Math.max(0, this.lastUploadedOrbitLength + 1);
-        const orbitF32 = new Float32Array((totalIters - startIdx) * 2);
-        for (let i = startIdx; i < totalIters; i++) {
-          const ref = this.octOrbit[i];
+        const count = this.refIterations - startIdx + 1;
+        const orbitF32 = new Float32Array(count * 2);
+        for (let i = 0; i < count; i++) {
+          const orbitIdx = startIdx + i;
+          const ref = this.octOrbit[orbitIdx];
           // Sum all oct components to get f32 value
-          orbitF32[(i - startIdx) * 2] = ref ? ref[0] + ref[1] + ref[2] + ref[3] : 0;
-          orbitF32[(i - startIdx) * 2 + 1] = ref ? ref[4] + ref[5] + ref[6] + ref[7] : 0;
+          orbitF32[i * 2] = ref ? ref[0] + ref[1] + ref[2] + ref[3] : 0;
+          orbitF32[i * 2 + 1] = ref ? ref[4] + ref[5] + ref[6] + ref[7] : 0;
         }
         this.device.queue.writeBuffer(this.buffers.refOrbit, startIdx * 2 * 4, orbitF32);
-        this.lastUploadedOrbitLength = totalIters;
+        this.lastUploadedOrbitLength = this.refIterations;
       }
 
       if (this.un === 0) {
@@ -9261,9 +9513,14 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     this.tt = new Array(32);
 
     // Threading for robust cycle detection
-    this.threading = new ReferenceOrbitThreading(this.epsilon);
-    this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});  // iter 0
-    this.threading.refThreading.push({next: -1, deltaRe: 0, deltaIm: 0});  // iter 1
+    // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
+    // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
+    const threadingEpsilon = 10000 * this.epsilon;
+    const getOctPoint = (i) => this.refOrbit[i] || null;  // [re0..re3, im0..im3]
+    const spatialBucket = new OctSpatialBucket(threadingEpsilon, getOctPoint);
+    this.threading = new ReferenceOrbitThreading(spatialBucket);
+    this.threading.addPoint(0);
+    this.threading.addPoint(1);
 
     // Initialize per-pixel perturbation data (sets initialScale and pixelScale)
     this.initPixels(size, re, im);
@@ -9318,14 +9575,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     this.refIterations++;
 
     if (this.refIterations >= 2584) {
-      const reSum = nzrOct[0] + nzrOct[1] + nzrOct[2] + nzrOct[3];
-      const imSum = nziOct[0] + nziOct[1] + nziOct[2] + nziOct[3];
-      const getPoint = (i) => {
-        if (i < 0 || i >= this.refOrbit.length) return null;
-        const p = this.refOrbit[i];
-        return { re: p[0] + p[1] + p[2] + p[3], im: p[4] + p[5] + p[6] + p[7] };
-      };
-      this.threading.addOrbitPoint(this.refIterations, reSum, imSum, getPoint);
+      this.threading.addPoint(this.refIterations);
     }
   }
 
@@ -9340,7 +9590,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     // Look for a cycle in the last portion of the orbit
     const checkStart = Math.max(2584, this.refIterations - 100000);
     for (let i = this.refIterations; i >= checkStart; i--) {
-      const thread = this.threading.refThreading[i];
+      const thread = this.threading.getThread(i);
       if (thread && thread.next > 0 && thread.next < i) {
         const jumpAmount = i - thread.next;
         if (jumpAmount > 1000) {  // Only use significant jumps
@@ -9360,7 +9610,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
   // Upload threading data to GPU (copied from GpuZhuoranBoard)
   async uploadThreading() {
-    const threadingData = this.threading.refThreading;
+    const threadingData = this.threading.threads;
     const uploadLength = Math.min(threadingData.length, 1048576);
 
     if (this.lastUploadedThreadingLength < uploadLength) {
@@ -9461,8 +9711,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
     // Consolidated 6-binding layout:
     // 0: params (uniform)
-    // 1: intState (8 × i32 per pixel): iter, scale, status, period, ref_iter, ckpt_iter, next_threaded, spare
-    // 2: floatState (8 × f32 per pixel): dzr, dzi, bbr, bbi, threaded_r, threaded_i, dcr, dci
+    // 1: intState (8 × i32 per pixel): iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx, spare
+    // 2: floatState (8 × f32 per pixel): dzr, dzi, bbr, bbi, checkpoint_bb_r, checkpoint_bb_i, dcr, dci
     // 3: refOrbit (read-only)
     // 4: threading (read-only)
     // 5: debug
@@ -9493,7 +9743,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       })
     };
 
-    // Initialize intState: [iter, scale, status, period, ref_iter, ckpt_iter, next_threaded, spare]
+    // Initialize intState: [iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx, spare]
     const intStateData = new Int32Array(dimsArea * 8);
     for (let i = 0; i < dimsArea; i++) {
       const idx = i * 8;
@@ -9502,14 +9752,14 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       intStateData[idx + 2] = 0;                    // status = computing
       intStateData[idx + 3] = 0;                    // period = 0
       intStateData[idx + 4] = this.refIter[i];      // ref_iter
-      intStateData[idx + 5] = -1;                   // ckpt_iter (0xFFFFFFFF as i32 = -1)
-      intStateData[idx + 6] = -1;                   // next_threaded_ref_iter
+      intStateData[idx + 5] = -1;                   // checkpoint_refidx (0xFFFFFFFF as i32 = -1)
+      intStateData[idx + 6] = -1;                   // pending_checkpoint_refidx
       intStateData[idx + 7] = 0;                    // spare
     }
     this.device.queue.writeBuffer(this.buffers.intState, 0, intStateData);
 
-    // Initialize floatState: [dzr, dzi, bbr, bbi, threaded_r, threaded_i, dcr, dci]
-    // bb and threaded_delta use initialScale (Option C)
+    // Initialize floatState: [dzr, dzi, bbr, bbi, checkpoint_bb_r, checkpoint_bb_i, dcr, dci]
+    // bb and checkpoint_bb use initialScale (Option C)
     const floatStateData = new Float32Array(dimsArea * 8);
     for (let i = 0; i < dimsArea; i++) {
       const idx = i * 8;
@@ -9517,8 +9767,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       floatStateData[idx + 1] = this.dz[i * 2 + 1]; // dzi (scaled by per-pixel scale)
       floatStateData[idx + 2] = 0;                  // bbr (scaled by initialScale)
       floatStateData[idx + 3] = 0;                  // bbi (scaled by initialScale)
-      floatStateData[idx + 4] = 0;                  // threaded_r (scaled by initialScale)
-      floatStateData[idx + 5] = 0;                  // threaded_i (scaled by initialScale)
+      floatStateData[idx + 4] = 0;                  // checkpoint_bb_r (scaled by initialScale)
+      floatStateData[idx + 5] = 0;                  // checkpoint_bb_i (scaled by initialScale)
       floatStateData[idx + 6] = this.dc[i * 2];     // dcr (scaled by initialScale)
       floatStateData[idx + 7] = this.dc[i * 2 + 1]; // dci (scaled by initialScale)
     }
@@ -9539,7 +9789,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         { binding: 1, resource: { buffer: this.buffers.intState } },
         { binding: 2, resource: { buffer: this.buffers.floatState } },
         { binding: 3, resource: { buffer: this.buffers.refOrbit } },
-        { binding: 4, resource: { buffer: this.buffers.threading } }
+        { binding: 4, resource: { buffer: this.buffers.threading } },
+        { binding: 5, resource: { buffer: this.buffers.debug } }
       ]
     });
   }
@@ -9547,11 +9798,12 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
   async createComputePipeline() {
     // Consolidated 6-binding adaptive per-pixel scaling perturbation shader
     // Buffer layout:
-    //   intState[i*8]: iter, scale, status, period, ref_iter, ckpt_iter, next_threaded, spare
-    //   floatState[i*8]: dzr, dzi, bbr, bbi, threaded_r, threaded_i, dcr, dci
+    //   intState[i*8]: iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx, spare
+    //   floatState[i*8]: dzr, dzi, bbr, bbi, checkpoint_bb_r, checkpoint_bb_i, dcr, dci
     // Scale conventions:
     //   dz: per-pixel adaptive scale
-    //   bb, threaded_delta, dc: global initialScale (Option C)
+    //   bb, checkpoint_bb, dc: global initialScale (Option C)
+    // Lazy threading: bb gets modified by thread deltas, checkpoint_bb stores original for reset
     const shaderCode = `
       struct Params {
         dims_width: u32,
@@ -9581,12 +9833,13 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         loop_delta_i: f32,
       }
 
-      // Consolidated 5-binding layout (debug removed for testing)
+      // Consolidated 6-binding layout with debug
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> intState: array<i32>;    // 8 per pixel
       @group(0) @binding(2) var<storage, read_write> floatState: array<f32>;  // 8 per pixel
       @group(0) @binding(3) var<storage, read> refOrbit: array<f32>;
       @group(0) @binding(4) var<storage, read> threading: array<vec4<f32>>;
+      @group(0) @binding(5) var<storage, read_write> debug: array<f32>;       // 300*8 floats for debug
 
       // intState indices (per pixel, multiply index by 8)
       const INT_ITER: u32 = 0u;
@@ -9594,17 +9847,17 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       const INT_STATUS: u32 = 2u;
       const INT_PERIOD: u32 = 3u;
       const INT_REF_ITER: u32 = 4u;
-      const INT_CKPT_ITER: u32 = 5u;
-      const INT_NEXT_THREADED: u32 = 6u;
+      const INT_CKPT_REFIDX: u32 = 5u;       // fixed ref index at checkpoint
+      const INT_PENDING_REFIDX: u32 = 6u;    // advances via lazy threading
       const INT_SPARE: u32 = 7u;
 
       // floatState indices (per pixel, multiply index by 8)
       const FLOAT_DZR: u32 = 0u;
       const FLOAT_DZI: u32 = 1u;
-      const FLOAT_BBR: u32 = 2u;
+      const FLOAT_BBR: u32 = 2u;             // current adjusted checkpoint position (in initialScale)
       const FLOAT_BBI: u32 = 3u;
-      const FLOAT_THREADED_R: u32 = 4u;
-      const FLOAT_THREADED_I: u32 = 5u;
+      const FLOAT_CKPT_BBR: u32 = 4u;        // original dz at checkpoint (in initialScale, for reset)
+      const FLOAT_CKPT_BBI: u32 = 5u;
       const FLOAT_DCR: u32 = 6u;
       const FLOAT_DCI: u32 = 7u;
 
@@ -9630,16 +9883,16 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         var scale = intState[idx8 + INT_SCALE];
         var pp = u32(intState[idx8 + INT_PERIOD]);
         var ref_iter = u32(intState[idx8 + INT_REF_ITER]);
-        var ckpt_iter = u32(intState[idx8 + INT_CKPT_ITER]);
-        var next_threaded_ref_iter = u32(intState[idx8 + INT_NEXT_THREADED]);
+        var checkpoint_refidx = u32(intState[idx8 + INT_CKPT_REFIDX]);  // fixed ref index at checkpoint
+        var pending_checkpoint_refidx = u32(intState[idx8 + INT_PENDING_REFIDX]);  // advances via lazy threading
 
-        // Read float state
+        // Read float state (all checkpoint-related values in initialScale)
         var dzr = floatState[idx8 + FLOAT_DZR];
         var dzi = floatState[idx8 + FLOAT_DZI];
-        var bbr = floatState[idx8 + FLOAT_BBR];           // scaled by initialScale
-        var bbi = floatState[idx8 + FLOAT_BBI];           // scaled by initialScale
-        var threaded_delta_re = floatState[idx8 + FLOAT_THREADED_R];  // scaled by initialScale
-        var threaded_delta_im = floatState[idx8 + FLOAT_THREADED_I];  // scaled by initialScale
+        var bbr = floatState[idx8 + FLOAT_BBR];           // current adjusted checkpoint position
+        var bbi = floatState[idx8 + FLOAT_BBI];
+        var checkpoint_bb_r = floatState[idx8 + FLOAT_CKPT_BBR];  // original dz at checkpoint (for reset)
+        var checkpoint_bb_i = floatState[idx8 + FLOAT_CKPT_BBI];
         let dcr = floatState[idx8 + FLOAT_DCR];           // scaled by initialScale
         let dci = floatState[idx8 + FLOAT_DCI];           // scaled by initialScale
 
@@ -9675,6 +9928,16 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           // === REBASING ===
           let z_norm = max(abs(zr), abs(zi));
           let dz_norm = max(abs(dzr_actual), abs(dzi_actual));
+          // Debug: capture pre-rebase state for pixel 0 at critical iterations
+          if (index == 0u && iter >= 200u && iter <= 210u) {
+            let pre_rebase_idx = 2100u + (iter - 200u) * 6u;
+            debug[pre_rebase_idx + 0u] = f32(ref_iter);
+            debug[pre_rebase_idx + 1u] = refr;
+            debug[pre_rebase_idx + 2u] = refi;
+            debug[pre_rebase_idx + 3u] = z_norm;
+            debug[pre_rebase_idx + 4u] = dz_norm;
+            debug[pre_rebase_idx + 5u] = select(0.0, 1.0, z_norm < dz_norm * 2.0);  // Will rebase?
+          }
           if (ref_iter > 0u && z_norm < dz_norm * 2.0 && z_norm > 1e-13) {
             let new_log2 = floor(log2(z_norm));
             let new_scale = max(i32(new_log2), -126);
@@ -9682,6 +9945,13 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
             dzi = ldexp(zi, -new_scale);
             scale = new_scale;
             ref_iter = 0u;
+
+            // Reset lazy threading state after rebase
+            if (checkpoint_refidx != 0xFFFFFFFFu) {
+              pending_checkpoint_refidx = checkpoint_refidx;
+              bbr = checkpoint_bb_r;
+              bbi = checkpoint_bb_i;
+            }
 
             refr = refOrbit[0];
             refi = refOrbit[1];
@@ -9691,10 +9961,37 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
             zi = refi + dzi_actual;
           }
 
+          // === DEBUG OUTPUT for pixel 0, all iterations 1-250 ===
+          // Layout: 8 floats per iter: [iter, ref_iter, dzr_actual, dzi_actual, z_mag_sq, refr, refi, spare]
+          // Note: dzr_actual for Adaptive so it's comparable to OctZhuoran's actual dzr
+          if (index == 0u && iter >= 1u && iter < 250u) {
+            let debug_idx = iter * 8u;
+            debug[debug_idx + 0u] = f32(iter);
+            debug[debug_idx + 1u] = f32(ref_iter);
+            debug[debug_idx + 2u] = dzr_actual;
+            debug[debug_idx + 3u] = dzi_actual;
+            debug[debug_idx + 4u] = zr * zr + zi * zi;
+            debug[debug_idx + 5u] = refr;
+            debug[debug_idx + 6u] = refi;
+            debug[debug_idx + 7u] = f32(scale);
+          }
+          // Also store scale for Adaptive at offset 1254
+          if (index == 0u) {
+            debug[1254u] = f32(scale);
+          }
+
           // === ESCAPE CHECK ===
           if (scale >= -126) {
             let z_mag_sq = zr * zr + zi * zi;
             if (z_mag_sq > 4.0) {
+              // Log escape for pixel 0 at offset 2000
+              if (index == 0u) {
+                debug[2000u] = f32(iter);
+                debug[2001u] = zr;
+                debug[2002u] = zi;
+                debug[2003u] = z_mag_sq;
+                debug[2004u] = f32(scale);
+              }
               intState[idx8 + INT_STATUS] = 1;
               intState[idx8 + INT_PERIOD] = i32(pp);
               break;
@@ -9720,43 +10017,31 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
             if (batch_iter == checkpoint_offset) {
               just_updated = true;
-              // Store bb in initialScale: bb = dz_actual / 2^initialScale
-              bbr = ldexp(dzr_actual, -params.initial_scale);
-              bbi = ldexp(dzi_actual, -params.initial_scale);
-              ckpt_iter = ref_iter;
+              // Store bb and checkpoint_bb in initialScale: bb = dz_actual / 2^initialScale
+              let bb_val_r = ldexp(dzr_actual, -params.initial_scale);
+              let bb_val_i = ldexp(dzi_actual, -params.initial_scale);
+              bbr = bb_val_r;
+              bbi = bb_val_i;
+              checkpoint_bb_r = bb_val_r;  // Save original for reset after rebase
+              checkpoint_bb_i = bb_val_i;
+              checkpoint_refidx = ref_iter;
+              pending_checkpoint_refidx = ref_iter;  // Start lazy threading at checkpoint
               pp = 0u;
               next_checkpoint_idx = next_checkpoint_idx + 1u;
-
-              // Initialize threading (thread deltas are in actual coords, convert to initialScale)
-              threaded_delta_re = 0.0;
-              threaded_delta_im = 0.0;
-              if (ref_iter >= 2584u && ref_iter < params.ref_orbit_length) {
-                let thread = getThread(ref_iter);
-                if (thread.x >= 0.0) {
-                  next_threaded_ref_iter = u32(thread.x);
-                  // Convert thread deltas from actual to initialScale
-                  threaded_delta_re = ldexp(thread.y, -params.initial_scale);
-                  threaded_delta_im = ldexp(thread.z, -params.initial_scale);
-                } else {
-                  next_threaded_ref_iter = 0xFFFFFFFFu;
-                }
-              } else {
-                next_threaded_ref_iter = 0xFFFFFFFFu;
-              }
             }
           }
 
-          // Check convergence (all comparisons in initialScale)
-          if (ckpt_iter != 0xFFFFFFFFu && !just_updated && scale >= -126) {
+          // Check convergence with lazy threading (all comparisons in initialScale)
+          if (checkpoint_refidx != 0xFFFFFFFFu && !just_updated && scale >= -126) {
             const THREADING_CAPACITY = 1048576u;
 
             if (ref_iter >= THREADING_CAPACITY) {
               // Fallback: compare absolute positions (in actual coords)
               let z_total_r = zr;
               let z_total_i = zi;
-              let checkpoint_ref_offset = ckpt_iter * 2u;
-              let bbr_actual = ldexp(bbr, params.initial_scale);
-              let bbi_actual = ldexp(bbi, params.initial_scale);
+              let checkpoint_ref_offset = checkpoint_refidx * 2u;
+              let bbr_actual = ldexp(checkpoint_bb_r, params.initial_scale);
+              let bbi_actual = ldexp(checkpoint_bb_i, params.initial_scale);
               let z_checkpoint_r = refOrbit[checkpoint_ref_offset] + bbr_actual;
               let z_checkpoint_i = refOrbit[checkpoint_ref_offset + 1u] + bbi_actual;
 
@@ -9773,18 +10058,16 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
                 }
               }
             } else {
-              // Normal convergence check in initialScale
-              if (ref_iter == ckpt_iter ||
-                  (next_threaded_ref_iter != 0xFFFFFFFFu &&
-                   ref_iter == next_threaded_ref_iter)) {
-                // Convert current dz to initialScale for comparison
-                let dzr_scaled = ldexp(dzr_actual, -params.initial_scale);
-                let dzi_scaled = ldexp(dzi_actual, -params.initial_scale);
+              // LAZY THREADING convergence check in initialScale
+              // Convert current dz to initialScale for comparison
+              let dzr_scaled = ldexp(dzr_actual, -params.initial_scale);
+              let dzi_scaled = ldexp(dzi_actual, -params.initial_scale);
+
+              // Case 1: ref_iter == checkpoint_refidx (after rebasing or naturally arriving)
+              if (ref_iter == checkpoint_refidx) {
                 let dz_diff_r = dzr_scaled - bbr;
                 let dz_diff_i = dzi_scaled - bbi;
-                let total_diff_r = threaded_delta_re + dz_diff_r;
-                let total_diff_i = threaded_delta_im + dz_diff_i;
-                let db = max(abs(total_diff_r), abs(total_diff_i));
+                let db = max(abs(dz_diff_r), abs(dz_diff_i));
 
                 if (db <= epsilon2) {
                   if (pp == 0u) { pp = iter; }
@@ -9794,18 +10077,33 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
                     break;
                   }
                 }
+              }
 
-                if (ref_iter == next_threaded_ref_iter &&
-                    next_threaded_ref_iter < params.ref_orbit_length) {
-                  let thread = getThread(next_threaded_ref_iter);
-                  if (thread.x >= 0.0) {
-                    // Accumulate thread deltas in initialScale
-                    threaded_delta_re = threaded_delta_re + ldexp(thread.y, -params.initial_scale);
-                    threaded_delta_im = threaded_delta_im + ldexp(thread.z, -params.initial_scale);
-                    next_threaded_ref_iter = u32(thread.x);
-                  } else {
-                    next_threaded_ref_iter = 0xFFFFFFFFu;
+              // Case 2: Check if thread[pending_checkpoint_refidx].next == ref_iter
+              if (pending_checkpoint_refidx >= 2584u &&
+                  pending_checkpoint_refidx < params.ref_orbit_length) {
+                let thread = getThread(pending_checkpoint_refidx);
+                if (thread.x >= 0.0 && u32(thread.x) == ref_iter) {
+                  // Check convergence: add thread delta to diff (convert to initialScale)
+                  let thread_r_scaled = ldexp(thread.y, -params.initial_scale);
+                  let thread_i_scaled = ldexp(thread.z, -params.initial_scale);
+                  let dz_diff_r = dzr_scaled - bbr + thread_r_scaled;
+                  let dz_diff_i = dzi_scaled - bbi + thread_i_scaled;
+                  let db = max(abs(dz_diff_r), abs(dz_diff_i));
+
+                  if (db <= epsilon2) {
+                    if (pp == 0u) { pp = iter; }
+                    if (db <= epsilon) {
+                      intState[idx8 + INT_STATUS] = 2;
+                      intState[idx8 + INT_PERIOD] = i32(pp);
+                      break;
+                    }
                   }
+
+                  // Update bb for future checks: bb -= thread.delta
+                  bbr = bbr - thread_r_scaled;
+                  bbi = bbi - thread_i_scaled;
+                  pending_checkpoint_refidx = ref_iter;
                 }
               }
             }
@@ -9854,8 +10152,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         intState[idx8 + INT_ITER] = i32(iter);
         intState[idx8 + INT_SCALE] = scale;
         intState[idx8 + INT_REF_ITER] = i32(ref_iter);
-        intState[idx8 + INT_CKPT_ITER] = i32(ckpt_iter);
-        intState[idx8 + INT_NEXT_THREADED] = i32(next_threaded_ref_iter);
+        intState[idx8 + INT_CKPT_REFIDX] = i32(checkpoint_refidx);
+        intState[idx8 + INT_PENDING_REFIDX] = i32(pending_checkpoint_refidx);
         if (intState[idx8 + INT_STATUS] == 0) {
           intState[idx8 + INT_PERIOD] = i32(pp);
         }
@@ -9865,8 +10163,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         floatState[idx8 + FLOAT_DZI] = dzi;
         floatState[idx8 + FLOAT_BBR] = bbr;
         floatState[idx8 + FLOAT_BBI] = bbi;
-        floatState[idx8 + FLOAT_THREADED_R] = threaded_delta_re;
-        floatState[idx8 + FLOAT_THREADED_I] = threaded_delta_im;
+        floatState[idx8 + FLOAT_CKPT_BBR] = checkpoint_bb_r;
+        floatState[idx8 + FLOAT_CKPT_BBI] = checkpoint_bb_i;
       }
     `;
 
@@ -9948,17 +10246,21 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         this.lastUploadedOrbitLength = -1;
       }
       // Upload ref orbit incrementally (oct format: [r0,r1,r2,r3,i0,i1,i2,i3])
-      if (this.lastUploadedOrbitLength < totalIters) {
+      // lastUploadedOrbitLength tracks the highest index uploaded (not count)
+      // startIdx should be the next index to upload
+      if (this.lastUploadedOrbitLength < this.refIterations) {
         const startIdx = Math.max(0, this.lastUploadedOrbitLength + 1);
-        const orbitF32 = new Float32Array((totalIters - startIdx) * 2);
-        for (let i = startIdx; i < totalIters; i++) {
-          const ref = this.refOrbit[i];
+        const count = this.refIterations - startIdx + 1;
+        const orbitF32 = new Float32Array(count * 2);
+        for (let i = 0; i < count; i++) {
+          const orbitIdx = startIdx + i;
+          const ref = this.refOrbit[orbitIdx];
           // Sum all oct components to get f32 value
-          orbitF32[(i - startIdx) * 2] = ref ? ref[0] + ref[1] + ref[2] + ref[3] : 0;
-          orbitF32[(i - startIdx) * 2 + 1] = ref ? ref[4] + ref[5] + ref[6] + ref[7] : 0;
+          orbitF32[i * 2] = ref ? ref[0] + ref[1] + ref[2] + ref[3] : 0;
+          orbitF32[i * 2 + 1] = ref ? ref[4] + ref[5] + ref[6] + ref[7] : 0;
         }
         this.device.queue.writeBuffer(this.buffers.refOrbit, startIdx * 2 * 4, orbitF32);
-        this.lastUploadedOrbitLength = totalIters;
+        this.lastUploadedOrbitLength = this.refIterations;
       }
 
       // Upload threading data for convergence detection
@@ -10037,6 +10339,46 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       // intState layout: [iter, scale, status, period, ref_iter, ckpt_iter, next_threaded, spare] × 8 per pixel
       const intStateData = await this.readBuffer(this.buffers.intState, Int32Array);
 
+      // Read debug buffer and log once when iterations reach near escape
+      // Debug buffer layout from shader: 8 floats per iter at offset iter*8
+      // [iter, ref_iter, dzr_actual, dzi_actual, z_mag_sq, refr, refi, scale]
+      // Escape info at offset 2000: [escape_iter, zr, zi, z_mag_sq, scale]
+      if (this.it >= 200 && this.it <= 250 && !this.debugLogged) {
+        const debugData = await this.readBuffer(this.buffers.debug, Float32Array);
+        // Check escape info at offset 2000
+        const escapeIter = debugData[2000];
+        if (escapeIter > 0) {
+          this.debugLogged = true;
+          console.log('=== AdaptiveGpuBoard DEBUG (pixel 0 trajectory) ===');
+          // Print trajectory leading up to escape
+          for (let iter = Math.max(1, escapeIter - 15); iter <= escapeIter + 2; iter++) {
+            const idx = iter * 8;
+            const logged_iter = debugData[idx + 0];
+            if (logged_iter === 0) continue;
+            const ref_iter = debugData[idx + 1];
+            const dzr = debugData[idx + 2];
+            const dzi = debugData[idx + 3];
+            const z_mag_sq = debugData[idx + 4];
+            const refr = debugData[idx + 5];
+            const refi = debugData[idx + 6];
+            console.log(`iter=${logged_iter}: ref_iter=${ref_iter}, dzr=${dzr.toExponential(8)}, dzi=${dzi.toExponential(8)}, |z|²=${z_mag_sq.toFixed(6)}, refR=${refr.toExponential(8)}, refI=${refi.toExponential(8)}`);
+          }
+          console.log(`ESCAPE at iter=${escapeIter}: z=(${debugData[2001].toExponential(6)}, ${debugData[2002].toExponential(6)}), |z|²=${debugData[2003].toFixed(6)}, scale=${debugData[2004]}`);
+          // Print pre-rebase debug info (iter 200-210)
+          console.log('=== PRE-REBASE STATE (pixel 0, iter 200-210) ===');
+          for (let iter = 200; iter <= 210; iter++) {
+            const idx = 2100 + (iter - 200) * 6;
+            const pre_ref_iter = debugData[idx + 0];
+            const pre_refr = debugData[idx + 1];
+            const pre_refi = debugData[idx + 2];
+            const z_norm = debugData[idx + 3];
+            const dz_norm = debugData[idx + 4];
+            const will_rebase = debugData[idx + 5];
+            console.log(`iter=${iter}: pre_ref_iter=${pre_ref_iter}, pre_refR=${pre_refr.toExponential(8)}, z_norm=${z_norm.toExponential(4)}, dz_norm=${dz_norm.toExponential(4)}, rebase_threshold=${(dz_norm*2).toExponential(4)}, will_rebase=${will_rebase === 1}`);
+          }
+        }
+      }
+
       // Process GPU results
       let floatStateData = null;
       const pixelsByIteration = new Map();
@@ -10104,6 +10446,23 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         if (divergedIndices.length > 0 || convergedData.length > 0) {
           this.queueChanges({ iter: iter, nn: divergedIndices, vv: convergedData });
         }
+      }
+
+      // Log final debug on completion
+      if (this.un === 0 && !this.finalDebugLogged) {
+        this.finalDebugLogged = true;
+        const debugData = await this.readBuffer(this.buffers.debug, Float32Array);
+        console.log('=== AdaptiveGpuBoard FINAL DEBUG (pixel 0) ===');
+        console.log('Raw debug buffer first 13 entries (iter 200-212):');
+        for (let i = 0; i < 13; i++) {
+          const idx = i * 8;
+          console.log(`  [${200 + i}] iter=${debugData[idx + 0]}, z=(${debugData[idx + 1].toExponential(6)}, ${debugData[idx + 2].toExponential(6)}), |z|²=${debugData[idx + 3].toFixed(6)}`);
+        }
+        const escapeIter = debugData[160];
+        if (escapeIter > 0) {
+          console.log(`ESCAPE at iter=${escapeIter}: z=(${debugData[161].toExponential(6)}, ${debugData[162].toExponential(6)}), |z|²=${debugData[163].toFixed(6)}`);
+        }
+        console.log(`Final pixel 0: iter=${debugData[164]}, ref_iter=${debugData[165]}, scale=${debugData[166]}`);
       }
 
     } catch (error) {
