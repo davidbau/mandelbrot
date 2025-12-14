@@ -5701,10 +5701,10 @@ class DDSpatialBucket extends SpatialBucket {
 }
 
 /**
- * OctSpatialBucket - for oct precision points
+ * QDSpatialBucket - for quad-double precision points
  * Point format: [re0, re1, re2, re3, im0, im1, im2, im3]
  */
-class OctSpatialBucket extends SpatialBucket {
+class QDSpatialBucket extends SpatialBucket {
   constructor(threadingEpsilon, getQDPoint) {
     super(threadingEpsilon);
     this.getQDPoint = getQDPoint;
@@ -5749,7 +5749,7 @@ class OctSpatialBucket extends SpatialBucket {
 // Reference Orbit Threading - enables robust cycle detection despite rebasing
 class ReferenceOrbitThreading {
   /**
-   * @param {SpatialBucket} spatialBucket - A precision-aware spatial bucket (DDSpatialBucket or OctSpatialBucket)
+   * @param {SpatialBucket} spatialBucket - A precision-aware spatial bucket (DDSpatialBucket or QDSpatialBucket)
    */
   constructor(spatialBucket) {
     const maxCycleLength = 1e5;
@@ -6353,22 +6353,22 @@ class QDZhuoranBoard extends ZhuoranBoard {
     // Build oct reference from the base class's oct values
     const refReQD = this.re.slice();
     const refImQD = this.im.slice();
-    // Store oct-precision reference point
-    this.refC_oct = [...refReQD, ...refImQD];
-    // Initialize oct orbit array - stores full oct precision for each reference iteration
+    // Store QD-precision reference point
+    this.refC_qd = [...refReQD, ...refImQD];
+    // Initialize QD orbit array - stores full quad-double precision for each reference iteration
     // Each entry is [re0, re1, re2, re3, im0, im1, im2, im3]
-    this.octOrbit = [
+    this.qdRefOrbit = [
       [0, 0, 0, 0, 0, 0, 0, 0],  // Iteration 0: z = 0
       [...refReQD, ...refImQD]  // Iteration 1: z = c
     ];
-    // Working array for oct precision operations
+    // Working array for QD precision operations
     this.tt = new Array(32);
-    // Reinitialize threading with oct orbit
+    // Reinitialize threading with QD orbit
     // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
     // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
     const threadingEpsilon = 10000 * this.epsilon;
-    const getQDPoint = (i) => this.octOrbit[i] || null;  // [re0..re3, im0..im3]
-    const spatialBucket = new OctSpatialBucket(threadingEpsilon, getQDPoint);
+    const getQDPoint = (i) => this.qdRefOrbit[i] || null;  // [re0..re3, im0..im3]
+    const spatialBucket = new QDSpatialBucket(threadingEpsilon, getQDPoint);
     this.threading = new ReferenceOrbitThreading(spatialBucket);
     this.threading.addPoint(0);
     this.threading.addPoint(1);
@@ -6411,8 +6411,8 @@ class QDZhuoranBoard extends ZhuoranBoard {
   }
 
   extendReferenceOrbit() {
-    // Compute one more iteration of the reference orbit in oct precision
-    const last = this.octOrbit[this.refIterations];
+    // Compute one more iteration of the reference orbit in QD precision
+    const last = this.qdRefOrbit[this.refIterations];
     const rr = [last[0], last[1], last[2], last[3]];
     const ri = [last[4], last[5], last[6], last[7]];
     const tt = this.tt;
@@ -6447,13 +6447,13 @@ class QDZhuoranBoard extends ZhuoranBoard {
     const nzrQD = new Array(4);
     const nziQD = new Array(4);
     ArqdAdd(nzrQD, 0, tt[16], tt[17], tt[18], tt[19],
-      this.refC_oct[0], this.refC_oct[1], this.refC_oct[2], this.refC_oct[3]);
+      this.refC_qd[0], this.refC_qd[1], this.refC_qd[2], this.refC_qd[3]);
     ArqdAdd(nziQD, 0, tt[8], tt[9], tt[10], tt[11],
-      this.refC_oct[4], this.refC_oct[5], this.refC_oct[6], this.refC_oct[7]);
+      this.refC_qd[4], this.refC_qd[5], this.refC_qd[6], this.refC_qd[7]);
 
-    // Store in oct orbit
-    this.octOrbit.push([nzrQD[0], nzrQD[1], nzrQD[2], nzrQD[3],
-                        nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
+    // Store in QD orbit
+    this.qdRefOrbit.push([nzrQD[0], nzrQD[1], nzrQD[2], nzrQD[3],
+                          nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
 
     // Convert to quad precision for refOrbit (used by perturbation iterations)
     const nzrDD = qdToDD(nzrQD);
@@ -8477,7 +8477,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
     const threadingEpsilon = 10000 * this.epsilon;
     const getQDPoint = (i) => this.refOrbit[i] || null;  // [re0..re3, im0..im3]
-    const spatialBucket = new OctSpatialBucket(threadingEpsilon, getQDPoint);
+    const spatialBucket = new QDSpatialBucket(threadingEpsilon, getQDPoint);
     this.threading = new ReferenceOrbitThreading(spatialBucket);
     this.threading.addPoint(0);
     this.threading.addPoint(1);

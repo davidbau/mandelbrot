@@ -210,6 +210,16 @@ class ReferenceOrbitThreading {
 
 The bucket size is `2 * epsilon`, so any two points within epsilon are guaranteed to be in the same or adjacent buckets. Checking 9 buckets instead of the entire history transforms O(n²) into O(n).
 
+### SpatialBucket Classes
+
+The implementation uses a class hierarchy to handle different precision levels:
+
+- **`SpatialBucket`**: Base class with the core bucketing logic
+- **`DDSpatialBucket`**: For double-double precision reference orbits (used by `GpuZhuoranBoard`, `PerturbationBoard`)
+- **`QDSpatialBucket`**: For quad-double precision reference orbits (used by `QDZhuoranBoard`, `AdaptiveGpuBoard`)
+
+Each subclass implements precision-appropriate distance calculations and bucket key generation while sharing the O(1) lookup strategy.
+
 ## Algorithm Selection
 
 The `Scheduler` automatically selects the best algorithm for the job:

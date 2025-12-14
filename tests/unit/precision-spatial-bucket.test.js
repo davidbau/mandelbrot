@@ -1,5 +1,5 @@
 /**
- * Unit tests for DDSpatialBucket and OctSpatialBucket classes
+ * Unit tests for DDSpatialBucket and QDSpatialBucket classes
  *
  * These tests verify correct behavior with:
  * - Coarse grids (normal epsilon values)
@@ -239,16 +239,16 @@ class DDSpatialBucket extends SpatialBucket {
 }
 
 // ============================================================
-// OctSpatialBucket - for oct precision [re0, re1, re2, re3, im0, im1, im2, im3]
+// QDSpatialBucket - for quad-double precision [re0, re1, re2, re3, im0, im1, im2, im3]
 // ============================================================
-class OctSpatialBucket extends SpatialBucket {
-  constructor(threadingEpsilon, getOctPoint) {
+class QDSpatialBucket extends SpatialBucket {
+  constructor(threadingEpsilon, getQDPoint) {
     super(threadingEpsilon);
-    this.getOctPoint = getOctPoint;
+    this.getQDPoint = getQDPoint;
   }
 
   getF64Point(i) {
-    const p = this.getOctPoint(i);
+    const p = this.getQDPoint(i);
     if (!p) return null;
     return {
       re: p[0] + p[1] + p[2] + p[3],
@@ -257,23 +257,23 @@ class OctSpatialBucket extends SpatialBucket {
   }
 
   verifyAndGetDelta(i, j) {
-    const pi = this.getOctPoint(i);
-    const pj = this.getOctPoint(j);
+    const pi = this.getQDPoint(i);
+    const pj = this.getQDPoint(j);
     if (!pi || !pj) return null;
 
-    // Proper oct subtraction to avoid catastrophic cancellation
-    const deltaReOct = toQDSub(
+    // Proper QD subtraction to avoid catastrophic cancellation
+    const deltaReQD = toQDSub(
       [pi[0], pi[1], pi[2], pi[3]],
       [pj[0], pj[1], pj[2], pj[3]]
     );
-    const deltaImOct = toQDSub(
+    const deltaImQD = toQDSub(
       [pi[4], pi[5], pi[6], pi[7]],
       [pj[4], pj[5], pj[6], pj[7]]
     );
 
-    // Sum oct result to f64
-    const deltaRe = qdToNumber(deltaReOct);
-    const deltaIm = qdToNumber(deltaImOct);
+    // Sum QD result to f64
+    const deltaRe = qdToNumber(deltaReQD);
+    const deltaIm = qdToNumber(deltaImQD);
 
     // Check L∞ distance
     if (Math.max(Math.abs(deltaRe), Math.abs(deltaIm)) <= this.threadingEpsilon) {
@@ -420,16 +420,16 @@ describe('DDSpatialBucket', () => {
   });
 });
 
-describe('OctSpatialBucket', () => {
+describe('QDSpatialBucket', () => {
   describe('coarse grid (normal epsilon)', () => {
-    test('finds nearby oct points', () => {
-      // Oct format: [re0, re1, re2, re3, im0, im1, im2, im3]
+    test('finds nearby QD points', () => {
+      // QD format: [re0, re1, re2, re3, im0, im1, im2, im3]
       const points = [
         [1.0, 0, 0, 0, 0.5, 0, 0, 0],       // index 0: (1.0, 0.5)
         [1.0001, 0, 0, 0, 0.5001, 0, 0, 0], // index 1: slightly different
         [5.0, 0, 0, 0, 5.0, 0, 0, 0],       // index 2: far away
       ];
-      const bucket = new OctSpatialBucket(0.01, i => points[i]);
+      const bucket = new QDSpatialBucket(0.01, i => points[i]);
 
       bucket.add(0);
       bucket.add(2);
@@ -445,7 +445,7 @@ describe('OctSpatialBucket', () => {
         [-1.5, 0, 0, 0, -0.5, 0, 0, 0],
         [-1.5001, 0, 0, 0, -0.5001, 0, 0, 0],
       ];
-      const bucket = new OctSpatialBucket(0.01, i => points[i]);
+      const bucket = new QDSpatialBucket(0.01, i => points[i]);
 
       bucket.add(0);
       const found = bucket.findAndRemoveNear(1);
@@ -454,7 +454,7 @@ describe('OctSpatialBucket', () => {
   });
 
   describe('fine grid (deep zoom simulation)', () => {
-    test('correctly handles oct values with precision in lower components', () => {
+    test('correctly handles QD values with precision in lower components', () => {
       // Simulate deep zoom: high components are ~center, low components have precision
       const center = -1.8;
       const tinyDiff = 1e-40;  // Way beyond f64 precision
@@ -469,7 +469,7 @@ describe('OctSpatialBucket', () => {
       ];
 
       // With super-fine epsilon, bucket clamps to MIN_BUCKET_SIZE
-      const bucket = new OctSpatialBucket(tinyDiff * 2, i => points[i]);
+      const bucket = new QDSpatialBucket(tinyDiff * 2, i => points[i]);
       expect(bucket.bucketRadius).toBe(SpatialBucket.MIN_BUCKET_SIZE);
 
       bucket.add(0);
@@ -478,30 +478,30 @@ describe('OctSpatialBucket', () => {
       // All points land in same coarse bucket since high components are identical
       const found = bucket.findAndRemoveNear(2);
 
-      // Both should be found (in same bucket), verified with oct subtraction
+      // Both should be found (in same bucket), verified with QD subtraction
       expect(found.length).toBe(2);
     });
 
-    test('oct subtraction preserves precision for delta computation', () => {
-      // Create two oct values that are extremely close
-      // Their f64 sums would be identical, but oct subtraction reveals the difference
+    test('QD subtraction preserves precision for delta computation', () => {
+      // Create two QD values that are extremely close
+      // Their f64 sums would be identical, but QD subtraction reveals the difference
       const big = 1e10;
       const tiny = 1e-30;
 
       const points = [
-        // Point with value spread across oct components
+        // Point with value spread across QD components
         [big, -big + 1, 1e-15, tiny, 0, 0, 0, 0],
         // Same value but with tiny added to re3
         [big, -big + 1, 1e-15, tiny + 1e-35, 0, 0, 0, 0],
       ];
 
-      const bucket = new OctSpatialBucket(1e-30, i => points[i]);
+      const bucket = new QDSpatialBucket(1e-30, i => points[i]);
       bucket.add(0);
 
       const found = bucket.findAndRemoveNear(1);
 
       // The points should be found (same coarse bucket)
-      // Delta should be computed via oct subtraction
+      // Delta should be computed via QD subtraction
       expect(found.length).toBe(1);
       // Delta should be approximately 1e-35
       expect(Math.abs(found[0].deltaRe)).toBeLessThan(1e-30);
@@ -516,7 +516,7 @@ describe('OctSpatialBucket', () => {
         [0.2, 0, 0, 0, 0, 0, 0, 0],
         [0.3, 0, 0, 0, 0, 0, 0, 0],
       ];
-      const bucket = new OctSpatialBucket(1.0, i => points[i]);
+      const bucket = new QDSpatialBucket(1.0, i => points[i]);
 
       bucket.add(0);
       bucket.add(1);
@@ -533,7 +533,7 @@ describe('OctSpatialBucket', () => {
     test('finds all nearby points regardless of bucket boundary position', () => {
       // Create a grid of points and verify the 4-bucket probe finds all neighbors
       const epsilon = 0.5;
-      const bucket = new OctSpatialBucket(epsilon, i => testPoints[i]);
+      const bucket = new QDSpatialBucket(epsilon, i => testPoints[i]);
 
       // Create test points in a pattern that spans bucket boundaries
       const testPoints = [];
@@ -599,13 +599,13 @@ describe('Mixed precision scenarios', () => {
     expect(Math.abs(found[0].deltaIm - 0.3e-17)).toBeLessThan(1e-20);
   });
 
-  test('OCT bucket returns correct deltas for threading', () => {
-    // Similar test for oct precision
+  test('QD bucket returns correct deltas for threading', () => {
+    // Similar test for quad-double precision
     const cyclePoint = [-1.8, 1e-16, 1e-32, 1e-48, 0, 1e-20, 1e-36, 1e-52];
     const returnPoint = [-1.8, 1e-16, 1e-32, 1e-48 + 1e-50, 0, 1e-20, 1e-36, 1e-52 + 2e-50];
 
     const points = [cyclePoint, returnPoint];
-    const bucket = new OctSpatialBucket(1e-45, i => points[i]);
+    const bucket = new QDSpatialBucket(1e-45, i => points[i]);
 
     bucket.add(0);
     const found = bucket.findAndRemoveNear(1);
