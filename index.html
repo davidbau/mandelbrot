@@ -7321,7 +7321,7 @@ class GpuBoard extends GpuBaseBoard {
 // WebGPU-accelerated perturbation board using Zhuoran's approach
 // Computes high-precision reference orbit on CPU, perturbations on GPU
 class GpuZhuoranBoard extends GpuBaseBoard {
-  static BYTES_PER_PIXEL = 64;  // 8 u32 + 8 f32 (consolidated intState + floatState buffers)
+  static BYTES_PER_PIXEL = 56;  // 6 u32 + 8 f32 (unified PixelState struct)
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
@@ -7439,52 +7439,37 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       this.device.limits.maxBufferSize,
       this.device.limits.maxStorageBufferBindingSize
     );
-    // Consolidated layout: 8 u32 + 8 f32 = 64 bytes per pixel
-    const largestBufferSize = dimsArea * 8 * 4;
+    // Unified PixelState struct: 6 u32 + 8 f32 = 56 bytes per pixel
+    const pixelBufferSize = dimsArea * 56;
 
-    if (largestBufferSize > maxBufferSize) {
+    if (pixelBufferSize > maxBufferSize) {
       throw new Error(
-        `Buffer size (${(largestBufferSize / (1024 * 1024)).toFixed(1)} MB) ` +
+        `Buffer size (${(pixelBufferSize / (1024 * 1024)).toFixed(1)} MB) ` +
         `exceeds WebGPU limit (${(maxBufferSize / (1024 * 1024)).toFixed(1)} MB). ` +
         `Board ${this.config.dimsWidth}x${this.config.dimsHeight} is too large ` +
         `for GPU acceleration.`);
     }
 
-    // Consolidated integer state buffer (8 u32 per pixel)
-    // Layout: [iter, status, period, ref_iter, ckpt_refidx, pending_refidx, spare1, spare2]
-    this.buffers.intState = this.device.createBuffer({
-      size: dimsArea * 8 * 4,  // 8 u32 per pixel
+    // Single unified pixel state buffer (PixelState struct: 6 u32 + 8 f32 = 56 bytes per pixel)
+    // Layout per pixel: [iter, status, period, ref_iter, ckpt_refidx, pending_refidx,
+    //                    dzr, dzi, bbr, bbi, ckpt_bbr, ckpt_bbi, dcr, dci]
+    this.buffers.pixels = this.device.createBuffer({
+      size: pixelBufferSize,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Integer state buffer'
+      label: 'Pixel state buffer'
     });
 
-    // Consolidated float state buffer (8 f32 per pixel)
-    // Layout: [dzr, dzi, bbr, bbi, ckpt_bbr, ckpt_bbi, dcr, dci]
-    this.buffers.floatState = this.device.createBuffer({
-      size: dimsArea * 8 * 4,  // 8 f32 per pixel
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Float state buffer'
-    });
-
-    // Storage buffer for reference orbit (orbit data only: 2 floats per iter)
-    // Start with reasonable size, will recreate if needed
-    this.buffers.refOrbit = this.device.createBuffer({
-      size: Math.max(this.maxRefIterations * 2 * 4, 1024),
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      label: 'Reference orbit buffer'
-    });
-
-    // Storage buffer for threading data (4 floats per iter: next, deltaRe, deltaIm, pad)
+    // Unified iteration state buffer (IterState struct: 5 f32 = 20 bytes per iteration)
+    // Combines reference orbit (re, im) and threading data (next, deltaRe, deltaIm)
     // Start with 1MB, will grow by doubling up to 128MB cap
-    this.buffers.threading = this.device.createBuffer({
+    this.buffers.iters = this.device.createBuffer({
       size: 1 * 1024 * 1024,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      label: 'Threading buffer'
+      label: 'Iteration state buffer'
     });
 
-    // Track last uploaded lengths for incremental uploads
-    this.lastUploadedOrbitLength = -1;  // -1 means nothing uploaded yet
-    this.lastUploadedThreadingLength = -1;
+    // Track last uploaded iteration length
+    this.lastUploadedIterLength = -1;  // -1 means nothing uploaded yet
 
     // Uniform buffer for parameters
     this.buffers.params = this.device.createBuffer({
@@ -7493,68 +7478,63 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       label: 'Params buffer'
     });
 
-    // Initialize intState buffer
-    // Layout per pixel: [iter, status, period, ref_iter, ckpt_refidx, pending_refidx, spare1, spare2]
-    const intStateData = new Uint32Array(dimsArea * 8);
+    // Initialize pixel state buffer using overlapping typed array views
+    // ArrayBuffer holds 56 bytes per pixel (14 x 4 bytes)
+    const pixelData = new ArrayBuffer(pixelBufferSize);
+    const pixelU32 = new Uint32Array(pixelData);   // For u32 fields (indices 0-5)
+    const pixelF32 = new Float32Array(pixelData);  // For f32 fields (indices 6-13)
+
     for (let i = 0; i < dimsArea; i++) {
-      const idx8 = i * 8;
-      intStateData[idx8 + 0] = 1;  // iter (start at 1, z=c is iteration 1)
-      intStateData[idx8 + 1] = 0;  // status (0 = computing)
-      intStateData[idx8 + 2] = 0;  // period
-      intStateData[idx8 + 3] = this.refIter[i];  // ref_iter
-      intStateData[idx8 + 4] = 0xFFFFFFFF;  // ckpt_refidx (sentinel)
-      intStateData[idx8 + 5] = 0xFFFFFFFF;  // pending_refidx (sentinel)
-      intStateData[idx8 + 6] = 0;  // spare1
-      intStateData[idx8 + 7] = 0;  // spare2
+      const idx14 = i * 14;  // 14 x 4-byte values per pixel
+      // Integer fields (offsets 0-5)
+      pixelU32[idx14 + 0] = 1;                      // iter (start at 1, z=c is iteration 1)
+      pixelU32[idx14 + 1] = 0;                      // status (0 = computing)
+      pixelU32[idx14 + 2] = 0;                      // period
+      pixelU32[idx14 + 3] = this.refIter[i];       // ref_iter
+      pixelU32[idx14 + 4] = 0xFFFFFFFF;            // ckpt_refidx (sentinel)
+      pixelU32[idx14 + 5] = 0xFFFFFFFF;            // pending_refidx (sentinel)
+      // Float fields (offsets 6-13)
+      pixelF32[idx14 + 6] = this.dz[i * 2];        // dzr
+      pixelF32[idx14 + 7] = this.dz[i * 2 + 1];    // dzi
+      pixelF32[idx14 + 8] = 0;                      // bbr
+      pixelF32[idx14 + 9] = 0;                      // bbi
+      pixelF32[idx14 + 10] = 0;                     // ckpt_bbr
+      pixelF32[idx14 + 11] = 0;                     // ckpt_bbi
+      pixelF32[idx14 + 12] = this.dc[i * 2];       // dcr
+      pixelF32[idx14 + 13] = this.dc[i * 2 + 1];   // dci
     }
 
-    // Initialize floatState buffer
-    // Layout per pixel: [dzr, dzi, bbr, bbi, ckpt_bbr, ckpt_bbi, dcr, dci]
-    const floatStateData = new Float32Array(dimsArea * 8);
-    for (let i = 0; i < dimsArea; i++) {
-      const idx8 = i * 8;
-      floatStateData[idx8 + 0] = this.dz[i * 2];      // dzr
-      floatStateData[idx8 + 1] = this.dz[i * 2 + 1];  // dzi
-      floatStateData[idx8 + 2] = 0;  // bbr
-      floatStateData[idx8 + 3] = 0;  // bbi
-      floatStateData[idx8 + 4] = 0;  // ckpt_bbr
-      floatStateData[idx8 + 5] = 0;  // ckpt_bbi
-      floatStateData[idx8 + 6] = this.dc[i * 2];      // dcr
-      floatStateData[idx8 + 7] = this.dc[i * 2 + 1];  // dci
-    }
+    // Initialize unified iters buffer with initial data (iter 0 and 1)
+    // IterState struct: [ref_re, ref_im, thread_next, thread_delta_re, thread_delta_im] = 5 f32
+    const initialIterData = new Float32Array(10);  // 2 iters * 5 floats
+    // iter 0: z=0, no thread
+    initialIterData[0] = 0;   // ref_re
+    initialIterData[1] = 0;   // ref_im
+    initialIterData[2] = -1;  // thread_next (-1 = no thread)
+    initialIterData[3] = 0;   // thread_delta_re
+    initialIterData[4] = 0;   // thread_delta_im
+    // iter 1: z=c_ref, no thread
+    initialIterData[5] = this.refC[0] + this.refC[1];  // ref_re
+    initialIterData[6] = this.refC[2] + this.refC[3];  // ref_im
+    initialIterData[7] = -1;  // thread_next
+    initialIterData[8] = 0;   // thread_delta_re
+    initialIterData[9] = 0;   // thread_delta_im
 
-    // Initialize orbit buffer with initial reference orbit (iter 0 and 1)
-    const initialOrbitData = new Float32Array(4);  // 2 iters * 2 floats
-    initialOrbitData[0] = 0;  // iter 0: re = 0
-    initialOrbitData[1] = 0;  // iter 0: im = 0
-    initialOrbitData[2] = this.refC[0] + this.refC[1];  // iter 1: re = c_ref
-    initialOrbitData[3] = this.refC[2] + this.refC[3];  // iter 1: im = c_ref
-
-    // Initialize threading buffer with initial threading data (iter 0 and 1, no threads)
-    const initialThreadingData = new Float32Array(8);  // 2 iters * 4 floats
-    initialThreadingData[0] = -1;  // iter 0: next = -1 (no thread)
-    initialThreadingData[4] = -1;  // iter 1: next = -1 (no thread)
-
-    this.device.queue.writeBuffer(this.buffers.intState, 0, intStateData);
-    this.device.queue.writeBuffer(this.buffers.floatState, 0, floatStateData);
-    this.device.queue.writeBuffer(this.buffers.refOrbit, 0, initialOrbitData);
-    this.device.queue.writeBuffer(this.buffers.threading, 0, initialThreadingData);
+    this.device.queue.writeBuffer(this.buffers.pixels, 0, pixelU32);
+    this.device.queue.writeBuffer(this.buffers.iters, 0, initialIterData);
 
     // Mark initial data as uploaded
-    this.lastUploadedOrbitLength = 1;  // Uploaded iters 0 and 1
-    this.lastUploadedThreadingLength = 1;
+    this.lastUploadedIterLength = 1;  // Uploaded iters 0 and 1
   }
 
   createBindGroup() {
-    // Consolidated 5-binding layout (matches AdaptiveGpuBoard for better cache coherency)
+    // Unified 3-binding layout for maximum cache coherency
     this.bindGroup = this.device.createBindGroup({
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.buffers.params } },
-        { binding: 1, resource: { buffer: this.buffers.intState } },
-        { binding: 2, resource: { buffer: this.buffers.floatState } },
-        { binding: 3, resource: { buffer: this.buffers.refOrbit } },
-        { binding: 4, resource: { buffer: this.buffers.threading } }
+        { binding: 1, resource: { buffer: this.buffers.pixels } },
+        { binding: 2, resource: { buffer: this.buffers.iters } }
       ],
       label: 'Perturbation bind group'
     });
@@ -7728,39 +7708,51 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         loop_delta_i: f32,      // Delta to add to dzi
       }
 
-      // Consolidated 5-binding layout (matches AdaptiveGpuBoard for better cache coherency)
+      // Single per-pixel struct for maximum cache coherency
+      struct PixelState {
+        // Integer fields (6 u32)
+        iter: u32,
+        status: u32,
+        period: u32,
+        ref_iter: u32,
+        ckpt_refidx: u32,
+        pending_refidx: u32,
+        // Float fields (8 f32)
+        dzr: f32,
+        dzi: f32,
+        bbr: f32,
+        bbi: f32,
+        ckpt_bbr: f32,
+        ckpt_bbi: f32,
+        dcr: f32,
+        dci: f32,
+      }
+
+      // Per-iteration struct combining reference orbit and threading data (3-binding layout)
+      struct IterState {
+        ref_re: f32,      // Reference orbit real part
+        ref_im: f32,      // Reference orbit imag part
+        thread_next: f32, // Next thread index (as f32, -1 = no thread)
+        thread_delta_re: f32,
+        thread_delta_im: f32,
+      }
+
       @group(0) @binding(0) var<uniform> params: Params;
-      @group(0) @binding(1) var<storage, read_write> intState: array<u32>;    // 8 per pixel
-      @group(0) @binding(2) var<storage, read_write> floatState: array<f32>;  // 8 per pixel
-      @group(0) @binding(3) var<storage, read> refOrbit: array<f32>;
-      @group(0) @binding(4) var<storage, read> threading: array<vec4<f32>>;
+      @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
+      @group(0) @binding(2) var<storage, read> iters: array<IterState>;
 
-      // intState indices (per pixel, multiply index by 8)
-      const INT_ITER: u32 = 0u;
-      const INT_STATUS: u32 = 1u;
-      const INT_PERIOD: u32 = 2u;
-      const INT_REF_ITER: u32 = 3u;
-      const INT_CKPT_REFIDX: u32 = 4u;
-      const INT_PENDING_REFIDX: u32 = 5u;
-      const INT_SPARE1: u32 = 6u;
-      const INT_SPARE2: u32 = 7u;
-
-      // floatState indices (per pixel, multiply index by 8)
-      const FLOAT_DZR: u32 = 0u;
-      const FLOAT_DZI: u32 = 1u;
-      const FLOAT_BBR: u32 = 2u;
-      const FLOAT_BBI: u32 = 3u;
-      const FLOAT_CKPT_BBR: u32 = 4u;
-      const FLOAT_CKPT_BBI: u32 = 5u;
-      const FLOAT_DCR: u32 = 6u;
-      const FLOAT_DCI: u32 = 7u;
-
-      // Get threading data from threading buffer
+      // Get threading data from unified iters buffer
       // Returns vec3: [next_index_as_f32, deltaRe, deltaIm]
       fn getThread(idx: u32) -> vec3<f32> {
         if (idx >= params.ref_orbit_length) { return vec3<f32>(-1.0, 0.0, 0.0); }
-        let thread_data = threading[idx];
-        return vec3<f32>(thread_data.x, thread_data.y, thread_data.z);
+        let iter_data = iters[idx];
+        return vec3<f32>(iter_data.thread_next, iter_data.thread_delta_re, iter_data.thread_delta_im);
+      }
+
+      // Get reference orbit values from unified iters buffer
+      fn getRefOrbit(idx: u32) -> vec2<f32> {
+        if (idx >= params.ref_orbit_length) { return vec2<f32>(0.0, 0.0); }
+        return vec2<f32>(iters[idx].ref_re, iters[idx].ref_im);
       }
 
       @compute @workgroup_size(64)
@@ -7770,28 +7762,23 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         let dimsArea = params.dims_width * params.dims_height;
         if (index >= dimsArea) { return; }
 
-        let idx8 = index * 8u;
-
         // Skip if already finished
-        let status = intState[idx8 + INT_STATUS];
-        if (status != 0u) { return; }
+        if (pixels[index].status != 0u) { return; }
 
-        // Load integer state
-        var iter = intState[idx8 + INT_ITER];
-        var pp = intState[idx8 + INT_PERIOD];
-        var ref_iter = intState[idx8 + INT_REF_ITER];
-        var checkpoint_refidx = intState[idx8 + INT_CKPT_REFIDX];
-        var pending_checkpoint_refidx = intState[idx8 + INT_PENDING_REFIDX];
-
-        // Load float state
-        var dzr = floatState[idx8 + FLOAT_DZR];
-        var dzi = floatState[idx8 + FLOAT_DZI];
-        var bbr = floatState[idx8 + FLOAT_BBR];
-        var bbi = floatState[idx8 + FLOAT_BBI];
-        var checkpoint_bb_r = floatState[idx8 + FLOAT_CKPT_BBR];
-        var checkpoint_bb_i = floatState[idx8 + FLOAT_CKPT_BBI];
-        let dcr = floatState[idx8 + FLOAT_DCR];
-        let dci = floatState[idx8 + FLOAT_DCI];
+        // Load state from unified pixel struct
+        var iter = pixels[index].iter;
+        var pp = pixels[index].period;
+        var ref_iter = pixels[index].ref_iter;
+        var checkpoint_refidx = pixels[index].ckpt_refidx;
+        var pending_checkpoint_refidx = pixels[index].pending_refidx;
+        var dzr = pixels[index].dzr;
+        var dzi = pixels[index].dzi;
+        var bbr = pixels[index].bbr;
+        var bbi = pixels[index].bbi;
+        var checkpoint_bb_r = pixels[index].ckpt_bbr;
+        var checkpoint_bb_i = pixels[index].ckpt_bbi;
+        let dcr = pixels[index].dcr;
+        let dci = pixels[index].dci;
 
         // Convergence thresholds scale with pixel size for deep zooms
         // GPU uses float32 precision, so thresholds must be larger than CPU's float64
@@ -7804,7 +7791,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         // Iterate for the batch
         for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
           // Early exit if pixel already finished (converged/diverged)
-          if (intState[idx8 + INT_STATUS] != 0u) {
+          if (pixels[index].status != 0u) {
             break;
           }
 
@@ -7812,12 +7799,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           let dz_norm = max(abs(dzr), abs(dzi));
 
           // Peek at reference orbit to check rebasing condition
-          let ref_offset_check = ref_iter * 2u;
-          if (ref_offset_check + 1u < params.ref_orbit_length * 2u) {
-            let refr_check = refOrbit[ref_offset_check];
-            let refi_check = refOrbit[ref_offset_check + 1u];
-            let total_r_pre = refr_check + dzr;
-            let total_i_pre = refi_check + dzi;
+          if (ref_iter < params.ref_orbit_length) {
+            let ref_check = getRefOrbit(ref_iter);
+            let total_r_pre = ref_check.x + dzr;
+            let total_i_pre = ref_check.y + dzi;
             let total_norm = max(abs(total_r_pre), abs(total_i_pre));
 
             // Rebase when orbit approaches critical point
@@ -7838,12 +7823,12 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           }
 
           // Load reference orbit values for current (possibly rebased) ref_iter
-          let ref_offset = ref_iter * 2u;
-          if (ref_offset + 1u >= params.ref_orbit_length * 2u) {
+          if (ref_iter >= params.ref_orbit_length) {
             break;  // Reference orbit too short
           }
-          var refr = refOrbit[ref_offset];
-          var refi = refOrbit[ref_offset + 1u];
+          let ref_val = getRefOrbit(ref_iter);
+          var refr = ref_val.x;
+          var refi = ref_val.y;
 
           // Check current z for divergence
           let curr_total_r = refr + dzr;
@@ -7851,8 +7836,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           let curr_mag_sq = curr_total_r * curr_total_r + curr_total_i * curr_total_i;
 
           if (curr_mag_sq > 4.0) {
-            intState[idx8 + INT_STATUS] = 1u;
-            intState[idx8 + INT_PERIOD] = pp;
+            pixels[index].status = 1u;
+            pixels[index].period = pp;
             break;
           }
 
@@ -7948,9 +7933,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
               // Compute absolute positions (accepts float32 precision loss)
               let z_total_r = refr + old_dzr;
               let z_total_i = refi + old_dzi;
-              let checkpoint_ref_offset = checkpoint_refidx * 2u;
-              let z_checkpoint_r = refOrbit[checkpoint_ref_offset] + checkpoint_bb_r;
-              let z_checkpoint_i = refOrbit[checkpoint_ref_offset + 1u] + checkpoint_bb_i;
+              let checkpoint_ref = getRefOrbit(checkpoint_refidx);
+              let z_checkpoint_r = checkpoint_ref.x + checkpoint_bb_r;
+              let z_checkpoint_i = checkpoint_ref.y + checkpoint_bb_i;
 
               let diff_r = z_total_r - z_checkpoint_r;
               let diff_i = z_total_i - z_checkpoint_i;
@@ -7961,8 +7946,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
                   pp = iter;
                 }
                 if (db <= epsilon) {
-                  intState[idx8 + INT_STATUS] = 2u;
-                  intState[idx8 + INT_PERIOD] = pp;
+                  pixels[index].status = 2u;
+                  pixels[index].period = pp;
                   break;
                 }
               }
@@ -7980,8 +7965,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
                     pp = iter;
                   }
                   if (db <= epsilon) {
-                    intState[idx8 + INT_STATUS] = 2u;
-                    intState[idx8 + INT_PERIOD] = pp;
+                    pixels[index].status = 2u;
+                    pixels[index].period = pp;
                     break;
                   }
                 }
@@ -8004,8 +7989,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
                       pp = iter;
                     }
                     if (db <= epsilon) {
-                      intState[idx8 + INT_STATUS] = 2u;
-                      intState[idx8 + INT_PERIOD] = pp;
+                      pixels[index].status = 2u;
+                      pixels[index].period = pp;
                       break;
                     }
                   }
@@ -8031,18 +8016,18 @@ class GpuZhuoranBoard extends GpuBaseBoard {
             ref_iter -= params.loop_jump;
           }
         }
-        // Write back state - consolidated into intState and floatState buffers
-        intState[idx8 + INT_ITER] = iter;
-        intState[idx8 + INT_PERIOD] = pp;
-        intState[idx8 + INT_REF_ITER] = ref_iter;
-        intState[idx8 + INT_CKPT_REFIDX] = checkpoint_refidx;
-        intState[idx8 + INT_PENDING_REFIDX] = pending_checkpoint_refidx;
-        floatState[idx8 + FLOAT_DZR] = dzr;
-        floatState[idx8 + FLOAT_DZI] = dzi;
-        floatState[idx8 + FLOAT_BBR] = bbr;
-        floatState[idx8 + FLOAT_BBI] = bbi;
-        floatState[idx8 + FLOAT_CKPT_BBR] = checkpoint_bb_r;
-        floatState[idx8 + FLOAT_CKPT_BBI] = checkpoint_bb_i;
+        // Write back state to unified pixel struct
+        pixels[index].iter = iter;
+        pixels[index].period = pp;
+        pixels[index].ref_iter = ref_iter;
+        pixels[index].ckpt_refidx = checkpoint_refidx;
+        pixels[index].pending_refidx = pending_checkpoint_refidx;
+        pixels[index].dzr = dzr;
+        pixels[index].dzi = dzi;
+        pixels[index].bbr = bbr;
+        pixels[index].bbi = bbi;
+        pixels[index].ckpt_bbr = checkpoint_bb_r;
+        pixels[index].ckpt_bbi = checkpoint_bb_i;
       }
     `;
 
@@ -8099,100 +8084,66 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       this.setupReferenceOrbitLoop();
     }
 
-    // Step 2: Upload reference orbit and threading to GPU (INCREMENTAL UPLOADS)
+    // Step 2: Upload iteration state to GPU (INCREMENTAL UPLOADS)
+    // IterState struct: 5 f32 per iteration (ref_re, ref_im, thread_next, thread_delta_re, thread_delta_im)
     const totalIters = this.refIterations + 1;  // Include iteration 0
-    let orbitUploadTime = 0;
-    let orbitBufferResized = false;
+    const BYTES_PER_ITER = 20;  // 5 f32 = 20 bytes
 
-    // Resize refOrbit buffer if needed (2 floats per iter)
-    const requiredOrbitSize = totalIters * 2 * 4;
-    const allocOrbitSize = Math.max(requiredOrbitSize * 2, 1024);
-    if (this.buffers.refOrbit.size < requiredOrbitSize &&
-        this.buffers.refOrbit.size < allocOrbitSize) {
-      // Only resize if we can actually allocate a larger buffer
-      // Wait for GPU to finish before destroying buffer
-      await this.device.queue.onSubmittedWorkDone();
-      orbitBufferResized = true;
-      this.buffers.refOrbit.destroy();
-      this.buffers.refOrbit = this.device.createBuffer({
-        size: allocOrbitSize,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-        label: 'Reference orbit buffer'
-      });
-      this.lastUploadedOrbitLength = -1;  // Reset after resize
-      this.createBindGroup();
-    }
-
-    // Resize threading buffer if needed (4 floats per iter), cap at 128MB
-    const requiredThreadingSize = totalIters * 4 * 4;
+    // Resize iters buffer if needed, cap at 128MB
+    const requiredIterSize = totalIters * BYTES_PER_ITER;
     const maxBufferSize = 128 * 1024 * 1024;
-    const allocSize = Math.min(Math.max(requiredThreadingSize * 2, 1024), maxBufferSize);
-    if (this.buffers.threading.size < requiredThreadingSize &&
-        this.buffers.threading.size < allocSize) {
+    const allocSize = Math.min(Math.max(requiredIterSize * 2, 1024), maxBufferSize);
+    if (this.buffers.iters.size < requiredIterSize &&
+        this.buffers.iters.size < allocSize) {
       // Only resize if we can actually allocate a larger buffer (not already at max cap)
-      // Wait for GPU to finish before destroying buffer
       await this.device.queue.onSubmittedWorkDone();
-      this.buffers.threading.destroy();
-      this.buffers.threading = this.device.createBuffer({
+      this.buffers.iters.destroy();
+      this.buffers.iters = this.device.createBuffer({
         size: allocSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-        label: 'Threading buffer'
+        label: 'Iteration state buffer'
       });
-      this.lastUploadedThreadingLength = -1;  // Reset after resize
+      this.lastUploadedIterLength = -1;  // Reset after resize
       this.createBindGroup();
     }
 
-    // INCREMENTAL UPLOAD: Only upload new orbit data
-    if (this.lastUploadedOrbitLength < this.refIterations) {
-      const startIdx = Math.max(0, this.lastUploadedOrbitLength + 1);
-      const count = this.refIterations - startIdx + 1;
-      const orbitF32 = new Float32Array(count * 2);
-
-      for (let i = 0; i < count; i++) {
-        const orbitIdx = startIdx + i;
-        const ref = this.refOrbit[orbitIdx];
-        orbitF32[i * 2] = ref[0] + ref[1];
-        orbitF32[i * 2 + 1] = ref[2] + ref[3];
-      }
-
-      const byteOffset = startIdx * 2 * 4;
-      this.device.queue.writeBuffer(this.buffers.refOrbit, byteOffset, orbitF32);
-      this.lastUploadedOrbitLength = this.refIterations;
-    }
-
-    // INCREMENTAL UPLOAD: Only upload new threading data (capped at buffer size)
-    if (this.lastUploadedThreadingLength < this.refIterations) {
-      const startIdx = Math.max(0, this.lastUploadedThreadingLength + 1);
-      // Cap to buffer capacity (1M iterations in 16MB buffer)
-      const maxIters = this.buffers.threading.size / 16;
+    // INCREMENTAL UPLOAD: Only upload new iteration data
+    if (this.lastUploadedIterLength < this.refIterations) {
+      const startIdx = Math.max(0, this.lastUploadedIterLength + 1);
+      // Cap to buffer capacity
+      const maxIters = Math.floor(this.buffers.iters.size / BYTES_PER_ITER);
       const endIdx = Math.min(this.refIterations, maxIters - 1);
       const count = endIdx - startIdx + 1;
 
       if (count > 0) {
-        const threadF32 = new Float32Array(count * 4);
+        const iterF32 = new Float32Array(count * 5);  // 5 floats per iteration
 
         for (let i = 0; i < count; i++) {
-          const threadIdx = startIdx + i;
-          const thread = this.threading.getThread(threadIdx);
+          const iterIdx = startIdx + i;
+          const ref = this.refOrbit[iterIdx];
+          const thread = this.threading.getThread(iterIdx);
+
+          const base = i * 5;
+          // Reference orbit (DD precision -> f32)
+          iterF32[base + 0] = ref[0] + ref[1];      // ref_re
+          iterF32[base + 1] = ref[2] + ref[3];      // ref_im
+          // Threading data
           if (!thread) {
-            // No threading data yet (before iteration 2584) - use -1 sentinel
-            threadF32[i * 4] = -1;
-            threadF32[i * 4 + 1] = 0;
-            threadF32[i * 4 + 2] = 0;
-            threadF32[i * 4 + 3] = 0;
+            iterF32[base + 2] = -1;   // thread_next (-1 = no thread)
+            iterF32[base + 3] = 0;    // thread_delta_re
+            iterF32[base + 4] = 0;    // thread_delta_im
           } else {
-            threadF32[i * 4] = thread.next;  // Store as f32 (will be cast to u32 in shader)
-            threadF32[i * 4 + 1] = thread.deltaRe;
-            threadF32[i * 4 + 2] = thread.deltaIm;
-            threadF32[i * 4 + 3] = 0;  // Padding
+            iterF32[base + 2] = thread.next;
+            iterF32[base + 3] = thread.deltaRe;
+            iterF32[base + 4] = thread.deltaIm;
           }
         }
 
-        const byteOffset = startIdx * 4 * 4;
-        this.device.queue.writeBuffer(this.buffers.threading, byteOffset, threadF32);
+        const byteOffset = startIdx * BYTES_PER_ITER;
+        this.device.queue.writeBuffer(this.buffers.iters, byteOffset, iterF32);
       }
 
-      this.lastUploadedThreadingLength = this.refIterations;
+      this.lastUploadedIterLength = this.refIterations;
     }
 
     // Step 3: Check if all done
@@ -8272,19 +8223,21 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     this.device.queue.submit([commandEncoder.finish()]);
 
-    // Step 6: Read back results (consolidated 2-buffer layout)
+    // Step 6: Read back results (unified PixelState buffer)
     await this.device.queue.onSubmittedWorkDone();
 
-    // Read consolidated intState buffer (8 u32 per pixel: iter, status, period, ref_iter, ...)
-    const intStateData = await this.readBuffer(this.buffers.intState, Uint32Array);
+    // Read unified pixel buffer and create overlapping views
+    // PixelState struct: 6 u32 + 8 f32 = 14 x 4-byte values per pixel
+    const pixelBuffer = await this.readBuffer(this.buffers.pixels, Uint32Array);
+    const pixelU32 = pixelBuffer;  // Already Uint32Array for u32 fields
+    const pixelF32 = new Float32Array(pixelBuffer.buffer);  // Overlapping view for f32 fields
 
     // Update global iteration counter (before processing results, like CPU implementations)
     this.it += iterationsPerBatch;
 
-    // intState indices (must match shader constants)
+    // PixelState struct offsets (14 values per pixel, matching shader struct layout)
     const INT_ITER = 0, INT_STATUS = 1, INT_PERIOD = 2, INT_REF_ITER = 3;
-    // floatState indices (must match shader constants)
-    const FLOAT_DZR = 0, FLOAT_DZI = 1;
+    const FLOAT_DZR = 6, FLOAT_DZI = 7;  // f32 fields start at offset 6
 
     // Step 7: Update board state
     const pixelsByIteration = new Map();  // Group diverged pixels by their exact iteration
@@ -8296,15 +8249,15 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     let convergedCount = 0;
 
     for (let i = 0; i < dimsArea; i++) {
-      const idx8 = i * 8;
-      const status = intStateData[idx8 + INT_STATUS];
-      const period = intStateData[idx8 + INT_PERIOD];
+      const idx14 = i * 14;  // 14 values per pixel in unified struct
+      const status = pixelU32[idx14 + INT_STATUS];
+      const period = pixelU32[idx14 + INT_PERIOD];
 
       if (this.nn[i] !== 0) continue;  // Already finished
 
       if (status === 1) {
         // Newly diverged
-        const iters = intStateData[idx8 + INT_ITER];
+        const iters = pixelU32[idx14 + INT_ITER];
         divergedCount++;
         this.nn[i] = iters;
         this.pp[i] = period;
@@ -8326,21 +8279,18 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       }
     }
 
-    // Second pass: only read heavy float buffer if we have converged pixels
+    // Second pass: process converged pixels (f32 fields already available in pixelF32)
     if (hasConverged) {
-      // Read consolidated floatState buffer (8 f32 per pixel: dzr, dzi, bbr, bbi, ...)
-      const floatStateData = await this.readBuffer(this.buffers.floatState, Float32Array);
-
       for (let i = 0; i < dimsArea; i++) {
-        const idx8 = i * 8;
-        const status = intStateData[idx8 + INT_STATUS];
-        const period = intStateData[idx8 + INT_PERIOD];
+        const idx14 = i * 14;
+        const status = pixelU32[idx14 + INT_STATUS];
+        const period = pixelU32[idx14 + INT_PERIOD];
 
         if (this.nn[i]) continue;  // Already finished
 
         if (status === 2) {
           // Newly converged
-          const iters = intStateData[idx8 + INT_ITER];
+          const iters = pixelU32[idx14 + INT_ITER];
           this.nn[i] = -iters;
 
           // period from shader is pp (iteration when first within epsilon2)
@@ -8349,10 +8299,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
           // Get converged position: refOrbit[refIter+1] + dz
           // dz corresponds to refIter+1 because we computed new dz but didn't increment ref_iter
-          const refIter = intStateData[idx8 + INT_REF_ITER];
+          const refIter = pixelU32[idx14 + INT_REF_ITER];
           const nextRefIter = refIter + 1;
-          const dzr = floatStateData[idx8 + FLOAT_DZR];
-          const dzi = floatStateData[idx8 + FLOAT_DZI];
+          const dzr = pixelF32[idx14 + FLOAT_DZR];
+          const dzi = pixelF32[idx14 + FLOAT_DZI];
 
           const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
           const refR = ref[0] + ref[1];
