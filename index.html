@@ -11215,14 +11215,29 @@ function AoctTwoProduct(a, b) {
   return [tmp[0], tmp[1]];
 }
 
-function AoctRenorm(r, i, s0, s1, s2, s3, s4) {
-  [s3, s4] = AquickTwoSum(s3, s4);
-  [s2, s3] = AquickTwoSum(s2, s3);
-  [s1, s2] = AquickTwoSum(s1, s2);
-  [s0, s1] = AquickTwoSum(s0, s1);
-  [s2, s3] = AquickTwoSum(s2, s3);
-  [s1, s2] = AquickTwoSum(s1, s2);
-  AoctSet(r, i, s0, s1, s2, s3);
+// Renormalization algorithm from QD library (Hida, Li, Bailey)
+// Takes 5 inputs and produces 4 normalized outputs
+function AoctRenorm(r, i, c0, c1, c2, c3, c4) {
+  let t0, t1, t2, t3, s;
+
+  // First pass: propagate from bottom to top, collecting errors
+  [s, t3] = AquickTwoSum(c3, c4);
+  [s, t2] = AquickTwoSum(c2, s);
+  [s, t1] = AquickTwoSum(c1, s);
+  [c0, t0] = AquickTwoSum(c0, s);
+
+  // Second pass: combine error terms
+  [s, t2] = AquickTwoSum(t2, t3);
+  [s, t1] = AquickTwoSum(t1, s);
+  [c1, t0] = AquickTwoSum(t0, s);
+
+  // Third pass: final cleanup
+  [s, t1] = AquickTwoSum(t1, t2);
+  [c2, t0] = AquickTwoSum(t0, s);
+
+  c3 = t0 + t1;
+
+  AoctSet(r, i, c0, c1, c2, c3);
 }
 
 function AoctSet(r, i, a1, a2, a3, a4) {
