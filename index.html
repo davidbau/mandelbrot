@@ -1520,7 +1520,7 @@ class Grid {
     const view = this.views[k];
     if (!view) return;
     this.scheduler.assignBoardToWorker(
-      k, view.size, octToNumber(view.re), octToNumber(view.im), this.config, view.id);
+      k, view.size, view.re, view.im, this.config, view.id);
   }
 
   removeView(k) {
@@ -1742,7 +1742,7 @@ class Grid {
           if (oldK !== k) {
             this.scheduler.removeBoardFromWorker(oldK);
             this.scheduler.assignBoardToWorker(
-              k, preserved.size, octToNumber(preserved.re), octToNumber(preserved.im),
+              k, preserved.size, preserved.re, preserved.im,
               this.config, preserved.id);
           }
 
@@ -2206,8 +2206,6 @@ class ZoomManager {
     // Scale offsets by size to preserve accuracy at deep zoom (toOctScale handles conversion)
     const nreOct = toOctAdd(ore, toOctScale(osize, offsetX));
     const nimOct = toOctAdd(oim, toOctScale(osize, offsetY / this.config.aspectRatio));
-    let nre = octToQd(nreOct);
-    let nim = octToQd(nimOct);
 
     // Stage 1: Create DOM and scroll immediately (instant visual feedback)
     // Pass nsize to makecanvas so the zoom label shows correct scientific notation
@@ -3737,7 +3735,7 @@ class Scheduler {
            '// <\/script>\n';
   }
 
-  assignBoardToWorker(k, size, re, im, config, id) {
+  assignBoardToWorker(k, size, reOct, imOct, config, id) {
     let [workerNumber, minLoad] = this.findLeastLoadedWorker();
     if (workerNumber == -1 || (minLoad > 0 && this.workers.length < this.workerCount)) {
       if (this.addWorker()) {
@@ -3750,11 +3748,9 @@ class Scheduler {
     this.boardIds.set(k, id);  // Track which board ID is at this index
     this.assignments[k] = workerNumber;
 
-    const view = (this.grid && this.grid.views && this.grid.views[k]) ? this.grid.views[k] : null;
-    const viewOct = view && view.sizesOct ? view.sizesOct : null;
-    // sizesOct format: [sizeDouble, reOct, imOct]
-    const reOct = (viewOct && viewOct[1]) ? viewOct[1] : toOct(re);
-    const imOct = (viewOct && viewOct[2]) ? viewOct[2] : toOct(im);
+    // Ensure oct coordinates are properly formatted
+    reOct = toOct(reOct);
+    imOct = toOct(imOct);
 
     if (!isFinite(size)) {
       console.warn(`Board ${k}: non-finite size`, size);
@@ -3764,8 +3760,6 @@ class Scheduler {
       data: {
         k,
         size,
-        re,
-        im,
         reOct,
         imOct,
         config: {
@@ -6352,14 +6346,7 @@ class ZhuoranBoard extends Board {
       const currentZR = refR + dr;
       const currentZI = refI + di;
       const currentMag2 = currentZR * currentZR + currentZI * currentZI;
-      // Debug output for pixel 0 near escape (iter 190-220)
-      if (index === 0 && this.it >= 190 && this.it <= 220) {
-        console.log(`ZhuoranBoard pixel0 iter=${this.it}: ref_iter=${refIter}, dzr=${dr.toExponential(8)}, dzi=${di.toExponential(8)}, |z|²=${currentMag2.toFixed(6)}, refR=${refR.toExponential(8)}, refI=${refI.toExponential(8)}`);
-      }
       if (currentMag2 > 4) {
-        if (index === 0) {
-          console.log(`ZhuoranBoard ESCAPE pixel0 at iter=${this.it}: z=(${currentZR.toExponential(6)}, ${currentZI.toExponential(6)}), |z|²=${currentMag2.toFixed(6)}`);
-        }
         return 1;  // Diverged before iteration: report this.it
       }
     }
@@ -10522,8 +10509,8 @@ self.onmessage = async function(e) {
         console.warn(`Board ${data.k}: non-finite size`, size);
       }
       let board;
-      const reArg = data.reOct || data.re;
-      const imArg = data.imOct || data.im;
+      const reArg = data.reOct;
+      const imArg = data.imOct;
       const pixelSize = size / data.config.dimsWidth;
       const GpuBoardClass = GpuBaseBoard.getBoardClass(pixelSize);
       const bytesPerPixel = GpuBoardClass.BYTES_PER_PIXEL;
@@ -10658,17 +10645,11 @@ self.onmessage = async function(e) {
 
       boards.set(data.k, board);
 
-      // Restore oct centers if provided (size is already double, coords are oct)
-      if (data.reOct || data.imOct) {
-        board.sizesOct = [
-          size,
-          data.reOct || board.re || toOct(reArg),
-          data.imOct || board.im || toOct(imArg)
-        ];
-      }
+      // Store oct-precision coordinates
+      board.sizesOct = [size, data.reOct, data.imOct];
 
-      const re_val = Array.isArray(data.re) ? (data.re[0] + data.re[1]) : data.re;
-      const im_val = Array.isArray(data.im) ? (data.im[0] + data.im[1]) : data.im;
+      const re_val = octToNumber(data.reOct);
+      const im_val = octToNumber(data.imOct);
       const precision = Math.max(3, Math.min(15, Math.ceil(-Math.log10(pixelSize)) + 2));
       console.log(
         `Board ${data.k}: ${board.constructor.name} @ ` +

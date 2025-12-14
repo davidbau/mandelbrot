@@ -145,6 +145,19 @@ describe('Mandelbrot Board Computations', () => {
 
   afterAll(async () => {
     if (browser) {
+      // Terminate workers before closing browser to prevent orphaned processes
+      if (page) {
+        try {
+          await page.evaluate(() => {
+            if (window.explorer?.scheduler?.workers) {
+              window.explorer.scheduler.workers.forEach(w => w.terminate());
+              window.explorer.scheduler.workers = [];
+            }
+          });
+        } catch (e) { /* ignore */ }
+      }
+      // Delay before browser close to allow worker threads to finish
+      await new Promise(r => setTimeout(r, 200));
       await browser.close();
     }
   });

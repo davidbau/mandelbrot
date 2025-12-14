@@ -167,8 +167,9 @@ describe('Movie Mode Tests', () => {
     }
 
     // Navigate with minimal views for fast encoding
-    // Use pixelratio=1 to keep canvas small, and set up 2 views with small zoom
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.1i&s=3,2&pixelratio=1`);
+    // Use a very small viewport and pixelratio=1 to keep canvas small
+    await page.setViewport({ width: 64, height: 64 });
+    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.1i&s=3,2&pixelratio=1&grid=64`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
     await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
     // Wait for computation to start
@@ -185,7 +186,7 @@ describe('Movie Mode Tests', () => {
     // This exercises: Muxer constructor, addVideoChunk, finalize, ArrayBufferTarget
     const encodingComplete = await page.waitForFunction(
       () => window.explorer.movieMode.recordedBlob !== null,
-      { timeout: 60000 }  // Allow up to 60s for encoding
+      { timeout: 20000 }  // Allow up to 20s for encoding
     ).then(() => true).catch(() => false);
 
     if (encodingComplete) {
@@ -221,7 +222,7 @@ describe('Movie Mode Tests', () => {
 
     // Clean up - exit movie mode
     await page.keyboard.press('m');
-  }, 90000);  // 90 second timeout for this test
+  }, 30000);  // 30 second timeout for this test
 
   test('Clicking .moviemode hyperlink in help text triggers movie mode', async () => {
     await setupForMovieMode(page);

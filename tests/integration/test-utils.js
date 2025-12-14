@@ -155,14 +155,19 @@ async function closeBrowser(browser, timeout = 10000) {
     const pages = await browser.pages();
     await Promise.all(pages.map(async (page) => {
       try {
+        // Terminate workers and wait briefly for cleanup
         await page.evaluate(() => {
           if (window.explorer?.scheduler?.workers) {
             window.explorer.scheduler.workers.forEach(w => w.terminate());
+            window.explorer.scheduler.workers = [];
           }
         });
       } catch (e) { /* page may be closed */ }
       try { await page.close(); } catch (e) { /* ignore */ }
     }));
+
+    // Delay before browser close to allow worker threads to finish terminating
+    await new Promise(r => setTimeout(r, 200));
 
     // Race browser.close() against timeout, ensuring timer is cleaned up
     const proc = browser.process();

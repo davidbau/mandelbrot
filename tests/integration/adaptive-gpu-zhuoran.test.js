@@ -3,28 +3,28 @@
  * Tests adaptive per-pixel scaling for deep zoom GPU perturbation.
  */
 
-const puppeteer = require('puppeteer');
 const path = require('path');
+const { TEST_TIMEOUT, setupBrowser, setupPage, closeBrowser } = require('./test-utils');
 
 describe('AdaptiveGpuBoard', () => {
   let browser;
   let page;
 
   beforeAll(async () => {
-    browser = await puppeteer.launch({ headless: true });
-  });
+    browser = await setupBrowser();
+  }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
-  });
+    await closeBrowser(browser);
+  }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await browser.newPage();
-  });
+    page = await setupPage(browser, {}, TEST_TIMEOUT);
+  }, TEST_TIMEOUT);
 
   afterEach(async () => {
-    if (page) await page.close();
-  });
+    if (page) { try { await page.close(); } catch (e) { /* ignore */ } }
+  }, TEST_TIMEOUT);
 
   async function runBoard(boardType, zoom, c, maxiter = 200) {
     const cwd = process.cwd();
@@ -121,6 +121,9 @@ describe('AdaptiveGpuBoard', () => {
     const TRAPEZOID_CENTER = '-0.53040750060512211537022930878823+0.67082992953379211136335172587405i';
     const TRAPEZOID_ZOOM = '5.00e+29';
 
+    // Set viewport to match the test parameters (256x144 at 16:9)
+    await page.setViewport({ width: 256, height: 144 });
+
     // Run gpuzhuoran as reference (doesn't have the bug)
     const cwd = process.cwd();
     const gpuUrl = `file://${path.join(cwd, 'index.html')}?z=${TRAPEZOID_ZOOM}&c=${TRAPEZOID_CENTER}&board=gpuzhuoran&grid=1&maxiter=3000&width=256&height=144&a=16:9&pixelratio=1`;
@@ -132,7 +135,7 @@ describe('AdaptiveGpuBoard', () => {
         const view = window.explorer?.grid?.views?.[0];
         return view && view.un === 0;
       },
-      { timeout: 120000 }
+      { timeout: 60000 }
     );
 
     const gpuResult = await page.evaluate(() => {
@@ -141,7 +144,8 @@ describe('AdaptiveGpuBoard', () => {
     });
 
     await page.close();
-    page = await browser.newPage();
+    page = await setupPage(browser, {}, TEST_TIMEOUT);
+    await page.setViewport({ width: 256, height: 144 });
 
     // Run adaptive board
     const adaptiveUrl = `file://${path.join(cwd, 'index.html')}?z=${TRAPEZOID_ZOOM}&c=${TRAPEZOID_CENTER}&board=adaptive&grid=1&maxiter=3000&width=256&height=144&a=16:9&pixelratio=1`;
@@ -153,7 +157,7 @@ describe('AdaptiveGpuBoard', () => {
         const view = window.explorer?.grid?.views?.[0];
         return view && view.un === 0;
       },
-      { timeout: 120000 }
+      { timeout: 60000 }
     );
 
     const adaptiveResult = await page.evaluate(() => {
@@ -175,5 +179,5 @@ describe('AdaptiveGpuBoard', () => {
     // With the 1e-13 threshold fix, we should have very few trapezoid pixels
     // (typically 4 or fewer, which are f32 boundary noise, not the systematic bug)
     expect(trapezoidPixels).toBeLessThan(10);
-  }, 180000);
+  }, 90000);
 });
