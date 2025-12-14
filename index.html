@@ -4005,27 +4005,6 @@ class Scheduler {
   }
 }
 
-// Oct arithmetic helpers for orbit computation (must be defined before OrbitComputer)
-function toOctMul(a, b) {
-  const aa = toOct(a);
-  const bb = toOct(b);
-  const out = new Array(4);
-  AoctMul(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
-  return out;
-}
-
-function toOctSquare(a) {
-  const aa = toOct(a);
-  const out = new Array(4);
-  AoctMul(out, 0, aa[0], aa[1], aa[2], aa[3], aa[0], aa[1], aa[2], aa[3]);
-  return out;
-}
-
-function toOctDouble(a) {
-  const aa = toOct(a);
-  return [aa[0] * 2, aa[1] * 2, aa[2] * 2, aa[3] * 2];
-}
-
 // Convert QD complex (4 elements: [r0, r1, i0, i1]) to oct complex (8 elements)
 function qdcToOctc(qdc) {
   if (!qdc || qdc.length !== 4) return null;
