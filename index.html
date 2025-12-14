@@ -8928,16 +8928,52 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           }
 
           // === PERTURBATION ITERATION ===
-          let linear_r = 2.0 * (refr * dzr - refi * dzi);
-          let linear_i = 2.0 * (refr * dzi + refi * dzr);
-          let quad_r = ldexp(dzr * dzr - dzi * dzi, scale);
-          let quad_i = ldexp(2.0 * dzr * dzi, scale);
+          // Binomial expansion using Horner's method: (Z+δz)^n - Z^n = dz·(C(n,1)·Z^(n-1) + dz·(...))
+          // δz is in 2^scale coordinates; terms must be scaled appropriately
+
+          // Start Horner's method with innermost term (dz in 2^scale)
+          var result_r = dzr;
+          var result_i = dzi;
+
+          // Build binomial powers: z_pow tracks Z^k
+          var z_pow_r = refr;
+          var z_pow_i = refi;
+          var coeff = f32(params.exponent);  // C(n,1) = n
+
+          // Horner's method: accumulate terms from highest to lowest power of Z
+          for (var k = 1u; k < params.exponent; k++) {
+            // Add coeff * z_pow term (in actual coordinates, scale to 2^scale)
+            let term_r = ldexp(coeff * z_pow_r, -scale);
+            let term_i = ldexp(coeff * z_pow_i, -scale);
+            result_r = result_r + term_r;
+            result_i = result_i + term_i;
+
+            // Multiply by dz: result goes from 2^scale to 2^(2*scale)
+            let temp_r = result_r * dzr - result_i * dzi;
+            let temp_i = result_r * dzi + result_i * dzr;
+            result_r = temp_r;
+            result_i = temp_i;
+
+            // Scale back to 2^scale coordinates (from 2^(2*scale))
+            result_r = ldexp(result_r, scale);
+            result_i = ldexp(result_i, scale);
+
+            // Update z_pow: z_pow *= z_ref
+            let new_z_pow_r = z_pow_r * refr - z_pow_i * refi;
+            z_pow_i = z_pow_r * refi + z_pow_i * refr;
+            z_pow_r = new_z_pow_r;
+
+            // Update coefficient: C(n,k+1) = C(n,k) * (n-k) / (k+1)
+            coeff *= f32(params.exponent - k) / f32(k + 1u);
+          }
+
+          // Add perturbation in c (scale dc to match result's 2^scale)
           let scale_diff = params.initial_scale - scale;
           let dc_r = ldexp(dcr, scale_diff);
           let dc_i = ldexp(dci, scale_diff);
+          var new_dzr = result_r + dc_r;
+          var new_dzi = result_i + dc_i;
 
-          var new_dzr = linear_r + quad_r + dc_r;
-          var new_dzi = linear_i + quad_i + dc_i;
           var new_scale = scale;
 
           // === ADAPTIVE RESCALING ===

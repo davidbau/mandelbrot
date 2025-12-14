@@ -99,8 +99,8 @@ describe('Exponent 3 - AdaptiveGpuBoard vs GpuZhuoranBoard', () => {
     expect(zhuoran.total).toBe(adaptive.total);
 
     // Both should be using the correct board type
-    expect(zhuoran.boardType).toBe('gpuzhuoran');
-    expect(adaptive.boardType).toBe('adaptive');
+    expect(zhuoran.boardType).toBe('GpuZhuoranBoard');
+    expect(adaptive.boardType).toBe('AdaptiveGpuBoard');
 
     // Both should have similar divergence patterns (within 5% tolerance)
     const divergedRatio = adaptive.diverged / zhuoran.diverged;
