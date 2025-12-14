@@ -18,11 +18,11 @@ A typical Mandelbrot frame might dispatch 640,000 threads (for a 800×800 image)
 
 The explorer has three GPU implementations, selected based on zoom depth:
 
-| Board | Pixel Size | Precision | Use Case |
-|-------|------------|-----------|----------|
-| **GpuBoard** | > 1e-7 | float32 | Shallow zoom (up to ~10^7 magnification) |
-| **GpuZhuoranBoard** | 1e-30 to 1e-7 | float32 perturbation, DD reference | Deep zoom (10^7 to 10^30) |
-| **AdaptiveGpuBoard** | < 1e-30 | float32 perturbation, QD reference | Ultra-deep zoom (10^30+) |
+| Board | Pixel Size | Precision | Buffer Layout | Use Case |
+|-------|------------|-----------|---------------|----------|
+| **GpuBoard** | > 1e-7 | float32 | 3 bindings (36 bytes/pixel) | Shallow zoom (up to ~10^7×) |
+| **GpuZhuoranBoard** | 1e-30 to 1e-7 | float32 perturbation<br/>DD reference orbit | 3 bindings (56 bytes/pixel) | Deep zoom (10^7× to 10^30×) |
+| **AdaptiveGpuBoard** | < 1e-30 | float32 perturbation<br/>QD reference orbit<br/>Per-pixel scaling | 3 bindings (60 bytes/pixel) | Ultra-deep zoom (10^30×+) |
 
 The threshold of 1e-7 reflects float32's precision limit (~7 decimal digits). Beyond this, raw float32 iteration breaks down—neighboring pixels become indistinguishable. At extreme depths (> 10^30), AdaptiveGpuBoard uses QD-precision references and per-pixel adaptive scaling to handle coordinates that exceed float32's exponent range.
 
@@ -170,7 +170,7 @@ if (ref_iter > 0u && total_norm < dz_norm * 2.0) {
 
 The condition `total_norm < dz_norm * 2.0` catches orbits that are getting close to zero (where the reference is more accurate than the perturbation). After rebasing, the perturbation starts fresh with full precision.
 
-### Binomial Expansion for Higher Exponents
+### Binomial Expansion with Horner's Method
 
 For z^n + c with n > 2, the perturbation formula uses the binomial expansion:
 
@@ -178,36 +178,107 @@ For z^n + c with n > 2, the perturbation formula uses the binomial expansion:
 (Z + δz)^n - Z^n = Σ_{k=1}^{n} C(n,k) · Z^{n-k} · δz^k
 ```
 
-This is computed efficiently using an iterative method that builds up the polynomial term by term:
+Both GpuZhuoranBoard and AdaptiveGpuBoard compute this efficiently using **Horner's method**, which evaluates the polynomial as:
+
+```
+δz · (C(n,1)·Z^{n-1} + δz · (C(n,2)·Z^{n-2} + δz · (... + δz)))
+```
+
+This requires only one multiplication by `δz` per term, building from the innermost term outward.
+
+#### GpuZhuoranBoard Implementation
 
 ```wgsl
-// Iterative method for perturbation
-var z_pow_r = refr;
-var z_pow_i = refi;
-var coeff = f32(params.exponent);
-
+// Start with innermost term
 var result_r = dzr;
 var result_i = dzi;
 
+// Build binomial powers: z_pow tracks Z^k
+var z_pow_r = refr;   // Start at Z^1
+var z_pow_i = refi;
+var coeff = f32(params.exponent);  // C(n,1) = n
+
+// Horner's method: accumulate from highest to lowest power of Z
 for (var k = 1u; k < params.exponent; k++) {
-  // Add coeff * z_ref^power term
+  // Add C(n,k) · Z^k term
   let term_r = coeff * z_pow_r;
   let term_i = coeff * z_pow_i;
   result_r = result_r + term_r;
   result_i = result_i + term_i;
 
-  // Multiply by dz
+  // Multiply by δz (complex multiplication)
   let temp_r = result_r * dzr - result_i * dzi;
-  result_i = result_r * dzi + result_i * dzr;
+  let temp_i = result_r * dzi + result_i * dzr;
   result_r = temp_r;
+  result_i = temp_i;
 
-  // Update z_ref power and coefficient
-  // ...
+  // Update Z^k: multiply by Z
+  let new_z_pow_r = z_pow_r * refr - z_pow_i * refi;
+  z_pow_i = z_pow_r * refi + z_pow_i * refr;
+  z_pow_r = new_z_pow_r;
+
+  // Update coefficient: C(n,k+1) = C(n,k) · (n-k) / (k+1)
+  coeff *= f32(params.exponent - k) / f32(k + 1u);
 }
 
+// Add perturbation in c
 dzr = result_r + dcr;
 dzi = result_i + dci;
 ```
+
+For exponent=3, this expands to:
+- k=1: `result = δz + 3·Z` → `result · δz = 3·Z·δz + δz²`
+- k=2: `result = (3·Z·δz + δz²) + 3·Z²` → `result · δz = 3·Z²·δz + 3·Z·δz² + δz³`
+
+Which matches the binomial expansion: `3·Z²·δz + 3·Z·δz² + δz³`
+
+#### AdaptiveGpuBoard Implementation with Scaling
+
+AdaptiveGpuBoard uses the same Horner's method but must account for per-pixel adaptive scaling. The perturbation `δz` is stored in scaled coordinates (`δz_actual / 2^scale`), so each multiplication changes the exponent:
+
+```wgsl
+// Start with δz in 2^scale coordinates
+var result_r = dzr;
+var result_i = dzi;
+
+var z_pow_r = refr;  // Z is in actual coordinates
+var z_pow_i = refi;
+var coeff = f32(params.exponent);
+
+for (var k = 1u; k < params.exponent; k++) {
+  // Add C(n,k)·Z^k term, scaled to match result's 2^scale coordinates
+  // Z^k is in actual coords, so divide by 2^scale to match
+  let term_r = ldexp(coeff * z_pow_r, -scale);
+  let term_i = ldexp(coeff * z_pow_i, -scale);
+  result_r = result_r + term_r;
+  result_i = result_i + term_i;
+
+  // Multiply by δz: result goes from 2^scale to 2^(2*scale)
+  let temp_r = result_r * dzr - result_i * dzi;
+  let temp_i = result_r * dzi + result_i * dzr;
+  result_r = temp_r;
+  result_i = temp_i;
+
+  // Scale back from 2^(2*scale) to 2^scale
+  // scale is negative (e.g., -95), so ldexp(x, -95) divides by 2^95
+  result_r = ldexp(result_r, scale);
+  result_i = ldexp(result_i, scale);
+
+  // Update Z^k and coefficient (same as GpuZhuoranBoard)
+  let new_z_pow_r = z_pow_r * refr - z_pow_i * refi;
+  z_pow_i = z_pow_r * refi + z_pow_i * refr;
+  z_pow_r = new_z_pow_r;
+
+  coeff *= f32(params.exponent - k) / f32(k + 1u);
+}
+
+// Add δc (scaled to match result)
+let scale_diff = params.initial_scale - scale;
+result_r = result_r + ldexp(dcr, scale_diff);
+result_i = result_i + ldexp(dci, scale_diff);
+```
+
+The key insight: when `scale = -95`, multiplying two 2^(-95) values gives a 2^(-190) result. Using `ldexp(result, -95)` divides by 2^95, converting back to 2^(-95) coordinates.
 
 ### Cycle Detection with Threading
 
@@ -234,29 +305,196 @@ The threading structure is computed on the CPU as the reference orbit extends, t
 
 ## Buffer Layout
 
-GpuZhuoranBoard and AdaptiveGpuBoard use a consolidated 5-binding layout for better cache coherency:
+### GpuBoard: 3-Binding Layout (Shallow Zoom)
 
-| Buffer | `@binding` | Contents | Size |
-|--------|---|----------|------|
-| `params` | 0 | Uniform parameters (dims, batch size, checkpoints, etc.) | 128 bytes |
-| `intState` | 1 | Per-pixel integer state: iter, status, period, ref_iter, checkpoint indices, spares | 32 bytes/pixel (8×u32) |
-| `floatState` | 2 | Per-pixel float state: δz, checkpoint δz, δc | 32 bytes/pixel (8×f32) |
-| `refOrbit` | 3 | Reference orbit positions (shared across all pixels) | 8 bytes/iteration (2×f32) |
-| `threading` | 4 | Thread links and deltas for cycle detection (shared) | 16 bytes/iteration (4×f32) |
+For shallow zooms where perturbation isn't needed, GpuBoard uses a simple 3-binding layout:
 
-The consolidated layout packs all per-pixel data into two buffers with uniform ×8 stride, improving GPU cache performance compared to separate buffers with varying strides. Total memory per pixel is 64 bytes. For a 1920×1080 view, that's ~133 MB of GPU memory.
+```wgsl
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
+@group(0) @binding(2) var<storage, read_write> active_indices: array<u32>;
+```
+
+The `PixelState` struct packs all per-pixel data:
+```wgsl
+struct PixelState {
+  iter: u32,        // Current iteration count
+  status: u32,      // 0=computing, 1=diverged, 2=converged
+  period: u32,      // Detected period (for convergence)
+  zr: f32,          // Current z real part
+  zi: f32,          // Current z imaginary part
+  ckpt_zr: f32,     // Checkpoint z real
+  ckpt_zi: f32,     // Checkpoint z imaginary
+  cr: f32,          // Pixel's c real part
+  ci: f32,          // Pixel's c imaginary part
+}
+```
+
+Total: 36 bytes per pixel (9 fields × 4 bytes).
+
+### GpuZhuoranBoard: 3-Binding Layout (Deep Zoom)
+
+For deep zoom with perturbation theory, GpuZhuoranBoard uses a consolidated 3-binding layout:
+
+```wgsl
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
+@group(0) @binding(2) var<storage, read> iters: array<IterState>;
+```
+
+The `PixelState` struct (56 bytes) consolidates all per-pixel state:
+```wgsl
+struct PixelState {
+  // Integer fields (6 × u32 = 24 bytes)
+  iter: u32,                 // Total iterations completed
+  status: u32,               // 0=computing, 1=diverged, 2=converged
+  period: u32,               // Detected cycle period
+  ref_iter: u32,             // Current position in reference orbit
+  ckpt_refidx: u32,          // Checkpoint reference index
+  pending_refidx: u32,       // Lazy threading: pending ref index
+
+  // Float fields (8 × f32 = 32 bytes)
+  dzr: f32,                  // Perturbation δz real
+  dzi: f32,                  // Perturbation δz imaginary
+  bbr: f32,                  // Current checkpoint δz real
+  bbi: f32,                  // Current checkpoint δz imaginary
+  ckpt_bbr: f32,             // Original checkpoint δz real (for rebasing)
+  ckpt_bbi: f32,             // Original checkpoint δz imaginary
+  dcr: f32,                  // Perturbation δc real (c - c_ref)
+  dci: f32,                  // Perturbation δc imaginary
+}
+```
+
+The `IterState` struct (20 bytes) combines reference orbit and threading data:
+```wgsl
+struct IterState {
+  ref_re: f32,          // Reference orbit Z_n real part
+  ref_im: f32,          // Reference orbit Z_n imaginary part
+  thread_next: f32,     // Next thread index (-1 = no thread)
+  thread_delta_re: f32, // Thread position delta real
+  thread_delta_im: f32, // Thread position delta imaginary
+}
+```
+
+This consolidation improves cache coherency by storing all shared data (reference orbit + threading) in a single buffer with uniform 20-byte stride. For a 1920×1080 view with 100,000 reference iterations: ~107 MB pixels + ~2 MB iters = ~109 MB total GPU memory.
+
+### AdaptiveGpuBoard: 3-Binding Layout (Ultra-Deep Zoom)
+
+AdaptiveGpuBoard uses the same 3-binding pattern but with per-pixel scaling:
+
+```wgsl
+struct PixelState {
+  // Integer fields (7 × i32 = 28 bytes)
+  iter: i32,            // Total iterations (signed for compatibility)
+  scale: i32,           // Per-pixel exponent scale (adaptive)
+  status: i32,          // 0=computing, 1=diverged, 2=converged
+  period: i32,          // Detected cycle period
+  ref_iter: i32,        // Current position in reference orbit
+  ckpt_refidx: i32,     // Checkpoint reference index
+  pending_refidx: i32,  // Lazy threading: pending ref index
+
+  // Float fields (8 × f32 = 32 bytes)
+  dzr: f32,             // Scaled perturbation: δz / 2^scale
+  dzi: f32,             // (stored values are normalized)
+  bbr: f32,             // Scaled checkpoint δz real
+  bbi: f32,             // Scaled checkpoint δz imaginary
+  ckpt_bbr: f32,        // Original scaled checkpoint
+  ckpt_bbi: f32,        // (for reset after rebasing)
+  dcr: f32,             // Scaled δc real
+  dci: f32,             // Scaled δc imaginary
+}
+```
+
+Total: 60 bytes per pixel. The `scale` field enables each pixel to independently adapt its floating-point exponent range, allowing computation at depths beyond float32's normal limits (pixel sizes < 1e-30).
+
+## AdaptiveGpuBoard: Per-Pixel Adaptive Scaling
+
+At extreme zoom depths (pixel sizes < 1e-30), float32's exponent range becomes the limiting factor. Even though perturbation theory keeps the mantissa in range, the values can become so small that they underflow to zero or require denormal numbers (which have poor performance).
+
+AdaptiveGpuBoard solves this with **per-pixel adaptive scaling**: each pixel maintains its own exponent scale that shifts values into float32's normal range.
+
+### Scaling Mechanism
+
+Each pixel tracks:
+- `scale`: an integer exponent offset (typically negative, e.g., -95 for pixel_size ≈ 1e-30)
+- `dzr, dzi`: perturbation values stored as `δz_actual / 2^scale`
+
+This effectively extends float32's range by borrowing bits from the exponent. For example:
+- Actual value: `1e-95` (would underflow float32)
+- With `scale = -95`: stored as `1.0` (perfectly normal float32)
+- To convert back: `stored_value * 2^scale = 1.0 * 2^(-95) = actual_value`
+
+### Dynamic Rescaling
+
+After each iteration, the shader adjusts `scale` to keep `δz` in the range [0.5, 2.0]:
+
+```wgsl
+// Check if δz is getting too large
+let dz_mag = max(abs(new_dzr), abs(new_dzi));
+if (dz_mag > 0.0) {
+  let log2_mag = floor(log2(dz_mag));
+
+  // Scale down if magnitude ≥ 2
+  if (log2_mag >= 1.0) {
+    let steps = i32(log2_mag);
+    new_dzr = ldexp(new_dzr, -steps);  // Divide by 2^steps
+    new_dzi = ldexp(new_dzi, -steps);
+    new_scale = new_scale + steps;     // Increase exponent offset
+  }
+
+  // Scale up if magnitude < 0.5 (and we have headroom)
+  else if (log2_mag < -1.0 && new_scale > params.initial_scale) {
+    let steps = min(i32(-log2_mag) - 1, new_scale - params.initial_scale);
+    if (steps > 0) {
+      new_dzr = ldexp(new_dzr, steps);   // Multiply by 2^steps
+      new_dzi = ldexp(new_dzi, steps);
+      new_scale = new_scale - steps;     // Decrease exponent offset
+    }
+  }
+}
+```
+
+This keeps the stored values in float32's sweet spot (normal range, no denormals) while the actual mathematical values can be arbitrarily small.
+
+### Reference Orbit Precision
+
+For AdaptiveGpuBoard to work correctly, the CPU must compute the reference orbit in **QD (quad-double) precision** rather than DD (double-double). This provides ~62 decimal digits of precision, sufficient for:
+- Pixel sizes down to ~1e-60
+- Reference coordinates requiring ~60 digits
+- Accurate orbit loop detection at extreme depths
+
+The reference orbit values uploaded to the GPU are truncated to float32 for each iteration, which is sufficient because perturbation keeps individual terms small.
 
 ## CPU-GPU Coordination
 
-The reference orbit is computed lazily on the CPU in quad precision. Each `compute()` call:
+The reference orbit is computed lazily on the CPU using high-precision arithmetic:
+- **GpuZhuoranBoard**: DD (double-double) precision (~31 decimal digits)
+- **AdaptiveGpuBoard**: QD (quad-double) precision (~62 decimal digits)
+
+Each `compute()` call:
 
 1. **Extends the reference orbit** if any pixel needs more iterations than currently available
-2. **Uploads new orbit data** to the GPU (incrementally, only what's new)
-3. **Uploads new threading data** similarly
-4. **Dispatches the compute shader** for one batch of iterations
-5. **Reads back results** (iteration counts, status, periods) for finished pixels
+   - Computed using oct-precision (8 float64 components) on CPU
+   - Truncated to DD or QD for storage depending on board type
+   - Further truncated to float32 when uploading to GPU
 
-This interleaving allows the GPU to work on most pixels while the CPU extends the high-precision reference for the few deep-zooming pixels that need it.
+2. **Uploads new orbit data** to the GPU (incrementally, only what's new)
+   - Reference orbit positions: 2×f32 per iteration (8 bytes)
+   - Only new iterations since last upload are transferred
+
+3. **Uploads new threading data** similarly
+   - Threading links and deltas: computed from iteration 0
+   - Shader ignores threading checks until iteration ≥ F(18) = 2584
+   - Full threading buffer populated for better orbit loop detection
+
+4. **Dispatches the compute shader** for one batch of iterations
+   - Dynamic batch sizing: more iterations when fewer pixels active
+   - 2D workgroup dispatch for large images (>65535 workgroups)
+
+5. **Reads back results** (iteration counts, status, periods) for finished pixels
+   - Only completed pixels are read back to minimize PCIe bandwidth
+
+This interleaving allows the GPU to work on most pixels while the CPU extends the high-precision reference for the few deep-zooming pixels that need it. The precision difference (DD vs QD) ensures each board has sufficient accuracy for its zoom range.
 
 ## Performance Tuning
 
@@ -287,7 +525,97 @@ let index = global_id.y * params.workgroups_x + global_id.x;
 
 ### Orbit Loop for Very Deep Zooms
 
-Beyond ~4 million iterations, the threading buffer would exceed reasonable memory limits. The code detects when the reference orbit loops back near a previous position and creates a "jump" that wraps the orbit around, allowing unbounded iteration depth with bounded memory.
+Beyond ~1 million iterations (2^20), the threading buffer would exceed reasonable memory limits. Both GpuZhuoranBoard and AdaptiveGpuBoard detect when the reference orbit loops back near a previous position and create a "jump" that wraps the orbit around, allowing unbounded iteration depth with bounded memory.
+
+#### Loop Detection Algorithm
+
+When the reference orbit reaches the threading capacity (1,048,576 iterations), the code searches backward through the last 12,000 iterations to find the closest previous position:
+
+**GpuZhuoranBoard** (DD precision):
+```javascript
+const THREADING_CAPACITY = 1048576;  // 2^20
+const SEARCH_WINDOW = 12000;
+
+// Get endpoint (current position)
+const endpoint = this.refOrbit[THREADING_CAPACITY];
+
+let minDist = Infinity;
+let closestIter = THREADING_CAPACITY - SEARCH_WINDOW;
+
+for (let i = THREADING_CAPACITY - SEARCH_WINDOW; i < THREADING_CAPACITY; i++) {
+  const pt = this.refOrbit[i];
+
+  // Compute distance using DD (double-double) precision
+  const dr = endpoint[0] - pt[0] + (endpoint[1] - pt[1]);  // DD subtraction
+  const di = endpoint[2] - pt[2] + (endpoint[3] - pt[3]);
+  const dist = Math.max(Math.abs(dr), Math.abs(di));  // Chebyshev distance
+
+  if (dist < minDist) {
+    minDist = dist;
+    closestIter = i;
+  }
+}
+
+this.refOrbitLoop = {
+  enabled: true,
+  threshold: THREADING_CAPACITY,
+  jumpAmount: THREADING_CAPACITY - closestIter,
+  deltaR: /* DD delta */,
+  deltaI: /* DD delta */
+};
+```
+
+**AdaptiveGpuBoard** (QD precision):
+```javascript
+// Same search window, but using QD (quad-double) precision for accuracy
+const tt = new Float64Array(8);  // Temp array for QD arithmetic
+
+for (let i = THREADING_CAPACITY - SEARCH_WINDOW; i < THREADING_CAPACITY; i++) {
+  const pt = this.refOrbit[i];
+
+  // Compute difference in QD precision (all 4 components)
+  ArqdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
+                 -pt[0], -pt[1], -pt[2], -pt[3]);  // dr in QD
+  ArqdAdd(tt, 4, endpoint[4], endpoint[5], endpoint[6], endpoint[7],
+                 -pt[4], -pt[5], -pt[6], -pt[7]);  // di in QD
+
+  // Sum QD components for final distance
+  const dr = tt[0] + tt[1] + tt[2] + tt[3];
+  const di = tt[4] + tt[5] + tt[6] + tt[7];
+  const dist = Math.max(Math.abs(dr), Math.abs(di));
+
+  // ... find minimum
+}
+
+// Store delta with full QD precision
+this.refOrbitLoop = {
+  enabled: true,
+  threshold: THREADING_CAPACITY,
+  jumpAmount: THREADING_CAPACITY - closestIter,
+  deltaR_qd: [/* 4 QD components */],  // Full precision for CPU
+  deltaI_qd: [/* 4 QD components */],
+  deltaR: /* float64 for GPU */,       // Truncated for shader
+  deltaI: /* float64 for GPU */
+};
+```
+
+The larger 12,000-iteration search window (compared to earlier 10,000) increases the likelihood of finding a closer loop point, reducing accumulated error over millions of iterations.
+
+#### GPU Application
+
+When a pixel's `ref_iter` reaches the loop threshold, the shader applies the jump:
+
+```wgsl
+if (params.loop_enabled && ref_iter >= params.loop_threshold) {
+  ref_iter = ref_iter - params.loop_jump;  // Jump back in orbit
+
+  // Add the stored delta to maintain continuity
+  dzr = dzr + params.loop_delta_r;
+  dzi = dzi + params.loop_delta_i;
+}
+```
+
+This allows pixels to iterate indefinitely without requiring unbounded memory for the reference orbit or threading structures.
 
 ## WebGPU Availability
 
