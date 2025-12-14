@@ -234,51 +234,44 @@ Which matches the binomial expansion: `3·Z²·δz + 3·Z·δz² + δz³`
 
 #### AdaptiveGpuBoard Implementation with Scaling
 
-AdaptiveGpuBoard uses the same Horner's method but must account for per-pixel adaptive scaling. The perturbation `δz` is stored in scaled coordinates (`δz_actual / 2^scale`), so each multiplication changes the exponent:
+AdaptiveGpuBoard cannot use Horner's method directly because converting between scaled and actual coordinates with `ldexp(..., -scale)` causes **float32 overflow** when scale is very negative (e.g., -159 at z=1e47). Instead, it uses explicit term-by-term computation that stays in scaled coordinates:
 
+**Exponent 2** (z² + c):
 ```wgsl
-// Start with δz in 2^scale coordinates
-var result_r = dzr;
-var result_i = dzi;
-
-var z_pow_r = refr;  // Z is in actual coordinates
-var z_pow_i = refi;
-var coeff = f32(params.exponent);
-
-for (var k = 1u; k < params.exponent; k++) {
-  // Add C(n,k)·Z^k term, scaled to match result's 2^scale coordinates
-  // Z^k is in actual coords, so divide by 2^scale to match
-  let term_r = ldexp(coeff * z_pow_r, -scale);
-  let term_i = ldexp(coeff * z_pow_i, -scale);
-  result_r = result_r + term_r;
-  result_i = result_i + term_i;
-
-  // Multiply by δz: result goes from 2^scale to 2^(2*scale)
-  let temp_r = result_r * dzr - result_i * dzi;
-  let temp_i = result_r * dzi + result_i * dzr;
-  result_r = temp_r;
-  result_i = temp_i;
-
-  // Scale back from 2^(2*scale) to 2^scale
-  // scale is negative (e.g., -95), so ldexp(x, -95) divides by 2^95
-  result_r = ldexp(result_r, scale);
-  result_i = ldexp(result_i, scale);
-
-  // Update Z^k and coefficient (same as GpuZhuoranBoard)
-  let new_z_pow_r = z_pow_r * refr - z_pow_i * refi;
-  z_pow_i = z_pow_r * refi + z_pow_i * refr;
-  z_pow_r = new_z_pow_r;
-
-  coeff *= f32(params.exponent - k) / f32(k + 1u);
-}
-
-// Add δc (scaled to match result)
-let scale_diff = params.initial_scale - scale;
-result_r = result_r + ldexp(dcr, scale_diff);
-result_i = result_i + ldexp(dci, scale_diff);
+// 2·Z·δz + δz²
+let linear_r = 2.0 * (refr * dzr - refi * dzi);  // Z·δz_stored, stays in scaled
+let linear_i = 2.0 * (refr * dzi + refi * dzr);
+let quad_r = ldexp(dzr * dzr - dzi * dzi, scale);  // δz² in 2^(2*scale), scale back
+let quad_i = ldexp(2.0 * dzr * dzi, scale);
+result = linear + quad + dc;
 ```
 
-The key insight: when `scale = -95`, multiplying two 2^(-95) values gives a 2^(-190) result. Using `ldexp(result, -95)` divides by 2^95, converting back to 2^(-95) coordinates.
+**Exponent 3** (z³ + c):
+```wgsl
+// 3·Z²·δz + 3·Z·δz² + δz³
+let ref2 = Z²;  // Precompute Z²
+let t1 = 3.0 * ref2 * dz_stored;  // Linear term, stays in scaled
+let dz2 = dz_stored²;  // δz² in 2^(2*scale)
+let t2 = ldexp(3.0 * Z * dz2, scale);  // Scale back to 2^scale
+let dz3 = dz_stored * dz2;  // δz³ in 2^(3*scale)
+let t3 = ldexp(dz3, 2*scale);  // Scale back to 2^scale
+result = t1 + t2 + t3 + dc;
+```
+
+**Exponent 4** (z⁴ + c):
+```wgsl
+// 4·Z³·δz + 6·Z²·δz² + 4·Z·δz³ + δz⁴
+let ref2 = Z², ref3 = Z³;
+let t1 = 4.0 * ref3 * dz_stored;  // O(1) * O(1) = O(1)
+let t2 = ldexp(6.0 * ref2 * dz2, scale);
+let t3 = ldexp(4.0 * Z * dz3, 2*scale);
+let t4 = ldexp(dz4, 3*scale);
+result = t1 + t2 + t3 + t4 + dc;
+```
+
+**Key constraint**: Never use `ldexp(..., -scale)` with large negative scale to convert actual→scaled coordinates. This multiplies by 2^|scale| and overflows float32 to Infinity. Instead, work entirely in scaled coordinates where all values stay in [0.25, 4.0] range.
+
+For exponents > 4, a fallback computes `(Z+δz)^n - Z^n` directly using actual coordinates (less efficient but always works).
 
 ### Cycle Detection with Threading
 
