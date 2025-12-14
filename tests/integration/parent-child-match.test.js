@@ -151,7 +151,7 @@ describe('Parent-child view iteration matching', () => {
             totalSamples++;
 
             if (diff === 0) exactMatches++;
-            if (diff <= 5) closeMatches++;
+            if (diff <= 1) closeMatches++;
 
             if (samples.length < 20) { // Limit detailed samples
               samples.push({
@@ -182,11 +182,137 @@ describe('Parent-child view iteration matching', () => {
       };
     });
 
-    // At z=1e20, expect at least 60% close matches (perturbation can cause small differences)
-    expect(comparison.closeRate).toBeGreaterThan(0.6);
+    // At z=1e20, expect reasonable match rates
+    // Perfect matching is limited by subpixel positioning and rounding
+    // closeRate = within 1 iteration, exactRate = exact match
+    console.log(`z=1e20: exactRate=${(comparison.exactRate*100).toFixed(1)}%, closeRate=${(comparison.closeRate*100).toFixed(1)}%, boards=${comparison.v0BoardType}/${comparison.v1BoardType}`);
+    expect(comparison.closeRate).toBeGreaterThan(0.5);
+    expect(comparison.exactRate).toBeGreaterThan(0.35);
   }, PARENT_CHILD_TIMEOUT);
 
-  // Note: original test at z=1e35 was replaced with z=1e20 for faster execution.
-  // The test verifies that parent and child views compute consistent iteration
-  // counts for corresponding pixels at deep zoom.
+  test('z=1e47 deep zoom should have matching iteration counts', async () => {
+    if (launchFailed) return;
+
+    // Test at z=1e47 - this is where the sloppy_mul fix matters most
+    // At this zoom, pixel spacing is ~1e-49, requiring full oct precision
+    const url = '?z=1.00e+47&a=16:9&grid=20&subpixel=1&c=-1.8+0i';
+
+    await navigateToAppBasic(page, url);
+
+    // Wait for first view to be ready
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views?.[0];
+      return view && !view.uninteresting();
+    }, { timeout: 30000 });
+    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 30000 });
+
+    // Click canvas center to create child view
+    const canvas = await page.$('#grid canvas');
+    const box = await canvas.boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+    // Wait for both views to exist
+    await page.waitForFunction(() => {
+      return window.explorer.grid.views.length >= 2 &&
+             window.explorer.grid.views[0] !== null &&
+             window.explorer.grid.views[1] !== null;
+    }, { timeout: 15000 });
+
+    // Wait for child view to be mostly complete
+    await page.waitForFunction(() => {
+      const v0 = window.explorer.grid.views[0];
+      const v1 = window.explorer.grid.views[1];
+      return v0 && v1 &&
+             v1.un <= 10 &&
+             v0.di > v0.config.dimsArea * 0.5;
+    }, { timeout: 60000 });
+
+    // Get detailed comparison data (same logic as z=1e20 test)
+    const comparison = await page.evaluate(() => {
+      const view0 = window.explorer.grid.views[0];
+      const view1 = window.explorer.grid.views[1];
+      const config = window.explorer.config;
+
+      const v0Size = view0.sizesOct[0];
+      const v0CenterROct = view0.sizesOct[1];
+      const v0CenterIOct = view0.sizesOct[2];
+
+      const v1Size = view1.sizesOct[0];
+      const v1CenterROct = view1.sizesOct[1];
+      const v1CenterIOct = view1.sizesOct[2];
+      const zoomFactor = v0Size / v1Size;
+
+      const samples = [];
+      const samplePoints = 11;
+      const dimsWidth = config.dimsWidth;
+      const dimsHeight = config.dimsHeight;
+      const aspectRatio = config.aspectRatio;
+
+      let exactMatches = 0;
+      let closeMatches = 0;
+      let totalSamples = 0;
+
+      for (let sy = 0; sy < samplePoints; sy++) {
+        for (let sx = 0; sx < samplePoints; sx++) {
+          const v1x = Math.floor(dimsWidth * (0.3 + 0.4 * sx / (samplePoints - 1)));
+          const v1y = Math.floor(dimsHeight * (0.3 + 0.4 * sy / (samplePoints - 1)));
+          const v1idx = v1y * dimsWidth + v1x;
+
+          const v1PixelC = view1.currentc(v1idx);
+          const pixelROct = [v1PixelC[0], v1PixelC[1], v1PixelC[2], v1PixelC[3]];
+          const pixelIOct = [v1PixelC[4], v1PixelC[5], v1PixelC[6], v1PixelC[7]];
+
+          const deltaR = toOctSub(pixelROct, v0CenterROct);
+          const deltaI = toOctSub(pixelIOct, v0CenterIOct);
+
+          const v0x = Math.round((octToNumber(deltaR) / v0Size + 0.5) * dimsWidth);
+          const v0y = Math.round((0.5 - octToNumber(deltaI) * aspectRatio / v0Size) * dimsHeight);
+
+          if (v0x >= 0 && v0x < dimsWidth && v0y >= 0 && v0y < dimsHeight) {
+            const v0idx = v0y * dimsWidth + v0x;
+
+            const v0iter = view0.nn[v0idx];
+            const v1iter = view1.nn[v1idx];
+
+            const diff = Math.abs(v0iter - v1iter);
+            totalSamples++;
+
+            if (diff === 0) exactMatches++;
+            if (diff <= 1) closeMatches++;
+
+            if (samples.length < 20) {
+              samples.push({
+                v1x, v1y, v0x, v0y,
+                v0iter, v1iter, diff
+              });
+            }
+          }
+        }
+      }
+
+      return {
+        v0Size,
+        v1Size,
+        zoomFactor,
+        v0Stats: { it: view0.it, di: view0.di, un: view0.un, total: view0.config.dimsArea },
+        v1Stats: { it: view1.it, di: view1.di, un: view1.un, total: view1.config.dimsArea },
+        v0BoardType: view0.boardType,
+        v1BoardType: view1.boardType,
+        samples,
+        exactMatches,
+        closeMatches,
+        totalSamples,
+        exactRate: exactMatches / totalSamples,
+        closeRate: closeMatches / totalSamples
+      };
+    });
+
+    // At z=1e47, with sloppy_mul fix, expect match rates comparable to z=1e20
+    // The key verification is that deep zoom doesn't degrade precision significantly
+    // Before the fix, z=1e47 would have much lower rates due to lost cross-terms
+    // closeRate = within 1 iteration, exactRate = exact match
+    console.log(`z=1e47: exactRate=${(comparison.exactRate*100).toFixed(1)}%, closeRate=${(comparison.closeRate*100).toFixed(1)}%, boards=${comparison.v0BoardType}/${comparison.v1BoardType}`);
+    expect(comparison.closeRate).toBeGreaterThan(0.5);
+    expect(comparison.exactRate).toBeGreaterThan(0.3);
+  }, 90000); // 90 second timeout for deep zoom
 });

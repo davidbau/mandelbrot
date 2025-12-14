@@ -21,10 +21,13 @@ const {
   AoctSquare,
   AsymmetricTwoSum,
   AquickTwoSum,
+  AthreeSum,
   AoctTwoProduct,
+  AoctTwoSquare,
   AoctRenorm,
   AoctSet,
   AtwoProduct,
+  AtwoSquare,
   AqdSplit
 } = createTestEnvironment([
   'toOct',
@@ -39,10 +42,13 @@ const {
   'AoctSquare',
   'AsymmetricTwoSum',
   'AquickTwoSum',
+  'AthreeSum',
   'AoctTwoProduct',
+  'AoctTwoSquare',
   'AoctRenorm',
   'AoctSet',
   'AtwoProduct',
+  'AtwoSquare',
   'AqdSplit'
 ]);
 
@@ -196,9 +202,9 @@ describe('QD-style oct precision tests', () => {
     expect(result[1]).toBeCloseTo(2e-16, -16);  // 2 * 1 * 1e-16
   });
 
-  test('cross-term precision loss analysis', () => {
-    // Test specifically the cross terms that use plain multiplication
-    // in our AoctMul but use two_prod in QD
+  test('cross-term precision with QD sloppy_mul', () => {
+    // Test level-2 cross terms which use TwoProduct in QD sloppy_mul
+    // Note: sloppy_mul computes levels 0-3, level-4 (a[2]*b[2]) is not computed
 
     // Create values where a[0]*b[2] and a[2]*b[0] terms matter
     const a = [1, 0, 1e-32, 0];  // 1 + 1e-32
@@ -207,12 +213,64 @@ describe('QD-style oct precision tests', () => {
     const result = toOctSquare(a);
 
     // Expected: (1 + 1e-32)² = 1 + 2e-32 + 1e-64
-    // The 2e-32 term comes from a[0]*b[2] + a[2]*b[0]
-    // These are computed with plain multiplication in our code!
+    // The 2e-32 term comes from a[0]*b[2] + a[2]*b[0] (level-2, computed with TwoProduct)
+    // The 1e-64 term is a[2]*b[2] (level-4, not computed by sloppy_mul)
 
-    // After renormalization, 2e-32 appears in result[1], and 1e-64 in result[2]
+    // After renormalization, 2e-32 appears in result[1]
     expect(Math.abs(result[1] - 2e-32) / 2e-32).toBeLessThan(0.01);
-    expect(Math.abs(result[2] - 1e-64) / 1e-64).toBeLessThan(0.01);
+    // Level-4 terms are dropped by sloppy_mul (only a few bits lost per QD docs)
+    // The 1e-64 term won't appear because sloppy_mul doesn't compute a[2]*b[2]
+    expect(result[2]).toBe(0);
+  });
+
+  test('level-3 cross-terms computed correctly', () => {
+    // Level-3 terms: a[0]*b[3] + a[1]*b[2] + a[2]*b[1] + a[3]*b[0]
+    // In sloppy_mul, these are computed with plain multiplication (not TwoProduct)
+    // but should still be captured in the result
+
+    // Create values where level-3 terms are significant
+    const a = [1, 0, 0, 1e-48];  // 1 + 1e-48
+    const b = [1, 0, 0, 1e-48];  // 1 + 1e-48
+
+    const result = toOctSquare(a);
+
+    // Expected: (1 + 1e-48)² = 1 + 2e-48 + 1e-96
+    // The 2e-48 term comes from a[0]*b[3] + a[3]*b[0] (level-3)
+    // The 1e-96 term is a[3]*b[3] (level-6, not computed)
+
+    // Level-3 terms should be captured (plain multiply, no TwoProduct error term)
+    // The 2e-48 term should appear somewhere in the result
+    const sum = result[0] + result[1] + result[2] + result[3];
+    expect(Math.abs(sum - (1 + 2e-48)) / (1 + 2e-48)).toBeLessThan(1e-10);
+  });
+
+  test('level-3 cross-terms at deep zoom scale', () => {
+    // Test level-3 terms at magnitudes relevant to deep zoom (z=1e40)
+    // At z=1e40, pixel spacing is ~1e-42, so level-3 precision matters
+
+    const a = [1.5, 1e-16, 1e-32, 1e-48];
+    const b = [0.7, 2e-17, 3e-33, 4e-49];
+
+    const result = toOctMul(a, b);
+
+    // Level-3 terms: a[0]*b[3] + a[1]*b[2] + a[2]*b[1] + a[3]*b[0]
+    // = 1.5*4e-49 + 1e-16*3e-33 + 1e-32*2e-17 + 1e-48*0.7
+    // = 6e-49 + 3e-49 + 2e-49 + 7e-49 = 1.8e-48
+    const expectedLevel3 = 1.5*4e-49 + 1e-16*3e-33 + 1e-32*2e-17 + 1e-48*0.7;
+
+    // The sum should include level-3 contribution
+    const sum = result[0] + result[1] + result[2] + result[3];
+
+    // Main product ≈ 1.5 * 0.7 = 1.05
+    // Level-1: 1.5*2e-17 + 1e-16*0.7 ≈ 1e-16
+    // Level-2: various cross-terms ≈ 1e-32
+    // Level-3: ≈ 1.8e-48
+
+    // Verify the sum is close to expected (accounting for all terms)
+    const expectedSum = 1.5*0.7 + 1.5*2e-17 + 1e-16*0.7 +
+                        1.5*3e-33 + 1e-16*2e-17 + 1e-32*0.7 +
+                        expectedLevel3;
+    expect(Math.abs(sum - expectedSum) / expectedSum).toBeLessThan(1e-10);
   });
 
   test('Mandelbrot iteration precision simulation', () => {

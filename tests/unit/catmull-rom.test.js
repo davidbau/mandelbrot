@@ -36,10 +36,13 @@ const {
   AoctMul,
   AsymmetricTwoSum,
   AquickTwoSum,
+  AthreeSum,
   AoctTwoProduct,
+  AoctTwoSquare,
   AoctRenorm,
   AoctSet,
   AtwoProduct,
+  AtwoSquare,
   AqdSplit
 } = createTestEnvironment([
   'catmullRom1D',
@@ -64,10 +67,13 @@ const {
   'AoctMul',
   'AsymmetricTwoSum',
   'AquickTwoSum',
+  'AthreeSum',
   'AoctTwoProduct',
+  'AoctTwoSquare',
   'AoctRenorm',
   'AoctSet',
   'AtwoProduct',
+  'AtwoSquare',
   'AqdSplit'
 ]);
 

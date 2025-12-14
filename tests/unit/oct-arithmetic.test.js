@@ -22,8 +22,11 @@ const {
   AoctRenorm,
   AquickTwoSum,
   AsymmetricTwoSum,
+  AthreeSum,
   AoctTwoProduct,
+  AoctTwoSquare,
   AtwoProduct,
+  AtwoSquare,
   AqdSplit
 } = createTestEnvironment([
   'toOct',
@@ -39,8 +42,11 @@ const {
   'AoctRenorm',
   'AquickTwoSum',
   'AsymmetricTwoSum',
+  'AthreeSum',
   'AoctTwoProduct',
+  'AoctTwoSquare',
   'AtwoProduct',
+  'AtwoSquare',
   'AqdSplit'
 ]);
 

@@ -10268,6 +10268,15 @@ function AsymmetricTwoSum(a, b) {
   return [s, (a - (s - bb)) + (b - bb)];
 }
 
+// Three-sum from QD library: combines three values with proper error propagation
+// Returns [sum, err1, err2] where sum + err1 + err2 = a + b + c (exactly)
+function AthreeSum(a, b, c) {
+  let [t1, t2] = AsymmetricTwoSum(a, b);
+  let [newA, t3] = AsymmetricTwoSum(c, t1);
+  let [newB, newC] = AsymmetricTwoSum(t2, t3);
+  return [newA, newB, newC];
+}
+
 function AqdAdd(r, i, a1, a2, b1, b2) {
   Aslow2Sum(r, i, a1, b1);
   const h1 = r[i];
@@ -10324,6 +10333,12 @@ function AqdAbsSub(r, i, a1, a2, b1, b2) {
 function AoctTwoProduct(a, b) {
   const tmp = [];
   AtwoProduct(tmp, 0, a, b);
+  return [tmp[0], tmp[1]];
+}
+
+function AoctTwoSquare(a) {
+  const tmp = [];
+  AtwoSquare(tmp, 0, a);
   return [tmp[0], tmp[1]];
 }
 
@@ -10402,37 +10417,73 @@ function AoctAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   AoctSet(r, i, s0, s1, s2, s3);
 }
 
+// QD library sloppy_mul algorithm (Hida, Li, Bailey)
+// Uses TwoProduct for 6 products (levels 0-2) for nearly full 212-bit precision
 function AoctMul(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
-  const [p0, e0] = AoctTwoProduct(a1, b1);
-  const [c1, e1] = AoctTwoProduct(a1, b2);
-  const [c2, e2] = AoctTwoProduct(a2, b1);
+  // Level 0: a[0]*b[0]
+  let [p0, q0] = AoctTwoProduct(a1, b1);
 
-  const [p1, carry12] = AsymmetricTwoSum(c1, c2);
+  // Level 1: a[0]*b[1], a[1]*b[0]
+  let [p1, q1] = AoctTwoProduct(a1, b2);
+  let [p2, q2] = AoctTwoProduct(a2, b1);
 
-  // FIX: e0 (error from main product) can be much larger than p1 (cross terms)
-  // when a1,b1 are ~1 but a2,b2 are tiny (e.g., at deep zoom).
-  // We must combine them with TwoSum to preserve both, ensuring proper
-  // magnitude ordering for renormalization.
-  const [s1, s1_error] = AsymmetricTwoSum(e0, p1);
+  // Level 2: a[0]*b[2], a[1]*b[1], a[2]*b[0]
+  let [p3, q3] = AoctTwoProduct(a1, b3);
+  let [p4, q4] = AoctTwoProduct(a2, b2);
+  let [p5, q5] = AoctTwoProduct(a3, b1);
 
-  // Now s1 contains the larger part, s1_error contains what was lost in the sum
-  const lowErrors = e1 + e2 + carry12 + s1_error;
+  // Accumulate terms using three_sum
+  [p1, p2, q0] = AthreeSum(p1, p2, q0);
+  [p2, q1, q2] = AthreeSum(p2, q1, q2);
+  [p3, p4, p5] = AthreeSum(p3, p4, p5);
 
-  const cross2 = a1 * b3 + a2 * b2 + a3 * b1;
-  const cross3 = a1 * b4 + a2 * b3 + a3 * b2 + a4 * b1;
-  const cross4 = a2 * b4 + a3 * b3 + a4 * b2;
-  const cross5 = a3 * b4 + a4 * b3;
-  const tail = a4 * b4;
+  // Further combining
+  let [s0, t0] = AsymmetricTwoSum(p2, p3);
+  let [s1, t1] = AsymmetricTwoSum(q1, p4);
+  let s2 = q2 + p5;
+  [s1, t0] = AsymmetricTwoSum(s1, t0);
+  s2 += t0 + t1;
 
-  const s2 = lowErrors + cross2;
-  const s3 = cross3 + cross4;
-  const s4 = cross5 + tail;
+  // Level 3 cross-products and remaining error terms
+  s1 += a1 * b4 + a2 * b3 + a3 * b2 + a4 * b1 + q0 + q3 + q4 + q5;
 
-  AoctRenorm(r, i, p0, s1, s2, s3, s4);
+  // Renormalize
+  AoctRenorm(r, i, p0, p1, s0, s1, s2);
 }
 
+// QD library optimized sqr algorithm (Hida, Li, Bailey)
+// Exploits symmetry: a[i]*a[j] = a[j]*a[i], so compute once and double
+// Uses TwoSquare (cheaper than TwoProduct) where possible
 function AoctSquare(r, i, a1, a2, a3, a4) {
-  AoctMul(r, i, a1, a2, a3, a4, a1, a2, a3, a4);
+  // Level 0: a[0]² - use TwoSquare
+  let [p0, q0] = AoctTwoSquare(a1);
+
+  // Level 1: 2*a[0]*a[1] - single TwoProduct with doubled arg
+  let [p1, q1] = AoctTwoProduct(2 * a1, a2);
+
+  // Level 2: 2*a[0]*a[2] + a[1]²
+  let [p2, q2] = AoctTwoProduct(2 * a1, a3);
+  let [p3, q3] = AoctTwoSquare(a2);
+
+  // Accumulate level 1
+  [p1, p2, q0] = AthreeSum(p1, q0, p2);
+
+  // Accumulate level 2
+  [p2, q1, q2] = AthreeSum(p2, q1, q2);
+  [p3, q3] = AsymmetricTwoSum(p3, q3);
+
+  // Combine accumulated values
+  let [s0, t0] = AsymmetricTwoSum(p2, p3);
+  let [s1, t1] = AsymmetricTwoSum(q1, q3);
+  let s2 = q2;
+  [s1, t0] = AsymmetricTwoSum(s1, t0);
+  s2 += t0 + t1;
+
+  // Level 3: 2*a[0]*a[3] + 2*a[1]*a[2] (plain multiply)
+  s1 += 2 * a1 * a4 + 2 * a2 * a3 + q0;
+
+  // Renormalize
+  AoctRenorm(r, i, p0, p1, s0, s1, s2);
 }
 
 // Oct-precision absolute difference: r = |a - b|
