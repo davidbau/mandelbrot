@@ -92,9 +92,6 @@ describe('Exponent 3 - AdaptiveGpuBoard vs GpuZhuoranBoard', () => {
 
     await page2.close();
 
-    console.log(`GpuZhuoranBoard: ${zhuoran.boardType}, ${zhuoran.diverged} diverged, ${zhuoran.converged} converged, ${zhuoran.computing} computing, maxIter=${zhuoran.maxIter}, di/un=${zhuoran.di}/${zhuoran.un}`);
-    console.log(`AdaptiveGpuBoard: ${adaptive.boardType}, ${adaptive.diverged} diverged, ${adaptive.converged} converged, ${adaptive.computing} computing, maxIter=${adaptive.maxIter}, di/un=${adaptive.di}/${adaptive.un}`);
-
     // Both boards should have the same total pixels
     expect(zhuoran.total).toBe(adaptive.total);
 

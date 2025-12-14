@@ -185,7 +185,6 @@ describe('Parent-child view iteration matching', () => {
     // At z=1e20, expect reasonable match rates
     // Perfect matching is limited by subpixel positioning and rounding
     // closeRate = within 1 iteration, exactRate = exact match
-    console.log(`z=1e20: exactRate=${(comparison.exactRate*100).toFixed(1)}%, closeRate=${(comparison.closeRate*100).toFixed(1)}%, boards=${comparison.v0BoardType}/${comparison.v1BoardType}`);
     expect(comparison.closeRate).toBeGreaterThan(0.5);
     expect(comparison.exactRate).toBeGreaterThan(0.35);
   }, PARENT_CHILD_TIMEOUT);
@@ -311,7 +310,6 @@ describe('Parent-child view iteration matching', () => {
     // The key verification is that deep zoom doesn't degrade precision significantly
     // Before the fix, z=1e47 would have much lower rates due to lost cross-terms
     // closeRate = within 1 iteration, exactRate = exact match
-    console.log(`z=1e47: exactRate=${(comparison.exactRate*100).toFixed(1)}%, closeRate=${(comparison.closeRate*100).toFixed(1)}%, boards=${comparison.v0BoardType}/${comparison.v1BoardType}`);
     expect(comparison.closeRate).toBeGreaterThan(0.5);
     expect(comparison.exactRate).toBeGreaterThan(0.3);
   }, 90000); // 90 second timeout for deep zoom
