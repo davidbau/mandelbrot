@@ -4324,69 +4324,6 @@ function toSimpleFraction(decimal, maxDenominator = 100) {
   return [bestNum, bestDen];
 }
 
-// Convert oct value to decimal string with exact BigInt arithmetic.
-// This avoids the rounding errors that qd-based formatting introduces.
-function octToDecimalString(oct, digits) {
-  const o = Array.isArray(oct) ? oct : [oct, 0, 0, 0];
-  const internalScale = 60;
-
-  // Sum all limbs as exact BigInt values
-  let total = 0n;
-  for (let i = 0; i < 4; i++) {
-    if (o[i] !== 0) {
-      total += float64ToBigIntScaled(o[i], internalScale);
-    }
-  }
-
-  const neg = total < 0n;
-  if (neg) total = -total;
-
-  // Convert to decimal string
-  const divisor = BigInt(10) ** BigInt(internalScale);
-  const intPart = total / divisor;
-  let fracPart = total % divisor;
-
-  // Build the string
-  let result = intPart.toString();
-
-  if (digits > 0) {
-    // Pad fracPart to internalScale digits, then take first 'digits' digits
-    let fracStr = fracPart.toString().padStart(internalScale, '0');
-
-    // Round at position 'digits'
-    if (digits < fracStr.length) {
-      const roundDigit = parseInt(fracStr[digits]);
-      fracStr = fracStr.slice(0, digits);
-      if (roundDigit >= 5) {
-        // Carry the rounding
-        let carry = 1;
-        let chars = fracStr.split('');
-        for (let i = chars.length - 1; i >= 0 && carry; i--) {
-          const d = parseInt(chars[i]) + carry;
-          chars[i] = (d % 10).toString();
-          carry = Math.floor(d / 10);
-        }
-        fracStr = chars.join('');
-        if (carry) {
-          // Carry into integer part
-          result = (BigInt(result) + 1n).toString();
-        }
-      }
-    } else {
-      // Pad with zeros if needed
-      fracStr = fracStr.padEnd(digits, '0');
-    }
-
-    // Strip trailing zeros from fractional part
-    fracStr = fracStr.replace(/0+$/, '');
-    if (fracStr.length > 0) {
-      result += '.' + fracStr;
-    }
-  }
-
-  return result;
-}
-
 function formatcomplex(k, re, im) {
   const view = explorer.grid.views[k];
   const pix = view.pixelSize;
@@ -10805,7 +10742,7 @@ function octToDecimalString(oct, digits) {
     fracStr = fracStr.replace(/0+$/, '');
     if (fracStr.length > 0) result += '.' + fracStr;
   }
-  return (neg ? '-' : '') + result;
+  return result;
 }
 
 function fast2Sum(a, b) {
