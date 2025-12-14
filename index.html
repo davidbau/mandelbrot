@@ -7484,11 +7484,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.refOrbit.push(newZ);
     this.refIterations++;
 
-    // Threading: add new orbit point
-    // Start threading at F(18) = 2584 and continue forever
-    if (this.refIterations >= 2584) {
-      this.threading.addPoint(this.refIterations);
-    }
+    // Threading: add new orbit point from iteration 0
+    // (Shader only uses threading after F(18) = 2584 iterations)
+    this.threading.addPoint(this.refIterations);
 
     // Grow array if needed
     if (this.refIterations >= this.maxRefIterations) {
@@ -7499,7 +7497,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   setupReferenceOrbitLoop() {
     // When reference orbit hits threading limit, find a close point to loop back to
     const THREADING_CAPACITY = 1048576;  // 2^20
-    const SEARCH_WINDOW = 10000;
+    const SEARCH_WINDOW = 12000;
 
     if (this.refIterations < THREADING_CAPACITY || this.refOrbitLoopConfigured) {
       return; // Not at limit yet, or already configured
@@ -8284,7 +8282,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
  * See docs/ADAPTIVE-SCALING.md for full mathematical derivation.
  */
 class AdaptiveGpuBoard extends GpuBaseBoard {
-  static BYTES_PER_PIXEL = 24;  // 6x f32 (dzAndCheckpoint buffer)
+  static BYTES_PER_PIXEL = 60;  // 15 × 4 bytes (7 i32 + 8 f32)
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
@@ -8372,73 +8370,146 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
                         nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
     this.refIterations++;
 
-    if (this.refIterations >= 2584) {
-      this.threading.addPoint(this.refIterations);
-    }
+    // Threading: add new orbit point from iteration 0
+    // (Shader only uses threading after F(18) = 2584 iterations)
+    this.threading.addPoint(this.refIterations);
   }
 
   // Setup reference orbit loop for very long orbits (copied from GpuZhuoranBoard)
   setupReferenceOrbitLoop() {
-    if (this.refOrbitLoopConfigured) return;
+    // When reference orbit hits threading limit, find a close point to loop back to
+    const THREADING_CAPACITY = 1048576;  // 2^20
+    const SEARCH_WINDOW = 12000;
 
-    // Find a cycle in the reference orbit using threading data
-    const THREADING_CAPACITY = 1048576;
-    if (this.refIterations < THREADING_CAPACITY) return;
+    if (this.refIterations < THREADING_CAPACITY || this.refOrbitLoopConfigured) {
+      return; // Not at limit yet, or already configured
+    }
 
-    // Look for a cycle in the last portion of the orbit
-    const checkStart = Math.max(2584, this.refIterations - 100000);
-    for (let i = this.refIterations; i >= checkStart; i--) {
-      const thread = this.threading.getThread(i);
-      if (thread && thread.next > 0 && thread.next < i) {
-        const jumpAmount = i - thread.next;
-        if (jumpAmount > 1000) {  // Only use significant jumps
-          this.refOrbitLoop = {
-            enabled: true,
-            threshold: i,
-            jumpAmount: jumpAmount,
-            deltaR: thread.deltaRe,
-            deltaI: thread.deltaIm
-          };
-          this.refOrbitLoopConfigured = true;
-          return;
+    // Get endpoint (current position at threading limit) - oct precision
+    const endpoint = this.refOrbit[THREADING_CAPACITY];
+
+    // Search back to find closest point (using QD arithmetic)
+    let closestIter = THREADING_CAPACITY - SEARCH_WINDOW;
+    let closestDist = Infinity;
+    const tt = this.tt;
+
+    for (let i = THREADING_CAPACITY - SEARCH_WINDOW; i < THREADING_CAPACITY; i++) {
+      const pt = this.refOrbit[i];
+      // Compute difference in QD precision
+      ArqdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
+                     -pt[0], -pt[1], -pt[2], -pt[3]); // dr
+      ArqdAdd(tt, 4, endpoint[4], endpoint[5], endpoint[6], endpoint[7],
+                     -pt[4], -pt[5], -pt[6], -pt[7]); // di
+
+      // Chebyshev distance: max(|dr|, |di|)
+      const dr = tt[0] + tt[1] + tt[2] + tt[3];
+      const di = tt[4] + tt[5] + tt[6] + tt[7];
+      const dist = Math.max(Math.abs(dr), Math.abs(di));
+
+      if (dist <= closestDist) {  // Use <= to take latest point when tied
+        closestDist = dist;
+        closestIter = i;
+      }
+    }
+
+    // Compute delta in oct precision
+    const closestPt = this.refOrbit[closestIter];
+    ArqdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
+                   -closestPt[0], -closestPt[1], -closestPt[2], -closestPt[3]); // real delta
+    ArqdAdd(tt, 4, endpoint[4], endpoint[5], endpoint[6], endpoint[7],
+                   -closestPt[4], -closestPt[5], -closestPt[6], -closestPt[7]); // imag delta
+
+    // Store loop parameters with QD precision delta
+    const deltaR_qd = [tt[0], tt[1], tt[2], tt[3]];
+    const deltaI_qd = [tt[4], tt[5], tt[6], tt[7]];
+
+    this.refOrbitLoop = {
+      enabled: true,
+      threshold: THREADING_CAPACITY,
+      jumpAmount: THREADING_CAPACITY - closestIter,
+      deltaR_qd: deltaR_qd,
+      deltaI_qd: deltaI_qd,
+      deltaR: deltaR_qd[0] + deltaR_qd[1] + deltaR_qd[2] + deltaR_qd[3], // f64 for GPU
+      deltaI: deltaI_qd[0] + deltaI_qd[1] + deltaI_qd[2] + deltaI_qd[3]
+    };
+
+    this.refOrbitLoopConfigured = true;
+
+    // Update threading for loop segment to wrap around (using QD precision)
+    const loopDeltaR = deltaR_qd[0] + deltaR_qd[1] + deltaR_qd[2] + deltaR_qd[3];
+    const loopDeltaI = deltaI_qd[0] + deltaI_qd[1] + deltaI_qd[2] + deltaI_qd[3];
+    const epsilon3 = this.threading.epsilon3;
+
+    // For each iteration in the loop segment, check if it can thread to another iteration
+    // considering the loop wrap (iterations will repeat with a delta offset)
+    for (let i = closestIter; i <= THREADING_CAPACITY; i++) {
+      const iPt = this.refOrbit[i];
+      const iR = iPt[0] + iPt[1] + iPt[2] + iPt[3];
+      const iI = iPt[4] + iPt[5] + iPt[6] + iPt[7];
+
+      // Check if we can thread to same or later iteration (considering it will wrap with delta)
+      // Allow j = i for self-threading within the loop (period-N orbits repeat with delta)
+      for (let j = i; j <= THREADING_CAPACITY; j++) {
+        const jPt = this.refOrbit[j];
+        // After loop, iteration j will be at position refOrbit[j] + loop_delta
+        const jR = jPt[0] + jPt[1] + jPt[2] + jPt[3] + loopDeltaR;
+        const jI = jPt[4] + jPt[5] + jPt[6] + jPt[7] + loopDeltaI;
+
+        const dr = iR - jR;
+        const di = iI - jI;
+        const dist = Math.max(Math.abs(dr), Math.abs(di));
+
+        if (dist <= epsilon3) {
+          // Thread i -> j (wrapping through the loop)
+          this.threading.setThread(i, j, jR - iR, jI - iI);
+          break;  // Take first match
         }
       }
     }
   }
 
-  // Upload threading data to GPU (copied from GpuZhuoranBoard)
-  async uploadThreading() {
+  // Upload combined ref orbit + threading to iters buffer
+  async uploadIters() {
+    const ITER_BYTES = 20;  // 5 f32 per iteration
     const threadingData = this.threading.threads;
-    const uploadLength = Math.min(threadingData.length, 1048576);
+    const totalIters = this.refIterations + 1;
 
-    if (this.lastUploadedThreadingLength < uploadLength) {
-      const startIdx = Math.max(0, this.lastUploadedThreadingLength);
-      const count = uploadLength - startIdx;
+    // Resize iters buffer if needed
+    const requiredSize = totalIters * ITER_BYTES;
+    if (this.buffers.iters.size < requiredSize) {
+      await this.device.queue.onSubmittedWorkDone();
+      this.buffers.iters.destroy();
+      this.buffers.iters = this.device.createBuffer({
+        size: Math.max(requiredSize * 2, 1024),
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+      });
+      this.createBindGroup();
+      this.lastUploadedItersLength = -1;  // Force full re-upload after resize
+    }
 
-      // Resize threading buffer if needed
-      const requiredSize = uploadLength * 16;  // 4 floats per entry
-      if (this.buffers.threading.size < requiredSize) {
-        await this.device.queue.onSubmittedWorkDone();
-        this.buffers.threading.destroy();
-        this.buffers.threading = this.device.createBuffer({
-          size: Math.max(requiredSize * 2, 1024),
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-        });
-        this.createBindGroup();
-      }
+    // Upload incrementally from lastUploadedItersLength
+    if (this.lastUploadedItersLength < this.refIterations) {
+      const startIdx = Math.max(0, this.lastUploadedItersLength + 1);
+      const count = this.refIterations - startIdx + 1;
 
-      const threadF32 = new Float32Array(count * 4);
+      // IterState: [ref_re, ref_im, thread_next, thread_delta_re, thread_delta_im]
+      const itersF32 = new Float32Array(count * 5);
       for (let i = 0; i < count; i++) {
-        const idx = startIdx + i;
-        const entry = threadingData[idx] || { next: -1, deltaRe: 0, deltaIm: 0 };
-        threadF32[i * 4] = entry.next;
-        threadF32[i * 4 + 1] = entry.deltaRe;
-        threadF32[i * 4 + 2] = entry.deltaIm;
-        threadF32[i * 4 + 3] = 0;  // padding
+        const orbitIdx = startIdx + i;
+        const ref = this.refOrbit[orbitIdx];
+        const thread = threadingData[orbitIdx] || { next: -1, deltaRe: 0, deltaIm: 0 };
+
+        const idx = i * 5;
+        // Sum oct components to get f32 value for ref orbit
+        itersF32[idx + 0] = ref ? ref[0] + ref[1] + ref[2] + ref[3] : 0;  // ref_re
+        itersF32[idx + 1] = ref ? ref[4] + ref[5] + ref[6] + ref[7] : 0;  // ref_im
+        itersF32[idx + 2] = thread.next;      // thread_next
+        itersF32[idx + 3] = thread.deltaRe;   // thread_delta_re
+        itersF32[idx + 4] = thread.deltaIm;   // thread_delta_im
       }
 
-      this.device.queue.writeBuffer(this.buffers.threading, startIdx * 16, threadF32);
-      this.lastUploadedThreadingLength = uploadLength;
+      this.device.queue.writeBuffer(this.buffers.iters, startIdx * ITER_BYTES, itersF32);
+      this.lastUploadedItersLength = this.refIterations;
     }
   }
 
@@ -8507,73 +8578,58 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
   async createBuffers() {
     const dimsArea = this.config.dimsArea;
 
-    // Consolidated 6-binding layout:
+    // Consolidated 3-binding layout:
     // 0: params (uniform)
-    // 1: intState (8 × i32 per pixel): iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx, spare
-    // 2: floatState (8 × f32 per pixel): dzr, dzi, bbr, bbi, checkpoint_bb_r, checkpoint_bb_i, dcr, dci
-    // 3: refOrbit (read-only)
-    // 4: threading (read-only)
-    // 5: debug
+    // 1: pixels (PixelState): 7 i32 + 8 f32 = 60 bytes per pixel
+    // 2: iters (IterState): 5 f32 = 20 bytes per iteration (refOrbit + threading combined)
+    const PIXEL_BYTES = 60;  // 15 × 4 bytes
+    const ITER_BYTES = 20;   // 5 × 4 bytes
+
     this.buffers = {
       params: this.device.createBuffer({
         size: 128,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
       }),
-      intState: this.device.createBuffer({
-        size: dimsArea * 32,  // 8 × i32 per pixel
+      pixels: this.device.createBuffer({
+        size: dimsArea * PIXEL_BYTES,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
       }),
-      floatState: this.device.createBuffer({
-        size: dimsArea * 32,  // 8 × f32 per pixel
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
-      }),
-      refOrbit: this.device.createBuffer({
-        size: 1024,
+      iters: this.device.createBuffer({
+        size: 1024 * ITER_BYTES,  // Start small, will resize as needed
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-      }),
-      threading: this.device.createBuffer({
-        size: 1024,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-      }),
-      debug: this.device.createBuffer({
-        size: 300 * 32,  // 300 iterations × 8 floats for debug tracing
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
       })
     };
 
-    // Initialize intState: [iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx, spare]
-    const intStateData = new Int32Array(dimsArea * 8);
-    for (let i = 0; i < dimsArea; i++) {
-      const idx = i * 8;
-      intStateData[idx + 0] = 1;                    // iter starts at 1
-      intStateData[idx + 1] = this.pixelScale[i];   // scale from initPixels
-      intStateData[idx + 2] = 0;                    // status = computing
-      intStateData[idx + 3] = 0;                    // period = 0
-      intStateData[idx + 4] = this.refIter[i];      // ref_iter
-      intStateData[idx + 5] = -1;                   // checkpoint_refidx (0xFFFFFFFF as i32 = -1)
-      intStateData[idx + 6] = -1;                   // pending_checkpoint_refidx
-      intStateData[idx + 7] = 0;                    // spare
-    }
-    this.device.queue.writeBuffer(this.buffers.intState, 0, intStateData);
+    // Initialize pixels buffer with overlapping typed array views
+    // PixelState layout: [iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx,
+    //                     dzr, dzi, bbr, bbi, ckpt_bbr, ckpt_bbi, dcr, dci]
+    const pixelBuffer = new ArrayBuffer(dimsArea * PIXEL_BYTES);
+    const pixelsI32 = new Int32Array(pixelBuffer);
+    const pixelsF32 = new Float32Array(pixelBuffer);
 
-    // Initialize floatState: [dzr, dzi, bbr, bbi, checkpoint_bb_r, checkpoint_bb_i, dcr, dci]
-    // bb and checkpoint_bb use initialScale (Option C)
-    const floatStateData = new Float32Array(dimsArea * 8);
     for (let i = 0; i < dimsArea; i++) {
-      const idx = i * 8;
-      floatStateData[idx + 0] = this.dz[i * 2];     // dzr (scaled by per-pixel scale)
-      floatStateData[idx + 1] = this.dz[i * 2 + 1]; // dzi (scaled by per-pixel scale)
-      floatStateData[idx + 2] = 0;                  // bbr (scaled by initialScale)
-      floatStateData[idx + 3] = 0;                  // bbi (scaled by initialScale)
-      floatStateData[idx + 4] = 0;                  // checkpoint_bb_r (scaled by initialScale)
-      floatStateData[idx + 5] = 0;                  // checkpoint_bb_i (scaled by initialScale)
-      floatStateData[idx + 6] = this.dc[i * 2];     // dcr (scaled by initialScale)
-      floatStateData[idx + 7] = this.dc[i * 2 + 1]; // dci (scaled by initialScale)
+      const idx = i * 15;  // 15 fields per pixel
+      // Integer fields (indices 0-6)
+      pixelsI32[idx + 0] = 1;                    // iter starts at 1
+      pixelsI32[idx + 1] = this.pixelScale[i];  // scale from initPixels
+      pixelsI32[idx + 2] = 0;                    // status = computing
+      pixelsI32[idx + 3] = 0;                    // period = 0
+      pixelsI32[idx + 4] = this.refIter[i];     // ref_iter
+      pixelsI32[idx + 5] = -1;                   // ckpt_refidx (-1 = no checkpoint)
+      pixelsI32[idx + 6] = -1;                   // pending_refidx
+      // Float fields (indices 7-14)
+      pixelsF32[idx + 7] = this.dz[i * 2];      // dzr (scaled by per-pixel scale)
+      pixelsF32[idx + 8] = this.dz[i * 2 + 1];  // dzi
+      pixelsF32[idx + 9] = 0;                    // bbr (scaled by initialScale)
+      pixelsF32[idx + 10] = 0;                   // bbi
+      pixelsF32[idx + 11] = 0;                   // ckpt_bbr
+      pixelsF32[idx + 12] = 0;                   // ckpt_bbi
+      pixelsF32[idx + 13] = this.dc[i * 2];     // dcr (scaled by initialScale)
+      pixelsF32[idx + 14] = this.dc[i * 2 + 1]; // dci
     }
-    this.device.queue.writeBuffer(this.buffers.floatState, 0, floatStateData);
+    this.device.queue.writeBuffer(this.buffers.pixels, 0, pixelBuffer);
 
-    this.lastUploadedOrbitLength = -1;
-    this.lastUploadedThreadingLength = -1;
+    this.lastUploadedItersLength = -1;
   }
 
   createBindGroup() {
@@ -8581,19 +8637,14 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.buffers.params } },
-        { binding: 1, resource: { buffer: this.buffers.intState } },
-        { binding: 2, resource: { buffer: this.buffers.floatState } },
-        { binding: 3, resource: { buffer: this.buffers.refOrbit } },
-        { binding: 4, resource: { buffer: this.buffers.threading } }
+        { binding: 1, resource: { buffer: this.buffers.pixels } },
+        { binding: 2, resource: { buffer: this.buffers.iters } }
       ]
     });
   }
 
   async createComputePipeline() {
-    // Consolidated 5-binding adaptive per-pixel scaling perturbation shader
-    // Buffer layout:
-    //   intState[i*8]: iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx, spare
-    //   floatState[i*8]: dzr, dzi, bbr, bbi, checkpoint_bb_r, checkpoint_bb_i, dcr, dci
+    // Consolidated 3-binding adaptive per-pixel scaling perturbation shader
     // Scale conventions:
     //   dz: per-pixel adaptive scale
     //   bb, checkpoint_bb, dc: global initialScale (Option C)
@@ -8627,37 +8678,49 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         loop_delta_i: f32,
       }
 
-      // Consolidated 5-binding layout
+      // Consolidated per-pixel state: 7 i32 + 8 f32 = 60 bytes
+      struct PixelState {
+        // Integer fields (7 i32)
+        iter: i32,
+        scale: i32,
+        status: i32,
+        period: i32,
+        ref_iter: i32,
+        ckpt_refidx: i32,
+        pending_refidx: i32,
+        // Float fields (8 f32)
+        dzr: f32,
+        dzi: f32,
+        bbr: f32,
+        bbi: f32,
+        ckpt_bbr: f32,
+        ckpt_bbi: f32,
+        dcr: f32,
+        dci: f32,
+      }
+
+      // Consolidated per-iteration state: 5 f32 = 20 bytes
+      struct IterState {
+        ref_re: f32,
+        ref_im: f32,
+        thread_next: f32,
+        thread_delta_re: f32,
+        thread_delta_im: f32,
+      }
+
       @group(0) @binding(0) var<uniform> params: Params;
-      @group(0) @binding(1) var<storage, read_write> intState: array<i32>;    // 8 per pixel
-      @group(0) @binding(2) var<storage, read_write> floatState: array<f32>;  // 8 per pixel
-      @group(0) @binding(3) var<storage, read> refOrbit: array<f32>;
-      @group(0) @binding(4) var<storage, read> threading: array<vec4<f32>>;
-
-      // intState indices (per pixel, multiply index by 8)
-      const INT_ITER: u32 = 0u;
-      const INT_SCALE: u32 = 1u;
-      const INT_STATUS: u32 = 2u;
-      const INT_PERIOD: u32 = 3u;
-      const INT_REF_ITER: u32 = 4u;
-      const INT_CKPT_REFIDX: u32 = 5u;       // fixed ref index at checkpoint
-      const INT_PENDING_REFIDX: u32 = 6u;    // advances via lazy threading
-      const INT_SPARE: u32 = 7u;
-
-      // floatState indices (per pixel, multiply index by 8)
-      const FLOAT_DZR: u32 = 0u;
-      const FLOAT_DZI: u32 = 1u;
-      const FLOAT_BBR: u32 = 2u;             // current adjusted checkpoint position (in initialScale)
-      const FLOAT_BBI: u32 = 3u;
-      const FLOAT_CKPT_BBR: u32 = 4u;        // original dz at checkpoint (in initialScale, for reset)
-      const FLOAT_CKPT_BBI: u32 = 5u;
-      const FLOAT_DCR: u32 = 6u;
-      const FLOAT_DCI: u32 = 7u;
+      @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
+      @group(0) @binding(2) var<storage, read> iters: array<IterState>;
 
       fn getThread(idx: u32) -> vec3<f32> {
         if (idx >= params.ref_orbit_length) { return vec3<f32>(-1.0, 0.0, 0.0); }
-        let thread_data = threading[idx];
-        return vec3<f32>(thread_data.x, thread_data.y, thread_data.z);
+        let iter_data = iters[idx];
+        return vec3<f32>(iter_data.thread_next, iter_data.thread_delta_re, iter_data.thread_delta_im);
+      }
+
+      fn getRefOrbit(idx: u32) -> vec2<f32> {
+        if (idx >= params.ref_orbit_length) { return vec2<f32>(0.0, 0.0); }
+        return vec2<f32>(iters[idx].ref_re, iters[idx].ref_im);
       }
 
       @compute @workgroup_size(64)
@@ -8666,28 +8729,26 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         let dimsArea = params.dims_width * params.dims_height;
         if (index >= dimsArea) { return; }
 
-        let idx8 = index * 8u;
-
-        // Read integer state
-        let status = intState[idx8 + INT_STATUS];
+        // Read pixel state
+        let status = pixels[index].status;
         if (status != 0) { return; }
 
-        var iter = u32(intState[idx8 + INT_ITER]);
-        var scale = intState[idx8 + INT_SCALE];
-        var pp = u32(intState[idx8 + INT_PERIOD]);
-        var ref_iter = u32(intState[idx8 + INT_REF_ITER]);
-        var checkpoint_refidx = u32(intState[idx8 + INT_CKPT_REFIDX]);  // fixed ref index at checkpoint
-        var pending_checkpoint_refidx = u32(intState[idx8 + INT_PENDING_REFIDX]);  // advances via lazy threading
+        var iter = u32(pixels[index].iter);
+        var scale = pixels[index].scale;
+        var pp = u32(pixels[index].period);
+        var ref_iter = u32(pixels[index].ref_iter);
+        var checkpoint_refidx = u32(pixels[index].ckpt_refidx);
+        var pending_checkpoint_refidx = u32(pixels[index].pending_refidx);
 
         // Read float state (all checkpoint-related values in initialScale)
-        var dzr = floatState[idx8 + FLOAT_DZR];
-        var dzi = floatState[idx8 + FLOAT_DZI];
-        var bbr = floatState[idx8 + FLOAT_BBR];           // current adjusted checkpoint position
-        var bbi = floatState[idx8 + FLOAT_BBI];
-        var checkpoint_bb_r = floatState[idx8 + FLOAT_CKPT_BBR];  // original dz at checkpoint (for reset)
-        var checkpoint_bb_i = floatState[idx8 + FLOAT_CKPT_BBI];
-        let dcr = floatState[idx8 + FLOAT_DCR];           // scaled by initialScale
-        let dci = floatState[idx8 + FLOAT_DCI];           // scaled by initialScale
+        var dzr = pixels[index].dzr;
+        var dzi = pixels[index].dzi;
+        var bbr = pixels[index].bbr;
+        var bbi = pixels[index].bbi;
+        var checkpoint_bb_r = pixels[index].ckpt_bbr;
+        var checkpoint_bb_i = pixels[index].ckpt_bbi;
+        let dcr = pixels[index].dcr;
+        let dci = pixels[index].dci;
 
         // Convergence thresholds - scaled by initialScale for comparison
         let epsilon_actual = min(1e-7, params.pixel_size / 10.0);
@@ -8700,13 +8761,13 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         var next_checkpoint_idx = 0u;
 
         for (var batch_iter = 0u; batch_iter < params.iterations_per_batch; batch_iter++) {
-          if (intState[idx8 + INT_STATUS] != 0) { break; }
+          if (pixels[index].status != 0) { break; }
 
-          let ref_offset = ref_iter * 2u;
-          if (ref_offset + 1u >= params.ref_orbit_length * 2u) { break; }
+          if (ref_iter >= params.ref_orbit_length) { break; }
 
-          var refr = refOrbit[ref_offset];
-          var refi = refOrbit[ref_offset + 1u];
+          let ref_orbit = getRefOrbit(ref_iter);
+          var refr = ref_orbit.x;
+          var refi = ref_orbit.y;
 
           // Compute actual delta and position: z = Z_ref + δ_actual
           var dzr_actual = 0.0;
@@ -8736,8 +8797,9 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
               bbi = checkpoint_bb_i;
             }
 
-            refr = refOrbit[0];
-            refi = refOrbit[1];
+            let ref0 = getRefOrbit(0u);
+            refr = ref0.x;
+            refi = ref0.y;
             dzr_actual = ldexp(dzr, scale);
             dzi_actual = ldexp(dzi, scale);
             zr = refr + dzr_actual;
@@ -8749,8 +8811,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           // The magnitude check still works since zr, zi are computed above
           let z_mag_sq = zr * zr + zi * zi;
           if (z_mag_sq > 4.0) {
-            intState[idx8 + INT_STATUS] = 1;
-            intState[idx8 + INT_PERIOD] = i32(pp);
+            pixels[index].status = 1;
+            pixels[index].period = i32(pp);
             break;
           }
 
@@ -8795,11 +8857,11 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
               // Fallback: compare absolute positions (in actual coords)
               let z_total_r = zr;
               let z_total_i = zi;
-              let checkpoint_ref_offset = checkpoint_refidx * 2u;
               let bbr_actual = ldexp(checkpoint_bb_r, params.initial_scale);
               let bbi_actual = ldexp(checkpoint_bb_i, params.initial_scale);
-              let z_checkpoint_r = refOrbit[checkpoint_ref_offset] + bbr_actual;
-              let z_checkpoint_i = refOrbit[checkpoint_ref_offset + 1u] + bbi_actual;
+              let ref_ckpt = getRefOrbit(checkpoint_refidx);
+              let z_checkpoint_r = ref_ckpt.x + bbr_actual;
+              let z_checkpoint_i = ref_ckpt.y + bbi_actual;
 
               let diff_r = z_total_r - z_checkpoint_r;
               let diff_i = z_total_i - z_checkpoint_i;
@@ -8808,8 +8870,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
               if (db <= epsilon2_actual) {
                 if (pp == 0u) { pp = iter; }
                 if (db <= epsilon_actual) {
-                  intState[idx8 + INT_STATUS] = 2;
-                  intState[idx8 + INT_PERIOD] = i32(pp);
+                  pixels[index].status = 2;
+                  pixels[index].period = i32(pp);
                   break;
                 }
               }
@@ -8828,8 +8890,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
                 if (db <= epsilon2) {
                   if (pp == 0u) { pp = iter; }
                   if (db <= epsilon) {
-                    intState[idx8 + INT_STATUS] = 2;
-                    intState[idx8 + INT_PERIOD] = i32(pp);
+                    pixels[index].status = 2;
+                    pixels[index].period = i32(pp);
                     break;
                   }
                 }
@@ -8850,8 +8912,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
                   if (db <= epsilon2) {
                     if (pp == 0u) { pp = iter; }
                     if (db <= epsilon) {
-                      intState[idx8 + INT_STATUS] = 2;
-                      intState[idx8 + INT_PERIOD] = i32(pp);
+                      pixels[index].status = 2;
+                      pixels[index].period = i32(pp);
                       break;
                     }
                   }
@@ -8905,22 +8967,22 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         }
 
         // Write back integer state
-        intState[idx8 + INT_ITER] = i32(iter);
-        intState[idx8 + INT_SCALE] = scale;
-        intState[idx8 + INT_REF_ITER] = i32(ref_iter);
-        intState[idx8 + INT_CKPT_REFIDX] = i32(checkpoint_refidx);
-        intState[idx8 + INT_PENDING_REFIDX] = i32(pending_checkpoint_refidx);
-        if (intState[idx8 + INT_STATUS] == 0) {
-          intState[idx8 + INT_PERIOD] = i32(pp);
+        pixels[index].iter = i32(iter);
+        pixels[index].scale = scale;
+        pixels[index].ref_iter = i32(ref_iter);
+        pixels[index].ckpt_refidx = i32(checkpoint_refidx);
+        pixels[index].pending_refidx = i32(pending_checkpoint_refidx);
+        if (pixels[index].status == 0) {
+          pixels[index].period = i32(pp);
         }
 
         // Write back float state
-        floatState[idx8 + FLOAT_DZR] = dzr;
-        floatState[idx8 + FLOAT_DZI] = dzi;
-        floatState[idx8 + FLOAT_BBR] = bbr;
-        floatState[idx8 + FLOAT_BBI] = bbi;
-        floatState[idx8 + FLOAT_CKPT_BBR] = checkpoint_bb_r;
-        floatState[idx8 + FLOAT_CKPT_BBI] = checkpoint_bb_i;
+        pixels[index].dzr = dzr;
+        pixels[index].dzi = dzi;
+        pixels[index].bbr = bbr;
+        pixels[index].bbi = bbi;
+        pixels[index].ckpt_bbr = checkpoint_bb_r;
+        pixels[index].ckpt_bbi = checkpoint_bb_i;
       }
     `;
 
@@ -8987,40 +9049,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         this.setupReferenceOrbitLoop();
       }
 
-      // Upload reference orbit and threading
-      const totalIters = this.refIterations + 1;
-      const requiredOrbitSize = totalIters * 2 * 4;
-      const allocOrbitSize = Math.max(requiredOrbitSize * 2, 1024);
-      if (this.buffers.refOrbit.size < requiredOrbitSize) {
-        await this.device.queue.onSubmittedWorkDone();
-        this.buffers.refOrbit.destroy();
-        this.buffers.refOrbit = this.device.createBuffer({
-          size: allocOrbitSize,
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-        });
-        this.createBindGroup();
-        this.lastUploadedOrbitLength = -1;
-      }
-      // Upload ref orbit incrementally (oct format: [r0,r1,r2,r3,i0,i1,i2,i3])
-      // lastUploadedOrbitLength tracks the highest index uploaded (not count)
-      // startIdx should be the next index to upload
-      if (this.lastUploadedOrbitLength < this.refIterations) {
-        const startIdx = Math.max(0, this.lastUploadedOrbitLength + 1);
-        const count = this.refIterations - startIdx + 1;
-        const orbitF32 = new Float32Array(count * 2);
-        for (let i = 0; i < count; i++) {
-          const orbitIdx = startIdx + i;
-          const ref = this.refOrbit[orbitIdx];
-          // Sum all oct components to get f32 value
-          orbitF32[i * 2] = ref ? ref[0] + ref[1] + ref[2] + ref[3] : 0;
-          orbitF32[i * 2 + 1] = ref ? ref[4] + ref[5] + ref[6] + ref[7] : 0;
-        }
-        this.device.queue.writeBuffer(this.buffers.refOrbit, startIdx * 2 * 4, orbitF32);
-        this.lastUploadedOrbitLength = this.refIterations;
-      }
-
-      // Upload threading data for convergence detection
-      await this.uploadThreading();
+      // Upload combined ref orbit + threading data
+      await this.uploadIters();
 
       if (this.un === 0) {
         this.isComputing = false;
@@ -9091,27 +9121,31 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
       this.it += iterationsPerBatch;
 
-      // Read consolidated buffers
-      // intState layout: [iter, scale, status, period, ref_iter, ckpt_iter, next_threaded, spare] × 8 per pixel
-      const intStateData = await this.readBuffer(this.buffers.intState, Int32Array);
+      // Read consolidated pixels buffer
+      // PixelState layout (15 fields × 4 bytes = 60 bytes/pixel):
+      //   Int32 (indices 0-6): iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx
+      //   Float32 (indices 7-14): dzr, dzi, bbr, bbi, ckpt_bbr, ckpt_bbi, dcr, dci
+      const pixelsU32 = await this.readBuffer(this.buffers.pixels, Uint32Array);
+      const pixelsI32 = new Int32Array(pixelsU32.buffer);
+      const pixelsF32 = new Float32Array(pixelsU32.buffer);
 
       // Process GPU results
-      let floatStateData = null;
       const pixelsByIteration = new Map();
       const convergedByIteration = new Map();
       let hasConverged = false;
 
-      // intState indices
-      const INT_ITER = 0, INT_SCALE = 1, INT_STATUS = 2, INT_PERIOD = 3;
-      const INT_REF_ITER = 4;
+      // PixelState field indices (in units of 4 bytes)
+      const STRIDE = 15;  // 15 fields per pixel
+      const P_ITER = 0, P_SCALE = 1, P_STATUS = 2, P_PERIOD = 3, P_REF_ITER = 4;
+      const P_DZR = 7, P_DZI = 8;
 
       for (let i = 0; i < dimsArea; i++) {
-        const idx8 = i * 8;
-        const status = intStateData[idx8 + INT_STATUS];
-        const period = intStateData[idx8 + INT_PERIOD];
+        const idx = i * STRIDE;
+        const status = pixelsI32[idx + P_STATUS];
+        const period = pixelsI32[idx + P_PERIOD];
         if (this.nn[i] !== 0) continue;
         if (status === 1) {
-          const iters = intStateData[idx8 + INT_ITER];
+          const iters = pixelsI32[idx + P_ITER];
           this.nn[i] = iters;
           this.pp[i] = period;
           if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
@@ -9125,25 +9159,21 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       }
 
       if (hasConverged) {
-        // floatState layout: [dzr, dzi, bbr, bbi, threaded_r, threaded_i, dcr, dci] × 8 per pixel
-        floatStateData = await this.readBuffer(this.buffers.floatState, Float32Array);
-        const FLOAT_DZR = 0, FLOAT_DZI = 1;
-
         for (let i = 0; i < dimsArea; i++) {
-          const idx8 = i * 8;
-          const status = intStateData[idx8 + INT_STATUS];
-          const period = intStateData[idx8 + INT_PERIOD];
+          const idx = i * STRIDE;
+          const status = pixelsI32[idx + P_STATUS];
+          const period = pixelsI32[idx + P_PERIOD];
           if (this.nn[i]) continue;
           if (status === 2) {
-            const iters = intStateData[idx8 + INT_ITER];
+            const iters = pixelsI32[idx + P_ITER];
             this.nn[i] = -iters;
             this.pp[i] = period - 1;
-            const refIter = intStateData[idx8 + INT_REF_ITER];
+            const refIter = pixelsI32[idx + P_REF_ITER];
             const nextRefIter = refIter + 1;
             // dz is in per-pixel scale, need to convert to actual for z position
-            const scale = intStateData[idx8 + INT_SCALE];
-            const dzr = floatStateData[idx8 + FLOAT_DZR] * Math.pow(2, scale);
-            const dzi = floatStateData[idx8 + FLOAT_DZI] * Math.pow(2, scale);
+            const scale = pixelsI32[idx + P_SCALE];
+            const dzr = pixelsF32[idx + P_DZR] * Math.pow(2, scale);
+            const dzi = pixelsF32[idx + P_DZI] * Math.pow(2, scale);
             const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
             const refR = ref[0] + ref[1] + ref[2] + ref[3];
             const refI = ref[4] + ref[5] + ref[6] + ref[7];
@@ -9162,23 +9192,6 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         if (divergedIndices.length > 0 || convergedData.length > 0) {
           this.queueChanges({ iter: iter, nn: divergedIndices, vv: convergedData });
         }
-      }
-
-      // Log final debug on completion
-      if (this.un === 0 && !this.finalDebugLogged) {
-        this.finalDebugLogged = true;
-        const debugData = await this.readBuffer(this.buffers.debug, Float32Array);
-        console.log('=== AdaptiveGpuBoard FINAL DEBUG (pixel 0) ===');
-        console.log('Raw debug buffer first 13 entries (iter 200-212):');
-        for (let i = 0; i < 13; i++) {
-          const idx = i * 8;
-          console.log(`  [${200 + i}] iter=${debugData[idx + 0]}, z=(${debugData[idx + 1].toExponential(6)}, ${debugData[idx + 2].toExponential(6)}), |z|²=${debugData[idx + 3].toFixed(6)}`);
-        }
-        const escapeIter = debugData[160];
-        if (escapeIter > 0) {
-          console.log(`ESCAPE at iter=${escapeIter}: z=(${debugData[161].toExponential(6)}, ${debugData[162].toExponential(6)}), |z|²=${debugData[163].toFixed(6)}`);
-        }
-        console.log(`Final pixel 0: iter=${debugData[164]}, ref_iter=${debugData[165]}, scale=${debugData[166]}`);
       }
 
     } catch (error) {
