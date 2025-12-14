@@ -5633,192 +5633,6 @@ class OctPerturbationBoard extends Board {
   }
 }
 
-// Utility helpers for oct-precision operations (inline duplicates to avoid refactor)
-function toOct(x) {
-  if (!Array.isArray(x)) return [x, 0, 0, 0];
-  if (x.length >= 4) return [x[0], x[1], x[2], x[3]];
-  if (x.length === 3) return [x[0], x[1], x[2], 0];
-  return [x[0], x[1] || 0, 0, 0];
-}
-
-function toOctScale(a, s) {
-  const o = toOct(a);
-  return [o[0] * s, o[1] * s, o[2] * s, o[3] * s];
-}
-
-function toOctAdd(a, b) {
-  const aa = toOct(a);
-  const bb = toOct(b);
-  const out = new Array(4);
-  AoctAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
-  return out;
-}
-
-function toOctSub(a, b) {
-  const bb = toOct(b);
-  return toOctAdd(a, [-bb[0], -bb[1], -bb[2], -bb[3]]);
-}
-
-function toOctMul(a, b) {
-  const aa = toOct(a);
-  const bb = toOct(b);
-  const out = new Array(4);
-  AoctMul(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
-  return out;
-}
-
-function toOctSquare(a) {
-  const aa = toOct(a);
-  const out = new Array(4);
-  AoctMul(out, 0, aa[0], aa[1], aa[2], aa[3], aa[0], aa[1], aa[2], aa[3]);
-  return out;
-}
-
-function toOctDouble(a) {
-  const aa = toOct(a);
-  return [aa[0] * 2, aa[1] * 2, aa[2] * 2, aa[3] * 2];
-}
-
-function octToNumber(o) {
-  const v = toOct(o);
-  return v[0] + v[1] + v[2] + v[3];
-}
-
-function octToQd(o) {
-  const v = toOct(o);
-  return [v[0], v[1] + v[2] + v[3]];
-}
-
-function decimalToOct(decimalString) {
-  let s = decimalString.trim().toLowerCase();
-  const neg = s.startsWith('-');
-  if (neg) s = s.slice(1);
-  if (s.startsWith('+')) s = s.slice(1);
-
-  // Handle scientific notation: split on 'e'
-  let exp = 0;
-  const eIdx = s.indexOf('e');
-  if (eIdx !== -1) {
-    exp = parseInt(s.slice(eIdx + 1), 10);
-    s = s.slice(0, eIdx);
-  }
-
-  // Parse mantissa
-  const parts = s.split('.');
-  const intPart = parts[0] || '0';
-  const fracPart = parts[1] || '';
-
-  // Scale tracks decimal places in the BigInt representation
-  // Positive exp shifts decimal right, negative shifts left
-  let scale = fracPart.length - exp;
-  const bigStr = intPart + fracPart;
-  let n = BigInt(bigStr.replace(/^0+/, '') || '0');
-  if (neg) n = -n;
-
-  // If scale is negative, we need to multiply by 10^|scale|
-  if (scale < 0) {
-    n = n * (BigInt(10) ** BigInt(-scale));
-    scale = 0;
-  }
-
-  // Convert to oct-precision by extracting limbs that sum to the exact decimal value.
-  // The challenge: n/10^scale may not be exactly representable in float64.
-  // Example: -19/10 = -1.9 exactly, but float64(-1.9) ≈ -1.89999999999999991...
-  //
-  // We use a high-precision internal scale (60 decimal places) to exactly represent
-  // the float64 values, then work with that throughout the computation.
-
-  // Use internal scale of 60 decimal places - enough for ~200 bits of precision
-  // which exceeds the 53-bit mantissa of float64 plus any exponent adjustment
-  const internalScale = 60;
-
-  // Scale to the internal scale
-  if (scale < internalScale) {
-    // Scale up to internal precision
-    n = n * (BigInt(10) ** BigInt(internalScale - scale));
-  } else if (scale > internalScale) {
-    // Scale down to internal precision (truncates excess precision)
-    n = n / (BigInt(10) ** BigInt(scale - internalScale));
-  }
-  // Now n represents the value at 10^(-internalScale) scale
-
-  const limbs = [];
-  let residual = n;
-  const divisor = BigInt(10) ** BigInt(internalScale);
-
-  for (let i = 0; i < 4; i++) {
-    if (residual === 0n) {
-      limbs.push(0);
-      continue;
-    }
-
-    // Get the limb as a float64 approximation
-    const limb = Number(residual) / Number(divisor);
-    limbs.push(limb);
-
-    // Compute the exact BigInt value that this float64 represents at internal scale.
-    const limbBigInt = float64ToBigIntScaled(limb, internalScale);
-    residual = residual - limbBigInt;
-  }
-  return limbs;
-}
-
-// Convert a float64 to its exact BigInt representation, scaled by 10^scale.
-// Returns the BigInt n such that n / 10^scale equals the exact value of the float64.
-function float64ToBigIntScaled(x, scale) {
-  if (x === 0) return 0n;
-  if (!Number.isFinite(x)) return 0n;
-
-  // Get the exact rational representation of the float64
-  // x = sign * mantissa * 2^binaryExp where mantissa is in [2^52, 2^53) for normalized numbers
-  const sign = x < 0 ? -1n : 1n;
-  const absX = Math.abs(x);
-
-  // Extract binary exponent and mantissa from IEEE 754 representation
-  const buffer = new ArrayBuffer(8);
-  const view = new DataView(buffer);
-  view.setFloat64(0, absX);
-  const bits = view.getBigUint64(0);
-
-  const expBits = Number((bits >> 52n) & 0x7FFn);
-  const mantissaBits = bits & 0xFFFFFFFFFFFFFn;  // 52 bits
-
-  let binaryExp;
-  let mantissa;
-  if (expBits === 0) {
-    // Subnormal number: x = mantissa * 2^(-1022-52)
-    mantissa = mantissaBits;
-    binaryExp = -1022 - 52;
-  } else {
-    // Normal number: x = (1 + mantissa/2^52) * 2^(expBits - 1023)
-    // = (2^52 + mantissa) * 2^(expBits - 1023 - 52)
-    mantissa = (1n << 52n) | mantissaBits;
-    binaryExp = expBits - 1023 - 52;
-  }
-
-  // Now x = sign * mantissa * 2^binaryExp (exactly)
-  // We need: result / 10^scale = sign * mantissa * 2^binaryExp
-  // So: result = sign * mantissa * 2^binaryExp * 10^scale
-  //            = sign * mantissa * 2^binaryExp * 2^scale * 5^scale
-  //            = sign * mantissa * 5^scale * 2^(binaryExp + scale)
-
-  const five = 5n;
-  const two = 2n;
-  let result = sign * mantissa * (five ** BigInt(scale));
-  const netBinaryExp = binaryExp + scale;
-
-  if (netBinaryExp >= 0) {
-    result = result * (two ** BigInt(netBinaryExp));
-  } else {
-    // Division by power of 2.
-    // With scale=60, this division should be exact for all normal float64 values
-    // because 60 decimal digits provide more than enough precision.
-    result = result / (two ** BigInt(-netBinaryExp));
-  }
-
-  return result;
-}
-
 // Spatial bucket for O(1) lookup of nearby points in 2D
 // Uses a grid with cell size = 2*bucketRadius to guarantee 4-bucket coverage
 // Base class - subclasses implement precision-specific getF64Point and verifyAndGetDelta
@@ -10648,13 +10462,21 @@ self.onmessage = async function(e) {
       // Store oct-precision coordinates
       board.sizesOct = [size, data.reOct, data.imOct];
 
-      const re_val = octToNumber(data.reOct);
-      const im_val = octToNumber(data.imOct);
-      const precision = Math.max(3, Math.min(15, Math.ceil(-Math.log10(pixelSize)) + 2));
+      // Show coordinates - use full precision only for very deep zoom (pixelSize < 1e-45)
+      let coordStr;
+      if (pixelSize < 1e-45) {
+        const digits = Math.ceil(-Math.log10(pixelSize)) + 3;
+        const re_str = octToDecimalString(data.reOct, digits);
+        const im_str = octToDecimalString(data.imOct, digits);
+        coordStr = `c=(${re_str}, ${im_str})`;
+      } else {
+        const re_val = octToNumber(data.reOct);
+        const im_val = octToNumber(data.imOct);
+        const precision = Math.max(3, Math.min(15, Math.ceil(-Math.log10(pixelSize)) + 2));
+        coordStr = `(${re_val.toExponential(precision)}, ${im_val.toExponential(precision)})`;
+      }
       console.log(
-        `Board ${data.k}: ${board.constructor.name} @ ` +
-        `(${re_val.toExponential(precision)}, ${im_val.toExponential(precision)}), ` +
-        `dims=${data.config.dimsWidth}x${data.config.dimsHeight}, ` +
+        `Board ${data.k}: ${board.constructor.name} @ ${coordStr}, ` +
         `pixel=${pixelSize.toExponential(3)}`
       );
 
@@ -10818,124 +10640,154 @@ function toQdc(c) {
   return [r[0], r[1], j[0], j[1]];
 }
 
-// Oct helpers - defined here for main thread, also in workerCode for workers
-// Guard against redefinition when test harness concatenates scripts
-if (typeof toOct === 'undefined') {
-  function toOct(x) {
-    if (!Array.isArray(x)) return [x, 0, 0, 0];
-    if (x.length >= 4) return [x[0], x[1], x[2], x[3]];
-    if (x.length === 3) return [x[0], x[1], x[2], 0];
-    return [x[0], x[1] || 0, 0, 0];
-  }
-  globalThis.toOct = toOct;
+// Oct helpers for both main thread and workers (via mathCode)
+function toOct(x) {
+  if (!Array.isArray(x)) return [x, 0, 0, 0];
+  if (x.length >= 4) return [x[0], x[1], x[2], x[3]];
+  if (x.length === 3) return [x[0], x[1], x[2], 0];
+  return [x[0], x[1] || 0, 0, 0];
+}
 
-  function toOctScale(a, s) {
-    const o = toOct(a);
-    return [o[0] * s, o[1] * s, o[2] * s, o[3] * s];
-  }
-  globalThis.toOctScale = toOctScale;
+function toOctScale(a, s) {
+  const o = toOct(a);
+  return [o[0] * s, o[1] * s, o[2] * s, o[3] * s];
+}
 
-  function toOctAdd(a, b) {
-    const aa = toOct(a);
-    const bb = toOct(b);
-    const out = new Array(4);
-    AoctAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
-    return out;
-  }
-  globalThis.toOctAdd = toOctAdd;
+function toOctAdd(a, b) {
+  const aa = toOct(a);
+  const bb = toOct(b);
+  const out = new Array(4);
+  AoctAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+  return out;
+}
 
-  function toOctSub(a, b) {
-    const bb = toOct(b);
-    return toOctAdd(a, [-bb[0], -bb[1], -bb[2], -bb[3]]);
-  }
-  globalThis.toOctSub = toOctSub;
+function toOctSub(a, b) {
+  const bb = toOct(b);
+  return toOctAdd(a, [-bb[0], -bb[1], -bb[2], -bb[3]]);
+}
 
-  function octToNumber(o) {
-    const v = toOct(o);
-    return v[0] + v[1] + v[2] + v[3];
-  }
-  globalThis.octToNumber = octToNumber;
+function octToNumber(o) {
+  const v = toOct(o);
+  return v[0] + v[1] + v[2] + v[3];
+}
 
-  function octToQd(o) {
-    const v = toOct(o);
-    return [v[0], v[1] + v[2] + v[3]];
-  }
-  globalThis.octToQd = octToQd;
+function octToQd(o) {
+  const v = toOct(o);
+  return [v[0], v[1] + v[2] + v[3]];
+}
 
-  // Convert a float64 to its exact BigInt representation, scaled by 10^scale.
-  function float64ToBigIntScaled(x, scale) {
-    if (x === 0) return 0n;
-    if (!Number.isFinite(x)) return 0n;
-    const sign = x < 0 ? -1n : 1n;
-    const absX = Math.abs(x);
-    const buffer = new ArrayBuffer(8);
-    const view = new DataView(buffer);
-    view.setFloat64(0, absX);
-    const bits = view.getBigUint64(0);
-    const expBits = Number((bits >> 52n) & 0x7FFn);
-    const mantissaBits = bits & 0xFFFFFFFFFFFFFn;
-    let binaryExp, mantissa;
-    if (expBits === 0) {
-      mantissa = mantissaBits;
-      binaryExp = -1022 - 52;
+// Convert a float64 to its exact BigInt representation, scaled by 10^scale.
+function float64ToBigIntScaled(x, scale) {
+  if (x === 0) return 0n;
+  if (!Number.isFinite(x)) return 0n;
+  const sign = x < 0 ? -1n : 1n;
+  const absX = Math.abs(x);
+  const buffer = new ArrayBuffer(8);
+  const view = new DataView(buffer);
+  view.setFloat64(0, absX);
+  const bits = view.getBigUint64(0);
+  const expBits = Number((bits >> 52n) & 0x7FFn);
+  const mantissaBits = bits & 0xFFFFFFFFFFFFFn;
+  let binaryExp, mantissa;
+  if (expBits === 0) {
+    mantissa = mantissaBits;
+    binaryExp = -1022 - 52;
+  } else {
+    mantissa = (1n << 52n) | mantissaBits;
+    binaryExp = expBits - 1023 - 52;
+  }
+  const five = 5n, two = 2n;
+  let result = sign * mantissa * (five ** BigInt(scale));
+  const netBinaryExp = binaryExp + scale;
+  if (netBinaryExp >= 0) {
+    result = result * (two ** BigInt(netBinaryExp));
+  } else {
+    result = result / (two ** BigInt(-netBinaryExp));
+  }
+  return result;
+}
+
+function decimalToOct(decimalString) {
+  let s = decimalString.trim().toLowerCase();
+  const neg = s.startsWith('-');
+  if (neg) s = s.slice(1);
+  if (s.startsWith('+')) s = s.slice(1);
+  let exp = 0;
+  const eIdx = s.indexOf('e');
+  if (eIdx !== -1) {
+    exp = parseInt(s.slice(eIdx + 1), 10);
+    s = s.slice(0, eIdx);
+  }
+  const parts = s.split('.');
+  const intPart = parts[0] || '0';
+  const fracPart = parts[1] || '';
+  let scale = fracPart.length - exp;
+  const bigStr = intPart + fracPart;
+  let n = BigInt(bigStr.replace(/^0+/, '') || '0');
+  if (neg) n = -n;
+  if (scale < 0) {
+    n = n * (BigInt(10) ** BigInt(-scale));
+    scale = 0;
+  }
+  // Use internal scale of 60 decimal places for exact float64 representation
+  const internalScale = 60;
+  if (scale < internalScale) {
+    n = n * (BigInt(10) ** BigInt(internalScale - scale));
+  } else if (scale > internalScale) {
+    n = n / (BigInt(10) ** BigInt(scale - internalScale));
+  }
+  const limbs = [];
+  let residual = n;
+  const divisor = BigInt(10) ** BigInt(internalScale);
+  for (let i = 0; i < 4; i++) {
+    if (residual === 0n) { limbs.push(0); continue; }
+    const limb = Number(residual) / Number(divisor);
+    limbs.push(limb);
+    const limbBigInt = float64ToBigIntScaled(limb, internalScale);
+    residual = residual - limbBigInt;
+  }
+  return limbs;
+}
+
+// Convert oct value to decimal string with exact BigInt arithmetic.
+function octToDecimalString(oct, digits) {
+  const o = Array.isArray(oct) ? oct : [oct, 0, 0, 0];
+  const internalScale = 60;
+  let total = 0n;
+  for (let i = 0; i < 4; i++) {
+    if (o[i] !== 0) {
+      total += float64ToBigIntScaled(o[i], internalScale);
+    }
+  }
+  const neg = total < 0n;
+  if (neg) total = -total;
+  const divisor = BigInt(10) ** BigInt(internalScale);
+  const intPart = total / divisor;
+  let fracPart = total % divisor;
+  let result = intPart.toString();
+  if (digits > 0) {
+    let fracStr = fracPart.toString().padStart(internalScale, '0');
+    if (digits < fracStr.length) {
+      const roundDigit = parseInt(fracStr[digits]);
+      fracStr = fracStr.slice(0, digits);
+      if (roundDigit >= 5) {
+        let carry = 1;
+        let chars = fracStr.split('');
+        for (let i = chars.length - 1; i >= 0 && carry; i--) {
+          const d = parseInt(chars[i]) + carry;
+          chars[i] = (d % 10).toString();
+          carry = Math.floor(d / 10);
+        }
+        fracStr = chars.join('');
+        if (carry) result = (BigInt(result) + 1n).toString();
+      }
     } else {
-      mantissa = (1n << 52n) | mantissaBits;
-      binaryExp = expBits - 1023 - 52;
+      fracStr = fracStr.padEnd(digits, '0');
     }
-    const five = 5n, two = 2n;
-    let result = sign * mantissa * (five ** BigInt(scale));
-    const netBinaryExp = binaryExp + scale;
-    if (netBinaryExp >= 0) {
-      result = result * (two ** BigInt(netBinaryExp));
-    } else {
-      result = result / (two ** BigInt(-netBinaryExp));
-    }
-    return result;
+    fracStr = fracStr.replace(/0+$/, '');
+    if (fracStr.length > 0) result += '.' + fracStr;
   }
-  globalThis.float64ToBigIntScaled = float64ToBigIntScaled;
-
-  function decimalToOct(decimalString) {
-    let s = decimalString.trim().toLowerCase();
-    const neg = s.startsWith('-');
-    if (neg) s = s.slice(1);
-    if (s.startsWith('+')) s = s.slice(1);
-    let exp = 0;
-    const eIdx = s.indexOf('e');
-    if (eIdx !== -1) {
-      exp = parseInt(s.slice(eIdx + 1), 10);
-      s = s.slice(0, eIdx);
-    }
-    const parts = s.split('.');
-    const intPart = parts[0] || '0';
-    const fracPart = parts[1] || '';
-    let scale = fracPart.length - exp;
-    const bigStr = intPart + fracPart;
-    let n = BigInt(bigStr.replace(/^0+/, '') || '0');
-    if (neg) n = -n;
-    if (scale < 0) {
-      n = n * (BigInt(10) ** BigInt(-scale));
-      scale = 0;
-    }
-    // Use internal scale of 60 decimal places for exact float64 representation
-    const internalScale = 60;
-    if (scale < internalScale) {
-      n = n * (BigInt(10) ** BigInt(internalScale - scale));
-    } else if (scale > internalScale) {
-      n = n / (BigInt(10) ** BigInt(scale - internalScale));
-    }
-    const limbs = [];
-    let residual = n;
-    const divisor = BigInt(10) ** BigInt(internalScale);
-    for (let i = 0; i < 4; i++) {
-      if (residual === 0n) { limbs.push(0); continue; }
-      const limb = Number(residual) / Number(divisor);
-      limbs.push(limb);
-      const limbBigInt = float64ToBigIntScaled(limb, internalScale);
-      residual = residual - limbBigInt;
-    }
-    return limbs;
-  }
-  globalThis.decimalToOct = decimalToOct;
+  return (neg ? '-' : '') + result;
 }
 
 function fast2Sum(a, b) {
