@@ -9782,21 +9782,21 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           }
 
           // === ESCAPE CHECK ===
-          if (scale >= -126) {
-            let z_mag_sq = zr * zr + zi * zi;
-            if (z_mag_sq > 4.0) {
-              // Log escape for pixel 0 at offset 2000
-              if (index == 0u) {
-                debug[2000u] = f32(iter);
-                debug[2001u] = zr;
-                debug[2002u] = zi;
-                debug[2003u] = z_mag_sq;
-                debug[2004u] = f32(scale);
-              }
-              intState[idx8 + INT_STATUS] = 1;
-              intState[idx8 + INT_PERIOD] = i32(pp);
-              break;
+          // Always check escape: when scale < -126, dz is effectively 0, so z = ref
+          // The magnitude check still works since zr, zi are computed above
+          let z_mag_sq = zr * zr + zi * zi;
+          if (z_mag_sq > 4.0) {
+            // Log escape for pixel 0 at offset 2000
+            if (index == 0u) {
+              debug[2000u] = f32(iter);
+              debug[2001u] = zr;
+              debug[2002u] = zi;
+              debug[2003u] = z_mag_sq;
+              debug[2004u] = f32(scale);
             }
+            intState[idx8 + INT_STATUS] = 1;
+            intState[idx8 + INT_PERIOD] = i32(pp);
+            break;
           }
 
           // === CONVERGENCE DETECTION ===
@@ -10479,6 +10479,14 @@ self.onmessage = async function(e) {
         `Board ${data.k}: ${board.constructor.name} @ ${coordStr}, ` +
         `pixel=${pixelSize.toExponential(3)}`
       );
+
+      // Log refC_oct at full precision for deep zoom boards to debug click vs URL differences
+      if (board.refC_oct && pixelSize < 1e-45) {
+        const refReOct = [board.refC_oct[0], board.refC_oct[1], board.refC_oct[2], board.refC_oct[3]];
+        const refImOct = [board.refC_oct[4], board.refC_oct[5], board.refC_oct[6], board.refC_oct[7]];
+        const digits = Math.ceil(-Math.log10(pixelSize)) + 3;
+        console.log(`  refC_oct: (${octToDecimalString(refReOct, digits)}, ${octToDecimalString(refImOct, digits)})`);
+      }
 
       // Send board type info once on creation
       self.postMessage({
