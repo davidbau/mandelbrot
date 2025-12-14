@@ -10611,6 +10611,26 @@ function toOctSub(a, b) {
   return toOctAdd(a, [-bb[0], -bb[1], -bb[2], -bb[3]]);
 }
 
+function toOctMul(a, b) {
+  const aa = toOct(a);
+  const bb = toOct(b);
+  const out = new Array(4);
+  AoctMul(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+  return out;
+}
+
+function toOctSquare(a) {
+  const aa = toOct(a);
+  const out = new Array(4);
+  AoctSquare(out, 0, aa[0], aa[1], aa[2], aa[3]);
+  return out;
+}
+
+function toOctDouble(a) {
+  const aa = toOct(a);
+  return [aa[0] * 2, aa[1] * 2, aa[2] * 2, aa[3] * 2];
+}
+
 function octToNumber(o) {
   const v = toOct(o);
   return v[0] + v[1] + v[2] + v[3];
