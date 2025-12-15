@@ -135,9 +135,9 @@ The threshold 1e-13 prevents underflow when z² would be too small to represent.
 
 ## Reference Orbit Precision
 
-`AdaptiveGpuBoard` uses QD (quad-double) precision for reference orbits:
-- Reference orbit computed at view center in full QD precision (~62 digits)
-- Stored as float64 pairs for GPU upload
+`AdaptiveGpuBoard` uses QD precision (quad-double) for reference orbits:
+- Reference orbit computed at view center in full QD precision (~62 decimal digits)
+- Stored as float64 quad-tuples for GPU upload
 - Sufficient precision for zooms to 10^60
 
 ## Comparison with Other Boards

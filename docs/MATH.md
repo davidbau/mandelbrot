@@ -1,6 +1,6 @@
-# Quad-Precision Arithmetic
+# DD and QD Precision Arithmetic
 
-When zooming deep into the Mandelbrot set—beyond a trillion-fold magnification—standard 64-bit floating-point numbers run out of precision. This document explains how the explorer achieves ~31 decimal digits of precision using a technique called "double-double" arithmetic, sometimes abbreviated as QD (for quad-precision, the general term for high-precision arithmetic using multiple floating-point numbers; here we specifically use the double-double variant).
+When zooming deep into the Mandelbrot set—beyond a trillion-fold magnification—standard 64-bit floating-point numbers run out of precision. This document explains how the explorer achieves ~31 decimal digits of precision using **DD (double-double)** arithmetic and ~62 decimal digits using **QD (quad-double)** arithmetic.
 
 ## The Precision Problem
 
@@ -24,8 +24,8 @@ A double-double number `x` is stored as an array `[hi, lo]` where:
 The key insight: when you add two floats and round to fit in 64 bits, the lost bits aren't gone—they're computable! By carefully tracking these rounding errors, we can recover them into the `lo` component.
 
 ```javascript
-// A quad-double number representing π
-const pi_qd = [3.141592653589793, 1.2246467991473532e-16];
+// A DD number representing π
+const pi_dd = [3.141592653589793, 1.2246467991473532e-16];
 // True value = 3.141592653589793 + 0.0000000000000001224...
 //            = 3.14159265358979323846... (more digits!)
 ```
@@ -139,9 +139,9 @@ function qdReciprocal(b, iters = 2) {
 
 Two iterations typically suffice to achieve full double-double precision.
 
-## Complex Numbers in Quad Precision
+## Complex Numbers in DD Precision
 
-The Mandelbrot iteration `z = z² + c` involves complex numbers. The explorer represents a complex quad-precision number as a 4-element array: `[re_hi, re_lo, im_hi, im_lo]`.
+The Mandelbrot iteration `z = z² + c` involves complex numbers. The explorer represents a complex DD number as a 4-element array: `[re_hi, re_lo, im_hi, im_lo]`.
 
 ### Complex Multiplication
 
@@ -180,11 +180,11 @@ function qdcSquare(a) {
 
 ## Parsing High-Precision Coordinates
 
-URL coordinates are parsed into quad-precision to preserve all significant digits:
+URL coordinates are parsed into DD or QD precision to preserve all significant digits:
 
 ```javascript
 function qdParse(s) {
-  // Parse digit by digit, accumulating in quad precision
+  // Parse digit by digit, accumulating in DD/QD precision
   let result = [0, 0];
   for (let digit of s) {
     result = qdAdd(qdMul(result, [10, 0]), [parseInt(digit), 0]);
@@ -194,7 +194,7 @@ function qdParse(s) {
 }
 ```
 
-By building the number incrementally in quad precision, digits beyond the 15th (which would be lost in a standard `parseFloat`) are preserved in the `lo` component.
+By building the number incrementally in DD or QD precision, digits beyond the 15th (which would be lost in a standard `parseFloat`) are preserved in the `lo` component.
 
 ## In-Place Array Operations
 
@@ -215,21 +215,21 @@ function AqdAdd(r, i, a1, a2, b1, b2) {
 
 These avoid the overhead of creating `[hi, lo]` arrays on every operation, which matters when computing millions of iterations per second.
 
-## Where Quad Precision Is Used
+## Where DD and QD Precision Are Used
 
-1. **Reference Orbit Computation:** The central reference point's orbit is computed in full quad precision (`qdcSquare`, `qdcAdd`). This orbit serves as the high-precision backbone for all perturbation calculations.
+1. **Reference Orbit Computation:** The central reference point's orbit is computed in DD precision (for zooms up to 10^30) or QD precision (for zooms beyond 10^30) using functions like `qdcSquare` and `qdcAdd`. This orbit serves as the high-precision backbone for all perturbation calculations.
 
-2. **Coordinate Parsing:** URL parameters like `c=-0.743643887037158704752191506114774+0.131825904205311970493132056385139i` are parsed in quad precision.
+2. **Coordinate Parsing:** URL parameters like `c=-0.743643887037158704752191506114774+0.131825904205311970493132056385139i` are parsed in DD or QD precision.
 
-3. **View Compositing:** When overlaying a child view on its parent at deep zoom, the offset calculation uses quad precision to avoid catastrophic cancellation.
+3. **View Compositing:** When overlaying a child view on its parent at deep zoom, the offset calculation uses DD or QD precision to avoid catastrophic cancellation.
 
-4. **Movie Interpolation:** The Catmull-Rom spline functions (`catmullRom1D`) use quad precision to ensure smooth camera paths even at extreme zooms.
+4. **Movie Interpolation:** The Catmull-Rom spline functions (`catmullRom1D`) use DD or QD precision to ensure smooth camera paths even at extreme zooms.
 
 ## Performance Considerations
 
-Quad-precision operations are 10-20× slower than standard float64. The explorer minimizes this cost by:
+DD and QD precision operations are 10-20× slower than standard float64. The explorer minimizes this cost by:
 
-1. **Computing one reference orbit in quad precision** while computing all other pixels as float64 perturbations from that reference.
+1. **Computing one reference orbit in DD or QD precision** while computing all other pixels as float64 perturbations from that reference.
 
 2. **Using GPU float32** for the bulk of the work, with the CPU handling only the high-precision reference.
 

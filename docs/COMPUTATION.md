@@ -117,7 +117,7 @@ The `pp` array lives only in the worker. When a pixel's convergence is reported 
 | `dc` | Float64 | Delta c from reference point |
 | `dz` | Float64 | Current perturbation delta |
 | `refIter` | Int32 | Which reference iteration each pixel follows |
-| `refOrbit` | Float64×4 | Quad precision reference orbit values |
+| `refOrbit` | Float64×4 or Float64×8 | DD or QD precision reference orbit values |
 
 ### Compaction
 
@@ -197,25 +197,25 @@ updateFromWorkerResult(data) {
 
 The View's `nn` array uses sign to distinguish pixel states: `nn[i] > 0` means diverged, `nn[i] < 0` means converged, `nn[i] === 0` means still computing.
 
-## The Quad-Precision Compositing Problem
+## The DD/QD Precision Compositing Problem
 A subtle but critical challenge arises when drawing a new, high-zoom view on top of its parent. At a zoom of 10^25, the child view's center might differ from the parent's by only 10^-20. Standard `Float64` precision is only ~10^-15. Subtracting the two centers to find the offset would result in zero—an effect called **catastrophic cancellation**.
 
 It's like trying to measure the thickness of a single sheet of paper by subtracting the height of a 1000-page book from the height of a 1001-page book. If your ruler's markings are wider than the paper's thickness, the measured difference is zero.
 
-The solution is to perform the coordinate mapping calculations in quad precision. Even though the final result is a screen-space pixel coordinate, the intermediate steps must preserve the tiny differences.
+The solution is to perform the coordinate mapping calculations in DD or QD precision. Even though the final result is a screen-space pixel coordinate, the intermediate steps must preserve the tiny differences.
 
 ```javascript
 calculateParentMapping() {
-  // All subtractions and scaling are done with quad-precision functions
+  // All subtractions and scaling are done with DD/QD precision functions
   // until the final conversion to screen coordinates.
-  AqdAdd(temp, 0, childCenterR_quad, childCenterR_quad_err,
-                 -parentCenterR_quad, -parentCenterR_quad_err);
-  const offset_quad = [temp[0], temp[1]];
-  const sx = (offset_quad[0] / parentSize) * dimsWidth;
+  AqdAdd(temp, 0, childCenterR_dd, childCenterR_dd_err,
+                 -parentCenterR_dd, -parentCenterR_dd_err);
+  const offset_dd = [temp[0], temp[1]];
+  const sx = (offset_dd[0] / parentSize) * dimsWidth;
   // ...
 }
 ```
-By using quad-precision math for the intermediate subtractions, we avoid catastrophic cancellation and ensure the child view is positioned with sub-pixel accuracy.
+By using DD or QD precision math for the intermediate subtractions, we avoid catastrophic cancellation and ensure the child view is positioned with sub-pixel accuracy.
 
 ## Next Steps
 

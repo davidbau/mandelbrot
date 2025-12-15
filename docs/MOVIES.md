@@ -15,7 +15,7 @@ A compelling Mandelbrot zoom video needs to solve several problems:
 
 The camera path is generated using Catmull-Rom splines. Developed by Edwin Catmull (later president of Pixar) and Raphael Rom, this technique creates a smooth curve that passes through a sequence of control points. Given four points (P0, P1, P2, P3), the spline travels from P1 to P2, with its tangents at those points determined by the neighboring points (P0 and P3). This guarantees C1 continuity (a smooth, continuous velocity), which makes the camera motion feel natural and cinematic.
 
-The implementation uses quad-precision arithmetic to ensure the path is accurate even at extreme zoom depths where the control points are numerically very close together:
+The implementation uses DD or QD precision arithmetic to ensure the path is accurate even at extreme zoom depths where the control points are numerically very close together:
 
 ```javascript
 function catmullRom1D(p0, p1, p2, p3, t) {

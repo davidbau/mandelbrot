@@ -121,7 +121,7 @@ Beyond 10^6 magnification, float32 loses the ability to represent pixel coordina
 ### The Perturbation Approach
 
 Instead of iterating `z = z² + c` for each pixel, we track:
-- **Reference orbit** `Z_n`: computed once in quad precision on the CPU
+- **Reference orbit** `Z_n`: computed once in DD or QD precision on the CPU
 - **Perturbation** `δz_n` for each pixel: how far this pixel's orbit is from the reference
 
 The iteration becomes:
@@ -241,9 +241,9 @@ AdaptiveGpuBoard cannot use Horner's method directly because converting between 
 // 2·Z·δz + δz²
 let linear_r = 2.0 * (refr * dzr - refi * dzi);  // Z·δz_stored, stays in scaled
 let linear_i = 2.0 * (refr * dzi + refi * dzr);
-let quad_r = ldexp(dzr * dzr - dzi * dzi, scale);  // δz² in 2^(2*scale), scale back
-let quad_i = ldexp(2.0 * dzr * dzi, scale);
-result = linear + quad + dc;
+let dz2_r = ldexp(dzr * dzr - dzi * dzi, scale);  // δz² in 2^(2*scale), scale back
+let dz2_i = ldexp(2.0 * dzr * dzi, scale);
+result = linear + dz2 + dc;
 ```
 
 **Exponent 3** (z³ + c):
@@ -467,7 +467,7 @@ The reference orbit is computed lazily on the CPU using high-precision arithmeti
 Each `compute()` call:
 
 1. **Extends the reference orbit** if any pixel needs more iterations than currently available
-   - Computed using oct-precision (8 float64 components) on CPU
+   - Computed using QD complex precision (8 float64 components) on CPU
    - Truncated to DD or QD for storage depending on board type
    - Further truncated to float32 when uploading to GPU
 
@@ -629,6 +629,6 @@ The explorer feature-detects WebGPU and falls back to CPU computation (using `Pe
 
 ## Next Steps
 
-- [MATH.md](MATH.md): The quad-precision math library used for reference orbits
+- [MATH.md](MATH.md): The DD and QD precision math library used for reference orbits
 - [ALGORITHMS.md](ALGORITHMS.md): Cycle detection and the Zhuoran method in detail
 - [COMPUTATION.md](COMPUTATION.md): How CPU and GPU coordinate

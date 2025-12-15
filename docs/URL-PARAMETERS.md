@@ -136,7 +136,7 @@ and debugging the different computation engines.
 ?board=gpu          # GpuBoard (WebGPU float32)
 ?board=zhuoran      # ZhuoranBoard (CPU with rebasing)
 ?board=gpuzhuoran   # GpuZhuoranBoard (GPU with rebasing)
-?board=perturbation # PerturbationBoard (CPU quad precision)
+?board=perturbation # PerturbationBoard (CPU DD precision)
 ?board=qdzhuoran    # QDZhuoranBoard (CPU QD precision, z > 10^30)
 ?board=adaptive     # AdaptiveGpuBoard (GPU QD precision, z > 10^30)
 ?board=qdcpu        # QDCpuBoard (CPU QD precision)

@@ -63,9 +63,9 @@ In 2024 I began coding with Claude as a chatbot, copying code back and forth.
 Features that would have taken weeks to research and implement came together
 in days.
 
-### Quad Precision
+### DD Precision (Double-Double)
 
-Implemented quad-precision arithmetic for coordinates, enabling
+Implemented DD precision arithmetic for coordinates, enabling
 zoom depths far beyond standard 64-bit float limits. Each number is stored as
 the unevaluated sum of two doubles, providing about 31 decimal digits of precision.
 
@@ -111,7 +111,7 @@ The result: WebGPU support with massive parallelism, plus significant UI enhance
 ### GPU Computation
 
 - **GpuBoard**: WebGPU compute shaders for shallow zooms (pixel size > 10^-7)
-- **GpuZhuoranBoard**: GPU perturbation with quad-precision reference orbits for
+- **GpuZhuoranBoard**: GPU perturbation with DD-precision reference orbits for
   deep zooms up to 10^30
 - **AdaptiveGpuBoard**: GPU perturbation with QD-precision reference for ultra-deep
   zooms beyond 10^30, using per-pixel adaptive scaling
@@ -125,10 +125,10 @@ they "rebase" to restart from the reference, avoiding the numerical glitches tha
 plague traditional perturbation methods. This eliminated visual artifacts at
 extreme zoom depths.
 
-### Quad-Double (QD) Precision (60+ Digits)
+### QD Precision (Quad-Double, 60+ Digits)
 
-Extended precision from ~31 decimal digits (double-double, DD) to ~62 decimal digits
-(quad-double, QD, using four doubles). This enables zoom depths beyond 10^60:
+Extended precision from ~31 decimal digits (DD, double-double) to ~62 decimal digits
+(QD, quad-double, using four doubles). This enables zoom depths beyond 10^60:
 - **QDZhuoranBoard**: CPU perturbation with QD-precision reference orbits
 - Seamless transition from DD to QD precision at z > 10^30
 

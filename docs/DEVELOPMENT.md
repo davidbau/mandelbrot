@@ -50,7 +50,7 @@ npm run test:watch    # Re-run tests on file changes
 npm run test:coverage # Generate a code coverage report
 ```
 
-- **Unit tests** verify the mathematical components, such as quad-precision arithmetic and algorithm logic.
+- **Unit tests** verify the mathematical components, such as DD and QD precision arithmetic and algorithm logic.
 - **Integration tests** use Puppeteer to simulate user interactions in a headless browser, testing everything from keyboard commands and URL parsing to movie mode and fullscreen behavior.
 - **Stress tests** run extended, randomized sequences of operations (like history navigation and view toggling) to uncover subtle race conditions in the asynchronous view lifecycle.
 
@@ -89,7 +89,7 @@ The application's JavaScript is contained within `<script>` tags inside `index.h
 1.  **Main Application Code (`mainCode`):** Contains the core application logic and classes that run on the main thread, including `MandelbrotExplorer`, `StateStore`, `Config`, `View`, `Grid`, and `ZoomManager`.
 2.  **UI and Interaction Code:** Includes classes for handling user input and browser integration, such as `URLHandler`, `EventHandler`, and `MovieMode`.
 3.  **Worker Code (`workerCode`):** Contains the `Board` classes and all the computational algorithms. This code is loaded into Web Workers to run off the main thread.
-4.  **Quad-Precision Math (`mathCode`):** The library for quad-double arithmetic.
+4.  **DD and QD Precision Math (`mathCode`):** The library for double-double and quad-double arithmetic.
 5.  **Bundled MP4 Muxer:** The minified `mp4-muxer` library, injected by the build script.
 6.  **Internationalization (i18n):** Contains the translated strings for the UI.
 7.  **Startup Script:** A final small script that instantiates `MandelbrotExplorer` to start the application.
@@ -100,9 +100,9 @@ You can use the browser's developer console to observe computation progress, wor
 
 - `?board=cpu`: Force the simple double-precision CPU board.
 - `?board=gpu`: Force the WebGPU float32 board.
-- `?board=zhuoran`: Force the quad-precision CPU board with rebasing.
-- `?board=gpuzhuoran`: Force the quad-precision GPU board with rebasing.
-- `?board=perturbation`: Force the quad-precision CPU board (alternative to Zhuoran).
+- `?board=zhuoran`: Force the DD-precision CPU board with rebasing.
+- `?board=gpuzhuoran`: Force the DD-precision GPU board with rebasing.
+- `?board=perturbation`: Force the DD-precision CPU board (alternative to Zhuoran).
 
 ## Contributing
 

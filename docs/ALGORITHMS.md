@@ -139,16 +139,16 @@ The beauty of rebasing is that it *avoids* glitches rather than detecting and co
 
 ### PerturbationBoard: Multi-Reference Grid
 
-`PerturbationBoard` uses a different approach: a grid of reference points rather than a single reference with rebasing. Each reference point is computed in quad precision, and nearby pixels use double-precision perturbations. When a pixel's perturbation grows too large, it switches to full quad-precision iteration for the remainder.
+`PerturbationBoard` uses a different approach: a grid of reference points rather than a single reference with rebasing. Each reference point is computed in DD precision, and nearby pixels use double-precision perturbations. When a pixel's perturbation grows too large, it switches to full DD precision iteration for the remainder.
 
 This multi-reference approach handles regions where orbits diverge significantly from any single reference. Compared to `ZhuoranBoard`'s single-reference rebasing, it has higher overhead from computing many reference orbits, but the memory access pattern is more cache-friendly and the per-pixel bookkeeping is simpler.
 
-## Quad-Precision Arithmetic
+## DD and QD Precision Arithmetic
 
-Reference orbits are computed using "quad-double" arithmetic, where each number is the unevaluated sum of two `Float64`s. This gives about 31 decimal digits of precision, pushing the zoom limit from 10^15 to 10^30. The technique uses algorithms by Dekker and Kahan to capture the exact rounding error from standard floating-point operations.
+Reference orbits are computed using "double-double" (DD) or "quad-double" (QD) arithmetic. DD uses two `Float64`s to give about 31 decimal digits of precision, pushing the zoom limit from 10^15 to 10^30. QD uses four `Float64`s to give about 62 decimal digits, enabling zooms beyond 10^60. The technique uses algorithms by Dekker and Kahan to capture the exact rounding error from standard floating-point operations.
 
 ```javascript
-// Quad number 'a' is [a_high, a_low]
+// DD number 'a' is [a_high, a_low]
 function qdAdd(a, b) {
   let [s1, s0] = twoSum(a[0], b[0]); // Add high parts
   s0 += a[1] + b[1];                // Add low parts and error
@@ -228,8 +228,8 @@ The `Scheduler` automatically selects the best algorithm for the job:
 |------------|---------------|------------|-------|
 | > 1e-7 | Yes | **GpuBoard** | Fast, parallel, uses `float32` direct iteration. |
 | > 1e-15 | No | **CpuBoard** | Simple `float64` iteration on the CPU. |
-| 1e-30 to 1e-7 | Yes | **GpuZhuoranBoard** | GPU perturbation with quad-precision reference orbit, `float32` deltas, and rebasing. |
-| 1e-30 to 1e-15 | No | **PerturbationBoard** | CPU perturbation with quad-precision reference, `float64` deltas. |
+| 1e-30 to 1e-7 | Yes | **GpuZhuoranBoard** | GPU perturbation with DD-precision reference orbit, `float32` deltas, and rebasing. |
+| 1e-30 to 1e-15 | No | **PerturbationBoard** | CPU perturbation with DD-precision reference, `float64` deltas. |
 | < 1e-30 | Yes | **AdaptiveGpuBoard** | GPU perturbation with QD-precision reference (~62 digits) and per-pixel adaptive scaling. |
 | < 1e-30 | No | **QDZhuoranBoard** | CPU perturbation with QD-precision reference (~62 digits). |
 
@@ -249,7 +249,7 @@ Points can have periods of millions of iterations. With Fibonacci checkpoints, d
 
 ### Precision Limits
 
-Beyond 10^30 magnification, quad precision (~31 digits) starts to degrade. The explorer automatically switches to QD precision (4-double, ~62 digits) for zooms beyond 10^30, enabling exploration to 10^60 magnification and beyond.
+Beyond 10^30 magnification, DD precision (~31 digits) starts to degrade. The explorer automatically switches to QD precision (quad-double, 4 doubles, ~62 digits) for zooms beyond 10^30, enabling exploration to 10^60 magnification and beyond.
 
 ## References
 
