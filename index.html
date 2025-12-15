@@ -802,7 +802,12 @@ class Config {
 
   // Feigenbaum / Myrberg point (real-axis accumulation point of period doubling)
   // OEIS A218453: 65-digit precision, parsed to quad-double (oct) format
-  static FEIGENBAUM_POINT_QD = decimalToOct('-1.4011551890920506005238267878938612922263080433973196089372614966');
+  static get FEIGENBAUM_POINT_QD() {
+    if (!this._FEIGENBAUM_POINT_QD) {
+      this._FEIGENBAUM_POINT_QD = decimalToOct('-1.4011551890920506005238267878938612922263080433973196089372614966');
+    }
+    return this._FEIGENBAUM_POINT_QD;
+  }
 
   constructor(store) {
     this.store = store;
