@@ -63,11 +63,11 @@ describe('AdaptiveGpuBoard at z=1e35', () => {
     return result;
   }
 
-  test('adaptive vs octzhuoran at z=1e35 near c=-1.8', async () => {
+  test('adaptive vs qdz at z=1e35 near c=-1.8', async () => {
     if (launchFailed) return;
 
-    // Run octzhuoran first (reference)
-    const octResult = await runBoard('octzhuoran');
+    // Run qdz first (reference)
+    const octResult = await runBoard('qdz');
     expect(octResult.diverged).toBeGreaterThan(0);
 
     // Run adaptive

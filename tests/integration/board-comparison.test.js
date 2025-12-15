@@ -89,7 +89,7 @@ describe('Board computation at default zoom', () => {
     if (launchFailed) return;
 
     const page = await setupPage(browser, {}, TEST_TIMEOUT);
-    const result = await runBoardTest(page, 'gpuzhuoran');
+    const result = await runBoardTest(page, 'gpuz');
     await page.close();
 
     // Board completes when di > 0 (some pixels computed)
@@ -105,7 +105,7 @@ describe('Board computation at default zoom', () => {
     await gpuPage.close();
 
     const zhuoranPage = await setupPage(browser, {}, TEST_TIMEOUT);
-    const zhuoranResult = await runBoardTest(zhuoranPage, 'gpuzhuoran');
+    const zhuoranResult = await runBoardTest(zhuoranPage, 'gpuz');
     await zhuoranPage.close();
 
     const comparison = compareBoards(gpuResult, zhuoranResult);

@@ -4474,6 +4474,10 @@ class Board {
     this.hasCheckpoint = new Array(this.config.dimsArea).fill(false);
     // Iteration when checkpoint was saved
     this.checkpointIter = new Array(this.config.dimsArea).fill(0);
+    // Per-pixel thread tracking for convergence detection
+    this.currentThreadIter = new Array(this.config.dimsArea).fill(0);
+    this.threadDeltaRe = new Array(this.config.dimsArea).fill(0);
+    this.threadDeltaIm = new Array(this.config.dimsArea).fill(0);
   }
 
   // Getter properties that derive from sizesQD (the authoritative source)
@@ -6232,109 +6236,49 @@ class DDZhuoranBoard extends Board {
     const justUpdatedCheckpoint = (fibonacciPeriod(this.it) == 1);
     if (justUpdatedCheckpoint) {
       // Store dz (perturbation) and which reference iteration we're at
-      // This allows precise difference computation:
-      // (ref[current] - ref[checkpoint]) + (dz[current] - dz[checkpoint])
       this.bb[index2] = dr;  // dz real at checkpoint (BEFORE iteration)
       this.bb[index2 + 1] = di;  // dz imag at checkpoint
       this.hasCheckpoint[index] = true;
       this.checkpointIter[index] = refIter;  // Which reference iteration (not this.it!)
       this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
+      // Reset thread tracking for this pixel
+      this.currentThreadIter[index] = refIter;
+      this.threadDeltaRe[index] = 0;
+      this.threadDeltaIm[index] = 0;
     }
     // Step 2: Check convergence EVERY iteration (if we have a checkpoint and didn't just update it)
     if (this.hasCheckpoint[index] && !justUpdatedCheckpoint) {
-      const checkpointRefIter = this.checkpointIter[index];
+      // Incrementally advance threads when thread.next == refIter
+      let currentThread = this.currentThreadIter[index];
+      while (currentThread < this.refOrbit.length) {
+        const thread = this.threading.getThread(currentThread);
+        if (!thread || thread.next < 0 || thread.next !== refIter) break;
 
-      // When refIter matches checkpointRefIter, both are at the same point in the reference
-      // orbit cycle and we only need to check if the perturbation dz is close to checkpoint dz.
-      // This works across rebases: after rebase, we wait for refIter to cycle back to match.
-      if (refIter === checkpointRefIter) {
-        const checkpoint_dr = this.bb[index2];
-        const checkpoint_di = this.bb[index2 + 1];
-
-        // Compute Chebyshev distance (L-infinity norm) between current
-        // INPUT dz and checkpoint dz
-        // Both are at the same refIter position, so we're comparing
-        // the same point in the orbit cycle
-        const dzDiffR = dr - checkpoint_dr;
-        const dzDiffI = di - checkpoint_di;
-        const db = Math.max(Math.abs(dzDiffR), Math.abs(dzDiffI));
-
-        if (db <= this.epsilon2) {
-          if (!this.pp[index]) {
-            this.pp[index] = this.it - 1;  // DDZhuoranBoard: -1 to account for checkpoint timing
-          }
-          if (db <= this.epsilon) {
-            return -1;  // Converged! Return before incrementing refIter
-          }
-        }
+        // Advance thread: accumulate delta and move to next
+        this.threadDeltaRe[index] += thread.deltaRe;
+        this.threadDeltaIm[index] += thread.deltaIm;
+        currentThread = thread.next;
+        this.currentThreadIter[index] = currentThread;
       }
 
-      // Thread-following and fallback convergence checks activate after 2584 iterations
-      // (Fibonacci F(18)) to match GPU behavior
-      if (this.it > 2584) {
-        // First try thread-following (more precise than absolute position comparison)
-        if (checkpointRefIter < this.refOrbit.length) {
-          let current = checkpointRefIter;
-          let deltaRe = 0;
-          let deltaIm = 0;
-          const maxSteps = 100;  // Match GPU limit to reduce pause
-          let steps = 0;
-
-          // Follow threads forward from checkpoint
-          while (steps < maxSteps && current < this.refOrbit.length) {
-            const thread = this.threading.getThread(current);
-            if (!thread || thread.next < 0) break;
-
-            deltaRe += thread.deltaRe;
-            deltaIm += thread.deltaIm;
-            current = thread.next;
-            steps++;
-
-            // Check if we're close to current refIter
-            if (Math.abs(current - refIter) <= 10) {
-              const checkpoint_dr = this.bb[index2];
-              const checkpoint_di = this.bb[index2 + 1];
-              const dzDiffR = dr - checkpoint_dr;
-              const dzDiffI = di - checkpoint_di;
-              const totalDiffR = deltaRe + dzDiffR;
-              const totalDiffI = deltaIm + dzDiffI;
-              const db = Math.max(Math.abs(totalDiffR), Math.abs(totalDiffI));
-
-              if (db <= this.epsilon2) {
-                if (!this.pp[index]) {
-                  // DDZhuoranBoard: -1 to account for checkpoint timing
-                  this.pp[index] = this.it - 1;
-                }
-                if (db <= this.epsilon) {
-                  return -1;  // Converged via threading!
-                }
-              }
-              break;  // Don't continue thread-following
-            }
-          }
-        }
-
-        // If thread-following didn't help, fall back to absolute position comparison.
-        // This handles orbits that stay close to reference but never trigger rebase.
+      // Check convergence when currentThreadIter matches refIter
+      if (this.currentThreadIter[index] === refIter) {
         const checkpoint_dr = this.bb[index2];
         const checkpoint_di = this.bb[index2 + 1];
 
-        // Compute absolute positions at checkpoint and current iteration
-        const refCheckpoint = this.refOrbit[checkpointRefIter];
-        const refCheckpointR = refCheckpoint[0] + refCheckpoint[1];
-        const refCheckpointI = refCheckpoint[2] + refCheckpoint[3];
-
-        // Total difference in absolute positions
-        const diffR = (refR + dr) - (refCheckpointR + checkpoint_dr);
-        const diffI = (refI + di) - (refCheckpointI + checkpoint_di);
-        const db = Math.max(Math.abs(diffR), Math.abs(diffI));
+        // Total difference = thread deltas + perturbation difference
+        const dzDiffR = dr - checkpoint_dr;
+        const dzDiffI = di - checkpoint_di;
+        const totalDiffR = this.threadDeltaRe[index] + dzDiffR;
+        const totalDiffI = this.threadDeltaIm[index] + dzDiffI;
+        const db = Math.max(Math.abs(totalDiffR), Math.abs(totalDiffI));
 
         if (db <= this.epsilon2) {
           if (!this.pp[index]) {
-            this.pp[index] = this.it - 1;  // DDZhuoranBoard: -1 to account for checkpoint timing
+            this.pp[index] = this.it - 1;
           }
           if (db <= this.epsilon) {
-            return -1;  // Converged! Return before incrementing refIter
+            return -1;  // Converged via threading!
           }
         }
       }
@@ -6666,59 +6610,94 @@ class QDZhuoranBoard extends Board {
     const oldZI = refI + di;
 
     const exponent = this.config.exponent || 2;
+
+    // Build binomial powers: coeff * z_ref^power for each term
     let zPowR = refR;
     let zPowI = refI;
     let coeff = exponent;
+
+    // Start Horner's method with innermost term (just dz)
     let resultR = dr;
     let resultI = di;
 
+    // Horner's method: accumulate terms from highest to lowest power of z_ref
     for (let k = 1; k < exponent; k++) {
-      // Multiply result by (coeff/k) * z_ref
-      const scale = coeff / k;
-      const tempR = resultR * zPowR - resultI * zPowI;
-      const tempI = resultR * zPowI + resultI * zPowR;
-      resultR = scale * tempR + dr;
-      resultI = scale * tempI + di;
+      // Add coeff * z_ref^power term
+      const termR = coeff * zPowR;
+      const termI = coeff * zPowI;
+      resultR = resultR + termR;
+      resultI = resultI + termI;
 
-      // Update z_ref^k
-      const nextZPowR = zPowR * refR - zPowI * refI;
-      const nextZPowI = zPowR * refI + zPowI * refR;
-      zPowR = nextZPowR;
-      zPowI = nextZPowI;
+      // Multiply by dz (complex multiplication)
+      const tempR = resultR * dr - resultI * di;
+      resultI = resultR * di + resultI * dr;
+      resultR = tempR;
 
-      coeff = coeff * (exponent - k);
+      // Update z_ref power: z_pow = z_pow * z_ref
+      const newZPowR = zPowR * refR - zPowI * refI;
+      zPowI = zPowR * refI + zPowI * refR;
+      zPowR = newZPowR;
+
+      // Update coefficient: coeff *= (n-k) / (k+1)
+      coeff *= (exponent - k) / (k + 1);
     }
 
-    // Multiply by z_ref one more time to get final binomial expansion
-    const finalR = resultR * refR - resultI * refI;
-    const finalI = resultR * refI + resultI * refR;
+    // Add perturbation in c
+    const newDr = resultR + this.dc[index2];
+    const newDi = resultI + this.dc[index2 + 1];
+    // Update dz first before checking divergence
+    this.dz[index2] = newDr;
+    this.dz[index2 + 1] = newDi;
 
-    // Add c to complete iteration
-    this.dz[index2] = finalR + this.dc[index2];
-    this.dz[index2 + 1] = finalI + this.dc[index2 + 1];
-
-    // Set checkpoint for convergence detection
-    if (this.it >= 3 && !this.hasCheckpoint[index]) {
-      this.bb[index2] = dr;
-      this.bb[index2 + 1] = di;
+    // CONVERGENCE DETECTION: fibonacciPeriod returns 1 at Fibonacci checkpoints
+    // Step 1: Update checkpoint at fibonacciPeriod intervals
+    const justUpdatedCheckpoint = (fibonacciPeriod(this.it) == 1);
+    if (justUpdatedCheckpoint) {
+      // Store dz (perturbation) and which reference iteration we're at
+      this.bb[index2] = dr;  // dz real at checkpoint (BEFORE iteration)
+      this.bb[index2 + 1] = di;  // dz imag at checkpoint
       this.hasCheckpoint[index] = true;
-      this.checkpointIter[index] = refIter;
+      this.checkpointIter[index] = refIter;  // Which reference iteration (not this.it!)
+      this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
+      // Reset thread tracking for this pixel
+      this.currentThreadIter[index] = refIter;
+      this.threadDeltaRe[index] = 0;
+      this.threadDeltaIm[index] = 0;
     }
+    // Step 2: Check convergence EVERY iteration (if we have a checkpoint and didn't just update it)
+    if (this.hasCheckpoint[index] && !justUpdatedCheckpoint) {
+      // Incrementally advance threads when thread.next == refIter
+      let currentThread = this.currentThreadIter[index];
+      while (currentThread < this.qdRefOrbit.length) {
+        const thread = this.threading.getThread(currentThread);
+        if (!thread || thread.next < 0 || thread.next !== refIter) break;
 
-    // Check convergence
-    if (this.hasCheckpoint[index] && this.checkpointIter[index] === refIter) {
-      const checkpoint_dr = this.bb[index2];
-      const checkpoint_di = this.bb[index2 + 1];
-      const dzDiffR = dr - checkpoint_dr;
-      const dzDiffI = di - checkpoint_di;
-      const db = Math.max(Math.abs(dzDiffR), Math.abs(dzDiffI));
+        // Advance thread: accumulate delta and move to next
+        this.threadDeltaRe[index] += thread.deltaRe;
+        this.threadDeltaIm[index] += thread.deltaIm;
+        currentThread = thread.next;
+        this.currentThreadIter[index] = currentThread;
+      }
 
-      if (db <= this.epsilon2) {
-        if (!this.pp[index]) {
-          this.pp[index] = this.it - 1;
-        }
-        if (db <= this.epsilon) {
-          return -1;  // Converged
+      // Check convergence when currentThreadIter matches refIter
+      if (this.currentThreadIter[index] === refIter) {
+        const checkpoint_dr = this.bb[index2];
+        const checkpoint_di = this.bb[index2 + 1];
+
+        // Total difference = thread deltas + perturbation difference
+        const dzDiffR = dr - checkpoint_dr;
+        const dzDiffI = di - checkpoint_di;
+        const totalDiffR = this.threadDeltaRe[index] + dzDiffR;
+        const totalDiffI = this.threadDeltaIm[index] + dzDiffI;
+        const db = Math.max(Math.abs(totalDiffR), Math.abs(totalDiffI));
+
+        if (db <= this.epsilon2) {
+          if (!this.pp[index]) {
+            this.pp[index] = this.it - 1;
+          }
+          if (db <= this.epsilon) {
+            return -1;  // Converged via threading!
+          }
         }
       }
     }
@@ -9716,8 +9695,7 @@ self.onmessage = async function(e) {
             );
             break;
           default:
-            console.error(`Unknown board type: ${forcedBoardType}, falling back to CpuBoard`);
-            board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
+            throw new Error(`Unknown board type: ${forcedBoardType}. Valid types: cpu, ddz, qdz, pert, qdpert, gpu, gpuz, adaptive, qdcpu`);
         }
       } else if (enableGPU && webGPUAvailable && gpuSafe) {
         // Two-tier strategy with WebGPU:

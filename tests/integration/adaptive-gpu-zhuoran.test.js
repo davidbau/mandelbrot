@@ -74,7 +74,7 @@ describe('AdaptiveGpuBoard', () => {
   const TEST_CENTER = '-0.74543+0.11301i';
 
   test('at z=1e20, should match QDZhuoranBoard >95%', async () => {
-    const octResult = await runBoard('octzhuoran', '1e20', TEST_CENTER, 200);
+    const octResult = await runBoard('qdz', '1e20', TEST_CENTER, 200);
     expect(octResult.diverged).toBeGreaterThan(0);
 
     await page.close();
@@ -100,7 +100,7 @@ describe('AdaptiveGpuBoard', () => {
   test('convergence detection at z=5', async () => {
     const CONVERGENT_CENTER = '+0.1972+0.5798i';
 
-    const octResult = await runBoard('octzhuoran', '5', CONVERGENT_CENTER, 500);
+    const octResult = await runBoard('qdz', '5', CONVERGENT_CENTER, 500);
     expect(octResult.converged).toBeGreaterThan(0);
 
     await page.close();
@@ -124,9 +124,9 @@ describe('AdaptiveGpuBoard', () => {
     // Set viewport to match the test parameters (256x144 at 16:9)
     await page.setViewport({ width: 256, height: 144 });
 
-    // Run gpuzhuoran as reference (doesn't have the bug)
+    // Run gpuz as reference (doesn't have the bug)
     const cwd = process.cwd();
-    const gpuUrl = `file://${path.join(cwd, 'index.html')}?z=${TRAPEZOID_ZOOM}&c=${TRAPEZOID_CENTER}&board=gpuzhuoran&grid=1&maxiter=3000&width=256&height=144&a=16:9&pixelratio=1`;
+    const gpuUrl = `file://${path.join(cwd, 'index.html')}?z=${TRAPEZOID_ZOOM}&c=${TRAPEZOID_CENTER}&board=gpuz&grid=1&maxiter=3000&width=256&height=144&a=16:9&pixelratio=1`;
 
     await page.goto(gpuUrl, { waitUntil: 'load' });
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 30000 });

@@ -147,7 +147,7 @@ async function main() {
     const page1 = await setupPage(browser);
     page1.setDefaultTimeout(120000);
     await page1.setViewport({ width: 160, height: 90 }); // 16:9 aspect, small for speed
-    const gpuzhuoranResult = await runBenchmark(page1, 'gpuzhuoran');
+    const gpuzResult = await runBenchmark(page1, 'gpuz');
     await page1.close();
 
     // Small pause between tests
@@ -164,11 +164,11 @@ async function main() {
     console.log('\n' + '='.repeat(60));
     console.log('RESULTS SUMMARY');
     console.log('='.repeat(60));
-    console.log(`GpuZhuoranBoard: ${(gpuzhuoranResult.elapsed / 1000).toFixed(2)}s (${gpuzhuoranResult.maxIter} iters)`);
+    console.log(`GpuZhuoranBoard: ${(gpuzResult.elapsed / 1000).toFixed(2)}s (${gpuzResult.maxIter} iters)`);
     console.log(`AdaptiveGpuBoard: ${(adaptiveResult.elapsed / 1000).toFixed(2)}s (${adaptiveResult.maxIter} iters)`);
 
-    if (!gpuzhuoranResult.timeout && !adaptiveResult.timeout) {
-      const ratio = adaptiveResult.elapsed / gpuzhuoranResult.elapsed;
+    if (!gpuzResult.timeout && !adaptiveResult.timeout) {
+      const ratio = adaptiveResult.elapsed / gpuzResult.elapsed;
       if (ratio > 1) {
         console.log(`\n→ GpuZhuoranBoard is ${ratio.toFixed(2)}x faster`);
       } else {

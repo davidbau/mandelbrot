@@ -26,7 +26,7 @@ describe('Exponent 3 - AdaptiveGpuBoard vs GpuZhuoranBoard', () => {
     const page1 = await setupPage(browser);
     page1.setDefaultTimeout(TEST_TIMEOUT);
     await page1.setViewport({ width: 160, height: 90 });
-    await page1.goto(`file://${htmlPath}?${params}&board=gpuzhuoran`, { waitUntil: 'load' });
+    await page1.goto(`file://${htmlPath}?${params}&board=gpuz`, { waitUntil: 'load' });
     await page1.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
     await page1.waitForFunction(() => {
       const view = window.explorer?.grid?.views?.[0];

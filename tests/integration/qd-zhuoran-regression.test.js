@@ -27,9 +27,9 @@ describe('GpuZhuoran Regression Tests', () => {
     const page = await setupPage(browser, {}, TEST_TIMEOUT);
     try {
       // Navigate to the specific deep zoom location that was broken
-      // Use gpuzhuoran (not octzhuoran) - this is the board type that had the bug
+      // Use gpuz (not qdz) - this is the board type that had the bug
       const url = 'file://' + path.join(process.cwd(), 'index.html') +
-        '?z=1.00e+20&c=-1.72413124442322315641234+0.00000000000000000000100i&board=gpuzhuoran&grid=1&width=48&height=27';
+        '?z=1.00e+20&c=-1.72413124442322315641234+0.00000000000000000000100i&board=gpuz&grid=1&width=48&height=27';
 
       await page.goto(url, { waitUntil: 'load' });
       await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
@@ -89,9 +89,9 @@ describe('GpuZhuoran Regression Tests', () => {
     const page = await setupPage(browser, {}, TEST_TIMEOUT);
     try {
       // Test that computation completes successfully at z=1e20
-      // Use gpuzhuoran (not octzhuoran) - this is the board type that had the bug
+      // Use gpuz (not qdz) - this is the board type that had the bug
       const url = 'file://' + path.join(process.cwd(), 'index.html') +
-        '?z=1.00e+20&c=-1.72413124442322315641234+0.00000000000000000000100i&board=gpuzhuoran&grid=1&width=48&height=27&maxiter=500';
+        '?z=1.00e+20&c=-1.72413124442322315641234+0.00000000000000000000100i&board=gpuz&grid=1&width=48&height=27&maxiter=500';
 
       await page.goto(url, { waitUntil: 'load' });
       await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });

@@ -1,7 +1,7 @@
 /**
  * Board divergence comparison tests
  *
- * Tests that different board implementations (gpuzhuoran, octzhuoran)
+ * Tests that different board implementations (gpuz, qdz)
  * produce correct results at various zoom levels.
  *
  * Test coordinate (full precision):
@@ -71,24 +71,24 @@ describe('Board Divergence Comparison Tests', () => {
     });
   }
 
-  test('gpuzhuoran shows diverse iterations at z=1e20', async () => {
-    const result = await getBoardIterations('gpuzhuoran', '1e20');
+  test('gpuz shows diverse iterations at z=1e20', async () => {
+    const result = await getBoardIterations('gpuz', '1e20');
     expect(result.uniqueIters).toBeGreaterThan(10);
   }, TEST_TIMEOUT);
 
-  test('octzhuoran shows diverse iterations at z=1e20', async () => {
-    const result = await getBoardIterations('octzhuoran', '1e20');
+  test('qdz shows diverse iterations at z=1e20', async () => {
+    const result = await getBoardIterations('qdz', '1e20');
     expect(result.uniqueIters).toBeGreaterThan(10);
   }, TEST_TIMEOUT);
 
-  test('octzhuoran shows diverse iterations at z=1e35', async () => {
-    const result = await getBoardIterations('octzhuoran', '1e35');
+  test('qdz shows diverse iterations at z=1e35', async () => {
+    const result = await getBoardIterations('qdz', '1e35');
     expect(result.uniqueIters).toBeGreaterThan(10);
   }, TEST_TIMEOUT);
 
-  test('gpuzhuoran and octzhuoran produce similar results at z=1e20', async () => {
-    const gpuResult = await getBoardIterations('gpuzhuoran', '1e20');
-    const octResult = await getBoardIterations('octzhuoran', '1e20');
+  test('gpuz and qdz produce similar results at z=1e20', async () => {
+    const gpuResult = await getBoardIterations('gpuz', '1e20');
+    const octResult = await getBoardIterations('qdz', '1e20');
 
     // Compare sample pixels
     let matches = 0;
