@@ -20,18 +20,19 @@ Keyboard controls added in 2022, and double-double precision perturbations,
 additional exponents, movie generation and web workers added in 2024.
 Claude code added GPU support in 2025.
 
-URL options: use ?grid=3           to select 3-column view,
-                    &c=-0.14-0.65i to set center (can chain: c=re+im,re+im,...),
-                    &z=25          to set zoom (1.0=default, higher=more zoomed),
-                    &a=16:9        to set aspect ratio (default is 1:1 square),
-             &exponent=3           to set exponent (default is 2),
-                &theme=warm        to set color theme (warm/neon/iceblue/tiedye/gray),
-                  &unk=000         to set unknown pixel color (hex color or CSS color name),
-                    &h=1,2         to hide views by index (comma-separated),
-           &pixelratio=2           to set subpixel resolution,
-                 &lang=es          to set language (en/es/zh/zh-tw/ar/id/pt/fr/ja/ru/de),
-                  &gpu=0           to disable GPU acceleration,
-                &board=gpuz        to force algorithm (cpu/gpu/gpuz/ddz/qdz/pert/qdpert/adaptive/qdcpu).
+URL options: ?grid=3           to select 3-column view,
+                &c=-0.14-0.65i to set center (can chain: c=re+im,re+im,...),
+                &z=25          zoom (1.0=default, higher=more zoomed),
+                &a=16:9        aspect ratio (default is 1:1 square),
+         &exponent=3           exponent (default is 2),
+            &theme=warm        color theme (warm/neon/iceblue/tiedye/gray),
+              &unk=000         unknown pixel color (hex or CSS color name),
+                &h=1,2         hide views by index (comma-separated),
+       &pixelratio=2           subpixel resolution,
+             &lang=es          language (en/es/zh/zh-tw/ar/id/pt/fr/ja/ru/de),
+              &gpu=0           disable GPU acceleration,
+            &board=gpuz        force algorithm (cpu/gpu/gpuz/ddz/qdz/
+                               pert/qdpert/adaptive/qdcpu).
 
 Implementation notes.  To minimize computation, the code identifies both
 points that diverge and points that converge.  It uses a method that can
@@ -99,7 +100,8 @@ body.starting div#b_0:after { display: flex; position: absolute;
 #fullscreen-button:hover { opacity: 1; }
 :fullscreen #fullscreen-button { display: none !important; }
 /* Fullscreen mode adjustments */
-:fullscreen { margin: 0; padding: 0; scroll-snap-type: y proximity; overflow-y: scroll; }
+:fullscreen { margin: 0; padding: 0; scroll-snap-type: y proximity;
+  overflow-y: scroll; }
 :fullscreen body { margin: 0; padding: 0; }
 :fullscreen #grid { margin: 0; padding: 0; }
 :fullscreen #grid > div {
@@ -145,8 +147,8 @@ of your zoom path.</span>
 
 <p style="margin-top:6px;margin-bottom:6px">
 <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> is iterated for each
-<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">complex number</a>
-<em>c</em>.  Colors show
+<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number"
+ >complex number</a> <em>c</em>.  Colors show
 <a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">iterations</a>
 to divergence; black points
 <a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">converge or cycle</a>.
@@ -154,7 +156,8 @@ to divergence; black points
 
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Yellow dots show
-<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbits</a></b>.
+<a target="mbhelp"
+ href="https://plus.maths.org/content/unveiling-mandelbrot-set">orbits</a></b>.
 Red dots show limit cycles.
 </p>
 
@@ -181,8 +184,8 @@ Once you have crafted an interesting path that shows the detail you want, you ca
 <a class="moviemode">create and download your own Mandelbrot deep zoom video</a>
 or bookmark your URL to save and share your exploration.
 To create high-quality images and videos, this viewer computes subpixels with a
-<span class="pixelratio">2</span>:1 ratio<span mobile="">, and that can be increased
-to create more precise displays</span>.
+<span class="pixelratio">2</span>:1 ratio<span mobile="">, and that can be
+increased to create more precise displays</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -331,7 +334,7 @@ class MandelbrotExplorer {
     }
 
     // Convert zoom/size from URL to absolute size
-    // zoomFromUrl: {mantissa, exponent} from z= parameter, or simple number from s= parameter
+    // zoomFromUrl: {mantissa, exponent} from z= parameter
     let actualSize = null;
     if (this.config.zoomFromUrl !== undefined) {
       const zoom = this.config.zoomFromUrl;
@@ -2581,9 +2584,12 @@ class URLHandler {
       return;
     }
 
-    const newUrl = this.currenturl();
-    const newCenters = this.extractCenters(newUrl);
-    const newHidden = this.extractHidden(newUrl);
+    const newSearch = this.currenturl();
+    const newCenters = this.extractCenters(newSearch);
+    const newHidden = this.extractHidden(newSearch);
+    var newUrl = new URL(window.location);
+    newUrl.search = newSearch;
+    console.log(newUrl);
 
     // Use pushState if centers were removed/replaced OR hidden views changed
     const centersLost = this.lastCenters !== null &&
@@ -2671,7 +2677,7 @@ class URLHandler {
       {
         name: 'z',
         parse: (val, configUpdates) => {
-          // URLSearchParams decodes '+' as space, convert back for scientific notation
+          // URLSearchParams decodes '+' as space, convert back for, e.g., 3e+20 
           val = val.replace(/ /g, '+');
           // Parse scientific notation to handle extreme zoom values (e.g., 1e400)
           const { mantissa, exponent } = this.parseScientificNotation(val);
@@ -2679,21 +2685,6 @@ class URLHandler {
           // aspect-ratio-adjusted firstsize
           // which isn't available until after initSizes() is called
           this.config.zoomFromUrl = { mantissa, exponent };
-        }
-      },
-      {
-        name: 's',
-        parse: (val, configUpdates) => {
-          // URLSearchParams decodes '+' as space, convert back for scientific notation
-          val = val.replace(/ /g, '+');
-          // Legacy parameter: s is the actual size in complex plane
-          // Convert to zoom factor: z = 3.0 / s
-          // This uses base size 3.0 so that actual size becomes (firstsize * s / 3.0)
-          // which properly applies aspect ratio adjustment (firstsize >= 3.0 for 16:9)
-          const size = parseFloat(val);
-          if (isFinite(size) && size > 0) {
-            this.config.zoomFromUrl = 3.0 / size;
-          }
         }
       },
       {
@@ -2757,15 +2748,20 @@ class URLHandler {
       c = c.replace(/ /g, '+');
       for (const coords of c.split(',')) {
         const m = coords.match(
-          /([-+]?\d?\.?\d+(?:e[-+]?\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]?\d+)?)i)?/);
-        // Store coordinates; size will be calculated later after relativeScale is applied
-        // Use decimalToQD for full 60+ digit precision (qdParse only gives ~31 digits)
+  /([-+]?\d*\.?\d+(?:e[-+]?\d+)?\b)?(?:([-+]?\d*\.?\d+(?:e[-+]?\d+)?)i|([-+]?i))?$/
+        );
+        // Store coordinates; size will be calculated later.
+        // Use decimalToQD for full 60+ digit precision.
         startstate.sizes.push([
           null,  // Placeholder - will be filled in after initSizes()
-          m && m[1] ? decimalToQD(m[1]) : (startstate.sizes.length > 0 ?
-              startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstrQD),
-          m && m[2] ? decimalToQD(m[2]) : (startstate.sizes.length > 0 ?
-              startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstjQD)
+          m ? decimalToQD(m[1] || '0')
+            : (startstate.sizes.length > 0 ?
+              startstate.sizes[startstate.sizes.length - 1][1] :
+              this.config.firstrQD),
+          m ? decimalToQD(m[2] || m[3]?.replace('i', '1') || '0')
+            : (startstate.sizes.length > 0 ?
+              startstate.sizes[startstate.sizes.length - 1][2] :
+              this.config.firstjQD)
         ]);
       }
     }
@@ -2822,24 +2818,32 @@ class URLHandler {
     }
 
     const url =
-           (Math.abs(zoomFactor - 1.0) > 0.01 ? `&z=${formatZoom(zoomFactor)}` : '') +
-           aspectRatioParam +
-           (this.config.exponent !== 2 ? `&exponent=${this.config.exponent}` : '') +
-           (!this.config.enableGPU ? '&gpu=0' : '') +
-           (this.config.forceBoard ? `&board=${this.config.forceBoard}` : '') +
-           (compactc.length ? `&c=${compactc}` : '') +
-           (this.config.gridcols !== Math.min(2, Math.ceil(this.config.vw / 501))
-             ? `&grid=${this.config.gridcols}` : '') +
-           (state.hidden.length ? `&h=${state.hidden}` : '') +
-           (this.config.theme !== 'warm' ? `&theme=${this.config.theme}` : '') +
-           (this.config.unknowncolor !== '#000' ? `&unk=${encodeURIComponent(
-             /^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$/.test(this.config.unknowncolor)
-               ? this.config.unknowncolor.substring(1)
-               : this.config.unknowncolor
-           )}` : '') +
-           (this.config.pixelRatio !== 2 ? `&pixelratio=${this.config.pixelRatio}` : '') +
-           (LANG_FROM_URL ? `&lang=${SELECTED_LANG}` : '');
-    return `?${url.replace('&', '')}`;
+        (Math.abs(zoomFactor - 1.0) > 0.01
+            ? `&z=${formatZoom(zoomFactor)}` : '') +
+        aspectRatioParam +
+        (this.config.exponent !== 2
+            ? `&exponent=${this.config.exponent}` : '') +
+        (!this.config.enableGPU
+            ? '&gpu=0' : '') +
+        (this.config.forceBoard
+            ? `&board=${this.config.forceBoard}` : '') +
+        (compactc.length
+            ? `&c=${compactc}` : '') +
+        (this.config.gridcols !== Math.min(2, Math.ceil(this.config.vw / 501))
+            ? `&grid=${this.config.gridcols}` : '') +
+        (state.hidden.length
+            ? `&h=${state.hidden}` : '') +
+        (this.config.theme !== 'warm'
+            ? `&theme=${this.config.theme}` : '') +
+        (this.config.unknowncolor !== '#000'
+            ? `&unk=${encodeURIComponent(
+              /^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$/.test(this.config.unknowncolor)
+              ? this.config.unknowncolor.substring(1)
+              : this.config.unknowncolor)}` : '') +
+        (this.config.pixelRatio !== 2
+            ? `&pixelratio=${this.config.pixelRatio}` : '') +
+        (LANG_FROM_URL ? `&lang=${SELECTED_LANG}` : '');
+    return url.replace('&', '?');
   }
 }
 
@@ -4283,10 +4287,10 @@ function centersWereLost(oldCenters, newCenters) {
 function formatZoom(z) {
   let s = z.toExponential(2);
   // Strip trailing zeros from mantissa and unnecessary + in exponent
-  return s.replace(/\.?0+e/, 'e').replace('e+', 'e');
+  return s.replace(/\.?0+e/, 'e').replace('e+', 'e').replace('e0$', '');
 }
 
-// Format scale for human-readable display (e.g., "2.5x", "100x", or scientific for large)
+// Format scale for human-readable display (e.g., "2.5x", "100x", "5.25e+25")
 function formatScale(scale) {
   if (scale < 10) {
     return +scale.toFixed(1) + 'x';
@@ -4338,15 +4342,18 @@ function formatcomplex(k, re, im) {
   let digits = Math.max(0, -Math.floor(Math.log10(pix)));
 
   // Use BigInt-based conversion for exact decimal output
-  const reQD = Array.isArray(re) ? re : [re, 0, 0, 0];
-  const imQD = Array.isArray(im) ? im : [im, 0, 0, 0];
+  const reQD = toQD(re);
+  const imQD = toQD(im);
 
   let rd = qdToDecimalString(reQD, digits);
   let id = qdToDecimalString(imQD, digits);
 
   let rs = reQD[0] < 0.0 ? '-' : '+';
   let is = imQD[0] < 0.0 ? '-' : '+';
-  return rs + rd + is + id + 'i';
+
+  // Omit zero terms from complex number
+  return ((rs + rd + is + id + 'i').
+      replace(/\+0i$/, '').replace(/^\+0(?=[-+])/, '').replace(/^\+/, ''));
 }
 
 function formatLargeInt(i) {
