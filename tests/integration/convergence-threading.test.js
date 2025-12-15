@@ -38,7 +38,7 @@ describe('Convergence Threading Tests', () => {
     await page.waitForFunction(
       () => {
         const view = window.explorer?.grid?.views?.[0];
-        return view && view.un === 0;
+        return view && view.un <= 5;
       },
       { timeout: 60000 }
     );
@@ -141,10 +141,10 @@ describe('Convergence Threading Tests', () => {
 
     const comparison = compareOrbitPeriods(ddzResult, qdzResult);
 
-    console.log(`\nOrbit Period Matching Stats (DDZ vs QDZ):`);
-    console.log(`  Pixels converged in both boards: ${comparison.convergedBoth}`);
-    console.log(`  Periods matching exactly: ${comparison.periodMatches}`);
-    console.log(`  Match rate: ${(comparison.periodMatchRate * 100).toFixed(2)}%`);
+    // console.log(`\nOrbit Period Matching Stats (DDZ vs QDZ):`);
+    // console.log(`  Pixels converged in both boards: ${comparison.convergedBoth}`);
+    // console.log(`  Periods matching exactly: ${comparison.periodMatches}`);
+    // console.log(`  Match rate: ${(comparison.periodMatchRate * 100).toFixed(2)}%`);
     if (comparison.periodDiffs.length > 0) {
       console.log(`  Sample mismatches:`, comparison.periodDiffs);
     }

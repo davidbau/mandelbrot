@@ -4470,14 +4470,6 @@ class Board {
     this.cc = [];
     this.zz = [];
     this.bb = [];
-    // Track if bb checkpoint is valid
-    this.hasCheckpoint = new Array(this.config.dimsArea).fill(false);
-    // Iteration when checkpoint was saved
-    this.checkpointIter = new Array(this.config.dimsArea).fill(0);
-    // Per-pixel thread tracking for convergence detection
-    this.currentThreadIter = new Array(this.config.dimsArea).fill(0);
-    this.threadDeltaRe = new Array(this.config.dimsArea).fill(0);
-    this.threadDeltaIm = new Array(this.config.dimsArea).fill(0);
   }
 
   // Getter properties that derive from sizesQD (the authoritative source)
@@ -5875,27 +5867,38 @@ class ReferenceOrbitThreading {
 class DDZhuoranBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
+
+    // Per-pixel thread tracking for convergence detection
+    this.currentThreadIter = new Array(this.config.dimsArea).fill(0);
+    this.threadDeltaRe = new Array(this.config.dimsArea).fill(0);
+    this.threadDeltaIm = new Array(this.config.dimsArea).fill(0);
+
     // Reference orbit data (DD precision)
     this.maxRefIterations = 10000;  // Will grow dynamically
     this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low] for each iteration
     this.refOrbitEscaped = false;
     this.refIterations = 0;  // Current length of reference orbit
+
     // Reference point (center of image) in DD precision
     const refRe = qdToDD(this.re);
     const refIm = qdToDD(this.im);
     this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
+
     // Per-pixel data (double precision)
     this.dc = [];  // Delta c from reference point [real, imag] pairs
     this.dz = [];  // Current perturbation delta [real, imag] pairs
     this.refIter = [];  // Which iteration of reference each pixel is following
     this.pixelIndexes = [];  // Active pixel indices
     this.maxRefIter = 1;  // Track maximum refIter to avoid scanning all pixels
+
     // Working array for DD precision operations
     this.tt = new Array(16);
+
     // Initialize reference orbit with z = 0 and z = c
     this.refOrbit.push([0, 0, 0, 0]);  // Iteration 0: z = 0
     this.refOrbit.push(this.refC.slice());  // Iteration 1: z = 0^2 + c = c
     this.refIterations = 1;  // We have computed 1 iteration beyond z=0
+
     // Threading for robust cycle detection
     // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
     // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
@@ -6093,10 +6096,8 @@ class DDZhuoranBoard extends Board {
     this.refOrbit.push(newZ);
     this.refIterations++;
 
-    // Build thread-following map after the orbit settles (first 2000 iterations)
-    if (this.refIterations >= 2000) {
-      this.threading.addPoint(this.refIterations);
-    }
+    // Build thread-following map
+    this.threading.addPoint(this.refIterations);
 
     // Grow array if needed
     if (this.refIterations >= this.maxRefIterations) {
@@ -6124,35 +6125,24 @@ class DDZhuoranBoard extends Board {
       }
     }
 
-    // Ensure reference orbit exists for this iteration
+    // Ensure reference orbit exists
     if (refIter >= this.refOrbit.length) {
-      // Need more reference orbit iterations
       if (this.refOrbitEscaped) {
-        // Reference has escaped, can't extend further
-        // Imagina's approach: Rebase to beginning of reference orbit
-        // This allows continued use of perturbation theory
-        // Get current z value
+        // Rebase to beginning
         const lastRef = this.refOrbit[this.refOrbit.length - 1];
         const lastRefR = lastRef[0] + lastRef[1];
         const lastRefI = lastRef[2] + lastRef[3];
         const dr = this.dz[index2];
         const di = this.dz[index2 + 1];
-        // Set dz to current total position (Imagina's VecResetAndSync)
         this.dz[index2] = lastRefR + dr;
         this.dz[index2 + 1] = lastRefI + di;
-        // Restart from iteration 0 (where z_ref = 0)
         this.refIter[index] = 0;
         refIter = 0;
-        // Continue with perturbation iteration from the top
-        // (don't return, fall through to normal iteration code below)
       } else {
-        // This shouldn't happen with proper reference orbit extension
-        console.warn(
-          `Pixel ${index} needs refIter ${refIter} but orbit length ` +
-          `is ${this.refOrbit.length}`);
-        return 1;  // Mark as diverged only if unexpected
+        return 1;  // Mark as diverged if unexpected
       }
     }
+
     // Check if we need to rebase (Zhuoran's key innovation)
     if (this.shouldRebase(index)) {
       // Imagina's rebasing: set dz = z_total and restart from refIter = 0
@@ -6168,7 +6158,7 @@ class DDZhuoranBoard extends Board {
       this.refIter[index] = 0;
       refIter = 0;
 
-      // Keep the checkpoint unchanged; difference-based comparison works across rebases
+      // Checkpoint unchanged; difference-based comparison works across rebases
     }
     // Get reference orbit value for current iteration
     const ref = this.refOrbit[refIter];
@@ -6228,8 +6218,9 @@ class DDZhuoranBoard extends Board {
     // Update dz first before checking divergence
     this.dz[index2] = newDr;
     this.dz[index2 + 1] = newDi;
-    // Note: We don't check escape here after iteration. Instead, the next iteration's
-    // pre-check will detect it. This matches CpuBoard's behavior and keeps nn counting simple.
+    // Note: We don't check escape here after iteration.
+    // Instead, the next iteration's pre-check will detect it.
+    //  This matches CpuBoard's behavior and keeps nn counting simple.
 
     // CONVERGENCE DETECTION: fibonacciPeriod returns 1 at Fibonacci checkpoints
     // Step 1: Update checkpoint at fibonacciPeriod intervals
@@ -6238,8 +6229,6 @@ class DDZhuoranBoard extends Board {
       // Store dz (perturbation) and which reference iteration we're at
       this.bb[index2] = dr;  // dz real at checkpoint (BEFORE iteration)
       this.bb[index2 + 1] = di;  // dz imag at checkpoint
-      this.hasCheckpoint[index] = true;
-      this.checkpointIter[index] = refIter;  // Which reference iteration (not this.it!)
       this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
       // Reset thread tracking for this pixel
       this.currentThreadIter[index] = refIter;
@@ -6247,13 +6236,11 @@ class DDZhuoranBoard extends Board {
       this.threadDeltaIm[index] = 0;
     }
     // Step 2: Check convergence EVERY iteration (if we have a checkpoint and didn't just update it)
-    if (this.hasCheckpoint[index] && !justUpdatedCheckpoint) {
+    else {
       // Incrementally advance threads when thread.next == refIter
       let currentThread = this.currentThreadIter[index];
-      while (currentThread < this.refOrbit.length) {
-        const thread = this.threading.getThread(currentThread);
-        if (!thread || thread.next < 0 || thread.next !== refIter) break;
-
+      const thread = this.threading.getThread(currentThread);
+      if (thread.next == refIter) {
         // Advance thread: accumulate delta and move to next
         this.threadDeltaRe[index] += thread.deltaRe;
         this.threadDeltaIm[index] += thread.deltaIm;
@@ -6342,6 +6329,11 @@ class DDZhuoranBoard extends Board {
 class QDZhuoranBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
+
+    // Per-pixel thread tracking for convergence detection
+    this.currentThreadIter = new Array(this.config.dimsArea).fill(0);
+    this.threadDeltaRe = new Array(this.config.dimsArea).fill(0);
+    this.threadDeltaIm = new Array(this.config.dimsArea).fill(0);
 
     // Reference orbit management
     this.maxRefIterations = 10000;  // Will grow dynamically
@@ -6476,10 +6468,8 @@ class QDZhuoranBoard extends Board {
                           nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
     this.refIterations++;
 
-    // Build thread-following map after the orbit settles (first 2000 iterations)
-    if (this.refIterations >= 2000) {
-      this.threading.addPoint(this.refIterations);
-    }
+    // Build thread-following map
+    this.threading.addPoint(this.refIterations);
 
     // Grow array if needed
     if (this.refIterations >= this.maxRefIterations) {
@@ -6603,9 +6593,12 @@ class QDZhuoranBoard extends Board {
     const refR = ref[0] + ref[1] + ref[2] + ref[3];
     const refI = ref[4] + ref[5] + ref[6] + ref[7];
 
-    // Perturbation iteration using Horner's method (double precision)
+    // Perturbation iteration using binomial expansion (Horner's method)
+    // (z_ref+dz)^n - z_ref^n = sum(k=1 to n) C(n,k) * z_ref^(n-k) * dz^k
     const dr = this.dz[index2];
     const di = this.dz[index2 + 1];
+    // Save the OLD z value (before this iteration) for checkpoint timing
+    // This matches CpuBoard's behavior where bb is set BEFORE computing the new z
     const oldZR = refR + dr;
     const oldZI = refI + di;
 
@@ -6648,6 +6641,9 @@ class QDZhuoranBoard extends Board {
     // Update dz first before checking divergence
     this.dz[index2] = newDr;
     this.dz[index2 + 1] = newDi;
+    // Note: We don't check escape here after iteration.
+    // Instead, the next iteration's pre-check will detect it.
+    //  This matches CpuBoard's behavior and keeps nn counting simple.
 
     // CONVERGENCE DETECTION: fibonacciPeriod returns 1 at Fibonacci checkpoints
     // Step 1: Update checkpoint at fibonacciPeriod intervals
@@ -6656,8 +6652,6 @@ class QDZhuoranBoard extends Board {
       // Store dz (perturbation) and which reference iteration we're at
       this.bb[index2] = dr;  // dz real at checkpoint (BEFORE iteration)
       this.bb[index2 + 1] = di;  // dz imag at checkpoint
-      this.hasCheckpoint[index] = true;
-      this.checkpointIter[index] = refIter;  // Which reference iteration (not this.it!)
       this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
       // Reset thread tracking for this pixel
       this.currentThreadIter[index] = refIter;
@@ -6665,13 +6659,11 @@ class QDZhuoranBoard extends Board {
       this.threadDeltaIm[index] = 0;
     }
     // Step 2: Check convergence EVERY iteration (if we have a checkpoint and didn't just update it)
-    if (this.hasCheckpoint[index] && !justUpdatedCheckpoint) {
+    else {
       // Incrementally advance threads when thread.next == refIter
       let currentThread = this.currentThreadIter[index];
-      while (currentThread < this.qdRefOrbit.length) {
-        const thread = this.threading.getThread(currentThread);
-        if (!thread || thread.next < 0 || thread.next !== refIter) break;
-
+      const thread = this.threading.getThread(currentThread);
+      if (thread.next == refIter) {
         // Advance thread: accumulate delta and move to next
         this.threadDeltaRe[index] += thread.deltaRe;
         this.threadDeltaIm[index] += thread.deltaIm;
@@ -6701,9 +6693,9 @@ class QDZhuoranBoard extends Board {
         }
       }
     }
-
-    // Update reference iteration counter
+    // Update reference iteration counter (dz was already updated above)
     this.refIter[index]++;
+    // Update cached maximum to avoid scanning all pixels
     if (this.refIter[index] > this.maxRefIter) {
       this.maxRefIter = this.refIter[index];
     }
@@ -6945,26 +6937,6 @@ class GpuBaseBoard extends Board {
       GpuBaseBoard.cachedMaxBufferSize = GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER;
       return GpuBaseBoard.cachedMaxBufferSize;
     }
-  }
-
-  static isSafeDims(dimsWidth, dimsHeight, bytesPerPixel = 16,
-                    maxBufferSize = GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER) {
-    // Check WebGPU buffer size limit (workgroup limit handled by 2D dispatch)
-    const dimsArea = dimsWidth * dimsHeight;
-    const largestBufferSize = dimsArea * bytesPerPixel;
-    return largestBufferSize <= maxBufferSize;
-  }
-
-  static getBoardClass(pixelSize) {
-    // Select board type based on zoom level and float32 precision limits
-    // Float32 has ~7 decimal digits, so direct iteration works to ~1e-7 pixel size
-    // Shallow zooms (z < ~1e7): GpuBoard with simple float32 iteration
-    // Medium zooms (z ~1e7 to ~1e30): GpuZhuoranBoard with quad-precision reference
-    // Deep zooms (z > ~1e30): AdaptiveGpuBoard with QD-precision reference
-    //   orbit and adaptive per-pixel scaling for correct escape detection
-    if (pixelSize > 1e-7) return GpuBoard;
-    if (pixelSize > 1e-30) return GpuZhuoranBoard;
-    return AdaptiveGpuBoard;
   }
 
   // Abstract methods - subclasses must implement these
@@ -9586,6 +9558,61 @@ function workerLog(message) {
   });
 }
 
+const forcedBoardTypes = {
+    'cpu': CpuBoard,
+    'ddz': DDZhuoranBoard,
+    'qdz': QDZhuoranBoard,
+    'pert': PerturbationBoard,
+    'qdpert': QDPerturbationBoard,
+    'gpu': GpuBoard,
+    'gpuz': GpuZhuoranBoard,
+    'adaptive': AdaptiveGpuBoard,
+    'qdcpu': QDCpuBoard
+};
+
+function selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard) {
+  if (forceBoard) {
+    if (forceBoard in forcedBoardTypes) {
+      return forcedBoardTypes[forceBoard];
+    } else {
+      throw new Error(`Unknown board type: ${forcedBoardType}.` +
+        ` Valid types: ${Object.keys(forcedBoardTypes).join(', ')}`);
+    }
+  }
+
+  // First, try to select a GPU board.
+  if (gpuMaxBufferSize) {
+    // Select board type based on zoom level and float32 precision limits
+    // Float32 has ~7 decimal digits, so direct iteration works to ~1e-7 pixel size
+    // Shallow zooms (z < ~1e7): GpuBoard with simple float32 iteration
+    // Medium zooms (z ~1e7 to ~1e30): GpuZhuoranBoard with quad-precision reference
+    // Deep zooms (z > ~1e30): AdaptiveGpuBoard with QD-precision reference
+    //   orbit and adaptive per-pixel scaling for correct escape detection
+    const GpuBoardClass = (
+        (pixelSize > 1e-7) ? GpuBoard :
+        (pixelSize > 1e-30) ? GpuZhuoranBoard :
+        AdaptiveGpuBoard);
+    const largestBufferSize = dimsArea * GpuBoardClass.BYTES_PER_PIXEL;
+    if (largestBufferSize <= gpuMaxBufferSize) {
+      return GpuBoardClass;
+    } else {
+      const bufferSizeMB = (largestBufferSize / (1024*1024)).toFixed(0);
+      const limitMB = (gpuMaxBufferSize / (1024*1024)).toFixed(0);
+      console.log(
+        `${GpuBoardClass}: dimsArea=${dimsArea} too large for GPU ` +
+            `(buffer size ${bufferSizeMB} MB > ${limitMB} MB), using CPU`);
+    }
+  }
+
+  // If GPU is not available, select a CPU board
+  const CpuBoardClass = (
+      (pixelSize > 1e-15) ? CpuBoard :
+      (pixelSize > 1e-30) ? PerturbationBoard :
+      QDZhuoranBoard);
+  return CpuBoardClass;
+}
+
+
 const workerName = self.name;
 const boards = new Map();
 let hiddenBoards = new Set();
@@ -9611,140 +9638,25 @@ self.onmessage = async function(e) {
       }
 
       // Explicit board selection via board= parameter
-      const forcedBoardType = data.config.forceBoard;
+      const forceBoard = data.config.forceBoard;
       const size = data.size;
-      if (!isFinite(size)) {
-        console.warn(`Board ${data.k}: non-finite size`, size);
-      }
-      let board;
-      const reArg = data.reQD;
-      const imArg = data.imQD;
+      const dimsArea = data.config.dimsArea;
       const pixelSize = size / data.config.dimsWidth;
-      const GpuBoardClass = GpuBaseBoard.getBoardClass(pixelSize);
-      const bytesPerPixel = GpuBoardClass.BYTES_PER_PIXEL;
-      const gpuSafe = GpuBaseBoard.isSafeDims(
-        data.config.dimsWidth, data.config.dimsHeight,
-        bytesPerPixel,
-        gpuMaxBufferSize || GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER
-      );
+      const BoardClass = selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard);
 
-      // Explicit board type selection via board= parameter
-      if (forcedBoardType) {
-        console.log(`Board ${data.k}: Requested board type: ${forcedBoardType}`);
-
-        // Use switch to avoid referencing undefined classes
-        switch (forcedBoardType) {
-          case 'cpu':
-            board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
-            break;
-          case 'ddz':
-            board = new DDZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
-            break;
-          case 'qdz':
-            board = new QDZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
-            break;
-          case 'pert':
-            board = new PerturbationBoard(
-              data.k, size, reArg, imArg, data.config, data.id
-            );
-            break;
-          case 'qdpert':
-            board = new QDPerturbationBoard(
-              data.k, size, reArg, imArg, data.config, data.id
-            );
-            break;
-          case 'gpu':
-            if (webGPUAvailable && gpuSafe) {
-              board = new GpuBoard(data.k, size, reArg, imArg, data.config, data.id);
-            } else {
-              console.warn('GpuBoard requested but not available, falling back to CpuBoard');
-              board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
-            }
-            break;
-          case 'gpuz':
-            if (webGPUAvailable && gpuSafe) {
-              board = new GpuZhuoranBoard(
-                data.k, size, reArg, imArg, data.config, data.id
-              );
-            } else {
-              console.warn(
-                'GpuZhuoranBoard requested but not available, falling back to DDZhuoranBoard'
-              );
-              board = new DDZhuoranBoard(
-                data.k, size, reArg, imArg, data.config, data.id
-              );
-            }
-            break;
-          case 'adaptive':
-            if (webGPUAvailable && gpuSafe) {
-              board = new AdaptiveGpuBoard(
-                data.k, size, reArg, imArg, data.config, data.id
-              );
-            } else {
-              console.warn(
-                'AdaptiveGpuBoard requested but not available, falling back to QDZhuoranBoard'
-              );
-              board = new QDZhuoranBoard(
-                data.k, size, reArg, imArg, data.config, data.id
-              );
-            }
-            break;
-          case 'qdcpu':
-            board = new QDCpuBoard(
-              data.k, size, reArg, imArg, data.config, data.id
-            );
-            break;
-          default:
-            throw new Error(`Unknown board type: ${forcedBoardType}. Valid types: cpu, ddz, qdz, pert, qdpert, gpu, gpuz, adaptive, qdcpu`);
-        }
-      } else if (enableGPU && webGPUAvailable && gpuSafe) {
-        // Two-tier strategy with WebGPU:
-        // - Shallow zooms: GpuBoard with simple float32 iteration
-        // - Deep zooms: GpuZhuoranBoard with DD precision reference + float32 perturbations
-        board = new GpuBoardClass(data.k, size, reArg, imArg, data.config, data.id);
-      } else {
-        if (enableGPU && webGPUAvailable && !gpuSafe) {
-          const dimsArea = data.config.dimsArea;
-          const bufferSizeMB = (dimsArea * bytesPerPixel / (1024*1024)).toFixed(0);
-          const limitMB = (
-            (gpuMaxBufferSize || GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER) / (1024*1024)
-          ).toFixed(0);
-          console.log(
-            `Board ${data.k}: dims=${data.config.dimsWidth}x${data.config.dimsHeight} ` +
-            `too large for GPU (buffer size ${bufferSizeMB} MB > ${limitMB} MB), using CPU`
-          );
-        }
-        // WebGPU disabled or unavailable - use CPU-based boards
-        // CpuBoard uses double precision (float64, ~15 digits), good to ~1e-15 pixel size
-        // PerturbationBoard uses DD precision reference for medium zooms
-        // QDZhuoranBoard uses QD precision (~212 bits) for deepest zooms
-        if (pixelSize > 1e-15) {
-          board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
-        } else if (pixelSize > 1e-30) {
-          board = new PerturbationBoard(data.k, size, reArg, imArg, data.config, data.id);
-        } else {
-          board = new QDZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
-        }
-      }
-
+      // Construct the board instance
+      let board = new BoardClass(data.k, size, data.reQD, data.imQD, data.config, data.id);
       boards.set(data.k, board);
 
       // Store QD-precision coordinates
       board.sizesQD = [size, data.reQD, data.imQD];
 
-      // Show coordinates - use full precision only for very deep zoom (pixelSize < 1e-45)
+      // Show coordinates
       let coordStr;
-      if (pixelSize < 1e-45) {
-        const digits = Math.ceil(-Math.log10(pixelSize)) + 3;
-        const re_str = qdToDecimalString(data.reQD, digits);
-        const im_str = qdToDecimalString(data.imQD, digits);
-        coordStr = `c=(${re_str}, ${im_str})`;
-      } else {
-        const re_val = qdToNumber(data.reQD);
-        const im_val = qdToNumber(data.imQD);
-        const precision = Math.max(3, Math.min(15, Math.ceil(-Math.log10(pixelSize)) + 2));
-        coordStr = `(${re_val.toExponential(precision)}, ${im_val.toExponential(precision)})`;
-      }
+      const digits = Math.ceil(-Math.log10(pixelSize)) + 3;
+      const re_str = qdToDecimalString(data.reQD, digits);
+      const im_str = qdToDecimalString(data.imQD, digits);
+      coordStr = `c=(${re_str}, ${im_str})`;
       console.log(
         `Board ${data.k}: ${board.constructor.name} @ ${coordStr}, ` +
         `pixel=${pixelSize.toExponential(3)}`
