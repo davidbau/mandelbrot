@@ -2639,7 +2639,7 @@ class URLHandler {
         parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
           const validTypes = [
-            'cpu', 'zhuoran', 'qdzhuoran', 'perturbation', 'gpu', 'gpuzhuoran',
+            'cpu', 'ddz', 'qdz', 'pert', 'qdpert', 'gpu', 'gpuz',
             'adaptive', 'qdcpu'
           ];
           if (validTypes.includes(boardType)) {
@@ -9658,14 +9658,19 @@ self.onmessage = async function(e) {
           case 'cpu':
             board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
             break;
-          case 'zhuoran':
+          case 'ddz':
             board = new DDZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
             break;
-          case 'qdzhuoran':
+          case 'qdz':
             board = new QDZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
             break;
-          case 'perturbation':
+          case 'pert':
             board = new PerturbationBoard(
+              data.k, size, reArg, imArg, data.config, data.id
+            );
+            break;
+          case 'qdpert':
+            board = new QDPerturbationBoard(
               data.k, size, reArg, imArg, data.config, data.id
             );
             break;
@@ -9677,7 +9682,7 @@ self.onmessage = async function(e) {
               board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
             }
             break;
-          case 'gpuzhuoran':
+          case 'gpuz':
             if (webGPUAvailable && gpuSafe) {
               board = new GpuZhuoranBoard(
                 data.k, size, reArg, imArg, data.config, data.id
