@@ -4031,7 +4031,8 @@ class Scheduler {
   }
 }
 
-// Convert QD complex (4 elements: [r0, r1, i0, i1]) to QD complex format (8 elements: 4 real, 4 imaginary)
+// Convert QD complex (4 elements: [r0, r1, i0, i1]) to
+// QD complex format (8 elements: 4 real, 4 imaginary)
 function qdcToQDComplex(qdc) {
   if (!qdc || qdc.length !== 4) return null;
   return [qdc[0], qdc[1], 0, 0, qdc[2], qdc[3], 0, 0];
@@ -7326,12 +7327,12 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const dimsArea = this.config.dimsArea;
 
     // Convert re/im to DD precision if needed
-    const re_qd = Array.isArray(re) ? re : toDD(re);
-    const im_qd = Array.isArray(im) ? im : toDD(im);
+    const re_dd = Array.isArray(re) ? re : toDD(re);
+    const im_dd = Array.isArray(im) ? im : toDD(im);
     // Convert size to scalar if it's a QD array (fixes NaN when size is array)
     const size_scalar = Array.isArray(size) ? size.reduce((a, b) => a + (b || 0), 0) : size;
-    const size_qd = toDD(size_scalar);
-    const sizeY_qd = toDD(size_scalar / this.config.aspectRatio);
+    const size_dd = toDD(size_scalar);
+    const sizeY_dd = toDD(size_scalar / this.config.aspectRatio);
 
     // Per-pixel data arrays
     this.dc = new Float32Array(dimsArea * 2);
@@ -7342,10 +7343,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // Which iteration of reference each pixel is following
 
     // Working arrays for DD precision arithmetic
-    const cr_qd = new Array(4);
-    const ci_qd = new Array(4);
-    const dcr_qd = new Array(4);
-    const dci_qd = new Array(4);
+    const cr_dd = new Array(4);
+    const ci_dd = new Array(4);
+    const dcr_dd = new Array(4);
+    const dci_dd = new Array(4);
     const temp = new Array(4);
 
     // Initialize all pixels as perturbations from the reference point
@@ -7353,30 +7354,30 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       // Use integer arithmetic to avoid float64 rounding: (dims/2 - y) / dims
       const yFrac = (dimsHeight / 2 - y) / dimsHeight;
 
-      // ci_qd = im_qd + yFrac * sizeY_qd (in DD precision)
-      AddMul(temp, 0, toDD(yFrac)[0], toDD(yFrac)[1], sizeY_qd[0], sizeY_qd[1]);
-      AddAdd(ci_qd, 0, im_qd[0], im_qd[1], temp[0], temp[1]);
+      // ci_dd = im_dd + yFrac * sizeY_dd (in DD precision)
+      AddMul(temp, 0, toDD(yFrac)[0], toDD(yFrac)[1], sizeY_dd[0], sizeY_dd[1]);
+      AddAdd(ci_dd, 0, im_dd[0], im_dd[1], temp[0], temp[1]);
 
-      // dci_qd = ci_qd - refC_imag
-      AddAdd(dci_qd, 0, ci_qd[0], ci_qd[1], -this.refC[2], -this.refC[3]);
+      // dci_dd = ci_dd - refC_imag
+      AddAdd(dci_dd, 0, ci_dd[0], ci_dd[1], -this.refC[2], -this.refC[3]);
 
       for (let x = 0; x < dimsWidth; x++) {
         // Use integer arithmetic to avoid float64 rounding: (x - dims/2) / dims
         const xFrac = (x - dimsWidth / 2) / dimsWidth;
 
-        // cr_qd = re_qd + xFrac * size_qd (in DD precision)
-        AddMul(temp, 0, toDD(xFrac)[0], toDD(xFrac)[1], size_qd[0], size_qd[1]);
-        AddAdd(cr_qd, 0, re_qd[0], re_qd[1], temp[0], temp[1]);
+        // cr_dd = re_dd + xFrac * size_dd (in DD precision)
+        AddMul(temp, 0, toDD(xFrac)[0], toDD(xFrac)[1], size_dd[0], size_dd[1]);
+        AddAdd(cr_dd, 0, re_dd[0], re_dd[1], temp[0], temp[1]);
 
-        // dcr_qd = cr_qd - refC_real
-        AddAdd(dcr_qd, 0, cr_qd[0], cr_qd[1], -this.refC[0], -this.refC[1]);
+        // dcr_dd = cr_dd - refC_real
+        AddAdd(dcr_dd, 0, cr_dd[0], cr_dd[1], -this.refC[0], -this.refC[1]);
 
         const index = y * dimsWidth + x;
         const index2 = index * 2;
 
         // Convert DD precision deltas to float32 (Math.fround simulates GPU precision)
-        this.dc[index2] = Math.fround(dcr_qd[0] + dcr_qd[1]);
-        this.dc[index2 + 1] = Math.fround(dci_qd[0] + dci_qd[1]);
+        this.dc[index2] = Math.fround(dcr_dd[0] + dcr_dd[1]);
+        this.dc[index2 + 1] = Math.fround(dci_dd[0] + dci_dd[1]);
 
         // Start with dz = dc (so z = c_ref + dc = c)
         this.dz[index2] = this.dc[index2];
@@ -8601,10 +8602,6 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
     // Mantissa factor: 2^(log2(pixelSize) - k) is in [1, 2)
     const mantissa = Math.pow(2, log2_pixelSize - this.initialScale);
-
-    // Convert re/im to DD precision if needed
-    const re_qd = Array.isArray(re) ? re : toDD(re);
-    const im_qd = Array.isArray(im) ? im : toDD(im);
 
     // Per-pixel data arrays
     this.dc = new Float32Array(dimsArea * 2);       // Delta c [real, imag] pairs
