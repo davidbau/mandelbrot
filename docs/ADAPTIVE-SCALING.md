@@ -177,7 +177,7 @@ The `adaptive-gpu-zhuoran.test.js` test compares AdaptiveGpuBoard against QDZhuo
 ```javascript
 // Compare GPU adaptive vs CPU QD at deep zoom
 const gpu = await runBoard("adaptive", testCase);
-const cpu = await runBoard("qdzhuoran", testCase);
+const cpu = await runBoard("qdz", testCase);
 const matchRate = compareIterations(gpu.nn, cpu.nn);
 expect(matchRate).toBeGreaterThan(0.9);  // >90% match
 ```

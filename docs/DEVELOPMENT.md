@@ -100,9 +100,11 @@ You can use the browser's developer console to observe computation progress, wor
 
 - `?board=cpu`: Force the simple double-precision CPU board.
 - `?board=gpu`: Force the WebGPU float32 board.
-- `?board=zhuoran`: Force the DD-precision CPU board with rebasing.
-- `?board=gpuzhuoran`: Force the DD-precision GPU board with rebasing.
-- `?board=perturbation`: Force the DD-precision CPU board (alternative to Zhuoran).
+- `?board=ddz`: Force the DD-precision CPU board with rebasing.
+- `?board=gpuz`: Force the DD-precision GPU board with rebasing.
+- `?board=pert`: Force the DD-precision CPU board (perturbation without rebasing).
+- `?board=qdz`: Force the QD-precision CPU board with rebasing.
+- `?board=adaptive`: Force the QD-precision GPU board with adaptive per-pixel scaling.
 
 ## Contributing
 

@@ -132,15 +132,24 @@ Forces a specific computation algorithm. This is primarily useful for testing
 and debugging the different computation engines.
 
 ```
-?board=cpu          # CpuBoard (double precision, no perturbation)
-?board=gpu          # GpuBoard (WebGPU float32)
-?board=zhuoran      # ZhuoranBoard (CPU with rebasing)
-?board=gpuzhuoran   # GpuZhuoranBoard (GPU with rebasing)
-?board=perturbation # PerturbationBoard (CPU DD precision)
-?board=qdzhuoran    # QDZhuoranBoard (CPU QD precision, z > 10^30)
-?board=adaptive     # AdaptiveGpuBoard (GPU QD precision, z > 10^30)
-?board=qdcpu        # QDCpuBoard (CPU QD precision)
+?board=cpu       # CpuBoard (double precision, no perturbation)
+?board=gpu       # GpuBoard (WebGPU float32)
+?board=ddz       # DDZhuoranBoard (CPU DD precision with rebasing)
+?board=gpuz      # GpuZhuoranBoard (GPU DD precision with rebasing)
+?board=pert      # PerturbationBoard (CPU DD precision)
+?board=qdpert    # QDPerturbationBoard (CPU QD precision)
+?board=qdz       # QDZhuoranBoard (CPU QD precision with rebasing)
+?board=adaptive  # AdaptiveGpuBoard (GPU QD precision with adaptive scaling)
+?board=qdcpu     # QDCpuBoard (CPU QD precision, no perturbation)
 ```
+
+**When to use each board:**
+- `cpu` - Reference implementation, always accurate
+- `gpu` - Fast, good for z < 10^6
+- `ddz` - CPU perturbation with DD precision, good for z < 10^15
+- `gpuz` - GPU perturbation with DD precision, fast for z < 10^15
+- `qdz` - CPU perturbation with QD precision, for z < 10^30
+- `adaptive` - GPU with QD precision and adaptive per-pixel scaling, for z > 10^15
 
 ## Localization
 
