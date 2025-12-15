@@ -8607,7 +8607,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     const refImQD = toQD(im);
 
     // Reference point (center of image) in QD precision
-    this.refC_oct = [...refReQD, ...refImQD];
+    this.refC_qd = [...refReQD, ...refImQD];
 
     // Reference orbit in QD precision: [r0, r1, r2, r3, i0, i1, i2, i3] per iteration
     this.refOrbit = [[0, 0, 0, 0, 0, 0, 0, 0], [...refReQD, ...refImQD]];
@@ -8677,9 +8677,9 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     const nzrQD = new Array(4);
     const nziQD = new Array(4);
     ArqdAdd(nzrQD, 0, tt[16], tt[17], tt[18], tt[19],
-      this.refC_oct[0], this.refC_oct[1], this.refC_oct[2], this.refC_oct[3]);
+      this.refC_qd[0], this.refC_qd[1], this.refC_qd[2], this.refC_qd[3]);
     ArqdAdd(nziQD, 0, tt[8], tt[9], tt[10], tt[11],
-      this.refC_oct[4], this.refC_oct[5], this.refC_oct[6], this.refC_oct[7]);
+      this.refC_qd[4], this.refC_qd[5], this.refC_qd[6], this.refC_qd[7]);
 
     this.refOrbit.push([nzrQD[0], nzrQD[1], nzrQD[2], nzrQD[3],
                         nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
@@ -9772,15 +9772,15 @@ self.onmessage = async function(e) {
         `pixel=${pixelSize.toExponential(3)}`
       );
 
-      // Log refC_oct at full precision for deep zoom boards
+      // Log refC_qd at full precision for deep zoom boards
       // to debug click vs URL differences
-      if (board.refC_oct && pixelSize < 1e-45) {
-        const refReQD = [board.refC_oct[0], board.refC_oct[1],
-          board.refC_oct[2], board.refC_oct[3]];
-        const refImQD = [board.refC_oct[4], board.refC_oct[5],
-          board.refC_oct[6], board.refC_oct[7]];
+      if (board.refC_qd && pixelSize < 1e-45) {
+        const refReQD = [board.refC_qd[0], board.refC_qd[1],
+          board.refC_qd[2], board.refC_qd[3]];
+        const refImQD = [board.refC_qd[4], board.refC_qd[5],
+          board.refC_qd[6], board.refC_qd[7]];
         const digits = Math.ceil(-Math.log10(pixelSize)) + 3;
-        console.log(`  refC_oct: (${qdToDecimalString(refReQD, digits)}, ` +
+        console.log(`  refC_qd: (${qdToDecimalString(refReQD, digits)}, ` +
           `${qdToDecimalString(refImQD, digits)})`);
       }
 
