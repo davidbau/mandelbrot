@@ -16,7 +16,7 @@ your zoom path.">
 <!--
 Written by David Bau as a Javascript example in 2009; updated in 2020
 to handle high device pixel ratios, show orbits, and report periodicity.
-Keyboard controls added in 2022, and quad-precision perturbations,
+Keyboard controls added in 2022, and double-double precision perturbations,
 additional exponents, movie generation and web workers added in 2024.
 Claude code added GPU support in 2025.
 
@@ -174,9 +174,9 @@ revealing the complex boundary dynamics that have fascinated mathematicians.
 <b>Exploring a zoom path.</b>
 Each <span mobile="tap">click</span> on the fractal opens a higher zoom level at
 the selected location, computed on your GPU if available.
-After you zoom beyond trillion-fold magnification, we use a quad-precision
-perturbation algorithm that resolves fine details to more than 60 digits of
-accuracy.
+After you zoom beyond trillion-fold magnification, we use double-double
+and quad-double precision perturbation algorithms that resolve fine details to more
+than 60 digits of accuracy.
 Once you have crafted an interesting path that shows the detail you want, you can
 <a class="moviemode">create and download your own Mandelbrot deep zoom video</a>
 or bookmark your URL to save and share your exploration.
@@ -217,8 +217,8 @@ href="#github-icon"/></svg></a></p>
 // =============================================================================
 //
 // This application renders the Mandelbrot set with deep zoom capabilities,
-// GPU acceleration, and quad-precision mathematics for trillion-fold
-// magnification.
+// GPU acceleration, and extended-precision mathematics (DD and QD) for
+// trillion-fold magnification.
 //
 // CORE COMPONENTS:
 //
@@ -249,7 +249,7 @@ href="#github-icon"/></svg></a></p>
 //
 // 6. Board subclasses - Fractal computation engines (run in worker threads)
 //    - CpuBoard: Basic CPU computation
-//    - PerturbationBoard: Quad-precision deep zoom (CPU)
+//    - PerturbationBoard: DD precision deep zoom (CPU)
 //    - ZhuoranBoard: Period detection for convergence (CPU)
 //    - GpuBoard: WebGPU parallel computation
 //    - GpuZhuoranBoard: WebGPU with period detection and perturbation
@@ -817,10 +817,10 @@ class Config {
   static CENTER_COORDINATE = 0.5;
 
   // Feigenbaum / Myrberg point (real-axis accumulation point of period doubling)
-  // OEIS A218453: 65-digit precision, parsed to quad-double (oct) format
+  // OEIS A218453: 65-digit precision, parsed to quad-double (QD) format
   static get FEIGENBAUM_POINT_QD() {
     if (!this._FEIGENBAUM_POINT_QD) {
-      this._FEIGENBAUM_POINT_QD = decimalToOct(
+      this._FEIGENBAUM_POINT_QD = decimalToQD(
         '-1.4011551890920506005238267878938612922263080433973196089372614966');
     }
     return this._FEIGENBAUM_POINT_QD;
@@ -1103,7 +1103,7 @@ class View {
   }
 
   initview(size, re, im) {
-    // Store size as double (sufficient for scaling), coordinates as oct
+    // Store size as double (sufficient for scaling), coordinates as QD
     this.sizesQD = [typeof size === 'number' ? size : qdToNumber(size), toQD(re), toQD(im)];
     this.nn = new Array(this.config.dimsArea).fill(0);
     this.un = this.config.dimsArea;
@@ -1173,11 +1173,11 @@ class View {
     const y = Math.floor(j / dimsWidth);
     const rFrac = (x / dimsWidth) - Config.CENTER_COORDINATE;
     const jFrac = Config.CENTER_COORDINATE - (y / dimsHeight);
-    // Use oct precision for scaling to preserve accuracy at deep zoom
+    // Use QD precision for scaling to preserve accuracy at deep zoom
     const rQD = toQDAdd(this.re, toQDScale(this.size, rFrac));
-    const iOct = toQDAdd(this.im, toQDScale(this.size, jFrac / aspectRatio));
-    // Return oct format (8 elements: 4 real + 4 imaginary) for full precision
-    return [rQD[0], rQD[1], rQD[2], rQD[3], iOct[0], iOct[1], iOct[2], iOct[3]];
+    const iQD = toQDAdd(this.im, toQDScale(this.size, jFrac / aspectRatio));
+    // Return QD complex format (8 elements: 4 real + 4 imaginary) for full precision
+    return [rQD[0], rQD[1], rQD[2], rQD[3], iQD[0], iQD[1], iQD[2], iQD[3]];
   }
 
   currentz(j) {
@@ -1242,26 +1242,26 @@ class View {
     }
   }
 
-  // Calculate coordinate mapping from parent to child canvas using oct precision
+  // Calculate coordinate mapping from parent to child canvas using QD precision
   calculateParentMapping() {
     const parent = this.parentView;
     const { dimsWidth, dimsHeight, aspectRatio } = this.config;
 
-    const [childSizeOct, childCenterROct, childCenterIOct] = this.sizesQD;
-    const [parentSizeOct, parentCenterROct, parentCenterIOct] = parent.sizesQD;
+    const [childSizeQD, childCenterRQD, childCenterIQD] = this.sizesQD;
+    const [parentSizeQD, parentCenterRQD, parentCenterIQD] = parent.sizesQD;
 
-    const childSize = qdToNumber(childSizeOct);
-    const parentSize = qdToNumber(parentSizeOct);
+    const childSize = qdToNumber(childSizeQD);
+    const parentSize = qdToNumber(parentSizeQD);
     const parentHeight = parentSize / aspectRatio;
 
     // sx = ((childCenterR - parentCenterR) + (parentSize - childSize)/2) / parentSize * dimsWidth
-    const deltaR = toQDSub(childCenterROct, parentCenterROct);
+    const deltaR = toQDSub(childCenterRQD, parentCenterRQD);
     const deltaRNum = qdToNumber(deltaR);
     const sx = ((deltaRNum + (parentSize - childSize) / 2) / parentSize) * dimsWidth;
 
     // sy = (deltaI + (parentHeight - childHeight)/2) / parentHeight * dimsHeight
     const childHeight = childSize / aspectRatio;
-    const deltaI = toQDSub(parentCenterIOct, childCenterIOct);
+    const deltaI = toQDSub(parentCenterIQD, childCenterIQD);
     const deltaINum = qdToNumber(deltaI);
     const sy = ((deltaINum + (parentHeight - childHeight) / 2) / parentHeight) * dimsHeight;
 
@@ -1695,8 +1695,8 @@ class Grid {
       const viewArea = view.nn?.length || 0;
       if (viewArea !== targetArea) return false;
 
-      const [viewSizeOct, viewReOct, viewImOct] = view.sizesQD;
-      const viewSize = qdToNumber(viewSizeOct);
+      const [viewSizeQD, viewReQD, viewImQD] = view.sizesQD;
+      const viewSize = qdToNumber(viewSizeQD);
       const [targetSize, targetRe, targetIm] = targetSizes;
 
       // Check zoom level - must be within 1%
@@ -1704,10 +1704,10 @@ class Grid {
       if (sizeRatio < 0.99 || sizeRatio > 1.01) return false;
 
       // Check coordinates - tolerance is 1% of view extent
-      // Use oct precision for comparison
+      // Use QD precision for comparison
       const tolerance = viewSize * 0.01;
-      const viewReVal = qdToNumber(viewReOct);
-      const viewImVal = qdToNumber(viewImOct);
+      const viewReVal = qdToNumber(viewReQD);
+      const viewImVal = qdToNumber(viewImQD);
       const targetReVal = targetRe[0] + (targetRe[1] || 0);
       const targetImVal = targetIm[0] + (targetIm[1] || 0);
       return Math.abs(targetReVal - viewReVal) < tolerance &&
@@ -2013,7 +2013,7 @@ class Grid {
       if (unfinishedCount > 0 && percentDone >= 99.9) {
         percentDone = 99.9;
       }
-      // Use oct precision coordinates when available to preserve full precision in status
+      // Use QD precision coordinates when available to preserve full precision in status
       const coords = formatcomplex(k, this.views[k].re, this.views[k].im)
         .replaceAll('-', '\u2212');
       const iters = formatLargeInt(this.views[k].it);
@@ -2125,28 +2125,28 @@ class ZoomManager {
   }
 
   updateZoomRectangles() {
-    let prevSizeOct = null, prevReOct = null, prevImOct = null;
+    let prevSizeQD = null, prevReQD = null, prevImQD = null;
     let prevK = 0;
     for (let k = 0; k < this.grid.views.length; k++) {
       if (this.grid.hiddencanvas(k)) { continue; }
       const view = this.grid.views[k];
       if (!view || !view.sizesQD) { continue; }
-      const [currSizeOct, currReOct, currImOct] = view.sizesQD;
-      if (prevSizeOct !== null) {
-        const prevSize = qdToNumber(prevSizeOct);
-        let x = qdToNumber(toQDSub(currReOct, prevReOct)) / prevSize + 0.5;
-        let y = 0.5 - qdToNumber(toQDSub(currImOct, prevImOct)) /
+      const [currSizeQD, currReQD, currImQD] = view.sizesQD;
+      if (prevSizeQD !== null) {
+        const prevSize = qdToNumber(prevSizeQD);
+        let x = qdToNumber(toQDSub(currReQD, prevReQD)) / prevSize + 0.5;
+        let y = 0.5 - qdToNumber(toQDSub(currImQD, prevImQD)) /
           (prevSize / this.config.aspectRatio);
 
-        let zf = prevSize / qdToNumber(currSizeOct);
+        let zf = prevSize / qdToNumber(currSizeQD);
         this.showZoomRect(prevK, x, y, zf);
       }
-      prevSizeOct = currSizeOct;
-      prevReOct = currReOct;
-      prevImOct = currImOct;
+      prevSizeQD = currSizeQD;
+      prevReQD = currReQD;
+      prevImQD = currImQD;
       prevK = k;
     }
-    if (prevSizeOct !== null) {
+    if (prevSizeQD !== null) {
       this.removeZoomRect(prevK);
     }
   }
@@ -2188,7 +2188,7 @@ class ZoomManager {
 
     // Stage 2: Create view structure
     setTimeout(() => {
-      // Pass oct coordinates directly to preserve full precision at deep zoom
+      // Pass QD coordinates directly to preserve full precision at deep zoom
       let newView = this.grid.makeView(
         k + 1, nsize, oreQD, oimQD, true
       );
@@ -2248,7 +2248,7 @@ class ZoomManager {
     canvas.offsetHeight; // Trigger reflow
 
     // Stage 2: Create view structure
-    // Pass oct precision coordinates to preserve full precision at deep zoom
+    // Pass QD precision coordinates to preserve full precision at deep zoom
     setTimeout(() => {
       let newView = this.grid.makeView(k + 1, nsize, nreQD, nimQD, true);
       this.grid.showcanvas(k + 1);
@@ -2287,13 +2287,13 @@ class ZoomManager {
     }
 
     // Helper to check if view center is within 1% tolerance of target
-    const isWithinTolerance = (view, targetReOct, targetImOct) => {
+    const isWithinTolerance = (view, targetReQD, targetImQD) => {
       const viewSize = view.size;
       const tolerance = viewSize * 0.01; // 1% of view extent
       const viewRe = qdToNumber(view.re);
       const viewIm = qdToNumber(view.im);
-      const targetRe = qdToNumber(targetReOct);
-      const targetIm = qdToNumber(targetImOct);
+      const targetRe = qdToNumber(targetReQD);
+      const targetIm = qdToNumber(targetImQD);
       return Math.abs(targetRe - viewRe) < tolerance &&
              Math.abs(targetIm - viewIm) < tolerance;
     };
@@ -2301,8 +2301,8 @@ class ZoomManager {
     for (k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
       this.showZoomRect(
           k, 0.5, 0.5, this.grid.views[k].size / this.grid.views[k+1].size);
-      if (octCompare(this.grid.views[k].re, oreQD) ||
-          octCompare(this.grid.views[k].im, oimQD)) {
+      if (qdCompare(this.grid.views[k].re, oreQD) ||
+          qdCompare(this.grid.views[k].im, oimQD)) {
         // View center differs from target - check if within 1% tolerance
         if (isWithinTolerance(this.grid.views[k], oreQD, oimQD)) {
           // Within tolerance: update coordinates to exact target without recreating
@@ -2483,7 +2483,7 @@ class URLHandler {
 
     // Match target views against current views by coordinates AND zoom level
     // A view is defined by both its center and its size (zoom level)
-    // Uses oct precision coordinates with 1% tolerance thresholds
+    // Uses QD precision coordinates with 1% tolerance thresholds
     const viewsMatch = (targetSize, targetRe, targetIm,
                         currentSize, currentRe, currentIm) => {
       // Check zoom level first - must be within 1% of each other
@@ -2491,7 +2491,7 @@ class URLHandler {
       if (sizeRatio < 0.99 || sizeRatio > 1.01) return false;
 
       // Check coordinates - tolerance is 1% of the view's visible extent
-      // Compute difference in oct precision first, then convert magnitude to double
+      // Compute difference in QD precision first, then convert magnitude to double
       // (converting coords to double first would lose precision at deep zooms)
       const tolerance = currentSize * 0.01;
       const reDiff = Math.abs(qdToNumber(toQDSub(targetRe, currentRe)));
@@ -2759,12 +2759,12 @@ class URLHandler {
         const m = coords.match(
           /([-+]?\d?\.?\d+(?:e[-+]?\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]?\d+)?)i)?/);
         // Store coordinates; size will be calculated later after relativeScale is applied
-        // Use decimalToOct for full 60+ digit precision (qdParse only gives ~31 digits)
+        // Use decimalToQD for full 60+ digit precision (qdParse only gives ~31 digits)
         startstate.sizes.push([
           null,  // Placeholder - will be filled in after initSizes()
-          m && m[1] ? decimalToOct(m[1]) : (startstate.sizes.length > 0 ?
+          m && m[1] ? decimalToQD(m[1]) : (startstate.sizes.length > 0 ?
               startstate.sizes[startstate.sizes.length - 1][1] : this.config.firstrQD),
-          m && m[2] ? decimalToOct(m[2]) : (startstate.sizes.length > 0 ?
+          m && m[2] ? decimalToQD(m[2]) : (startstate.sizes.length > 0 ?
               startstate.sizes[startstate.sizes.length - 1][2] : this.config.firstjQD)
         ]);
       }
@@ -2789,11 +2789,11 @@ class URLHandler {
     let prevj = -1;
     for (let j = 0; j <= state.sizes.length; j++) {
       const view = this.grid.views[j];
-      const viewReOct = view ? view.re : state.sizes[j]?.[1];
-      const viewImOct = view ? view.im : state.sizes[j]?.[2];
+      const viewReQD = view ? view.re : state.sizes[j]?.[1];
+      const viewImQD = view ? view.im : state.sizes[j]?.[2];
       if (j < state.sizes.length &&
-          !qdCompare(viewReOct, prev[0]) &&
-          !qdCompare(viewImOct, prev[1])) {
+          !qdCompare(viewReQD, prev[0]) &&
+          !qdCompare(viewImQD, prev[1])) {
         commas += ',';
       } else {
         if (prevj >= 0) {
@@ -2805,7 +2805,7 @@ class URLHandler {
         compactc += commas;
         if (j < state.sizes.length) {
           commas = '';
-          prev = [viewReOct, viewImOct];
+          prev = [viewReQD, viewImQD];
           prevj = j;
         }
       }
@@ -3602,7 +3602,7 @@ class MovieMode {
     scaleElement.href = URL.createObjectURL(this.recordedBlob);
     const k = this.explorer.grid.views.length - 1;
     const view = this.explorer.grid.views[k];
-    // Use oct values for full precision at deep zoom
+    // Use QD values for full precision at deep zoom
     const coords = formatcomplex(k, view.re, view.im);
     scaleElement.download = `mandelbrot${coords}-${view.it}.mp4`;
   }
@@ -3624,7 +3624,7 @@ class MovieMode {
     const colorT = expT * expT;
     const interpolatedSize = sourceSize * mulT;
 
-    // Use oct-precision spline interpolation for center coordinates at deep zoom
+    // Use QD-precision spline interpolation for center coordinates at deep zoom
     const sourceCenter = [sourceView.re, sourceView.im];
     const targetCenter = [targetView.re, targetView.im];
 
@@ -3781,7 +3781,7 @@ class Scheduler {
     this.boardIds.set(k, id);  // Track which board ID is at this index
     this.assignments[k] = workerNumber;
 
-    // Ensure oct coordinates are properly formatted
+    // Ensure QD coordinates are properly formatted
     reQD = toQD(reQD);
     imQD = toQD(imQD);
 
@@ -4031,8 +4031,8 @@ class Scheduler {
   }
 }
 
-// Convert QD complex (4 elements: [r0, r1, i0, i1]) to oct complex (8 elements)
-function qdcToOctc(qdc) {
+// Convert QD complex (4 elements: [r0, r1, i0, i1]) to QD complex format (8 elements: 4 real, 4 imaginary)
+function qdcToQDComplex(qdc) {
   if (!qdc || qdc.length !== 4) return null;
   return [qdc[0], qdc[1], 0, 0, qdc[2], qdc[3], 0, 0];
 }
@@ -4085,11 +4085,11 @@ class OrbitComputer {
     let view = this.explorer.grid.views[k];
 
     if (view && j >= 0 && j < this.explorer.config.dimsArea) {
-      let c = view.currentc(j);  // Now returns oct format (8 elements)
+      let c = view.currentc(j);  // Now returns QD complex format (8 elements)
       let zQd = view.currentz(j);  // Returns QD format (4 elements)
 
       // Calculate a further orbit beyond the old orbit.
-      // Orbits now use 8 elements per point (oct format)
+      // Orbits now use 8 elements per point (QD complex format)
       let finished = Math.max(view.currentp(j) || 0, Math.abs(view.nn[j] || 0));
       let whole = Math.min(finished || Math.max(view.it, 8));
       let more = Math.min(whole - oldOrb.length / 8, 53);
@@ -4104,8 +4104,8 @@ class OrbitComputer {
         ongoing = true;
       }
       // Calculate a cycle and any messages
-      // c is oct format: [r0, r1, r2, r3, i0, i1, i2, i3]
-      // Use full oct precision (4 components each) to avoid discretization at deep zoom
+      // c is QD complex format: [r0, r1, r2, r3, i0, i1, i2, i3]
+      // Use full QD precision (4 components each) to avoid discretization at deep zoom
       title = 'c=' +
         formatcomplex(k, [c[0], c[1], c[2], c[3]], [c[4], c[5], c[6], c[7]])
         .replaceAll('-', '\u2212');
@@ -4122,8 +4122,8 @@ class OrbitComputer {
             title += MSG.after_ + iters + MSG.period_ + periodStr;
           }
           let clen = fibonacciPeriod(view.currentp(j));
-          // Convert z from QD (4 elements) to oct (8 elements) for suborbit
-          const z = qdcToOctc(zQd);
+          // Convert z from QD (4 elements) to QD complex format (8 elements) for suborbit
+          const z = qdcToQDComplex(zQd);
           cyc = z ? this.suborbit(z, c, clen) : [];
         }
       } else {
@@ -4161,13 +4161,13 @@ class OrbitComputer {
   }
 
   suborbit(z, c, len) {
-    // z and c are in oct format: [r0, r1, r2, r3, i0, i1, i2, i3]
+    // z and c are in QD complex format: [r0, r1, r2, r3, i0, i1, i2, i3]
     let r = [z[0], z[1], z[2], z[3]];
     let j = [z[4], z[5], z[6], z[7]];
     const cr = [c[0], c[1], c[2], c[3]];
     const cj = [c[4], c[5], c[6], c[7]];
 
-    // Result stores 8 elements per point (oct format)
+    // Result stores 8 elements per point (QD complex format)
     let result = [r[0], r[1], r[2], r[3], j[0], j[1], j[2], j[3]];
     while (result.length < len * 8) {
       let j2 = toQDSquare(j);
@@ -4192,12 +4192,12 @@ class OrbitComputer {
     if (!overlay) { return; }
     let ctx = overlay.getContext('2d');
     ctx.fillStyle = color;
-    // Use oct values for full precision
+    // Use QD values for full precision
     const view = this.explorer.grid.views[k];
     const s = view.size;
     const crQD = view.re;
     const cjQD = view.im;
-    // seq is in oct format: 8 elements per point
+    // seq is in QD complex format: 8 elements per point
     for (let i = 0; i < seq.length; i += 8) {
       let r = [seq[i], seq[i+1], seq[i+2], seq[i+3]];
       let j = [seq[i+4], seq[i+5], seq[i+6], seq[i+7]];
@@ -4444,7 +4444,7 @@ const MAX_CHAOTIC_ITERATIONS = 100000;
 class Board {
   constructor(k, size, re, im, config, id) {
     this.k = k;    // Number in explorer
-    // Store size as double (sufficient for scaling), coordinates as oct
+    // Store size as double (sufficient for scaling), coordinates as QD
     this.sizesQD = [typeof size === 'number' ? size : qdToNumber(size), toQD(re), toQD(im)];
     this.id = id;  // Random ID
     this.config = config;  // Global config
@@ -4740,26 +4740,26 @@ class CpuBoard extends Board {
 
 }
 
-// CPU board using direct oct-precision iteration (no perturbation).
+// CPU board using direct QD-precision iteration (no perturbation).
 // Very slow but maximally accurate - serves as ground truth for verification.
 class QDCpuBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    // Override epsilon for oct precision - need much tighter thresholds
+    // Override epsilon for QD precision - need much tighter thresholds
     // to avoid false convergence detection at deep zoom.
-    // Base Board uses pix/10 and pix*10, but for direct oct iteration
+    // Base Board uses pix/10 and pix*10, but for direct QD iteration
     // we need thresholds much smaller than pixel size.
     this.epsilon = this.pix * 1e-20;   // Final convergence threshold
     this.epsilon2 = this.pix * 1e-15;  // Getting close threshold
-    // Use oct-precision values from getters
+    // Use QD-precision values from getters
     // IMPORTANT: At deep zoom (z > 1e30), double precision cannot represent
-    // the pixel size or offset accurately. Must use oct precision throughout.
+    // the pixel size or offset accurately. Must use QD precision throughout.
     const reQD = this.re;
     const imQD = this.im;
-    // Pre-compute size/aspectRatio in oct precision for y offsets
+    // Pre-compute size/aspectRatio in QD precision for y offsets
     // Use toQDMul instead of toQDScale to capture error terms at deep zoom
-    const aspectRecipOct = toQD(1 / this.config.aspectRatio);
-    const sizeOverAspect = toQDMul(this.size, aspectRecipOct);
+    const aspectRecipQD = toQD(1 / this.config.aspectRatio);
+    const sizeOverAspect = toQDMul(this.size, aspectRecipQD);
     // Initialize board: cc = c values (8 floats per pixel), zz = current z (8 floats per pixel)
     // bb = checkpoint z, ss = active pixel indices
     // Format: [r0, r1, r2, r3, i0, i1, i2, i3] for each complex number
@@ -4890,23 +4890,23 @@ class QDCpuBoard extends Board {
   compute(m) {
     if (this.nn[m]) return 0;
     const m8 = m * 8;
-    // Extract z as oct complex: [r0, r1, r2, r3] and [i0, i1, i2, i3]
+    // Extract z as QD complex: [r0, r1, r2, r3] and [i0, i1, i2, i3]
     const zr = [this.zz[m8], this.zz[m8+1], this.zz[m8+2], this.zz[m8+3]];
     const zi = [this.zz[m8+4], this.zz[m8+5], this.zz[m8+6], this.zz[m8+7]];
 
-    // Mandelbrot iteration: z = z² + c using oct precision
+    // Mandelbrot iteration: z = z² + c using QD precision
     // z² = (zr + zi*i)² = zr² - zi² + 2*zr*zi*i
     const zr2 = toQDSquare(zr);      // zr²
     const zi2 = toQDSquare(zi);      // zi²
     const zri = toQDMul(zr, zi);     // zr * zi
 
-    // Check escape: |z|² > 4 using FULL oct precision comparison
+    // Check escape: |z|² > 4 using FULL QD precision comparison
     // IMPORTANT: Cannot sum components to double and compare - this loses precision
     // when |z|² ≈ 4 and differences are at 1e-34 scale. Adjacent pixels would escape
     // at the same iteration, creating vertical stripes in the output.
-    // Instead, compute |z|² - 4 in oct precision and check if positive.
-    const mag2Oct = toQDAdd(zr2, zi2);  // |z|² in oct precision
-    const diffQD = toQDSub(mag2Oct, [4, 0, 0, 0]);  // |z|² - 4
+    // Instead, compute |z|² - 4 in QD precision and check if positive.
+    const mag2QD = toQDAdd(zr2, zi2);  // |z|² in QD precision
+    const diffQD = toQDSub(mag2QD, [4, 0, 0, 0]);  // |z|² - 4
     // Check if diff > 0: find first non-zero component and check its sign
     const escaped = diffQD[0] > 0 ||
       (diffQD[0] === 0 && (diffQD[1] > 0 ||
@@ -4933,7 +4933,7 @@ class QDCpuBoard extends Board {
     this.zz[m8+6] = finalZi[2]; this.zz[m8+7] = finalZi[3];
 
     // Check convergence: compare current z to checkpoint
-    // IMPORTANT: Must compute difference in oct precision FIRST, then convert to double.
+    // IMPORTANT: Must compute difference in QD precision FIRST, then convert to double.
     // If we sum to double first and then subtract, we lose precision due to catastrophic
     // cancellation when z ≈ 2 (fixed point) and differences are at 1e-35 scale.
     const bbR = [this.bb[m8], this.bb[m8+1], this.bb[m8+2], this.bb[m8+3]];
@@ -4958,13 +4958,13 @@ class QDCpuBoard extends Board {
   }
 }
 
-// CPU board using perturbation theory with sparse quad precision anchors.
+// CPU board using perturbation theory with sparse DD precision anchors.
 class PerturbationBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    this.quadIndexes = [];   // Pixels computed in quad precision
-    this.pertIndexes = [];   // Pixels computed as perturbations from quad points
-    this.tt = [];            // Working array for quad precision operations
+    this.ddIndexes = [];     // Pixels computed in DD precision
+    this.pertIndexes = [];   // Pixels computed as perturbations from DD points
+    this.tt = [];            // Working array for DD precision operations
     this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dimsWidth)));
     this.effort = 3;
     this.initPerturbationBoard(size, re, im);
@@ -4972,7 +4972,7 @@ class PerturbationBoard extends Board {
 
   initPerturbationBoard(size, re, im) {
     this.cc = new Array(this.config.dimsArea * 4).fill(NaN);
-    // Odd grid ensures that center point corresponds to a quad precision pixel
+    // Odd grid ensures that center point corresponds to a DD precision pixel
     const gridSizeX = Math.floor(this.config.dimsWidth / 17 / 2) * 2 + 1;
     const gridSizeY = Math.floor(this.config.dimsHeight / 17 / 2) * 2 + 1;
     const stepX = this.config.dimsWidth / gridSizeX;
@@ -5002,7 +5002,7 @@ class PerturbationBoard extends Board {
         cc[ri+1] = cr[1];
         cc[ri+2] = cj[0];
         cc[ri+3] = cj[1];
-        this.quadIndexes.push(refIndex);
+        this.ddIndexes.push(refIndex);
         let refspike = this.inspikeDDA(cr[0], cr[1], cj[0], cj[1]);
         if (refspike) {
           this.ch += 1;
@@ -5060,15 +5060,16 @@ class PerturbationBoard extends Board {
     board.nz = [];
     board.bb = [];
     board.pp = [];
-    for (let i = 0; i < serialized.quadIndexes.length; i++) {
-      const index = serialized.quadIndexes[i];
+    const ddIdx = serialized.ddIndexes || [];
+    for (let i = 0; i < ddIdx.length; i++) {
+      const index = ddIdx[i];
       for (let j = 0; j < 4; j++) {
         board.zz[index * 4 + j] = board.nz[index * 4 + j] = serialized.zz[i * 4 + j];
         board.bb[index * 4 + j] = serialized.bb[i * 4 + j];
         board.cc[index * 4 + j] = cc[index * 4 + j];
       }
       if (!isFinite(cc[index * 4 + 3])) {
-        board.initAsQuadPrecision(index, cc);
+        board.initAsDDPrecision(index, cc);
       }
       board.pp[index] = serialized.pp[i];
     }
@@ -5087,13 +5088,13 @@ class PerturbationBoard extends Board {
   serialize() {
     return {
       ...super.serialize(),
-      quadIndexes: this.quadIndexes,
+      ddIndexes: this.ddIndexes,
       pertIndexes: this.pertIndexes,
-      zz: this.quadIndexes.flatMap(i =>
+      zz: this.ddIndexes.flatMap(i =>
         [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2], this.zz[i*4+3]]),
-      bb: this.quadIndexes.flatMap(i =>
+      bb: this.ddIndexes.flatMap(i =>
         [this.bb[i*4], this.bb[i*4+1], this.bb[i*4+2], this.bb[i*4+3]]),
-      pp: this.quadIndexes.map(index => this.pp[index]),
+      pp: this.ddIndexes.map(index => this.pp[index]),
       pertZZ: this.pertIndexes.flatMap(i => [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2]]),
     };
   }
@@ -5101,15 +5102,15 @@ class PerturbationBoard extends Board {
   iterate() {
     let changes = null;
     let results = [0, 0, 0];
-    // Precompute quad-precision point escape without updating z
+    // Precompute DD precision point escape without updating z
     // Update checkpoints at Fibonacci intervals
     const isCheckpoint = fibonacciPeriod(this.it) === 1;
-    for (const index of this.quadIndexes) {
+    for (const index of this.ddIndexes) {
       if (isCheckpoint && !this.nn[index]) {
         ArddcCopy(this.bb, index*4, this.zz, index*4);  // bb = checkpoint z
         this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
       }
-      let r = this.precomputeQuad(index);
+      let r = this.precomputeDD(index);
       results[r + 1] += 1;
       if (r !== 0) {
         if (!changes) {
@@ -5127,14 +5128,14 @@ class PerturbationBoard extends Board {
       }
     }
     // Iterate perturbation points that use the old z
-    const newQuadIndexes = [];
+    const newDDIndexes = [];
     let cache = { refIndex: null, binZpow: [] };
     for (const index of this.pertIndexes) {
       if (!this.computePerturbation(index, cache)) {
-        this.convertToQuadPrecision(index);
-        let r = this.precomputeQuad(index);
+        this.convertToDDPrecision(index);
+        let r = this.precomputeDD(index);
         results[r + 1] += 1;
-        newQuadIndexes.push(index);
+        newDDIndexes.push(index);
         if (r !== 0) {
           if (!changes) {
             changes = { iter: this.it, nn: [], vv: [] };
@@ -5152,21 +5153,21 @@ class PerturbationBoard extends Board {
       }
     }
     // Update index arrays
-    if (newQuadIndexes.length > 0) {
+    if (newDDIndexes.length > 0) {
       const newPertIndexes = [];
       let qi = 0;
       for (const index of this.pertIndexes) {
-        if (newQuadIndexes[qi] == index) {
+        if (newDDIndexes[qi] == index) {
           qi += 1;
         } else {
           newPertIndexes.push(index);
         }
       }
-      this.quadIndexes = this.quadIndexes.concat(newQuadIndexes);
+      this.ddIndexes = this.ddIndexes.concat(newDDIndexes);
       this.pertIndexes = newPertIndexes;
     }
-    // Finally update quad-precision z with precomputed values
-    for (const index of this.quadIndexes) {
+    // Finally update DD precision z with precomputed values
+    for (const index of this.ddIndexes) {
       ArddcCopy(this.zz, index*4, this.nz, index*4);
     }
     // Tally progress
@@ -5175,13 +5176,13 @@ class PerturbationBoard extends Board {
     this.un -= count;
     this.di += diverged;
     // Trim finished pixels from array.
-    if (this.pertIndexes.length + this.quadIndexes.length > this.un * 1.25) {
+    if (this.pertIndexes.length + this.ddIndexes.length > this.un * 1.25) {
       this.compact();
-      // Switch to full quad when perturbations are a small fraction of the work
-      if (this.pertIndexes.length < this.quadIndexes.length * 0.5) {
+      // Switch to full DD when perturbations are a small fraction of the work
+      if (this.pertIndexes.length < this.ddIndexes.length * 0.5) {
         for (const index of this.pertIndexes) {
-          this.convertToQuadPrecision(index);
-          this.quadIndexes.push(index);
+          this.convertToDDPrecision(index);
+          this.ddIndexes.push(index);
         }
         this.pertIndexes = [];
       }
@@ -5191,12 +5192,12 @@ class PerturbationBoard extends Board {
   }
 
   compact() {
-    const trimmedQuadIndexes = this.quadIndexes.filter(i => !this.nn[i]);
-    this.quadIndexes = trimmedQuadIndexes;
+    const trimmedDDIndexes = this.ddIndexes.filter(i => !this.nn[i]);
+    this.ddIndexes = trimmedDDIndexes;
   }
 
-  precomputeQuad(m) {
-    // Quad-precision Mandelbrot iteration with convergence detection
+  precomputeDD(m) {
+    // DD precision Mandelbrot iteration with convergence detection
     if (this.nn[m]) return 0;
     const m4 = m * 4;
     const tt = this.tt;
@@ -5209,7 +5210,7 @@ class PerturbationBoard extends Board {
     const cr2 = this.cc[m4+1];
     const cj1 = this.cc[m4+2];
     const cj2 = this.cc[m4+3];
-    const br1 = this.bb[m4];  // bb = checkpoint z (quad precision)
+    const br1 = this.bb[m4];  // bb = checkpoint z (DD precision)
     const br2 = this.bb[m4+1];
     const bj1 = this.bb[m4+2];
     const bj2 = this.bb[m4+3];
@@ -5332,7 +5333,7 @@ class PerturbationBoard extends Board {
     return ((dr + zr) ** 2 + (di + zi) ** 2 > 3);
   }
 
-  convertToQuadPrecision(index) {
+  convertToDDPrecision(index) {
     const m4 = index * 4;
     const dr = this.zz[m4];
     const di = this.zz[m4+1];
@@ -5346,7 +5347,7 @@ class PerturbationBoard extends Board {
     AddAdd(this.cc, m4+2, ci, 0, this.cc[ri4+2], this.cc[ri4+3])
   }
 
-  initAsQuadPrecision(index, refcc) {
+  initAsDDPrecision(index, refcc) {
     const m4 = index * 4;
     const cr = this.cc[m4];
     const ci = this.cc[m4+1];
@@ -5357,17 +5358,17 @@ class PerturbationBoard extends Board {
   }
 }
 
-// Oct-precision CPU board using perturbation theory (oct-double anchors)
+// QD-precision CPU board using perturbation theory (quad-double anchors)
 class QDPerturbationBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    this.qdIndexes = [];   // Pixels computed in oct precision
-    this.tt = new Array(32).fill(0);           // Working array for oct operations
+    this.qdIndexes = [];   // Pixels computed in QD precision
+    this.tt = new Array(32).fill(0);           // Working array for QD operations
     this.effort = 4;        // Higher cost than quad perturbation
-    this.initOctBoard(size, re, im);
+    this.initQDBoard(size, re, im);
   }
 
-  initOctBoard(size, re, im) {
+  initQDBoard(size, re, im) {
     const dimsArea = this.config.dimsArea;
     this.cc = new Array(dimsArea * 8).fill(0);
     this.zz = new Array(dimsArea * 8).fill(0);
@@ -5428,16 +5429,16 @@ class QDPerturbationBoard extends Board {
     board.nz = [];
     board.bb = [];
     board.pp = [];
-    const octIdx = serialized.qdIndexes || serialized.quadIndexes || [];
-    for (let i = 0; i < octIdx.length; i++) {
-      const index = octIdx[i];
+    const qdIdx = serialized.qdIndexes || [];
+    for (let i = 0; i < qdIdx.length; i++) {
+      const index = qdIdx[i];
       for (let j = 0; j < 8; j++) {
         board.zz[index * 8 + j] = board.nz[index * 8 + j] = serialized.zz[i * 8 + j];
         board.bb[index * 8 + j] = serialized.bb[i * 8 + j];
         board.cc[index * 8 + j] = cc[index * 8 + j];
       }
       if (!isFinite(cc[index * 8 + 7])) {
-        board.initAsOctPrecision(index, cc);
+        board.initAsQDPrecision(index, cc);
       }
       board.pp[index] = serialized.pp[i];
     }
@@ -5465,7 +5466,7 @@ class QDPerturbationBoard extends Board {
     };
   }
 
-  initAsOctPrecision(index, refcc) {
+  initAsQDPrecision(index, refcc) {
     const m8 = index * 8;
     for (let j = 0; j < 4; j++) {
       this.cc[m8 + j] = refcc[m8 + j];
@@ -5767,19 +5768,19 @@ class QDSpatialBucket extends SpatialBucket {
     const pj = this.getQDPoint(j);
     if (!pi || !pj) return null;
 
-    // Proper oct subtraction to avoid catastrophic cancellation
-    const deltaReOct = toQDSub(
+    // Proper QD subtraction to avoid catastrophic cancellation
+    const deltaReQD = toQDSub(
       [pi[0], pi[1], pi[2], pi[3]],
       [pj[0], pj[1], pj[2], pj[3]]
     );
-    const deltaImOct = toQDSub(
+    const deltaImQD = toQDSub(
       [pi[4], pi[5], pi[6], pi[7]],
       [pj[4], pj[5], pj[6], pj[7]]
     );
 
-    // Sum oct result to f64
-    const deltaRe = qdToNumber(deltaReOct);
-    const deltaIm = qdToNumber(deltaImOct);
+    // Sum QD result to f64
+    const deltaRe = qdToNumber(deltaReQD);
+    const deltaIm = qdToNumber(deltaImQD);
 
     // Check L∞ distance against actual threadingEpsilon
     if (Math.max(Math.abs(deltaRe), Math.abs(deltaIm)) <= this.threadingEpsilon) {
@@ -5868,12 +5869,12 @@ class ReferenceOrbitThreading {
 class ZhuoranBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    // Reference orbit data (quad precision)
+    // Reference orbit data (DD precision)
     this.maxRefIterations = 10000;  // Will grow dynamically
     this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low] for each iteration
     this.refOrbitEscaped = false;
     this.refIterations = 0;  // Current length of reference orbit
-    // Reference point (center of image) in quad precision
+    // Reference point (center of image) in DD precision
     const refRe = qdToDD(this.re);
     const refIm = qdToDD(this.im);
     this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
@@ -5883,7 +5884,7 @@ class ZhuoranBoard extends Board {
     this.refIter = [];  // Which iteration of reference each pixel is following
     this.pixelIndexes = [];  // Active pixel indices
     this.maxRefIter = 1;  // Track maximum refIter to avoid scanning all pixels
-    // Working array for quad precision operations
+    // Working array for DD precision operations
     this.tt = new Array(16);
     // Initialize reference orbit with z = 0 and z = c
     this.refOrbit.push([0, 0, 0, 0]);  // Iteration 0: z = 0
@@ -5912,7 +5913,7 @@ class ZhuoranBoard extends Board {
     const dimsHeight = this.config.dimsHeight;
     const refRe = this.refC[0] + this.refC[1];
     const refIm = this.refC[2] + this.refC[3];
-    // Convert quad precision arrays to doubles for perturbation deltas
+    // Convert DD precision arrays to doubles for perturbation deltas
     const re_double = reDD[0] + reDD[1];
     const im_double = imDD[0] + imDD[1];
     // Initialize all pixels as perturbations from the reference point
@@ -6041,7 +6042,7 @@ class ZhuoranBoard extends Board {
   }
 
   extendReferenceOrbit() {
-    // Compute one more iteration of the reference orbit in quad precision
+    // Compute one more iteration of the reference orbit in DD precision
     const lastIndex = this.refIterations;
     const last = this.refOrbit[lastIndex];
     const tt = this.tt;
@@ -6389,12 +6390,12 @@ class ZhuoranBoard extends Board {
   }
 }
 
-// Oct-precision perturbation board - extends ZhuoranBoard with oct precision reference orbit
-// Provides higher precision (~212 bits) for very deep zooms where quad precision is insufficient
+// QD-precision perturbation board - extends ZhuoranBoard with QD precision reference orbit
+// Provides higher precision (~212 bits) for very deep zooms where DD precision is insufficient
 class QDZhuoranBoard extends ZhuoranBoard {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    // Build oct reference from the base class's oct values
+    // Build QD reference from the base class's QD values
     const refReQD = this.re.slice();
     const refImQD = this.im.slice();
     // Store QD-precision reference point
@@ -6416,11 +6417,11 @@ class QDZhuoranBoard extends ZhuoranBoard {
     this.threading = new ReferenceOrbitThreading(spatialBucket);
     this.threading.addPoint(0);
     this.threading.addPoint(1);
-    // Re-initialize pixels with oct-precision delta computation
-    this.initPixelsOct();
+    // Re-initialize pixels with QD-precision delta computation
+    this.initPixelsQD();
   }
 
-  initPixelsOct() {
+  initPixelsQD() {
     // Override parent's initPixels to compute delta c directly without precision loss.
     // At deep zoom (e.g., z=1e32), computing cr = center + offset loses precision because
     // -1.8 + 1e-33 = -1.8 in double precision. Instead, compute dc = offset directly.
@@ -6461,7 +6462,7 @@ class QDZhuoranBoard extends ZhuoranBoard {
     const ri = [last[4], last[5], last[6], last[7]];
     const tt = this.tt;
 
-    // Check for escape using sum of oct components
+    // Check for escape using sum of QD components
     const rSum = rr[0] + rr[1] + rr[2] + rr[3];
     const iSum = ri[0] + ri[1] + ri[2] + ri[3];
     const mag = rSum * rSum + iSum * iSum;
@@ -6506,7 +6507,7 @@ class QDZhuoranBoard extends ZhuoranBoard {
     this.qdRefOrbit.push([nzrQD[0], nzrQD[1], nzrQD[2], nzrQD[3],
                           nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
 
-    // Convert to quad precision for refOrbit (used by perturbation iterations)
+    // Convert to DD precision for refOrbit (used by perturbation iterations)
     const nzrDD = qdToDD(nzrQD);
     const nziDD = qdToDD(nziQD);
     this.refOrbit.push([nzrDD[0], nzrDD[1], nziDD[0], nziDD[1]]);
@@ -6738,7 +6739,7 @@ class GpuBaseBoard extends Board {
     // Float32 has ~7 decimal digits, so direct iteration works to ~1e-7 pixel size
     // Shallow zooms (z < ~1e7): GpuBoard with simple float32 iteration
     // Medium zooms (z ~1e7 to ~1e30): GpuZhuoranBoard with quad-precision reference
-    // Deep zooms (z > ~1e30): AdaptiveGpuBoard with oct-precision reference
+    // Deep zooms (z > ~1e30): AdaptiveGpuBoard with QD-precision reference
     //   orbit and adaptive per-pixel scaling for correct escape detection
     if (pixelSize > 1e-7) return GpuBoard;
     if (pixelSize > 1e-30) return GpuZhuoranBoard;
@@ -7283,7 +7284,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     this.effort = 2;  // Same as ZhuoranBoard
 
-    // Reference orbit for perturbation theory (computed on CPU in quad precision)
+    // Reference orbit for perturbation theory (computed on CPU in DD precision)
     this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low]
     this.refOrbitEscaped = false;
     this.refIterations = 0;
@@ -7299,7 +7300,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.refOrbit.push(this.refC.slice());
     this.refIterations = 1;
 
-    // Working array for quad precision operations
+    // Working array for DD precision operations
     this.tt = new Array(16);
 
     // Threading for robust cycle detection
@@ -7324,10 +7325,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const dimsHeight = this.config.dimsHeight;
     const dimsArea = this.config.dimsArea;
 
-    // Convert re/im to quad precision if needed
+    // Convert re/im to DD precision if needed
     const re_qd = Array.isArray(re) ? re : toDD(re);
     const im_qd = Array.isArray(im) ? im : toDD(im);
-    // Convert size to scalar if it's an oct array (fixes NaN when size is array)
+    // Convert size to scalar if it's a QD array (fixes NaN when size is array)
     const size_scalar = Array.isArray(size) ? size.reduce((a, b) => a + (b || 0), 0) : size;
     const size_qd = toDD(size_scalar);
     const sizeY_qd = toDD(size_scalar / this.config.aspectRatio);
@@ -7340,7 +7341,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     this.refIter = new Uint32Array(dimsArea);
     // Which iteration of reference each pixel is following
 
-    // Working arrays for quad precision arithmetic
+    // Working arrays for DD precision arithmetic
     const cr_qd = new Array(4);
     const ci_qd = new Array(4);
     const dcr_qd = new Array(4);
@@ -7352,7 +7353,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       // Use integer arithmetic to avoid float64 rounding: (dims/2 - y) / dims
       const yFrac = (dimsHeight / 2 - y) / dimsHeight;
 
-      // ci_qd = im_qd + yFrac * sizeY_qd (in quad precision)
+      // ci_qd = im_qd + yFrac * sizeY_qd (in DD precision)
       AddMul(temp, 0, toDD(yFrac)[0], toDD(yFrac)[1], sizeY_qd[0], sizeY_qd[1]);
       AddAdd(ci_qd, 0, im_qd[0], im_qd[1], temp[0], temp[1]);
 
@@ -7363,7 +7364,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         // Use integer arithmetic to avoid float64 rounding: (x - dims/2) / dims
         const xFrac = (x - dimsWidth / 2) / dimsWidth;
 
-        // cr_qd = re_qd + xFrac * size_qd (in quad precision)
+        // cr_qd = re_qd + xFrac * size_qd (in DD precision)
         AddMul(temp, 0, toDD(xFrac)[0], toDD(xFrac)[1], size_qd[0], size_qd[1]);
         AddAdd(cr_qd, 0, re_qd[0], re_qd[1], temp[0], temp[1]);
 
@@ -7373,7 +7374,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         const index = y * dimsWidth + x;
         const index2 = index * 2;
 
-        // Convert quad precision deltas to float32 (Math.fround simulates GPU precision)
+        // Convert DD precision deltas to float32 (Math.fround simulates GPU precision)
         this.dc[index2] = Math.fround(dcr_qd[0] + dcr_qd[1]);
         this.dc[index2 + 1] = Math.fround(dci_qd[0] + dci_qd[1]);
 
@@ -7500,7 +7501,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
   // Copy extendReferenceOrbit from ZhuoranBoard
   extendReferenceOrbit() {
-    // Compute one more iteration of the reference orbit in quad precision
+    // Compute one more iteration of the reference orbit in DD precision
     const lastIndex = this.refIterations;
     const last = this.refOrbit[lastIndex];
     const tt = this.tt;
@@ -7521,7 +7522,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       return;
     }
 
-    // Compute z^exponent using quad precision
+    // Compute z^exponent using DD precision
     ArddSet(tt, 8, r1, r2);  // ra = r
     ArddSet(tt, 6, j1, j2);  // ja = j
     for (let ex = 1; ex < this.config.exponent; ex++) {
@@ -7584,7 +7585,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       }
     }
 
-    // Compute delta in quad precision
+    // Compute delta in DD precision
     const closestPt = this.refOrbit[closestIter];
     const tt = this.tt;
     AddAdd(tt, 0, endpoint[0], endpoint[1], -closestPt[0], -closestPt[1]); // real delta
@@ -8354,23 +8355,23 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
     this.effort = 2;  // Same as ZhuoranBoard
 
-    // Reference orbit for perturbation theory (computed on CPU in oct precision only)
+    // Reference orbit for perturbation theory (computed on CPU in QD precision only)
     this.refOrbitEscaped = false;
     this.refIterations = 0;
     this.maxRefIterations = 10000;
 
-    // Build oct reference point
+    // Build QD reference point
     const refReQD = toQD(re);
     const refImQD = toQD(im);
 
-    // Reference point (center of image) in oct precision
+    // Reference point (center of image) in QD precision
     this.refC_oct = [...refReQD, ...refImQD];
 
-    // Reference orbit in oct precision: [r0, r1, r2, r3, i0, i1, i2, i3] per iteration
+    // Reference orbit in QD precision: [r0, r1, r2, r3, i0, i1, i2, i3] per iteration
     this.refOrbit = [[0, 0, 0, 0, 0, 0, 0, 0], [...refReQD, ...refImQD]];
     this.refIterations = 1;
 
-    // Working array for quad precision operations
+    // Working array for QD precision operations
     this.tt = new Array(32);
 
     // Threading for robust cycle detection
@@ -8390,15 +8391,15 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     this.gpuInitPromise = this.initGPU();
   }
 
-  // Extend reference orbit in oct precision
+  // Extend reference orbit in QD precision
   extendReferenceOrbit() {
-    // Compute one more iteration of the reference orbit in oct precision
+    // Compute one more iteration of the reference orbit in QD precision
     const last = this.refOrbit[this.refIterations];
     const rr = [last[0], last[1], last[2], last[3]];
     const ri = [last[4], last[5], last[6], last[7]];
     const tt = this.tt;
 
-    // Check for escape using sum of oct components
+    // Check for escape using sum of QD components
     const rSum = rr[0] + rr[1] + rr[2] + rr[3];
     const iSum = ri[0] + ri[1] + ri[2] + ri[3];
     const mag = rSum * rSum + iSum * iSum;
@@ -8457,7 +8458,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       return; // Not at limit yet, or already configured
     }
 
-    // Get endpoint (current position at threading limit) - oct precision
+    // Get endpoint (current position at threading limit) - QD precision
     const endpoint = this.refOrbit[THREADING_CAPACITY];
 
     // Search back to find closest point (using QD arithmetic)
@@ -8484,7 +8485,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       }
     }
 
-    // Compute delta in oct precision
+    // Compute delta in QD precision
     const closestPt = this.refOrbit[closestIter];
     ArqdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
                    -closestPt[0], -closestPt[1], -closestPt[2], -closestPt[3]); // real delta
@@ -8572,7 +8573,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         const thread = threadingData[orbitIdx] || { next: -1, deltaRe: 0, deltaIm: 0 };
 
         const idx = i * 5;
-        // Sum oct components to get f32 value for ref orbit
+        // Sum QD components to get f32 value for ref orbit
         itersF32[idx + 0] = ref ? ref[0] + ref[1] + ref[2] + ref[3] : 0;  // ref_re
         itersF32[idx + 1] = ref ? ref[4] + ref[5] + ref[6] + ref[7] : 0;  // ref_im
         itersF32[idx + 2] = thread.next;      // thread_next
@@ -8590,7 +8591,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     const dimsHeight = this.config.dimsHeight;
     const dimsArea = this.config.dimsArea;
 
-    // Convert size to scalar if it's an oct array
+    // Convert size to scalar if it's a QD array
     const size_scalar = Array.isArray(size) ? size.reduce((a, b) => a + (b || 0), 0) : size;
     const pixelSize = size_scalar / dimsWidth;
 
@@ -8601,7 +8602,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     // Mantissa factor: 2^(log2(pixelSize) - k) is in [1, 2)
     const mantissa = Math.pow(2, log2_pixelSize - this.initialScale);
 
-    // Convert re/im to quad precision if needed
+    // Convert re/im to DD precision if needed
     const re_qd = Array.isArray(re) ? re : toDD(re);
     const im_qd = Array.isArray(im) ? im : toDD(im);
 
@@ -8643,7 +8644,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     this.checkSpike(size, re, im);
   }
 
-  initPixelsOct() {
+  initPixelsQD() {
     // Override to prevent parent from overwriting our scaled arrays
   }
 
@@ -9014,10 +9015,10 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
             // z² + c: 2·Z·δz + δz²
             let linear_r = 2.0 * (refr * dzr - refi * dzi);
             let linear_i = 2.0 * (refr * dzi + refi * dzr);
-            let quad_r = ldexp(dzr * dzr - dzi * dzi, scale);
-            let quad_i = ldexp(2.0 * dzr * dzi, scale);
-            new_dzr = linear_r + quad_r + dc_r;
-            new_dzi = linear_i + quad_i + dc_i;
+            let dz2_r = ldexp(dzr * dzr - dzi * dzi, scale);
+            let dz2_i = ldexp(2.0 * dzr * dzi, scale);
+            new_dzr = linear_r + dz2_r + dc_r;
+            new_dzi = linear_i + dz2_i + dc_i;
           } else if (params.exponent == 3u) {
             // z³ + c: 3·Z²·δz + 3·Z·δz² + δz³
             let ref2_r = refr * refr - refi * refi;
@@ -9478,7 +9479,7 @@ self.onmessage = async function(e) {
       } else if (enableGPU && webGPUAvailable && gpuSafe) {
         // Two-tier strategy with WebGPU:
         // - Shallow zooms: GpuBoard with simple float32 iteration
-        // - Deep zooms: GpuZhuoranBoard with quad precision reference + float32 perturbations
+        // - Deep zooms: GpuZhuoranBoard with DD precision reference + float32 perturbations
         board = new GpuBoardClass(data.k, size, reArg, imArg, data.config, data.id);
       } else {
         if (enableGPU && webGPUAvailable && !gpuSafe) {
@@ -9494,8 +9495,8 @@ self.onmessage = async function(e) {
         }
         // WebGPU disabled or unavailable - use CPU-based boards
         // CpuBoard uses double precision (float64, ~15 digits), good to ~1e-15 pixel size
-        // PerturbationBoard uses quad precision reference for medium zooms
-        // QDZhuoranBoard uses oct precision (~212 bits) for deepest zooms
+        // PerturbationBoard uses DD precision reference for medium zooms
+        // QDZhuoranBoard uses QD precision (~212 bits) for deepest zooms
         if (pixelSize > 1e-15) {
           board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
         } else if (pixelSize > 1e-30) {
@@ -9507,7 +9508,7 @@ self.onmessage = async function(e) {
 
       boards.set(data.k, board);
 
-      // Store oct-precision coordinates
+      // Store QD-precision coordinates
       board.sizesQD = [size, data.reQD, data.imQD];
 
       // Show coordinates - use full precision only for very deep zoom (pixelSize < 1e-45)
@@ -9687,7 +9688,7 @@ async function iterateBoards() {
 
 </script>
 <script id="mathCode">
-//////////// quad-precision (qd, double double) utilities ///////////
+//////////// DD (double-double) precision utilities ///////////
 
 function toDD(x) {
   return Array.isArray(x) ? x : [x, 0];
@@ -9787,7 +9788,7 @@ function float64ToBigIntScaled(x, scale) {
   return result;
 }
 
-function decimalToOct(decimalString) {
+function decimalToQD(decimalString) {
   let s = decimalString.trim().toLowerCase();
   const neg = s.startsWith('-');
   if (neg) s = s.slice(1);
@@ -9826,7 +9827,7 @@ function decimalToOct(decimalString) {
     const limbBigInt = float64ToBigIntScaled(limb, internalScale);
     residual = residual - limbBigInt;
   }
-  // Normalize the result to ensure consistent representation across all oct operations.
+  // Normalize the result to ensure consistent representation across all QD operations.
   // Without this, limbs may not satisfy |limb[i]| < ulp(limb[i-1])/2, causing
   // ArqdAdd/toQDAdd to produce different representations when adding zero.
   // Uses quickTwoSum cascade to renormalize (fully inlined to avoid dependency issues).
@@ -9839,9 +9840,9 @@ function decimalToOct(decimalString) {
   return [s0, s1, s2, s3];
 }
 
-// Convert oct value to decimal string with exact BigInt arithmetic.
-function qdToDecimalString(oct, digits) {
-  const o = Array.isArray(oct) ? oct : [oct, 0, 0, 0];
+// Convert QD value to decimal string with exact BigInt arithmetic.
+function qdToDecimalString(qd, digits) {
+  const o = Array.isArray(qd) ? qd : [qd, 0, 0, 0];
   const internalScale = 60;
   let total = 0n;
   for (let i = 0; i < 4; i++) {
@@ -9986,21 +9987,21 @@ function ddReciprocal(b, iters = 2) {
   return x;
 }
 
-// Complex operations in quad precision
+// Complex operations in DD precision
 function qdcAdd(a, b) {
   let realSum = ddAdd([a[0], a[1]], [b[0], b[1]]);
   let imagSum = ddAdd([a[2], a[3]], [b[2], b[3]]);
   return [realSum[0], realSum[1], imagSum[0], imagSum[1]];
 }
 
-// Complex subtraction in quad precision
+// Complex subtraction in DD precision
 function qdcSub(a, b) {
   let realDiff = ddSub([a[0], a[1]], [b[0], b[1]]);
   let imagDiff = ddSub([a[2], a[3]], [b[2], b[3]]);
   return [realDiff[0], realDiff[1], imagDiff[0], imagDiff[1]];
 }
 
-// Complex multiplication in quad precision
+// Complex multiplication in DD precision
 function ddcMul(a, b) {
   let ac = ddMul([a[0], a[1]], [b[0], b[1]]);
   let bd = ddMul([a[2], a[3]], [b[2], b[3]]);
@@ -10010,14 +10011,14 @@ function ddcMul(a, b) {
   return [real[0], real[1], imag[0], imag[1]];
 }
 
-// Complex doubling in quad precision
+// Complex doubling in DD precision
 function qdcDouble(a) {
   let realDouble = ddDouble([a[0], a[1]]);
   let imagDouble = ddDouble([a[2], a[3]]);
   return [realDouble[0], realDouble[1], imagDouble[0], imagDouble[1]];
 }
 
-// Complex squaring in quad precision
+// Complex squaring in DD precision
 function ddcSquare(a) {
   let a0a0 = ddSquare([a[0], a[1]]);
   let a1a1 = ddSquare([a[2], a[3]]);
@@ -10027,7 +10028,7 @@ function ddcSquare(a) {
   return [real[0], real[1], imag[0], imag[1]];
 }
 
-// Complex absolute value in quad precision
+// Complex absolute value in DD precision
 function qdcAbs(a) {
   let a0a0 = ddSquare([a[0], a[1]]);
   let a1a1 = ddSquare([a[2], a[3]]);
@@ -10229,7 +10230,7 @@ function qdFormat(q, digits = 'auto', useFixedPoint = false) {
   return s + result + epart;
 }
 
-// Array in-place quad precision, allows fast computation
+// Array in-place DD precision, allows fast computation
 // by avoiding array constructors
 
 function Afast2Sum(r, i, a, b) {

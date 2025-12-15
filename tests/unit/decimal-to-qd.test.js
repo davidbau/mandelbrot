@@ -1,7 +1,7 @@
 /**
- * Unit tests for decimalToOct function
+ * Unit tests for decimalToQD function
  *
- * This function converts decimal strings to oct-precision (4 float64 limbs)
+ * This function converts decimal strings to QD-precision (4 float64 limbs)
  * representation. The critical requirement is that the sum of the 4 limbs
  * should equal the original decimal value to high precision.
  */
@@ -9,11 +9,11 @@
 const { createTestEnvironment } = require('../utils/extract-code');
 
 const {
-  decimalToOct,
+  decimalToQD,
   float64ToBigIntScaled,
   qdToDecimalString
 } = createTestEnvironment([
-  'decimalToOct',
+  'decimalToQD',
   'float64ToBigIntScaled',
   'qdToDecimalString'
 ]);
@@ -102,45 +102,45 @@ describe('float64ToBigIntScaled', () => {
   });
 });
 
-describe('decimalToOct basic functionality', () => {
+describe('decimalToQD basic functionality', () => {
   test('handles zero', () => {
-    const result = decimalToOct('0');
+    const result = decimalToQD('0');
     expect(sumLimbs(result)).toBe(0);
   });
 
   test('handles simple integers', () => {
-    expect(sumLimbs(decimalToOct('1'))).toBe(1);
-    expect(sumLimbs(decimalToOct('-1'))).toBe(-1);
-    expect(sumLimbs(decimalToOct('42'))).toBe(42);
-    expect(sumLimbs(decimalToOct('-42'))).toBe(-42);
+    expect(sumLimbs(decimalToQD('1'))).toBe(1);
+    expect(sumLimbs(decimalToQD('-1'))).toBe(-1);
+    expect(sumLimbs(decimalToQD('42'))).toBe(42);
+    expect(sumLimbs(decimalToQD('-42'))).toBe(-42);
   });
 
   test('handles simple decimals', () => {
-    const result = decimalToOct('1.5');
+    const result = decimalToQD('1.5');
     expect(sumLimbs(result)).toBeCloseTo(1.5, 15);
   });
 
   test('handles scientific notation', () => {
-    const result = decimalToOct('1.5e10');
+    const result = decimalToQD('1.5e10');
     expect(sumLimbs(result)).toBeCloseTo(1.5e10, 5);
   });
 
   test('handles negative scientific notation exponents', () => {
-    const result = decimalToOct('1.5e-10');
+    const result = decimalToQD('1.5e-10');
     expect(sumLimbs(result)).toBeCloseTo(1.5e-10, 25);
   });
 });
 
-describe('decimalToOct precision tests', () => {
+describe('decimalToQD precision tests', () => {
   test('preserves full double precision for representable numbers', () => {
     // Math.PI is exactly representable in float64
     const piStr = Math.PI.toString();
-    const result = decimalToOct(piStr);
+    const result = decimalToQD(piStr);
     expect(sumLimbs(result)).toBe(Math.PI);
   });
 
   test('limbs are in descending order of magnitude', () => {
-    const result = decimalToOct('1.23456789');
+    const result = decimalToQD('1.23456789');
 
     // Each limb should be smaller than or equal to the previous
     for (let i = 1; i < result.length; i++) {
@@ -150,16 +150,16 @@ describe('decimalToOct precision tests', () => {
 
   test('first limb is the best float64 approximation', () => {
     const input = '1.5';
-    const result = decimalToOct(input);
+    const result = decimalToQD(input);
     expect(result[0]).toBe(1.5);
   });
 });
 
-describe('decimalToOct high-precision strings', () => {
+describe('decimalToQD high-precision strings', () => {
   test('handles 20 decimal digit strings', () => {
     // This string cannot be exactly represented in float64
     const input = '1.23456789012345678901';
-    const result = decimalToOct(input);
+    const result = decimalToQD(input);
 
     // The sum should be close to the input
     const sum = sumLimbs(result);
@@ -169,7 +169,7 @@ describe('decimalToOct high-precision strings', () => {
 
   test('handles strings with many trailing digits - documents precision limit', () => {
     const input = '1.00000000000000000001';
-    const result = decimalToOct(input);
+    const result = decimalToQD(input);
 
     // First limb is the float64 approximation (exactly 1.0)
     expect(result[0]).toBe(1.0);
@@ -181,7 +181,7 @@ describe('decimalToOct high-precision strings', () => {
   });
 });
 
-describe('decimalToOct regression tests - precision near round numbers', () => {
+describe('decimalToQD regression tests - precision near round numbers', () => {
   /**
    * KNOWN LIMITATION: When a decimal string is very close to a "round" number
    * like -1.8, the oct representation may round to exactly that number.
@@ -202,7 +202,7 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
 
   test('documents limitation: -1.79999999999999999999649 rounds to -1.8 in float64 sum', () => {
     const input = '-1.79999999999999999999649';
-    const result = decimalToOct(input);
+    const result = decimalToQD(input);
     const sum = sumLimbs(result);
 
     // KNOWN LIMITATION: The sum equals -1.8 due to float64 precision limits
@@ -219,7 +219,7 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
     // After normalization, the limbs satisfy |limb[i]| < ulp(limb[i-1])/2
     // This ensures consistent representation across all oct operations
     const input = '-1.79999999999999999999649';
-    const result = decimalToOct(input);
+    const result = decimalToQD(input);
 
     // First limb is normalized to exactly -1.8 (the nearest float64 value)
     expect(result[0]).toBe(-1.8);
@@ -232,7 +232,7 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
 
   test('documents limitation: values near -2 also round', () => {
     const input = '-1.99999999999999999999';
-    const result = decimalToOct(input);
+    const result = decimalToQD(input);
     const sum = sumLimbs(result);
 
     // KNOWN LIMITATION: rounds to -2
@@ -241,7 +241,7 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
 
   test('documents limitation: values near 1 also round', () => {
     const input = '1.00000000000000000001';
-    const result = decimalToOct(input);
+    const result = decimalToQD(input);
     const sum = sumLimbs(result);
 
     // KNOWN LIMITATION: rounds to 1
@@ -251,7 +251,7 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
   test('imaginary component precision: 0.00000000000000000000073', () => {
     // This is the imaginary part from the regression URL
     const input = '0.00000000000000000000073';
-    const result = decimalToOct(input);
+    const result = decimalToQD(input);
     const sum = sumLimbs(result);
 
     // Should be positive and approximately 7.3e-22
@@ -260,32 +260,32 @@ describe('decimalToOct regression tests - precision near round numbers', () => {
   });
 });
 
-describe('decimalToOct edge cases', () => {
+describe('decimalToQD edge cases', () => {
   test('handles very small numbers', () => {
     // Test a small value well within float64 range
-    const result = decimalToOct('1e-50');
+    const result = decimalToQD('1e-50');
     const sum = sumLimbs(result);
     expect(sum).toBeCloseTo(1e-50, 60);
   });
 
   test('handles very large numbers', () => {
-    const result = decimalToOct('1e100');
+    const result = decimalToQD('1e100');
     const sum = sumLimbs(result);
     expect(sum).toBeCloseTo(1e100, -90);
   });
 
   test('handles leading/trailing whitespace', () => {
-    const result = decimalToOct('  1.5  ');
+    const result = decimalToQD('  1.5  ');
     expect(sumLimbs(result)).toBeCloseTo(1.5, 15);
   });
 
   test('handles positive sign', () => {
-    const result = decimalToOct('+1.5');
+    const result = decimalToQD('+1.5');
     expect(sumLimbs(result)).toBeCloseTo(1.5, 15);
   });
 
   test('handles uppercase E in scientific notation', () => {
-    const result = decimalToOct('1.5E10');
+    const result = decimalToQD('1.5E10');
     expect(sumLimbs(result)).toBeCloseTo(1.5e10, 5);
   });
 });
@@ -309,7 +309,7 @@ describe('qdToDecimalString', () => {
 
   test('handles deep zoom coordinates near -1.8', () => {
     // Coordinate from the regression test URL
-    const oct = decimalToOct('-1.799999999999999999999999999999999997574325104259492');
+    const oct = decimalToQD('-1.799999999999999999999999999999999997574325104259492');
     const result = qdToDecimalString(oct, 50);
     expect(result).not.toMatch(/^-/);  // Must not start with minus
     expect(result).toMatch(/^1\.799/);  // Should start with the absolute value

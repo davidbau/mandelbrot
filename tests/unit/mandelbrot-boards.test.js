@@ -785,7 +785,7 @@ describe('Mandelbrot Board Computations', () => {
           totalPixels: config.dimsArea,
           timedOut: board.un > 0,
           iterCount: iterCount,
-          quadIndexesCount: board.quadIndexes ? board.quadIndexes.length : 0,
+          ddIndexesCount: board.ddIndexes ? board.ddIndexes.length : 0,
           pertIndexesCount: board.pertIndexes ? board.pertIndexes.length : 0
         };
       }, location, SMALL_GRID, MAX_ITERATIONS);
@@ -834,12 +834,12 @@ describe('Mandelbrot Board Computations', () => {
       expect(result.unfinished).toBe(0);
     }, TEST_TIMEOUT);
 
-    test('should use quad reference points', async () => {
+    test('should use DD reference points', async () => {
       const result = await computePerturbationRegion(TEST_LOCATIONS.origin);
 
       expect(result.error).toBeUndefined();
-      // PerturbationBoard should have quad-double reference points
-      expect(result.quadIndexesCount).toBeGreaterThan(0);
+      // PerturbationBoard should have double-double reference points
+      expect(result.ddIndexesCount).toBeGreaterThan(0);
     }, TEST_TIMEOUT);
   });
 
