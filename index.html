@@ -800,10 +800,9 @@ class Config {
   static WIDESCREEN_ASPECT_RATIO = 16 / 9;
   static CENTER_COORDINATE = 0.5;
 
-  // Feigenbaum / Myreberg point (real-axis accumulation point of period doubling)
-  // Stored in oct precision and derived quad-double for legacy callers.
-  static FEIGENBAUM_POINT_OCT = [-1.4011551890920506, 3.1858157e-17, 0, 0];
-  static FEIGENBAUM_POINT = [-1.4011551890920506, 3.1858157e-17];
+  // Feigenbaum / Myrberg point (real-axis accumulation point of period doubling)
+  // OEIS A218453: 65-digit precision, parsed to quad-double (oct) format
+  static FEIGENBAUM_POINT_QD = decimalToOct('-1.4011551890920506005238267878938612922263080433973196089372614966');
 
   constructor(store) {
     this.store = store;
@@ -2131,14 +2130,12 @@ class ZoomManager {
     let osize = this.grid.views[k].size;
     let oreQD = this.grid.views[k].re;
     let oimQD = this.grid.views[k].im;
-    let ore = qdToDD(oreQD);
-    let oim = qdToDD(oimQD);
     let rre = Config.CENTER_COORDINATE;
-    if (k === 0 && ddEq(ore, -0.5) && ddEq(oim, 0)) {
+    // Check if center is at (-0.5, 0) - use QD comparison
+    if (k === 0 && qdEq(oreQD, -0.5) && qdEq(oimQD, 0)) {
       // Myreberg / Feigenbaum point
       const baseRe = this.grid.views[0].re;
-      oreQD = Config.FEIGENBAUM_POINT_OCT;
-      ore = qdToDD(oreQD);
+      oreQD = Config.FEIGENBAUM_POINT_QD;
       rre = qdToNumber(toQDAdd(
         toQDScale(toQDSub(oreQD, baseRe), 1 / this.grid.views[0].size),
         Config.CENTER_COORDINATE
@@ -10022,6 +10019,10 @@ function qdLt(a, s) {
 
 function ddEq(a, s) {
   return a[0] == s && a[1] == 0;
+}
+
+function qdEq(a, s) {
+  return a[0] === s && a[1] === 0 && a[2] === 0 && a[3] === 0;
 }
 
 function qdAbs(q) {
