@@ -2760,8 +2760,8 @@ class URLHandler {
       const viewReOct = view ? view.re : state.sizes[j]?.[1];
       const viewImOct = view ? view.im : state.sizes[j]?.[2];
       if (j < state.sizes.length &&
-          !ddCompare(qdToDD(viewReOct), qdToDD(prev[0])) &&
-          !ddCompare(qdToDD(viewImOct), qdToDD(prev[1]))) {
+          !qdCompare(viewReOct, prev[0]) &&
+          !qdCompare(viewImOct, prev[1])) {
         commas += ',';
       } else {
         if (prevj >= 0) {
@@ -10010,6 +10010,18 @@ function ddCompare(a, b) {
   if (a[0] > b[0]) return 1;
   if (a[1] < b[1]) return -1;
   if (a[1] > b[1]) return 1;
+  return 0;
+}
+
+function qdCompare(a, b) {
+  if (a[0] < b[0]) return -1;
+  if (a[0] > b[0]) return 1;
+  if (a[1] < b[1]) return -1;
+  if (a[1] > b[1]) return 1;
+  if (a[2] < b[2]) return -1;
+  if (a[2] > b[2]) return 1;
+  if (a[3] < b[3]) return -1;
+  if (a[3] > b[3]) return 1;
   return 0;
 }
 
