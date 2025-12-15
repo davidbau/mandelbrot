@@ -531,7 +531,7 @@ describe('Mandelbrot Board Computations', () => {
       expect(result.unfinished).toBe(0);
     }, TEST_TIMEOUT);
 
-    test('should produce results consistent with CPU ZhuoranBoard', async () => {
+    test('should produce results consistent with CPU DDZhuoranBoard', async () => {
       const location = TEST_LOCATIONS.outsideSet;
 
       // Run both GPU and CPU versions
@@ -542,7 +542,7 @@ describe('Mandelbrot Board Computations', () => {
         return;
       }
 
-      // Get CPU ZhuoranBoard result for comparison
+      // Get CPU DDZhuoranBoard result for comparison
       const cpuResult = await page.evaluate(async (loc, dims, maxIter) => {
         const config = {
           dimsWidth: dims.width,
@@ -560,7 +560,7 @@ describe('Mandelbrot Board Computations', () => {
           ? [loc.center[1], 0]
           : loc.center[1];
 
-        const board = new ZhuoranBoard(0, loc.size, center_re, center_im, config);
+        const board = new DDZhuoranBoard(0, loc.size, center_re, center_im, config);
 
         let iterCount = 0;
         const startTime = Date.now();
@@ -592,10 +592,10 @@ describe('Mandelbrot Board Computations', () => {
     }, TEST_TIMEOUT);
   });
 
-  // ZhuoranBoard tests - single reference orbit perturbation
-  describe('ZhuoranBoard tests', () => {
+  // DDZhuoranBoard tests - single reference orbit perturbation
+  describe('DDZhuoranBoard tests', () => {
     /**
-     * Helper to compute a region using ZhuoranBoard
+     * Helper to compute a region using DDZhuoranBoard
      */
     async function computeZhuoranRegion(location) {
       return await page.evaluate(async (loc, dims, maxIter) => {
@@ -617,14 +617,14 @@ describe('Mandelbrot Board Computations', () => {
           ? [loc.center[1], 0]
           : loc.center[1];
 
-        // Check if ZhuoranBoard class exists
-        if (typeof ZhuoranBoard === 'undefined') {
-          return { error: 'ZhuoranBoard not defined' };
+        // Check if DDZhuoranBoard class exists
+        if (typeof DDZhuoranBoard === 'undefined') {
+          return { error: 'DDZhuoranBoard not defined' };
         }
 
         let board;
         try {
-          board = new ZhuoranBoard(0, loc.size, center_re, center_im, config);
+          board = new DDZhuoranBoard(0, loc.size, center_re, center_im, config);
         } catch (e) {
           return { error: `Failed to create board: ${e.message}` };
         }
@@ -669,11 +669,11 @@ describe('Mandelbrot Board Computations', () => {
       const result = await computeZhuoranRegion(TEST_LOCATIONS.origin);
 
       if (result.error) {
-        console.log('ZhuoranBoard test error:', result.error);
+        console.log('DDZhuoranBoard test error:', result.error);
       }
 
       expect(result.error).toBeUndefined();
-      expect(result.boardType).toBe('ZhuoranBoard');
+      expect(result.boardType).toBe('DDZhuoranBoard');
       // Most pixels should diverge
       expect(result.diverged).toBeGreaterThanOrEqual(TEST_LOCATIONS.origin.expectedDivergedMin);
       // Should complete or nearly complete
@@ -684,11 +684,11 @@ describe('Mandelbrot Board Computations', () => {
       const result = await computeZhuoranRegion(TEST_LOCATIONS.mainCardioid);
 
       if (result.error) {
-        console.log('ZhuoranBoard test error:', result.error);
+        console.log('DDZhuoranBoard test error:', result.error);
       }
 
       expect(result.error).toBeUndefined();
-      expect(result.boardType).toBe('ZhuoranBoard');
+      expect(result.boardType).toBe('DDZhuoranBoard');
       // Most/all should converge in the main cardioid
       expect(result.converged).toBeGreaterThan(10);
       expect(result.unfinished).toBe(0);
@@ -698,11 +698,11 @@ describe('Mandelbrot Board Computations', () => {
       const result = await computeZhuoranRegion(TEST_LOCATIONS.outsideSet);
 
       if (result.error) {
-        console.log('ZhuoranBoard test error:', result.error);
+        console.log('DDZhuoranBoard test error:', result.error);
       }
 
       expect(result.error).toBeUndefined();
-      expect(result.boardType).toBe('ZhuoranBoard');
+      expect(result.boardType).toBe('DDZhuoranBoard');
       // All pixels around c=2 should diverge quickly
       expect(result.diverged).toBe(result.totalPixels);
       expect(result.unfinished).toBe(0);
@@ -712,7 +712,7 @@ describe('Mandelbrot Board Computations', () => {
       const result = await computeZhuoranRegion(TEST_LOCATIONS.outsideSet);
 
       expect(result.error).toBeUndefined();
-      // ZhuoranBoard should have computed a reference orbit
+      // DDZhuoranBoard should have computed a reference orbit
       expect(result.refIterations).toBeGreaterThan(0);
     }, TEST_TIMEOUT);
   });
@@ -870,8 +870,8 @@ describe('Mandelbrot Board Computations', () => {
         if (typeof CpuBoard === 'undefined') {
           return { error: 'CpuBoard not defined' };
         }
-        if (typeof ZhuoranBoard === 'undefined') {
-          return { error: 'ZhuoranBoard not defined' };
+        if (typeof DDZhuoranBoard === 'undefined') {
+          return { error: 'DDZhuoranBoard not defined' };
         }
         if (typeof PerturbationBoard === 'undefined') {
           return { error: 'PerturbationBoard not defined' };
@@ -920,13 +920,13 @@ describe('Mandelbrot Board Computations', () => {
 
         return {
           cpu: runBoard(CpuBoard, 'CpuBoard'),
-          zhuoran: runBoard(ZhuoranBoard, 'ZhuoranBoard'),
+          zhuoran: runBoard(DDZhuoranBoard, 'DDZhuoranBoard'),
           perturbation: runBoard(PerturbationBoard, 'PerturbationBoard')
         };
       }, location, SMALL_GRID, MAX_ITERATIONS);
     }
 
-    test('CpuBoard and ZhuoranBoard should agree on divergence/convergence and iteration counts', async () => {
+    test('CpuBoard and DDZhuoranBoard should agree on divergence/convergence and iteration counts', async () => {
       const location = TEST_LOCATIONS.outsideSet; // All diverge - clear case
       const results = await computeAllBoards(location);
 

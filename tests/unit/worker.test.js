@@ -11,7 +11,7 @@ global.self = global;
 const workerExports = loadWorkerBlob();
 Object.assign(global, workerExports);
 
-const { CpuBoard, PerturbationBoard, ZhuoranBoard, GpuBoard, GpuZhuoranBoard } = workerExports;
+const { CpuBoard, PerturbationBoard, DDZhuoranBoard, GpuBoard, GpuZhuoranBoard } = workerExports;
 
 // Mock WebGPU environment
 global.GPUBufferUsage = { STORAGE: 1, COPY_DST: 2, COPY_SRC: 4, MAP_READ: 8, UNIFORM: 16 };
@@ -148,12 +148,12 @@ describe('Worker Board Computations (Unit)', () => {
     });
   });
   
-  describe('ZhuoranBoard', () => {
+  describe('DDZhuoranBoard', () => {
      test('should initialize and compute', () => {
       const config = createConfig();
       config.enableGPU = false;
       const loc = TEST_LOCATIONS.outside;
-      const board = new ZhuoranBoard(0, loc.size, [loc.center[0], 0], [loc.center[1], 0], config, 'test-id');
+      const board = new DDZhuoranBoard(0, loc.size, [loc.center[0], 0], [loc.center[1], 0], config, 'test-id');
       
       let maxIter = 100;
       while (board.un > 0 && maxIter-- > 0) {

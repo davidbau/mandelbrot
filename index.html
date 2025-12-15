@@ -250,7 +250,7 @@ href="#github-icon"/></svg></a></p>
 // 6. Board subclasses - Fractal computation engines (run in worker threads)
 //    - CpuBoard: Basic CPU computation
 //    - PerturbationBoard: DD precision deep zoom (CPU)
-//    - ZhuoranBoard: Period detection for convergence (CPU)
+//    - DDZhuoranBoard: Period detection for convergence (CPU)
 //    - GpuBoard: WebGPU parallel computation
 //    - GpuZhuoranBoard: WebGPU with period detection and perturbation
 //
@@ -4518,7 +4518,7 @@ class Board {
       ['QDCpuBoard', QDCpuBoard],
       ['PerturbationBoard', PerturbationBoard],
       ['QDPerturbationBoard', QDPerturbationBoard],
-      ['ZhuoranBoard', ZhuoranBoard],
+      ['DDZhuoranBoard', DDZhuoranBoard],
       ['QDZhuoranBoard', QDZhuoranBoard],
       ['GpuBoard', GpuBoard],
       ['GpuZhuoranBoard', GpuZhuoranBoard],
@@ -5868,7 +5868,7 @@ class ReferenceOrbitThreading {
 // Based on Zhuoran Li's 2021 approach:
 // https://mathr.co.uk/blog/2021-05-14_stretching_deep_zoom.html
 // Rebasing implementation follows Imagina: https://github.com/ImaginaFractal/Imagina
-class ZhuoranBoard extends Board {
+class DDZhuoranBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
     // Reference orbit data (DD precision)
@@ -5944,7 +5944,7 @@ class ZhuoranBoard extends Board {
   }
 
   static fromSerialized(serialized) {
-    const board = new ZhuoranBoard(
+    const board = new DDZhuoranBoard(
       serialized.k,
       serialized.sizesQD[0],
       serialized.sizesQD[1],
@@ -6261,7 +6261,7 @@ class ZhuoranBoard extends Board {
 
         if (db <= this.epsilon2) {
           if (!this.pp[index]) {
-            this.pp[index] = this.it - 1;  // ZhuoranBoard: -1 to account for checkpoint timing
+            this.pp[index] = this.it - 1;  // DDZhuoranBoard: -1 to account for checkpoint timing
           }
           if (db <= this.epsilon) {
             return -1;  // Converged! Return before incrementing refIter
@@ -6302,7 +6302,7 @@ class ZhuoranBoard extends Board {
 
               if (db <= this.epsilon2) {
                 if (!this.pp[index]) {
-                  // ZhuoranBoard: -1 to account for checkpoint timing
+                  // DDZhuoranBoard: -1 to account for checkpoint timing
                   this.pp[index] = this.it - 1;
                 }
                 if (db <= this.epsilon) {
@@ -6331,7 +6331,7 @@ class ZhuoranBoard extends Board {
 
         if (db <= this.epsilon2) {
           if (!this.pp[index]) {
-            this.pp[index] = this.it - 1;  // ZhuoranBoard: -1 to account for checkpoint timing
+            this.pp[index] = this.it - 1;  // DDZhuoranBoard: -1 to account for checkpoint timing
           }
           if (db <= this.epsilon) {
             return -1;  // Converged! Return before incrementing refIter
@@ -6435,7 +6435,7 @@ class QDZhuoranBoard extends Board {
 
     // Initialize pixels
     this.initPixelsQD();
-    this.effort = 2;  // Similar to ZhuoranBoard
+    this.effort = 2;  // Similar to DDZhuoranBoard
   }
 
   initPixelsQD() {
@@ -7524,7 +7524,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
-    this.effort = 2;  // Same as ZhuoranBoard
+    this.effort = 2;  // Same as DDZhuoranBoard
 
     // Reference orbit for perturbation theory (computed on CPU in DD precision)
     this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low]
@@ -7741,7 +7741,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     });
   }
 
-  // Copy extendReferenceOrbit from ZhuoranBoard
+  // Copy extendReferenceOrbit from DDZhuoranBoard
   extendReferenceOrbit() {
     // Compute one more iteration of the reference orbit in DD precision
     const lastIndex = this.refIterations;
@@ -8534,7 +8534,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // NOTE: When refOrbitEscaped is true, we do NOT mark remaining pixels as diverged.
     // The GPU shader will continue iterating those pixels individually, and they will
     // either diverge naturally or continue until maxiter. This matches the behavior
-    // of ZhuoranBoard which rebases pixels when the reference orbit escapes.
+    // of DDZhuoranBoard which rebases pixels when the reference orbit escapes.
 
     // Create change objects grouped by iteration
     const allIterations = new Set([...pixelsByIteration.keys(),
@@ -8595,7 +8595,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
-    this.effort = 2;  // Same as ZhuoranBoard
+    this.effort = 2;  // Same as DDZhuoranBoard
 
     // Reference orbit for perturbation theory (computed on CPU in QD precision only)
     this.refOrbitEscaped = false;
@@ -9659,7 +9659,7 @@ self.onmessage = async function(e) {
             board = new CpuBoard(data.k, size, reArg, imArg, data.config, data.id);
             break;
           case 'zhuoran':
-            board = new ZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
+            board = new DDZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
             break;
           case 'qdzhuoran':
             board = new QDZhuoranBoard(data.k, size, reArg, imArg, data.config, data.id);
@@ -9684,9 +9684,9 @@ self.onmessage = async function(e) {
               );
             } else {
               console.warn(
-                'GpuZhuoranBoard requested but not available, falling back to ZhuoranBoard'
+                'GpuZhuoranBoard requested but not available, falling back to DDZhuoranBoard'
               );
-              board = new ZhuoranBoard(
+              board = new DDZhuoranBoard(
                 data.k, size, reArg, imArg, data.config, data.id
               );
             }
