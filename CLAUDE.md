@@ -40,6 +40,31 @@ When filtering tests by name:
 - All JavaScript is embedded in index.html
 - Tests use Puppeteer for integration testing
 
+### Code Design Philosophy
+
+**Simplicity over complexity** - Write the simplest code that works. Avoid over-engineering solutions. If cleanup reduces code by 200+ lines, the original implementation was too complex.
+
+**Fail loudly for debugging features** - Debugging tools like `board=` should throw errors on invalid input rather than silently falling back. This prevents masking bugs:
+- `board=invalid` should throw an error, not fall back to automatic selection
+- Hard failures during development catch issues early
+- Silent fallbacks hide configuration mistakes and make debugging harder
+
+**Reduce special cases** - Fewer code paths means:
+- Each path gets exercised more frequently in tests
+- Code generalizes better to edge cases
+- Maintenance burden is lower
+- Bugs are easier to find (fewer places to look)
+
+**Design for generalization** - Write code that works for the general case rather than adding special-case logic:
+- Use Fibonacci-based checkpoints everywhere, not one-time initialization
+- Use incremental O(1) threading, not quadratic loops
+- Handle edge cases through the same logic as normal cases when possible
+
+**Trust your data structures** - Don't add defensive checks that paper over bugs:
+- If thread.next should always equal refIter when advancing, check that exactly
+- Don't use fuzzy matching (`|current - refIter| <= 10`) when exact matching is correct
+- Defensive programming can hide bugs rather than expose them
+
 ### Debugging Strategies That Work
 
 These guidelines emerged from successful debugging sessions on this codebase:
