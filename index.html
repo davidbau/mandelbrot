@@ -113,7 +113,17 @@ body.starting div#b_0:after { display: flex; position: absolute;
 </style>
 </head>
 <body class="starting">
-<svg xmlns="http://www.w3.org/2000/svg" style="display:none"><symbol id="github-icon" viewBox="0 0 512 512"><circle cx="256" cy="256" r="256" fill="#181717"/><path fill="#fff" d="M335 499c-13 0-16-6-16-12l1-70c0-24-8-40-18-48 57-6 117-28 117-126 0-28-10-51-26-69 3-6 11-32-3-67 0 0-21-7-70 26-42-12-86-12-128 0-49-33-70-26-70-26-14 35-6 61-3 67-16 18-26 41-26 69 0 98 59 120 116 126-7 7-14 18-16 35-15 6-52 17-74-22 0 0-14-24-40-26 0 0-25 0-1 16 0 0 16 7 28 37 0 0 15 50 86 34l1 44c0 6-3 12-16 12-14 0-12 17-12 17H347s2-17-12-17Z"/></symbol></svg>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="github-icon" viewBox="0 0 512 512">
+    <circle cx="256" cy="256" r="256" fill="#181717"/>
+    <path fill="#fff" d="M335 499c-13 0-16-6-16-12l1-70c0-24-8-40-18-48 57-6
+      117-28 117-126 0-28-10-51-26-69 3-6 11-32-3-67 0 0-21-7-70 26-42-12-86-12
+      -128 0-49-33-70-26-70-26-14 35-6 61-3 67-16 18-26 41-26 69 0 98 59 120
+      116 126-7 7-14 18-16 35-15 6-52 17-74-22 0 0-14-24-40-26 0 0-25 0-1 16 0
+      0 16 7 28 37 0 0 15 50 86 34l1 44c0 6-3 12-16 12-14 0-12 17-12 17H347s2
+      -17-12-17Z"/>
+  </symbol>
+</svg>
 <div id=movie></div>
 <div id=grid></div>
 <div id=fullscreen-button title="Enter fullscreen (Enter)">⛶</div>
@@ -192,7 +202,11 @@ to create more precise displays</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a></p>
 </div>
 
 <script id="mainCode">
@@ -804,7 +818,8 @@ class Config {
   // OEIS A218453: 65-digit precision, parsed to quad-double (oct) format
   static get FEIGENBAUM_POINT_QD() {
     if (!this._FEIGENBAUM_POINT_QD) {
-      this._FEIGENBAUM_POINT_QD = decimalToOct('-1.4011551890920506005238267878938612922263080433973196089372614966');
+      this._FEIGENBAUM_POINT_QD = decimalToOct(
+        '-1.4011551890920506005238267878938612922263080433973196089372614966');
     }
     return this._FEIGENBAUM_POINT_QD;
   }
@@ -2114,7 +2129,8 @@ class ZoomManager {
       if (prevSizeOct !== null) {
         const prevSize = qdToNumber(prevSizeOct);
         let x = qdToNumber(toQDSub(currReOct, prevReOct)) / prevSize + 0.5;
-        let y = 0.5 - qdToNumber(toQDSub(currImOct, prevImOct)) / (prevSize / this.config.aspectRatio);
+        let y = 0.5 - qdToNumber(toQDSub(currImOct, prevImOct)) /
+          (prevSize / this.config.aspectRatio);
 
         let zf = prevSize / qdToNumber(currSizeOct);
         this.showZoomRect(prevK, x, y, zf);
@@ -2650,7 +2666,8 @@ class URLHandler {
           val = val.replace(/ /g, '+');
           // Parse scientific notation to handle extreme zoom values (e.g., 1e400)
           const { mantissa, exponent } = this.parseScientificNotation(val);
-          // Store zoom parameters for later - size computation needs aspect-ratio-adjusted firstsize
+          // Store zoom parameters for later - size computation needs
+          // aspect-ratio-adjusted firstsize
           // which isn't available until after initSizes() is called
           this.config.zoomFromUrl = { mantissa, exponent };
         }
@@ -3837,7 +3854,8 @@ class Scheduler {
     }
 
     if (orphanCount > 0) {
-      console.warn(`Found ${orphanCount} orphan board(s). Active views: ${views.length}, tracked boards: ${this.boardIds.size}`);
+      console.warn(`Found ${orphanCount} orphan board(s). ` +
+        `Active views: ${views.length}, tracked boards: ${this.boardIds.size}`);
     }
   }
 
@@ -4074,7 +4092,9 @@ class OrbitComputer {
       // Calculate a cycle and any messages
       // c is oct format: [r0, r1, r2, r3, i0, i1, i2, i3]
       // Use full oct precision (4 components each) to avoid discretization at deep zoom
-      title = 'c=' + formatcomplex(k, [c[0], c[1], c[2], c[3]], [c[4], c[5], c[6], c[7]]).replaceAll('-', '\u2212');
+      title = 'c=' +
+        formatcomplex(k, [c[0], c[1], c[2], c[3]], [c[4], c[5], c[6], c[7]])
+        .replaceAll('-', '\u2212');
       if (view.nn[j]) {
         if (view.nn[j] > 0) {
           title += MSG.diverges_in_ + view.nn[j];
@@ -5751,7 +5771,8 @@ class QDSpatialBucket extends SpatialBucket {
 // Reference Orbit Threading - enables robust cycle detection despite rebasing
 class ReferenceOrbitThreading {
   /**
-   * @param {SpatialBucket} spatialBucket - A precision-aware spatial bucket (DDSpatialBucket or QDSpatialBucket)
+   * @param {SpatialBucket} spatialBucket - A precision-aware spatial bucket
+   *   (DDSpatialBucket or QDSpatialBucket)
    */
   constructor(spatialBucket) {
     const maxCycleLength = 1e5;
@@ -6432,16 +6453,23 @@ class QDZhuoranBoard extends ZhuoranBoard {
     // z^2 = (zr + zi*i)^2 = zr^2 - zi^2 + 2*zr*zi*i
     ArqdSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
     ArqdSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
-    ArqdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3], ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
-    ArqdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
+    ArqdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3],
+      ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
+    ArqdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3],
+      -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
 
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      ArqdMul(tt, 0, ri[0], ri[1], ri[2], ri[3], tt[8], tt[9], tt[10], tt[11]);         // j * ja
-      ArqdMul(tt, 4, rr[0], rr[1], rr[2], rr[3], tt[16], tt[17], tt[18], tt[19]);       // r * ra
-      ArqdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
-      ArqdMul(tt, 0, rr[0], rr[1], rr[2], rr[3], tt[8], tt[9], tt[10], tt[11]);         // r * ja
+      ArqdMul(tt, 0, ri[0], ri[1], ri[2], ri[3],
+        tt[8], tt[9], tt[10], tt[11]);         // j * ja
+      ArqdMul(tt, 4, rr[0], rr[1], rr[2], rr[3],
+        tt[16], tt[17], tt[18], tt[19]);       // r * ra
+      ArqdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3],
+        tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
+      ArqdMul(tt, 0, rr[0], rr[1], rr[2], rr[3],
+        tt[8], tt[9], tt[10], tt[11]);         // r * ja
       ArqdMul(tt, 4, ri[0], ri[1], ri[2], ri[3], tt[16], tt[17], tt[18], tt[19]);       // j * ra
-      ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
+      ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3],
+        tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
       ArqdSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);                                   // ra = rt
     }
 
@@ -6913,7 +6941,8 @@ class GpuBoard extends GpuBaseBoard {
       label: 'Parameters buffer'
     });
 
-    // Consolidated pixel state buffer (PixelState struct: iter, status, period, zr, zi, base_r, base_i)
+    // Consolidated pixel state buffer
+    // (PixelState struct: iter, status, period, zr, zi, base_r, base_i)
     this.buffers.pixels = this.device.createBuffer({
       size: pixelBufferSize,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
@@ -6935,7 +6964,8 @@ class GpuBoard extends GpuBaseBoard {
     });
 
     // Initialize pixel state buffer using overlapping typed array views
-    // PixelState struct layout: [iter(u32), status(u32), period(u32), zr(f32), zi(f32), base_r(f32), base_i(f32)]
+    // PixelState struct layout: [iter(u32), status(u32), period(u32),
+    //   zr(f32), zi(f32), base_r(f32), base_i(f32)]
     const pixelData = new ArrayBuffer(pixelBufferSize);
     const pixelU32 = new Uint32Array(pixelData);
     const pixelF32 = new Float32Array(pixelData);
@@ -7281,9 +7311,12 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     const sizeY_qd = toDD(size_scalar / this.config.aspectRatio);
 
     // Per-pixel data arrays
-    this.dc = new Float32Array(dimsArea * 2);  // Delta c from reference [real, imag] pairs
-    this.dz = new Float32Array(dimsArea * 2);  // Current perturbation delta [real, imag] pairs
-    this.refIter = new Uint32Array(dimsArea);  // Which iteration of reference each pixel is following
+    this.dc = new Float32Array(dimsArea * 2);
+    // Delta c from reference [real, imag] pairs
+    this.dz = new Float32Array(dimsArea * 2);
+    // Current perturbation delta [real, imag] pairs
+    this.refIter = new Uint32Array(dimsArea);
+    // Which iteration of reference each pixel is following
 
     // Working arrays for quad precision arithmetic
     const cr_qd = new Array(4);
@@ -7647,7 +7680,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
       fn getThread(idx: u32) -> vec3<f32> {
         if (idx >= params.ref_orbit_length) { return vec3<f32>(-1.0, 0.0, 0.0); }
         let iter_data = iters[idx];
-        return vec3<f32>(iter_data.thread_next, iter_data.thread_delta_re, iter_data.thread_delta_im);
+        return vec3<f32>(iter_data.thread_next,
+          iter_data.thread_delta_re, iter_data.thread_delta_im);
       }
 
       // Get reference orbit values from unified iters buffer
@@ -7737,7 +7771,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
           let curr_mag_sq = curr_total_r * curr_total_r + curr_total_i * curr_total_i;
 
           // Check divergence (escape radius 2, or NaN/Infinity from numerical errors)
-          if (curr_mag_sq > 4.0 || !(curr_mag_sq <= 1e38)) {  // NaN/Inf check: !(x <= large) catches both
+          // NaN/Inf check: !(x <= large) catches both
+          if (curr_mag_sq > 4.0 || !(curr_mag_sq <= 1e38)) {
             pixels[index].status = 1u;
             pixels[index].period = pp;
             break;
@@ -7987,7 +8022,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     }
 
     // Step 2: Upload iteration state to GPU (INCREMENTAL UPLOADS)
-    // IterState struct: 5 f32 per iteration (ref_re, ref_im, thread_next, thread_delta_re, thread_delta_im)
+    // IterState struct: 5 f32 per iteration
+    // (ref_re, ref_im, thread_next, thread_delta_re, thread_delta_im)
     const totalIters = this.refIterations + 1;  // Include iteration 0
     const BYTES_PER_ITER = 20;  // 5 f32 = 20 bytes
 
@@ -8349,17 +8385,24 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     // Compute z^2 = (zr + zi*i)^2 = zr^2 - zi^2 + 2*zr*zi*i
     ArqdSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
     ArqdSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
-    ArqdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3], ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
-    ArqdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
+    ArqdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3],
+      ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
+    ArqdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3],
+      -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
 
     // For higher exponents (z^n where n > 2), multiply by z iteratively
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      ArqdMul(tt, 0, ri[0], ri[1], ri[2], ri[3], tt[8], tt[9], tt[10], tt[11]);         // j * ja
-      ArqdMul(tt, 4, rr[0], rr[1], rr[2], rr[3], tt[16], tt[17], tt[18], tt[19]);       // r * ra
-      ArqdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
-      ArqdMul(tt, 0, rr[0], rr[1], rr[2], rr[3], tt[8], tt[9], tt[10], tt[11]);         // r * ja
+      ArqdMul(tt, 0, ri[0], ri[1], ri[2], ri[3],
+        tt[8], tt[9], tt[10], tt[11]);         // j * ja
+      ArqdMul(tt, 4, rr[0], rr[1], rr[2], rr[3],
+        tt[16], tt[17], tt[18], tt[19]);       // r * ra
+      ArqdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3],
+        tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
+      ArqdMul(tt, 0, rr[0], rr[1], rr[2], rr[3],
+        tt[8], tt[9], tt[10], tt[11]);         // r * ja
       ArqdMul(tt, 4, ri[0], ri[1], ri[2], ri[3], tt[16], tt[17], tt[18], tt[19]);       // j * ra
-      ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
+      ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3],
+        tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
       ArqdSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);                                   // ra = rt
     }
 
@@ -8719,7 +8762,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       fn getThread(idx: u32) -> vec3<f32> {
         if (idx >= params.ref_orbit_length) { return vec3<f32>(-1.0, 0.0, 0.0); }
         let iter_data = iters[idx];
-        return vec3<f32>(iter_data.thread_next, iter_data.thread_delta_re, iter_data.thread_delta_im);
+        return vec3<f32>(iter_data.thread_next,
+          iter_data.thread_delta_re, iter_data.thread_delta_im);
       }
 
       fn getRefOrbit(idx: u32) -> vec2<f32> {
@@ -9067,7 +9111,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     const compilationInfo = await shaderModule.getCompilationInfo();
     for (const msg of compilationInfo.messages) {
       const level = msg.type === 'error' ? 'ERROR' : msg.type === 'warning' ? 'WARN' : 'INFO';
-      console.log(`AdaptiveGpuBoard shader ${level}: ${msg.message} (line ${msg.lineNum}, col ${msg.linePos})`);
+      console.log(`AdaptiveGpuBoard shader ${level}: ${msg.message} ` +
+        `(line ${msg.lineNum}, col ${msg.linePos})`);
     }
 
     this.pipeline = this.device.createComputePipeline({
@@ -9181,7 +9226,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
       this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
-      const commandEncoder = this.device.createCommandEncoder({ label: 'Adaptive perturbation compute' });
+      const commandEncoder = this.device.createCommandEncoder(
+        { label: 'Adaptive perturbation compute' });
       const passEncoder = commandEncoder.beginComputePass({ label: 'Adaptive perturbation pass' });
       passEncoder.setPipeline(this.pipeline);
       passEncoder.setBindGroup(0, this.bindGroup);
@@ -9250,7 +9296,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
             const refR = ref[0] + ref[1] + ref[2] + ref[3];
             const refI = ref[4] + ref[5] + ref[6] + ref[7];
             if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
-            convergedByIteration.get(iters).push({ index: i, z: [refR + dzr, refI + dzi], p: this.pp[i] });
+            convergedByIteration.get(iters).push(
+              { index: i, z: [refR + dzr, refI + dzi], p: this.pp[i] });
             this.un--;
             if (this.inSpike && this.inSpike[i] && this.ch > 0) this.ch -= 1;
           }
@@ -9267,7 +9314,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       }
 
     } catch (error) {
-      console.error('AdaptiveGpuBoard.compute() ERROR:', error?.message || error, error?.stack || '');
+      console.error('AdaptiveGpuBoard.compute() ERROR:',
+        error?.message || error, error?.stack || '');
     } finally {
       this.isComputing = false;
     }
@@ -9452,12 +9500,16 @@ self.onmessage = async function(e) {
         `pixel=${pixelSize.toExponential(3)}`
       );
 
-      // Log refC_oct at full precision for deep zoom boards to debug click vs URL differences
+      // Log refC_oct at full precision for deep zoom boards
+      // to debug click vs URL differences
       if (board.refC_oct && pixelSize < 1e-45) {
-        const refReQD = [board.refC_oct[0], board.refC_oct[1], board.refC_oct[2], board.refC_oct[3]];
-        const refImQD = [board.refC_oct[4], board.refC_oct[5], board.refC_oct[6], board.refC_oct[7]];
+        const refReQD = [board.refC_oct[0], board.refC_oct[1],
+          board.refC_oct[2], board.refC_oct[3]];
+        const refImQD = [board.refC_oct[4], board.refC_oct[5],
+          board.refC_oct[6], board.refC_oct[7]];
         const digits = Math.ceil(-Math.log10(pixelSize)) + 3;
-        console.log(`  refC_oct: (${qdToDecimalString(refReQD, digits)}, ${qdToDecimalString(refImQD, digits)})`);
+        console.log(`  refC_oct: (${qdToDecimalString(refReQD, digits)}, ` +
+          `${qdToDecimalString(refImQD, digits)})`);
       }
 
       // Send board type info once on creation
@@ -10557,7 +10609,11 @@ aumentarse para crear visualizaciones más precisas</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="zh" style="display:none">
@@ -10580,12 +10636,14 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>黄点显示<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">轨道</a></b>。红点显示极限环。
+<b>黄点显示<a target="mbhelp"
+href="https://plus.maths.org/content/unveiling-mandelbrot-set">轨道</a></b>。
+红点显示极限环。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>关于迭代。</b>随着您的探索，此查看器通过将迭代精细化至无穷来显示更多
-分形细节。
+<b>关于迭代。</b>随着您的探索，此查看器通过将迭代精细化至无穷来显示
+更多分形细节。
 等待时间越长，显示的细节越多。
 经过数千或数百万次迭代后，您可以解析分形最复杂部分的最精细
 细节。
@@ -10601,10 +10659,12 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 如果可用，将在您的GPU上计算。
 当您放大超过万亿倍后，我们使用四精度扰动算法，可将精细细节解析到
 超过60位数字的精度。
-一旦您制作了一条显示所需细节的有趣路径，您可以<a class="moviemode">创建并
-下载自己的曼德博深度缩放视频</a>，或为您的URL添加书签以保存和分享您的探索。
-为了创建高质量的图像和视频，此查看器以<span class="pixelratio">2</span>:1的
-比例计算子像素<span mobile="">，并且可以增加该比例以创建更精确的显示</span>。
+一旦您制作了一条显示所需细节的有趣路径，
+您可以<a class="moviemode">创建并下载自己的曼德博深度缩放视频</a>，
+或为您的URL添加书签以保存和分享您的探索。
+为了创建高质量的图像和视频，
+此查看器以<span class="pixelratio">2</span>:1的比例计算子像素<span mobile="">，
+并且可以增加该比例以创建更精确的显示</span>。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -10626,7 +10686,11 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="zh-TW" style="display:none">
@@ -10649,7 +10713,9 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>黃點顯示<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">軌道</a></b>。紅點顯示極限環。
+<b>黃點顯示<a target="mbhelp"
+href="https://plus.maths.org/content/unveiling-mandelbrot-set">軌道</a></b>。
+紅點顯示極限環。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
@@ -10668,12 +10734,14 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 碎形上的每次<span mobile="點擊">點擊</span>都會在所選位置開啟更高的
 縮放級別，
 如果可用，將在您的GPU上計算。
-當您放大超過兆倍後，我們使用四精度擾動演算法，可將精細細節解析到
-超過60位數字的精度。
-一旦您製作了一條顯示所需細節的有趣路徑，您可以<a class="moviemode">創建並
-下載自己的曼德博深度縮放影片</a>，或為您的URL加入書籤以儲存和分享您的探索。
-為了創建高品質的圖像和影片，此檢視器以<span class="pixelratio">2</span>:1的
-比例計算子像素<span mobile="">，並且可以增加該比例以創建更精確的顯示</span>。
+當您放大超過兆倍後，我們使用四精度擾動演算法，
+可將精細細節解析到超過60位數字的精度。
+一旦您製作了一條顯示所需細節的有趣路徑，
+您可以<a class="moviemode">創建並下載自己的曼德博深度縮放影片</a>，
+或為您的URL加入書籤以儲存和分享您的探索。
+為了創建高品質的圖像和影片，
+此檢視器以<span class="pixelratio">2</span>:1的比例計算子像素<span mobile="">，
+並且可以增加該比例以創建更精確的顯示</span>。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -10695,7 +10763,11 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="ar" style="display:none;direction:rtl;text-align:right">
@@ -10705,50 +10777,59 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 
 <p style="margin-top:6px;margin-bottom:6px">
 <b><span mobile="اضغط">انقر</span> للتكبير.</b>
-<span mobile="">انقر بزر الماوس الأيمن لحفظ الصور، <b>M</b> لإنشاء وحفظ
-فيديو لمسار التكبير الخاص بك.</span>
+<span mobile="">انقر بزر الماوس الأيمن لحفظ الصور،
+<b>M</b> لإنشاء وحفظ فيديو لمسار التكبير الخاص بك.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
 يتم تكرار <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> لكل
-<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">عدد مركب</a>
+<a target="mbhelp"
+href="http://en.wikipedia.org/wiki/Complex_number">عدد مركب</a>
 <em>c</em>.  تُظهر الألوان
-<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">التكرارات</a> حتى
-التباعد؛ النقاط السوداء
-<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">تتقارب أو تدور</a>.
+<a target="mbhelp"
+href="http://warp.povusers.org/Mandelbrot/">التكرارات</a> حتى التباعد؛
+النقاط السوداء <a
+href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">تتقارب أو تدور</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>النقاط الصفراء تُظهر
-<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">المدارات</a></b>.
+<b>النقاط الصفراء تُظهر <a target="mbhelp"
+href="https://plus.maths.org/content/unveiling-mandelbrot-set">المدارات</a></b>.
 النقاط الحمراء تُظهر الدورات الحدية.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>حول التكرارات.</b> يُظهر هذا العارض المزيد من تفاصيل الكسيريات بمرور
-الوقت من خلال تحسين التكرارات إلى ما لا نهاية أثناء استكشافك. كلما انتظرت
-أكثر، كلما ظهر المزيد من التفاصيل.
-بعد آلاف أو ملايين التكرارات، يمكنك حل أدق التفاصيل في الأجزاء الأكثر
-تعقيداً من الكسيرية.
-شاهد معلومات حول التكرارات والتقدم والإحداثيات عن طريق
-<span mobile="الضغط على">تمرير المؤشر فوق</span> رقم التكبير الأصفر أسفل
-كل نافذة.
-<span mobile="الاحتفاظ بإصبعك">تحريك الماوس</span> فوق محتوى الكسيرية
-سيُحرك مدار قيم <em>z</em> لكل موقع <em>c</em>، مما يكشف ديناميكيات الحدود
-المعقدة التي فتنت علماء الرياضيات.
+<b>حول التكرارات.</b> يُظهر هذا العارض المزيد من تفاصيل
+الكسيريات
+بمرور الوقت من خلال تحسين التكرارات إلى ما لا نهاية
+أثناء استكشافك.
+كلما انتظرت أكثر، كلما ظهر المزيد من التفاصيل.
+بعد آلاف أو ملايين التكرارات، يمكنك حل أدق التفاصيل
+في الأجزاء الأكثر تعقيداً من الكسيرية.
+شاهد معلومات حول التكرارات والتقدم والإحداثيات
+عن طريق <span mobile="الضغط على">تمرير المؤشر فوق</span>
+رقم التكبير الأصفر أسفل كل نافذة.
+<span mobile="الاحتفاظ بإصبعك">تحريك الماوس</span> فوق محتوى
+الكسيرية سيُحرك مدار قيم <em>z</em> لكل موقع <em>c</em>،
+مما يكشف ديناميكيات الحدود المعقدة التي فتنت علماء
+الرياضيات.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>استكشاف مسار التكبير.</b>
-كل <span mobile="نقرة">نقرة</span> على الكسيرية تفتح مستوى تكبير أعلى في
-الموقع المحدد، محسوباً على GPU الخاص بك إن توفر.
-بعد التكبير إلى ما يتجاوز تكبير تريليون ضعف، نستخدم خوارزمية اضطراب
-رباعية الدقة تحل التفاصيل الدقيقة لأكثر من 60 رقماً من الدقة.
-بمجرد أن تصنع مساراً مثيراً يُظهر التفاصيل التي تريدها، يمكنك
-<a class="moviemode">إنشاء وتنزيل فيديو تكبير عميق لماندلبروت الخاص بك</a>
-أو وضع إشارة مرجعية على عنوان URL الخاص بك لحفظ ومشاركة استكشافك.
-لإنشاء صور ومقاطع فيديو عالية الجودة، يحسب هذا العارض البكسلات الفرعية
-بنسبة <span class="pixelratio">2</span>:1<span mobile="">، ويمكن زيادة ذلك لإنشاء
-عروض أكثر دقة</span>.
+كل <span mobile="نقرة">نقرة</span> على الكسيرية تفتح مستوى تكبير
+أعلى في الموقع المحدد، محسوباً على GPU الخاص بك إن توفر.
+بعد التكبير إلى ما يتجاوز تكبير تريليون ضعف، نستخدم
+خوارزمية اضطراب رباعية الدقة تحل التفاصيل الدقيقة
+لأكثر من
+60 رقماً من الدقة.
+بمجرد أن تصنع مساراً مثيراً يُظهر التفاصيل التي
+تريدها،
+يمكنك <a class="moviemode">إنشاء وتنزيل فيديو تكبير عميق
+لماندلبروت الخاص بك</a> أو وضع إشارة مرجعية على عنوان URL
+الخاص بك لحفظ ومشاركة استكشافك.
+لإنشاء صور ومقاطع فيديو عالية الجودة، يحسب هذا العارض
+البكسلات الفرعية بنسبة <span class="pixelratio">2</span>:1<span mobile="">،
+ويمكن زيادة ذلك لإنشاء عروض أكثر دقة</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -10770,7 +10851,11 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <p style="margin-top:8px;margin-bottom:0;text-align:left">
 <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a> -</p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a> -</p>
 </div>
 
 <div lang="id" style="display:none">
@@ -10846,7 +10931,11 @@ ditingkatkan untuk membuat tampilan yang lebih presisi</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="pt" style="display:none">
@@ -10922,7 +11011,11 @@ ser aumentado para criar exibições mais precisas</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="fr" style="display:none">
@@ -10999,7 +11092,11 @@ cela peut être augmenté pour créer des affichages plus précis</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="ja" style="display:none">
@@ -11009,31 +11106,39 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 
 <p style="margin-top:6px;margin-bottom:6px">
 <b><span mobile="タップ">クリック</span>してズーム。</b>
-<span mobile="">右クリックで画像を保存、<b>M</b>でズームパスの動画を作成・保存
-できます。</span>
+<span mobile="">右クリックで画像を保存、<b>M</b>でズームパスの
+動画を作成・保存できます。</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-各<a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">複素数</a>
-<em>c</em> に対して <em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>
-が反復されます。色は発散までの<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">反復回数</a>を
-示し、
-黒い点は<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">収束または周期的</a>です。
+各<a target="mbhelp"
+href="http://en.wikipedia.org/wiki/Complex_number">複素数</a>
+<em>c</em> に対して
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em>
+が反復されます。色は発散までの<a target="mbhelp"
+href="http://warp.povusers.org/Mandelbrot/">反復回数</a>を示し、
+黒い点は<a
+href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">収束または周期的</a>です。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>黄色の点は<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">軌道</a>を示します</b>。赤い点は極限周期を示します。
+<b>黄色の点は<a target="mbhelp"
+href="https://plus.maths.org/content/unveiling-mandelbrot-set">軌道</a>を示します</b>。
+赤い点は極限周期を示します。
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>反復について。</b>このビューアは、探索中に反復を無限大まで精緻化することで、
-時間とともにより多くのフラクタルの詳細を表示します。待つほど、より多くの
-詳細が表示されます。
-数千または数百万回の反復の後、フラクタルの最も複雑な部分で最も細かい
-詳細を解像できます。
-各ウィンドウ下の黄色のズーム番号を<span mobile="タップ">マウスオーバー</span>
-することで、反復、進行状況、座標に関する情報を確認できます。
-フラクタルコンテンツ上で<span mobile="指を保持">マウスを移動</span>すると、
+<b>反復について。</b>
+このビューアは、探索中に反復を無限大まで精緻化することで、
+時間とともにより多くのフラクタルの詳細を表示します。
+待つほど、より多くの詳細が表示されます。
+数千または数百万回の反復の後、フラクタルの最も複雑な部分で
+最も細かい詳細を解像できます。
+各ウィンドウ下の黄色のズーム番号を<span mobile="タップ">
+マウスオーバー</span>することで、反復、進行状況、座標に関する
+情報を確認できます。
+フラクタルコンテンツ上で<span mobile="指を保持">マウスを
+移動</span>すると、
 各位置 <em>c</em> の <em>z</em> 値の軌道がアニメーション化され、数学者を
 魅了してきた複雑な境界ダイナミクスが明らかになります。
 </p>
@@ -11041,8 +11146,8 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <b>ズームパスの探索。</b>
 フラクタル上の各<span mobile="タップ">クリック</span>は、選択した場所で
 より高いズームレベルを開き、可能であればGPU上で計算されます。
-1兆倍を超える倍率までズームすると、60桁以上の精度で細かい詳細を解決する
-4倍精度摂動アルゴリズムを使用します。
+1兆倍を超える倍率までズームすると、60桁以上の精度で細かい
+詳細を解決する4倍精度摂動アルゴリズムを使用します。
 必要な詳細を示す興味深いパスを作成したら、<a class="moviemode">独自の
 マンデルブロディープズーム動画を作成してダウンロード</a>したり、URLを
 ブックマークして探索を保存・共有したりできます。
@@ -11070,7 +11175,11 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="ru" style="display:none">
@@ -11080,51 +11189,69 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 
 <p style="margin-top:6px;margin-bottom:6px">
 <b><span mobile="Нажмите">Щелкните</span>, чтобы увеличить.</b>
-<span mobile="">Щелкните правой кнопкой мыши, чтобы сохранить изображения,
-<b>M</b>, чтобы создать и сохранить видео вашего пути увеличения.</span>
+<span mobile="">Щелкните правой кнопкой мыши, чтобы
+сохранить изображения, <b>M</b>, чтобы создать и
+сохранить видео вашего пути увеличения.</span>
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> итерируется для
-каждого <a target="mbhelp" href="http://en.wikipedia.org/wiki/Complex_number">комплексного числа</a> <em>c</em>.  Цвета показывают
-<a target="mbhelp" href="http://warp.povusers.org/Mandelbrot/">итерации</a> до
-расхождения; черные точки
-<a href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">сходятся или циклируются</a>.
+<em>z &rightarrow; z<sup class="exponent">2</sup>+c</em> итерируется
+для каждого <a target="mbhelp"
+href="http://en.wikipedia.org/wiki/Complex_number">комплексного числа</a>
+<em>c</em>.  Цвета показывают <a target="mbhelp"
+href="http://warp.povusers.org/Mandelbrot/">итерации</a> до расхождения;
+черные точки <a
+href="https://math.bu.edu/DYSYS/FRACGEOM/node3.html">сходятся или
+циклируются</a>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Желтые точки показывают
-<a target="mbhelp" href="https://plus.maths.org/content/unveiling-mandelbrot-set">орбиты</a></b>. Красные точки показывают предельные циклы.
+<b>Желтые точки показывают <a target="mbhelp"
+href="https://plus.maths.org/content/unveiling-mandelbrot-set">орбиты</a></b>.
+Красные точки показывают предельные циклы.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px">
-<b>Об итерациях.</b> Этот просмотрщик показывает больше деталей фракталов с
-течением времени, уточняя итерации до бесконечности по мере вашего исследования.
+<b>Об итерациях.</b> Этот просмотрщик показывает больше
+деталей
+фракталов с течением времени, уточняя итерации до
+бесконечности по мере вашего исследования.
 Чем дольше вы ждете, тем больше деталей отображается.
-После тысяч или миллионов итераций вы можете разрешить мельчайшие детали в
-самых сложных частях фрактала.
-Просмотрите информацию об итерациях, прогрессе и координатах,
-<span mobile="нажав на">наведя курсор на</span> желтый номер увеличения под
-каждым окном.
-<span mobile="Удерживая палец">Перемещение мыши</span> над фрактальным
-содержимым анимирует орбиту значений <em>z</em> для каждого местоположения
-<em>c</em>, раскрывая сложную динамику границ, которая восхищала математиков.
+После тысяч или миллионов итераций вы можете
+разрешить
+мельчайшие детали в самых сложных частях фрактала.
+Просмотрите информацию об итерациях, прогрессе и
+координатах,
+<span mobile="нажав на">наведя курсор на</span> желтый номер
+увеличения под каждым окном.
+<span mobile="Удерживая палец">Перемещение мыши</span> над
+фрактальным содержимым анимирует орбиту значений
+<em>z</em> для каждого
+местоположения <em>c</em>, раскрывая сложную динамику
+границ, которая восхищала математиков.
 </p>
 <p style="margin-top:6px;margin-bottom:6px">
 <b>Исследование пути увеличения.</b>
-Каждый <span mobile="нажатие">щелчок</span> на фрактале открывает более
-высокий уровень увеличения в выбранном месте, вычисляемый на вашем GPU, если
-доступно.
-После увеличения более чем в триллион раз мы используем алгоритм возмущения
-с четверной точностью, который разрешает мелкие детали с точностью более
-60 цифр.
-Как только вы создадите интересный путь, показывающий нужные вам детали, вы
-можете <a class="moviemode">создать и загрузить собственное видео глубокого
-увеличения Мандельброта</a> или добавить закладку на ваш URL, чтобы сохранить
-и поделиться своим исследованием.
-Для создания высококачественных изображений и видео этот просмотрщик
-вычисляет субпиксели с соотношением <span class="pixelratio">2</span>:1<span mobile="">, и это может быть увеличено для создания более точных
-дисплеев</span>.
+Каждый <span mobile="нажатие">щелчок</span> на фрактале
+открывает
+более высокий уровень увеличения в выбранном месте,
+вычисляемый на вашем GPU, если доступно.
+После увеличения более чем в триллион раз мы
+используем
+алгоритм возмущения с четверной точностью, который
+разрешает мелкие детали с точностью более 60 цифр.
+Как только вы создадите интересный путь, показывающий
+нужные вам детали, вы можете <a class="moviemode">создать и
+загрузить собственное
+видео глубокого увеличения Мандельброта</a> или
+добавить закладку
+на ваш URL, чтобы сохранить и поделиться своим
+исследованием.
+Для создания высококачественных изображений и видео
+этот
+просмотрщик вычисляет субпиксели с соотношением
+<span class="pixelratio">2</span>:1<span mobile="">, и это может быть
+увеличено для создания более точных дисплеев</span>.
 </p>
 
 <p style="margin-top:6px;margin-bottom:6px" mobile="">
@@ -11148,7 +11275,11 @@ href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a></p>
 </div>
 
 <div lang="de" style="display:none">
@@ -11225,7 +11356,11 @@ und dies kann erhöht werden, um präzisere Anzeigen zu erstellen</span>.
 <p style="margin-top:8px;margin-bottom:0;text-align:right">
 - <a target="mbhelp"
 href="http://davidbau.com/archives/2009/09/27/mandelbrot.html"
->David Bau</a> <a target="mbhelp" href="https://github.com/davidbau/mandelbrot#readme" title="View source on GitHub"><svg style="width:14px;height:14px;vertical-align:-2px"><use href="#github-icon"/></svg></a></p>
+>David Bau</a> <a target="mbhelp"
+href="https://github.com/davidbau/mandelbrot#readme"
+title="View source on GitHub"><svg
+style="width:14px;height:14px;vertical-align:-2px"><use
+href="#github-icon"/></svg></a></p>
 </div>
 
 <script id="i18nCode">
@@ -11565,7 +11700,9 @@ let LANG_FROM_URL = false;
         // Preferred volume
         Array(10).fill(0),
         // Reserved
-        [fixed_16_16(1), fixed_16_16(0), fixed_2_30(0), fixed_16_16(0), fixed_16_16(1), fixed_2_30(0), fixed_16_16(0), fixed_16_16(0), fixed_2_30(1)],
+        [fixed_16_16(1), fixed_16_16(0), fixed_2_30(0),
+         fixed_16_16(0), fixed_16_16(1), fixed_2_30(0),
+         fixed_16_16(0), fixed_16_16(0), fixed_2_30(1)],
         // Matrix
         Array(24).fill(0),
         // Pre-defined
@@ -11607,7 +11744,9 @@ let LANG_FROM_URL = false;
         // Volume
         u16(0),
         // Reserved
-        [fixed_16_16(1), fixed_16_16(0), fixed_2_30(0), fixed_16_16(0), fixed_16_16(1), fixed_2_30(0), fixed_16_16(0), fixed_16_16(0), fixed_2_30(1)],
+        [fixed_16_16(1), fixed_16_16(0), fixed_2_30(0),
+         fixed_16_16(0), fixed_16_16(1), fixed_2_30(0),
+         fixed_16_16(0), fixed_16_16(0), fixed_2_30(1)],
         // Matrix
         fixed_16_16(track.info.type === "video" ? track.info.width : 0),
         // Track width
@@ -11683,7 +11822,8 @@ let LANG_FROM_URL = false;
     ]);
     var url = () => fullBox("url ", 0, 1);
     var stbl = (track) => {
-      const needsCtts = track.compositionTimeOffsetTable.length > 1 || track.compositionTimeOffsetTable.some((x) => x.sampleCompositionTimeOffset !== 0);
+      const needsCtts = track.compositionTimeOffsetTable.length > 1 ||
+        track.compositionTimeOffsetTable.some((x) => x.sampleCompositionTimeOffset !== 0);
       return box("stbl", null, [
         stsd(track),
         stts(track),
@@ -11965,11 +12105,13 @@ let LANG_FROM_URL = false;
         __privateMethod(this, _ensureSize, ensureSize_fn).call(this, this.pos + data.byteLength);
         __privateGet(this, _bytes).set(data, this.pos);
         this.pos += data.byteLength;
-        __privateSet(this, _maxPos, Math.max(__privateGet(this, _maxPos), this.pos));
+        __privateSet(this, _maxPos,
+          Math.max(__privateGet(this, _maxPos), this.pos));
       }
       finalize() {
         __privateMethod(this, _ensureSize, ensureSize_fn).call(this, this.pos);
-        __privateGet(this, _target).buffer = __privateGet(this, _buffer).slice(0, Math.max(__privateGet(this, _maxPos), this.pos));
+        __privateGet(this, _target).buffer = __privateGet(this, _buffer).slice(0,
+          Math.max(__privateGet(this, _maxPos), this.pos));
       }
     };
     _target = /* @__PURE__ */ new WeakMap();
@@ -11995,7 +12137,17 @@ let LANG_FROM_URL = false;
     var SUPPORTED_VIDEO_CODECS = ["avc", "hevc", "vp9", "av1"];
     var TIMESTAMP_OFFSET = 2082844800;
     var FIRST_TIMESTAMP_BEHAVIORS = ["strict", "offset", "cross-track-offset"];
-    var _options, _writer, _ftypSize, _mdat, _videoTrack, _creationTime, _finalizedChunks, _finalized, _validateOptions, validateOptions_fn, _writeHeader, writeHeader_fn, _prepareTracks, prepareTracks_fn, _createSampleForTrack, createSampleForTrack_fn, _addSampleToTrack, addSampleToTrack_fn, _validateTimestamp, validateTimestamp_fn, _finalizeCurrentChunk, finalizeCurrentChunk_fn, _maybeFlushStreamingTargetWriter, maybeFlushStreamingTargetWriter_fn, _ensureNotFinalized, ensureNotFinalized_fn;
+    var _options, _writer, _ftypSize, _mdat, _videoTrack, _creationTime;
+    var _finalizedChunks, _finalized;
+    var _validateOptions, validateOptions_fn;
+    var _writeHeader, writeHeader_fn;
+    var _prepareTracks, prepareTracks_fn;
+    var _createSampleForTrack, createSampleForTrack_fn;
+    var _addSampleToTrack, addSampleToTrack_fn;
+    var _validateTimestamp, validateTimestamp_fn;
+    var _finalizeCurrentChunk, finalizeCurrentChunk_fn;
+    var _maybeFlushStreamingTargetWriter, maybeFlushStreamingTargetWriter_fn;
+    var _ensureNotFinalized, ensureNotFinalized_fn;
     var Muxer = class {
       constructor(options) {
         __privateAdd(this, _validateOptions);
@@ -12044,7 +12196,8 @@ let LANG_FROM_URL = false;
             "timestamp must be non-negative"
           );
         }
-        if (compositionTimeOffset !== void 0 && !Number.isFinite(compositionTimeOffset)) {
+        if (compositionTimeOffset !== void 0 &&
+            !Number.isFinite(compositionTimeOffset)) {
           throw new TypeError(
             "compositionTimeOffset must be number"
           );
@@ -12076,7 +12229,8 @@ let LANG_FROM_URL = false;
         if (meta && typeof meta !== "object") {
           throw new TypeError("meta must be object");
         }
-        if (compositionTimeOffset !== void 0 && !Number.isFinite(compositionTimeOffset)) {
+        if (compositionTimeOffset !== void 0 &&
+            !Number.isFinite(compositionTimeOffset)) {
           throw new TypeError(
             "compositionTimeOffset must be number"
           );
@@ -12084,16 +12238,28 @@ let LANG_FROM_URL = false;
         __privateMethod(this, _ensureNotFinalized, ensureNotFinalized_fn).call(this);
         if (!__privateGet(this, _options).video)
           throw new Error("No video track declared.");
-        let videoSample = __privateMethod(this, _createSampleForTrack, createSampleForTrack_fn).call(this, __privateGet(this, _videoTrack), data, type, timestamp, duration, meta, compositionTimeOffset);
-        __privateMethod(this, _addSampleToTrack, addSampleToTrack_fn).call(this, __privateGet(this, _videoTrack), videoSample);
+        let videoSample = __privateMethod(
+          this, _createSampleForTrack, createSampleForTrack_fn
+        ).call(
+          this, __privateGet(this, _videoTrack), data, type,
+          timestamp, duration, meta, compositionTimeOffset
+        );
+        __privateMethod(
+          this, _addSampleToTrack, addSampleToTrack_fn
+        ).call(this, __privateGet(this, _videoTrack), videoSample);
       }
-      /** Finalizes the file, making it ready for use. Must be called after all video and audio chunks have been added. */
+      /**
+       * Finalizes the file, making it ready for use.
+       * Must be called after all video and audio chunks have been added.
+       */
       finalize() {
         if (__privateGet(this, _finalized)) {
           throw new Error("Cannot finalize a muxer more than once.");
         }
         if (__privateGet(this, _videoTrack))
-          __privateMethod(this, _finalizeCurrentChunk, finalizeCurrentChunk_fn).call(this, __privateGet(this, _videoTrack));
+          __privateMethod(
+            this, _finalizeCurrentChunk, finalizeCurrentChunk_fn
+          ).call(this, __privateGet(this, _videoTrack));
         let tracks = [__privateGet(this, _videoTrack)].filter(Boolean);
         if (__privateGet(this, _options).fastStart === "in-memory") {
           let mdatSize;
@@ -12125,7 +12291,10 @@ let LANG_FROM_URL = false;
             }
           }
         }
-        __privateMethod(this, _maybeFlushStreamingTargetWriter, maybeFlushStreamingTargetWriter_fn).call(this);
+        __privateMethod(
+          this, _maybeFlushStreamingTargetWriter,
+          maybeFlushStreamingTargetWriter_fn
+        ).call(this);
         __privateGet(this, _writer).finalize();
         __privateSet(this, _finalized, true);
       }
@@ -12151,24 +12320,41 @@ let LANG_FROM_URL = false;
           throw new TypeError(`Unsupported video codec: ${options.video.codec}`);
         }
         if (!Number.isInteger(options.video.width) || options.video.width <= 0) {
-          throw new TypeError(`Invalid video width: ${options.video.width}. Must be a positive integer.`);
+          throw new TypeError(
+            `Invalid video width: ${options.video.width}. Must be a positive integer.`
+          );
         }
         if (!Number.isInteger(options.video.height) || options.video.height <= 0) {
-          throw new TypeError(`Invalid video height: ${options.video.height}. Must be a positive integer.`);
+          throw new TypeError(
+            `Invalid video height: ${options.video.height}. Must be a positive integer.`
+          );
         }
         const videoRotation = options.video.rotation;
         if (typeof videoRotation === "number" && ![0, 90, 180, 270].includes(videoRotation)) {
-          throw new TypeError(`Invalid video rotation: ${videoRotation}. Has to be 0, 90, 180 or 270.`);
-        } else if (Array.isArray(videoRotation) && (videoRotation.length !== 9 || videoRotation.some((value) => typeof value !== "number"))) {
+          throw new TypeError(
+            `Invalid video rotation: ${videoRotation}. Has to be 0, 90, 180 or 270.`
+          );
+        } else if (
+          Array.isArray(videoRotation) &&
+          (videoRotation.length !== 9 ||
+           videoRotation.some((value) => typeof value !== "number"))
+        ) {
           throw new TypeError(`Invalid video transformation matrix: ${videoRotation.join()}`);
         }
-        if (options.video.frameRate !== void 0 && (!Number.isInteger(options.video.frameRate) || options.video.frameRate <= 0)) {
+        if (
+          options.video.frameRate !== void 0 &&
+          (!Number.isInteger(options.video.frameRate) ||
+           options.video.frameRate <= 0)
+        ) {
           throw new TypeError(
             `Invalid video frame rate: ${options.video.frameRate}. Must be a positive integer.`
           );
         }
       }
-      if (options.firstTimestampBehavior && !FIRST_TIMESTAMP_BEHAVIORS.includes(options.firstTimestampBehavior)) {
+      if (
+        options.firstTimestampBehavior &&
+        !FIRST_TIMESTAMP_BEHAVIORS.includes(options.firstTimestampBehavior)
+      ) {
         throw new TypeError(`Invalid first timestamp behavior: ${options.firstTimestampBehavior}`);
       }
       if (options.fastStart !== "in-memory") {
@@ -12183,7 +12369,10 @@ let LANG_FROM_URL = false;
       }));
       __privateSet(this, _ftypSize, __privateGet(this, _writer).pos);
       __privateSet(this, _mdat, mdat(false));
-      __privateMethod(this, _maybeFlushStreamingTargetWriter, maybeFlushStreamingTargetWriter_fn).call(this);
+      __privateMethod(
+        this, _maybeFlushStreamingTargetWriter,
+        maybeFlushStreamingTargetWriter_fn
+      ).call(this);
     };
     _prepareTracks = /* @__PURE__ */ new WeakSet();
     prepareTracks_fn = function() {
@@ -12214,11 +12403,17 @@ let LANG_FROM_URL = false;
       }
     };
     _createSampleForTrack = /* @__PURE__ */ new WeakSet();
-    createSampleForTrack_fn = function(track, data, type, timestamp, duration, meta, compositionTimeOffset) {
+    createSampleForTrack_fn = function(
+      track, data, type, timestamp, duration, meta, compositionTimeOffset
+    ) {
       let presentationTimestampInSeconds = timestamp / 1e6;
       let decodeTimestampInSeconds = (timestamp - (compositionTimeOffset ?? 0)) / 1e6;
       let durationInSeconds = duration / 1e6;
-      let adjusted = __privateMethod(this, _validateTimestamp, validateTimestamp_fn).call(this, presentationTimestampInSeconds, decodeTimestampInSeconds, track);
+      let adjusted = __privateMethod(
+        this, _validateTimestamp, validateTimestamp_fn
+      ).call(
+        this, presentationTimestampInSeconds, decodeTimestampInSeconds, track
+      );
       presentationTimestampInSeconds = adjusted.presentationTimestamp;
       decodeTimestampInSeconds = adjusted.decodeTimestamp;
       if (meta?.decoderConfig) {
@@ -12243,7 +12438,10 @@ let LANG_FROM_URL = false;
     _addSampleToTrack = /* @__PURE__ */ new WeakSet();
     addSampleToTrack_fn = function(track, sample) {
       track.samples.push(sample);
-      const sampleCompositionTimeOffset = intoTimescale(sample.presentationTimestamp - sample.decodeTimestamp, track.timescale);
+      const sampleCompositionTimeOffset = intoTimescale(
+        sample.presentationTimestamp - sample.decodeTimestamp,
+        track.timescale
+      );
       if (track.lastTimescaleUnits !== null) {
         let timescaleUnits = intoTimescale(sample.decodeTimestamp, track.timescale, false);
         let delta = Math.round(timescaleUnits - track.lastTimescaleUnits);
@@ -12264,7 +12462,10 @@ let LANG_FROM_URL = false;
             });
           }
           const lastCompositionTimeOffsetTableEntry = last(track.compositionTimeOffsetTable);
-          if (lastCompositionTimeOffsetTableEntry.sampleCompositionTimeOffset === sampleCompositionTimeOffset) {
+          if (
+            lastCompositionTimeOffsetTableEntry.sampleCompositionTimeOffset ===
+            sampleCompositionTimeOffset
+          ) {
             lastCompositionTimeOffsetTableEntry.sampleCount++;
           } else {
             track.compositionTimeOffsetTable.push({
@@ -12305,14 +12506,19 @@ let LANG_FROM_URL = false;
     };
     _validateTimestamp = /* @__PURE__ */ new WeakSet();
     validateTimestamp_fn = function(presentationTimestamp, decodeTimestamp, track) {
-      const strictTimestampBehavior = __privateGet(this, _options).firstTimestampBehavior === "strict";
+      const strictTimestampBehavior =
+        __privateGet(this, _options).firstTimestampBehavior === "strict";
       const noLastDecodeTimestamp = track.lastDecodeTimestamp === -1;
       const timestampNonZero = decodeTimestamp !== 0;
       if (strictTimestampBehavior && noLastDecodeTimestamp && timestampNonZero) {
         throw new Error(
-          `First chunk must have timestamp 0 (got DTS=${decodeTimestamp}). Use firstTimestampBehavior:"offset" to auto-fix.`
+          `First chunk must have timestamp 0 (got DTS=${decodeTimestamp}). ` +
+          `Use firstTimestampBehavior:"offset" to auto-fix.`
         );
-      } else if (__privateGet(this, _options).firstTimestampBehavior === "offset" || __privateGet(this, _options).firstTimestampBehavior === "cross-track-offset") {
+      } else if (
+        __privateGet(this, _options).firstTimestampBehavior === "offset" ||
+        __privateGet(this, _options).firstTimestampBehavior === "cross-track-offset"
+      ) {
         if (track.firstDecodeTimestamp === void 0) {
           track.firstDecodeTimestamp = decodeTimestamp;
         }
@@ -12330,7 +12536,8 @@ let LANG_FROM_URL = false;
       }
       if (decodeTimestamp < track.lastDecodeTimestamp) {
         throw new Error(
-          `Timestamps must be monotonically increasing (DTS went from ${track.lastDecodeTimestamp * 1e6} to ${decodeTimestamp * 1e6}).`
+          `Timestamps must be monotonically increasing ` +
+          `(DTS went from ${track.lastDecodeTimestamp * 1e6} to ${decodeTimestamp * 1e6}).`
         );
       }
       track.lastDecodeTimestamp = decodeTimestamp;
@@ -12342,7 +12549,11 @@ let LANG_FROM_URL = false;
         return;
       track.finalizedChunks.push(track.currentChunk);
       __privateGet(this, _finalizedChunks).push(track.currentChunk);
-      if (track.compactlyCodedChunkTable.length === 0 || last(track.compactlyCodedChunkTable).samplesPerChunk !== track.currentChunk.samples.length) {
+      if (
+        track.compactlyCodedChunkTable.length === 0 ||
+        last(track.compactlyCodedChunkTable).samplesPerChunk !==
+        track.currentChunk.samples.length
+      ) {
         track.compactlyCodedChunkTable.push({
           firstChunk: track.finalizedChunks.length,
           // 1-indexed
