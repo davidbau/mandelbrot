@@ -91,7 +91,8 @@ body.starting div#b_0:after { display: flex; position: absolute;
   top: 0; left: 0; width: 100%; height: 100%; align-items: center;
   justify-content: center; content:"Starting..."; color: white;
   z-index: -1; background: rgb(32,16,64); }
-#moviestatus { position: absolute; left: 0; bottom: -11pt; font-size: 11pt; color: yellow; }
+#moviestatus { position: absolute; left: 0; bottom: -11pt;
+  font-size: 11pt; color: yellow; }
 #fullscreen-button { position: fixed; bottom: 20px; right: 20px; font-size: 36px;
   cursor: pointer; user-select: none; opacity: 0.7; transition: opacity 0.3s;
   color: white; font-weight: bold; z-index: 10; display: none; }
@@ -104,7 +105,8 @@ body.starting div#b_0:after { display: flex; position: absolute;
 :fullscreen #grid > div {
   margin: 0; padding: 0; background: transparent;
   scroll-snap-align: start; scroll-snap-stop: normal; }
-:fullscreen #movie > div { margin: 0; padding: 0; background: black; scroll-snap-align: start; }
+:fullscreen #movie > div { margin: 0; padding: 0; background: black;
+  scroll-snap-align: start; }
 :fullscreen #text { scroll-snap-align: start; }
 :fullscreen canvas { display: block; }
 :fullscreen .zoomnum { bottom: 0; }
@@ -1890,7 +1892,8 @@ class Grid {
 
   overlay(k) {
     const container = this.container(k);
-    return container?.firstElementChild?.nextElementSibling?.nextElementSibling?.nextElementSibling;
+    return container?.firstElementChild?.nextElementSibling
+      ?.nextElementSibling?.nextElementSibling;
   }
 
   hidecanvas(k) {
@@ -2011,7 +2014,8 @@ class Grid {
         percentDone = 99.9;
       }
       // Use oct precision coordinates when available to preserve full precision in status
-      const coords = formatcomplex(k, this.views[k].re, this.views[k].im).replaceAll('-', '\u2212');
+      const coords = formatcomplex(k, this.views[k].re, this.views[k].im)
+        .replaceAll('-', '\u2212');
       const iters = formatLargeInt(this.views[k].it);
       const regularStatus = `${MSG.center_at_}${coords}\n${percentDone}` +
                              `${MSG.percent_done_after_}${iters}${MSG.iters}`;
@@ -2030,7 +2034,8 @@ class Grid {
     if (k >= this.views.length) return;
     const osize = this.views[k].size;
     const zoomFactor = this.config.firstsize / osize;  // Zoom factor (1.0 = default)
-    const exponentParam = this.config.exponent !== 2 ? `&exponent=${this.config.exponent}` : '';
+    const exponentParam = this.config.exponent !== 2 ?
+      `&exponent=${this.config.exponent}` : '';
     const themeParam = this.config.theme !== 'warm' ? `&theme=${this.config.theme}` : '';
     const coords = formatcomplex(k, this.views[k].re, this.views[k].im);
     return `?z=${formatZoom(zoomFactor)}${exponentParam}&c=${coords}${themeParam}`;
@@ -2069,7 +2074,8 @@ class Grid {
     if (button && !document.fullscreenElement) {
       const gridElement = document.getElementById('grid');
       const visibleCanvases = gridElement ?
-        Array.from(gridElement.children).filter(child => child.style.display !== 'none').length : 0;
+        Array.from(gridElement.children)
+          .filter(child => child.style.display !== 'none').length : 0;
       button.style.display = (visibleCanvases === 1) ? 'block' : 'none';
     }
   }
@@ -2429,7 +2435,8 @@ class URLHandler {
 
     // Theme: use URL value or default to 'warm'
     const theme = params.get('theme');
-    const targetTheme = (theme && this.config.colorThemes.all.includes(theme)) ? theme : 'warm';
+    const targetTheme = (theme && this.config.colorThemes.all.includes(theme)) ?
+      theme : 'warm';
     if (targetTheme !== this.config.theme) {
       this.store.dispatch(this.store.actions.updateConfig({ theme: targetTheme }));
       needsRedraw = true;
@@ -2477,7 +2484,8 @@ class URLHandler {
     // Match target views against current views by coordinates AND zoom level
     // A view is defined by both its center and its size (zoom level)
     // Uses oct precision coordinates with 1% tolerance thresholds
-    const viewsMatch = (targetSize, targetRe, targetIm, currentSize, currentRe, currentIm) => {
+    const viewsMatch = (targetSize, targetRe, targetIm,
+                        currentSize, currentRe, currentIm) => {
       // Check zoom level first - must be within 1% of each other
       const sizeRatio = targetSize / currentSize;
       if (sizeRatio < 0.99 || sizeRatio > 1.01) return false;
@@ -2578,7 +2586,8 @@ class URLHandler {
     const newHidden = this.extractHidden(newUrl);
 
     // Use pushState if centers were removed/replaced OR hidden views changed
-    const centersLost = this.lastCenters !== null && centersWereLost(this.lastCenters, newCenters);
+    const centersLost = this.lastCenters !== null &&
+      centersWereLost(this.lastCenters, newCenters);
     const hiddenChanged = this.lastHidden !== null && this.lastHidden !== newHidden;
 
     if (centersLost || hiddenChanged) {
@@ -2747,7 +2756,8 @@ class URLHandler {
     if (c) {
       c = c.replace(/ /g, '+');
       for (const coords of c.split(',')) {
-        const m = coords.match(/([-+]?\d?\.?\d+(?:e[-+]?\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]?\d+)?)i)?/);
+        const m = coords.match(
+          /([-+]?\d?\.?\d+(?:e[-+]?\d+)?)(?:([-+]\d?\.?\d+(?:e[-+]?\d+)?)i)?/);
         // Store coordinates; size will be calculated later after relativeScale is applied
         // Use decimalToOct for full 60+ digit precision (qdParse only gives ~31 digits)
         startstate.sizes.push([
@@ -3213,7 +3223,8 @@ class MovieMode {
     this.explorer.config.initSizes();
 
     this.explorer.movieContainer.innerHTML = '<div>' +
-      `<canvas width=${this.explorer.config.dimsWidth} height=${this.explorer.config.dimsHeight} ` +
+      `<canvas width=${this.explorer.config.dimsWidth} ` +
+      `height=${this.explorer.config.dimsHeight} ` +
       `style="width:${this.explorer.config.cssDimsWidth}px;` +
       `height:${this.explorer.config.cssDimsHeight}px"></canvas>` +
       `<span id="moviestatus"></span>` +
@@ -3629,7 +3640,8 @@ class MovieMode {
 
     // Clear the movie canvas with black (so unfinished pixels appear black)
     this.movieCtx.fillStyle = 'black';
-    this.movieCtx.fillRect(0, 0, this.explorer.config.dimsWidth, this.explorer.config.dimsHeight);
+    this.movieCtx.fillRect(0, 0, this.explorer.config.dimsWidth,
+                            this.explorer.config.dimsHeight);
 
     // Draw the current frame
     const scale = sourceSize / interpolatedSize;
@@ -3661,11 +3673,13 @@ class MovieMode {
     // Draw the next frame
     if (k < this.explorer.grid.views.length - 1) {
       const targetScale = targetSize / interpolatedSize;
-      const targetOffsetX = qdToNumber(toQDScale(toQDSub(interpolatedCenter[0], targetCenter[0]),
-                                  this.explorer.config.dimsWidth / targetSize));
+      const targetOffsetX = qdToNumber(toQDScale(
+        toQDSub(interpolatedCenter[0], targetCenter[0]),
+        this.explorer.config.dimsWidth / targetSize));
       const targetHeight = targetSize / this.explorer.config.aspectRatio;
-      const targetOffsetY = qdToNumber(toQDScale(toQDSub(targetCenter[1], interpolatedCenter[1]),
-                                  this.explorer.config.dimsHeight / targetHeight));
+      const targetOffsetY = qdToNumber(toQDScale(
+        toQDSub(targetCenter[1], interpolatedCenter[1]),
+        this.explorer.config.dimsHeight / targetHeight));
       this.movieCtx.save();
       this.movieCtx.imageSmoothingEnabled = true;
       this.movieCtx.imageSmoothingQuality = 'high';
@@ -4419,7 +4433,8 @@ function estimateLimit(data) {
 }
 
 // Under Puppeteer, use 0 so worker blob has no line padding (for coverage alignment).
-var lastScriptLineNumber = navigator.webdriver ? 0 : new Error().stack.match(/:(\d+)/)[1] | 0;
+var lastScriptLineNumber = navigator.webdriver ? 0 :
+  new Error().stack.match(/:(\d+)/)[1] | 0;
 </script>
 <script id="workerCode" type="text/webworker">
 // Constants
@@ -5372,12 +5387,18 @@ class QDPerturbationBoard extends Board {
         const cr = toQDAdd(re_o, toQDScale(toQD(rFrac), size));
         const idx = y * this.config.dimsWidth + x;
         const m8 = idx * 8;
-        this.cc[m8] = cr[0]; this.cc[m8+1] = cr[1]; this.cc[m8+2] = cr[2]; this.cc[m8+3] = cr[3];
-        this.cc[m8+4] = cj[0]; this.cc[m8+5] = cj[1]; this.cc[m8+6] = cj[2]; this.cc[m8+7] = cj[3];
-        this.zz[m8] = cr[0]; this.zz[m8+1] = cr[1]; this.zz[m8+2] = cr[2]; this.zz[m8+3] = cr[3];
-        this.zz[m8+4] = cj[0]; this.zz[m8+5] = cj[1]; this.zz[m8+6] = cj[2]; this.zz[m8+7] = cj[3];
-        this.bb[m8] = cr[0]; this.bb[m8+1] = cr[1]; this.bb[m8+2] = cr[2]; this.bb[m8+3] = cr[3];
-        this.bb[m8+4] = cj[0]; this.bb[m8+5] = cj[1]; this.bb[m8+6] = cj[2]; this.bb[m8+7] = cj[3];
+        this.cc[m8] = cr[0]; this.cc[m8+1] = cr[1];
+        this.cc[m8+2] = cr[2]; this.cc[m8+3] = cr[3];
+        this.cc[m8+4] = cj[0]; this.cc[m8+5] = cj[1];
+        this.cc[m8+6] = cj[2]; this.cc[m8+7] = cj[3];
+        this.zz[m8] = cr[0]; this.zz[m8+1] = cr[1];
+        this.zz[m8+2] = cr[2]; this.zz[m8+3] = cr[3];
+        this.zz[m8+4] = cj[0]; this.zz[m8+5] = cj[1];
+        this.zz[m8+6] = cj[2]; this.zz[m8+7] = cj[3];
+        this.bb[m8] = cr[0]; this.bb[m8+1] = cr[1];
+        this.bb[m8+2] = cr[2]; this.bb[m8+3] = cr[3];
+        this.bb[m8+4] = cj[0]; this.bb[m8+5] = cj[1];
+        this.bb[m8+6] = cj[2]; this.bb[m8+7] = cj[3];
         this.qdIndexes.push(idx);
         if (this.inspikeDDA(cr[0], cr[1], cj[0], cj[1])) {
           this.ch += 1;
@@ -7211,7 +7232,8 @@ class GpuBoard extends GpuBaseBoard {
     }
 
     // Create change objects for newly diverged and converged pixels
-    const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+    const allIterations = new Set([...pixelsByIteration.keys(),
+                                    ...convergedByIteration.keys()]);
     const sortedIterations = Array.from(allIterations).sort((a, b) => a - b);
     let totalChanges = 0;
 
@@ -7994,7 +8016,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     try {
     // Calculate batch size first (needed to determine reference orbit buffer)
     const pixelsToIterate = this.un + this.ch;
-    const iterationsPerBatch = Math.max(17, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
+    const iterationsPerBatch = Math.max(17,
+      Math.floor(333337 / Math.max(pixelsToIterate, 1)));
 
     // Update effort for scheduler (reflects actual iterations per call)
     this.effort = iterationsPerBatch;
@@ -8152,7 +8175,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
-    const commandEncoder = this.device.createCommandEncoder({ label: 'Perturbation compute' });
+    const commandEncoder = this.device.createCommandEncoder(
+      { label: 'Perturbation compute' });
     const passEncoder = commandEncoder.beginComputePass({ label: 'Perturbation pass' });
     passEncoder.setPipeline(this.pipeline);
     passEncoder.setBindGroup(0, this.bindGroup);
@@ -8270,7 +8294,8 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     // of ZhuoranBoard which rebases pixels when the reference orbit escapes.
 
     // Create change objects grouped by iteration
-    const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+    const allIterations = new Set([...pixelsByIteration.keys(),
+                                    ...convergedByIteration.keys()]);
     const sortedIterations = Array.from(allIterations).sort((a, b) => a - b);
 
     for (const iter of sortedIterations) {
@@ -9145,7 +9170,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
       // Calculate batch size
       const pixelsToIterate = this.un + this.ch;
-      const iterationsPerBatch = Math.max(17, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
+      const iterationsPerBatch = Math.max(17,
+        Math.floor(333337 / Math.max(pixelsToIterate, 1)));
       this.effort = iterationsPerBatch;
 
       // Extend reference orbit on CPU as needed
@@ -9228,7 +9254,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
       const commandEncoder = this.device.createCommandEncoder(
         { label: 'Adaptive perturbation compute' });
-      const passEncoder = commandEncoder.beginComputePass({ label: 'Adaptive perturbation pass' });
+      const passEncoder = commandEncoder.beginComputePass(
+        { label: 'Adaptive perturbation pass' });
       passEncoder.setPipeline(this.pipeline);
       passEncoder.setBindGroup(0, this.bindGroup);
       passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
@@ -9304,7 +9331,8 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         }
       }
 
-      const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+      const allIterations = new Set([...pixelsByIteration.keys(),
+                                      ...convergedByIteration.keys()]);
       for (const iter of Array.from(allIterations).sort((a, b) => a - b)) {
         const divergedIndices = pixelsByIteration.get(iter) || [];
         const convergedData = convergedByIteration.get(iter) || [];
@@ -11505,7 +11533,8 @@ let LANG_FROM_URL = false;
   const userLang = urlLang || browserLang;
 
   // List of supported languages
-  const supportedLangs = ['en', 'es', 'zh', 'zh-tw', 'ar', 'id', 'pt', 'fr', 'ja', 'ru', 'de'];
+  const supportedLangs = ['en', 'es', 'zh', 'zh-tw', 'ar', 'id', 'pt',
+                          'fr', 'ja', 'ru', 'de'];
 
   // Try exact match first, then base language code (e.g., zh-TW -> zh-tw, then zh)
   let selectedLang = 'en';
@@ -11640,7 +11669,8 @@ let LANG_FROM_URL = false;
         return x;
       if (Array.isArray(x))
         return x.map(deepClone);
-      return Object.fromEntries(Object.entries(x).map(([key, value]) => [key, deepClone(value)]));
+      return Object.fromEntries(
+        Object.entries(x).map(([key, value]) => [key, deepClone(value)]));
     };
     var isU32 = (value) => {
       return value >= 0 && value < 2 ** 32;
@@ -11931,7 +11961,8 @@ let LANG_FROM_URL = false;
     var stss = (track) => {
       if (track.samples.every((x) => x.type === "key"))
         return null;
-      let keySamples = [...track.samples.entries()].filter(([, sample]) => sample.type === "key");
+      let keySamples = [...track.samples.entries()]
+        .filter(([, sample]) => sample.type === "key");
       return fullBox("stss", 0, 0, [
         u32(keySamples.length),
         // Number of entries
@@ -12355,7 +12386,8 @@ let LANG_FROM_URL = false;
         options.firstTimestampBehavior &&
         !FIRST_TIMESTAMP_BEHAVIORS.includes(options.firstTimestampBehavior)
       ) {
-        throw new TypeError(`Invalid first timestamp behavior: ${options.firstTimestampBehavior}`);
+        throw new TypeError(
+          `Invalid first timestamp behavior: ${options.firstTimestampBehavior}`);
       }
       if (options.fastStart !== "in-memory") {
         throw new TypeError(`'fastStart' must be 'in-memory'.`);
@@ -12490,7 +12522,8 @@ let LANG_FROM_URL = false;
       if (!track.currentChunk) {
         beginNewChunk = true;
       } else {
-        let currentChunkDuration = sample.presentationTimestamp - track.currentChunk.startTimestamp;
+        let currentChunkDuration = sample.presentationTimestamp -
+          track.currentChunk.startTimestamp;
         beginNewChunk = currentChunkDuration >= 0.5;
       }
       if (beginNewChunk) {
@@ -12570,7 +12603,8 @@ let LANG_FROM_URL = false;
     _ensureNotFinalized = /* @__PURE__ */ new WeakSet();
     ensureNotFinalized_fn = function() {
       if (__privateGet(this, _finalized)) {
-        throw new Error("Cannot add new video or audio chunks after the file has been finalized.");
+        throw new Error(
+          "Cannot add new video or audio chunks after the file has been finalized.");
       }
     };
     window.Mp4Muxer = { Muxer, ArrayBufferTarget };
