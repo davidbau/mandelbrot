@@ -106,6 +106,69 @@ You can use the browser's developer console to observe computation progress, wor
 - `?board=qdz`: Force the QD-precision CPU board with rebasing.
 - `?board=adaptive`: Force the QD-precision GPU board with adaptive per-pixel scaling.
 
+### Main Thread Debugging with MockWorker
+
+Normally, computation runs in Web Workers which makes debugging difficult—you can't set breakpoints or inspect state easily. The `?debug=w` parameter runs computation on the main thread instead, enabling full debugger access.
+
+**`?debug=w`** — MockWorker mode
+
+Replaces Web Workers with `MockWorker` instances that run on the main thread. This allows you to:
+- Set breakpoints in board iteration code
+- Use `console.log` statements that appear in the main console
+- Inspect board state directly via `window.worker0.boards`
+
+```javascript
+// Access the worker and its boards from the console
+worker0.boards                    // Map of all boards
+worker0.boards.get(0)            // Get board for view 0
+worker0.boards.get(0).nn         // Iteration counts array
+worker0.boards.get(0).it         // Current iteration
+```
+
+**`?debug=w,s`** — Step mode
+
+Adds step-by-step iteration control on top of MockWorker mode. Computation pauses after each iteration batch, letting you inspect state changes incrementally.
+
+Available console functions:
+
+| Function | Description |
+|----------|-------------|
+| `step(n)` | Run `n` iteration batches (default: 1). Returns the boards Map. |
+| `step(n, callback)` | Run `n` batches, calling `callback(board)` after each. |
+| `stepAll()` | Resume continuous iteration (exit step mode). |
+| `pause()` | Pause iteration and re-enter step mode. |
+| `inspectBoard(k)` | Print summary of board `k` (iteration, pixels remaining, etc). |
+| `tracePixel(k, idx)` | Get detailed state for pixel `idx` in board `k`. |
+
+**Example debugging session:**
+
+```javascript
+// Load page with ?debug=w,s
+// Computation is paused
+
+step()                           // Run one iteration batch
+inspectBoard(0)                  // Check board state
+// Board 0 (GpuBoard):
+//   Iteration: 100
+//   Unfinished pixels: 12847
+//   Diverged: 1553
+//   Converged: 0
+
+step(10)                         // Run 10 more batches
+
+// Trace a specific pixel
+tracePixel(0, 500)              // Get pixel 500's state
+
+stepAll()                        // Resume normal iteration
+pause()                          // Pause again when needed
+```
+
+**Use cases:**
+- Debugging iteration logic by stepping through batches
+- Comparing board states at specific iterations
+- Investigating why specific pixels converge/diverge
+- Profiling individual iteration batches
+
 ## Contributing
 
 The project's philosophy is to maintain simplicity and portability by keeping the application within a single, self-contained HTML file. Before adding a new dependency or build step, consider if the added complexity is justified.
