@@ -2616,7 +2616,6 @@ class URLHandler {
     const newHidden = this.extractHidden(newSearch);
     var newUrl = new URL(window.location);
     newUrl.search = newSearch;
-    console.log(newUrl);
 
     // Use pushState if centers were removed/replaced OR hidden views changed
     const centersLost = this.lastCenters !== null &&
