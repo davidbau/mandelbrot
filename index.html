@@ -7081,7 +7081,15 @@ class GpuBoard extends GpuBaseBoard {
         ckpt7: u32,
       }
 
-      // Consolidated per-pixel state: 3 u32 + 4 f32 = 28 bytes
+      // Per-pixel state: 3 u32 + 4 f32 = 28 bytes
+      // Layout (u32 view):
+      //   [0] iter: u32
+      //   [1] status: u32
+      //   [2] period: u32
+      //   [3] zr: f32
+      //   [4] zi: f32
+      //   [5] base_r: f32
+      //   [6] base_i: f32
       struct PixelState {
         iter: u32,
         status: u32,
@@ -7940,7 +7948,22 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         loop_delta_i: f32,      // Delta to add to dzi
       }
 
-      // Single per-pixel struct for maximum cache coherency
+      // Per-pixel state: 6 u32 + 8 f32 = 56 bytes
+      // Layout (u32 view):
+      //   [0] iter: u32
+      //   [1] status: u32
+      //   [2] period: u32
+      //   [3] ref_iter: u32
+      //   [4] ckpt_refidx: u32
+      //   [5] pending_refidx: u32
+      //   [6] dzr: f32
+      //   [7] dzi: f32
+      //   [8] bbr: f32
+      //   [9] bbi: f32
+      //   [10] ckpt_bbr: f32
+      //   [11] ckpt_bbi: f32
+      //   [12] dcr: f32
+      //   [13] dci: f32
       struct PixelState {
         // Integer fields (6 u32)
         iter: u32,
@@ -7960,7 +7983,13 @@ class GpuZhuoranBoard extends GpuBaseBoard {
         dci: f32,
       }
 
-      // Per-iteration struct combining reference orbit and threading data (3-binding layout)
+      // Per-iteration state (reference orbit + threading): 5 f32 = 20 bytes
+      // Layout (f32 view):
+      //   [0] ref_re: f32
+      //   [1] ref_im: f32
+      //   [2] thread_next: f32 (-1 = no thread)
+      //   [3] thread_delta_re: f32
+      //   [4] thread_delta_im: f32
       struct IterState {
         ref_re: f32,      // Reference orbit real part
         ref_im: f32,      // Reference orbit imag part
@@ -9024,7 +9053,23 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         loop_delta_i: f32,
       }
 
-      // Consolidated per-pixel state: 7 i32 + 8 f32 = 60 bytes
+      // Per-pixel state: 7 i32 + 8 f32 = 60 bytes
+      // Layout (i32/u32 view):
+      //   [0] iter: i32
+      //   [1] scale: i32
+      //   [2] status: i32
+      //   [3] period: i32
+      //   [4] ref_iter: i32
+      //   [5] ckpt_refidx: i32
+      //   [6] pending_refidx: i32
+      //   [7] dzr: f32
+      //   [8] dzi: f32
+      //   [9] bbr: f32
+      //   [10] bbi: f32
+      //   [11] ckpt_bbr: f32
+      //   [12] ckpt_bbi: f32
+      //   [13] dcr: f32
+      //   [14] dci: f32
       struct PixelState {
         // Integer fields (7 i32)
         iter: i32,
@@ -9045,7 +9090,13 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
         dci: f32,
       }
 
-      // Consolidated per-iteration state: 5 f32 = 20 bytes
+      // Per-iteration state (reference orbit + threading): 5 f32 = 20 bytes
+      // Layout (f32 view):
+      //   [0] ref_re: f32
+      //   [1] ref_im: f32
+      //   [2] thread_next: f32
+      //   [3] thread_delta_re: f32
+      //   [4] thread_delta_im: f32
       struct IterState {
         ref_re: f32,
         ref_im: f32,
@@ -9139,7 +9190,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           // === REBASING ===
           let z_norm = max(abs(zr), abs(zi));
           let dz_norm = max(abs(dzr_actual), abs(dzi_actual));
-          if (ref_iter > 0u && z_norm < dz_norm * 2.0 && z_norm > 1e-13) {
+          if (ref_iter > 0u && z_norm < dz_norm * 2.0) {
             let new_log2 = floor(log2(z_norm));
             let new_scale = max(i32(new_log2), params.initial_scale);
             dzr = ldexp(zr, -new_scale);
@@ -9455,12 +9506,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       // Extend reference orbit on CPU as needed
       const THREADING_CAPACITY = 1048576;
       const currentNeed = this.it + iterationsPerBatch;
-      const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
-      const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
-      const targetRefIterations = Math.min(
-        Math.max(currentNeed, threadingBuffer),
-        THREADING_CAPACITY
-      );
+      const targetRefIterations = Math.min(currentNeed, THREADING_CAPACITY);
       while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
         this.extendReferenceOrbit();
       }
@@ -9753,6 +9799,7 @@ class FractalWorker {
       coordStr = `c=(${re_str}, ${im_str})`;
       console.log(
         `Board ${data.k}: ${board.constructor.name} @ ${coordStr}, ` +
+        `dims=${data.config.dimsWidth}x${data.config.dimsHeight}, ` +
         `pixel=${pixelSize.toExponential(3)}`
       );
 
@@ -9862,14 +9909,30 @@ class FractalWorker {
       }
       // Exponential scheduling policy
       let shift = Math.floor(this.steps++ / 2) + 1;
-    let p = 0;
-    while (shift & (1 << p)) { p += 1; }
-    const board = pri[Math.min(p, pri.length) % pri.length];
-    for (let workDone = 0; workDone < 17377 && board.unfinished(); ) {
-      workDone += board.un * board.effort;
-      await board.iterate();
-      if (board.isComputing) break;
-    }
+      let p = 0;
+      while (shift & (1 << p)) { p += 1; }
+      const board = pri[Math.min(p, pri.length) % pri.length];
+
+      // In step mode, handle stepping behavior
+      if (this.stepMode) {
+        if (this.stepsRequested > 0) {
+          await board.iterate();
+          this.stepsRequested--; // Consume one step
+
+          // Call step callback if set
+          if (this.stepCallback) {
+            await this.stepCallback();
+          }
+        }
+        // If stepsRequested is 0, don't do anything (wait for step() call)
+      } else {
+        // Normal mode - loop until workDone threshold
+        for (let workDone = 0; workDone < 17377 && board.unfinished(); ) {
+          workDone += board.un * board.effort;
+          await board.iterate();
+          if (board.isComputing) break;
+        }
+      }
       const now = (new Date()).getTime();
       if (this.focusedBoardK == board.k ?
           (board.updateSize >= 1429 || now - board.lastTime >= 100) :
@@ -9969,11 +10032,8 @@ if (location.search.includes('debug=')) {
           this.timer = setTimeout(() => this.iterateBoards(), 100);
           return;
         }
-        if (this.stepsRequested > 0) {
-          this.stepsRequested--; // Consume one step request
-        }
 
-        // Call parent implementation
+        // Call parent implementation (it will check stepsRequested and decrement if needed)
         await super.iterateBoards();
       }
 
@@ -10010,16 +10070,19 @@ if (location.search.includes('debug=')) {
       };
 
       // Helper functions for stepping through iterations
-      window.step = function(n = 1) {
+      window.step = function(n = 1, callback = null) {
         const worker = window.worker0;
         if (!worker || !worker.stepMode) {
           console.log('Step mode not active. Load page with ?debug=w,s');
           return;
         }
 
+        worker.stepCallback = callback;
         worker.stepsRequested += n;
 
-        console.log(`Stepping ${n} iteration(s)...`);
+        if (!callback) {
+          console.log(`Stepping ${n} iteration(s)...`);
+        }
         return worker.boards;
       };
 

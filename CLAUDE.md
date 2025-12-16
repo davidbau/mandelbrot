@@ -92,3 +92,19 @@ These guidelines emerged from successful debugging sessions on this codebase:
 11. **Unit test arithmetic operations in isolation** - Verify basic operations (add, mul, normalize) work correctly before debugging complex pipelines that use them.
 
 12. **Look for normalization issues** - When `f(x)` and `f(y)` differ but `x` and `y` should be equal, check if they have different internal representations (denormalized values, different limb distributions).
+
+13. **Reproduce first, debug later** - Don't dive into detailed debugging until you can reliably reproduce the exact problem. Early investigation may be looking at the wrong case entirely (wrong viewport size, wrong zoom level, wrong grid dimensions).
+
+14. **Match exact test conditions** - Viewport size determines grid dimensions (1470x827 → 52x29 grid). Testing at different sizes may show completely different behavior. Use explicit viewport/dimension settings in tests.
+
+15. **Build step-by-step tracing infrastructure** - For iteration-based algorithms, create `step(n, callback)` functionality that calls a callback after each iteration. This allows logging comprehensive state without timeouts.
+
+16. **Log comprehensive JSON data for offline analysis** - When debugging complex state evolution, log all relevant variables (dz, scale, refiter, z, |z|) as JSON per iteration. Capture to a file and analyze separately rather than trying to return large datasets through Puppeteer.
+
+17. **Compare working vs broken implementations side-by-side** - When two implementations should match but don't, log the same data from both and find exactly when they diverge. The first divergence point reveals the bug location.
+
+18. **Trace backwards from symptoms to root cause** - If pixels falsely diverge at iteration 9997, trace back to find when the two implementations started behaving differently (e.g., iter 1237). The divergence point is where the bug manifests.
+
+19. **Compare equivalent code across implementations** - When one board works and another doesn't, find the corresponding code sections (e.g., rebase conditions) and diff them. Extra conditions like `&& z_norm > 1e-13` that exist in one but not the other are prime bug candidates.
+
+20. **Guards can prevent necessary operations** - Conditions added to "avoid edge cases" (like `z_norm > 1e-13` to avoid numerical issues with very small z) may actually prevent critical operations (rebasing when z is near zero). Sometimes the edge case IS the important case.
