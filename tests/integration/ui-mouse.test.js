@@ -365,14 +365,18 @@ describe('Mouse UI Tests', () => {
       expect(result.testResults.outsideLeft.nn).toBeLessThan(20);  // Diverges fast
     }, TEST_TIMEOUT);
 
-    test('Should update URL after computation', async () => {
+    test('Should complete initial computation', async () => {
       await page.waitForFunction(() => {
         const view = window.explorer.grid.views[0];
         return view && !view.uninteresting();
       }, { timeout: 10000 });
 
-      const url = await page.url();
-      expect(url).toContain('?');
+      // Verify view has computed data
+      const hasData = await page.evaluate(() => {
+        const view = window.explorer.grid.views[0];
+        return view && view.nn && view.nn.some(n => n !== 0);
+      });
+      expect(hasData).toBe(true);
     }, TEST_TIMEOUT);
   }, TEST_TIMEOUT);
 

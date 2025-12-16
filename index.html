@@ -583,6 +583,7 @@ class StateStore {
         exponent: 2,              // Mandelbrot exponent (z^n + c)
         enableGPU: true,          // Allow WebGPU acceleration
         forceBoard: null,         // Force specific board type
+        debug: null,              // Debug string for controlling behaviors
 
         // Display parameters
         theme: 'warm',            // Color theme
@@ -880,6 +881,32 @@ class Config {
   get exponent() { return this.store.getState().config.exponent; }
   get enableGPU() { return this.store.getState().config.enableGPU; }
   get forceBoard() { return this.store.getState().config.forceBoard; }
+  get debug() { return this.store.getState().config.debug; }
+
+  // Check if a debug flag is set (supports both simple flags and key=value flags)
+  // Examples: debug=m,x=foo,t  →  hasDebugFlag('m')=true, hasDebugFlag('x')=true
+  hasDebugFlag(flag) {
+    const debug = this.debug;
+    if (!debug) return false;
+    const parts = debug.split(',').map(f => f.trim());
+    return parts.some(p => p === flag || p.startsWith(flag + '='));
+  }
+
+  // Get the value of a debug flag (returns null if not set or no value)
+  // Examples: debug=m,x=foo,t  →  getDebugFlag('x')='foo', getDebugFlag('m')=null
+  getDebugFlag(flag) {
+    const debug = this.debug;
+    if (!debug) return null;
+    const parts = debug.split(',').map(f => f.trim());
+    for (const part of parts) {
+      if (part === flag) return null; // Flag exists but has no value
+      if (part.startsWith(flag + '=')) {
+        return part.substring(flag.length + 1);
+      }
+    }
+    return null;
+  }
+
   get firstrQD() { return this.store.getState().config.firstrQD; }
   get firstjQD() { return this.store.getState().config.firstjQD; }
 
@@ -2712,6 +2739,19 @@ class URLHandler {
           }
           configUpdates.unknowncolor = color;
         }
+      },
+      {
+        name: 'debug',
+        parse: (val, configUpdates) => {
+          // Debug flags (comma-separated, supports key=value)
+          // Suggested flags:
+          //   w = load worker code on main thread (makes Board classes globally available for debugging)
+          //   n = noinit (skip default view creation - starts with blank canvas)
+          //   t = trace (enable detailed logging)
+          //   x=value = example custom flag with value
+          // Examples: ?debug=w,t  or  ?debug=w,n  or  ?debug=w,x=foobar
+          configUpdates.debug = val;
+        }
       }
     ];
   }
@@ -2747,22 +2787,28 @@ class URLHandler {
     if (c) {
       c = c.replace(/ /g, '+');
       for (const coords of c.split(',')) {
-        const m = coords.match(
-  /([-+]?\d*\.?\d+(?:e[-+]?\d+)?\b)?(?:([-+]?\d*\.?\d+(?:e[-+]?\d+)?)i|([-+]?i))?$/
-        );
-        // Store coordinates; size will be calculated later.
-        // Use decimalToQD for full 60+ digit precision.
-        startstate.sizes.push([
-          null,  // Placeholder - will be filled in after initSizes()
-          m ? decimalToQD(m[1] || '0')
-            : (startstate.sizes.length > 0 ?
+        // Parse complex number string (empty string returns null to inherit)
+        const parsed = parseComplexToQD(coords);
+
+        // If parsing failed or empty string, inherit from previous or default
+        if (!parsed) {
+          startstate.sizes.push([
+            null,  // Placeholder - will be filled in after initSizes()
+            startstate.sizes.length > 0 ?
               startstate.sizes[startstate.sizes.length - 1][1] :
-              this.config.firstrQD),
-          m ? decimalToQD(m[2] || m[3]?.replace('i', '1') || '0')
-            : (startstate.sizes.length > 0 ?
+              this.config.firstrQD,
+            startstate.sizes.length > 0 ?
               startstate.sizes[startstate.sizes.length - 1][2] :
-              this.config.firstjQD)
-        ]);
+              this.config.firstjQD
+          ]);
+        } else {
+          // Store parsed coordinates; size will be calculated later
+          startstate.sizes.push([
+            null,  // Placeholder - will be filled in after initSizes()
+            parsed.re,
+            parsed.im
+          ]);
+        }
       }
     }
 
@@ -2842,6 +2888,8 @@ class URLHandler {
               : this.config.unknowncolor)}` : '') +
         (this.config.pixelRatio !== 2
             ? `&pixelratio=${this.config.pixelRatio}` : '') +
+        (this.config.debug
+            ? `&debug=${this.config.debug}` : '') +
         (LANG_FROM_URL ? `&lang=${SELECTED_LANG}` : '');
     return url.replace('&', '?');
   }
@@ -3736,12 +3784,22 @@ class Scheduler {
     }
 
     try {
-      const workerCode = this.assembleWorkerCode();
-      const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
-      const workerUrl = URL.createObjectURL(workerBlob);
       const workerNum = this.workers.length;
-      const worker = new Worker(workerUrl, { name: `Worker ${workerNum}` });
-      URL.revokeObjectURL(workerUrl);
+      let worker;
+
+      // Use MockWorker if available (debug mode with 'w' flag)
+      if (typeof MockWorker !== 'undefined') {
+        worker = new MockWorker(workerNum);
+        console.log(`Created MockWorker ${workerNum} (main thread)`);
+      } else {
+        // Create real web worker
+        const workerCode = this.assembleWorkerCode();
+        const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(workerBlob);
+        worker = new Worker(workerUrl, { name: `Worker ${workerNum}` });
+        URL.revokeObjectURL(workerUrl);
+      }
+
       worker.onmessage = this.handleWorkerMessage.bind(this);
       this.workers.push(worker);
       window[`worker${workerNum}`] = worker;
@@ -3806,7 +3864,8 @@ class Scheduler {
           aspectRatio: config.aspectRatio,
           exponent: config.exponent,
           enableGPU: config.enableGPU,
-          forceBoard: config.forceBoard
+          forceBoard: config.forceBoard,
+          debug: config.debug
         },
         id,
         workerNumber
@@ -4447,6 +4506,14 @@ var lastScriptLineNumber = navigator.webdriver ? 0 :
 <script id="workerCode" type="text/webworker">
 // Constants
 const MAX_CHAOTIC_ITERATIONS = 100000;
+
+// Helper function to check debug flags
+function hasDebugFlag(config, flag) {
+  const debug = config?.debug;
+  if (!debug) return false;
+  const parts = debug.split(',').map(f => f.trim());
+  return parts.some(p => p === flag || p.startsWith(flag + '='));
+}
 
 // Abstract base class for Mandelbrot computation backends.
 class Board {
@@ -7265,9 +7332,13 @@ class GpuBoard extends GpuBaseBoard {
 
     // Dynamic batch sizing: scale iterations inversely with active pixels
     const targetWork = 333337;  // Prime, reduced for better responsiveness
-    let iterationsPerBatch = Math.floor(targetWork / Math.max(activeCount, 1));
-    // Clamp to reasonable bounds (min 17)
-    iterationsPerBatch = Math.max(17, iterationsPerBatch);
+    // Check for step mode debug flag 's'
+    const stepMode = hasDebugFlag(this.config, 's');
+    let iterationsPerBatch = stepMode ? 1 : Math.floor(targetWork / Math.max(activeCount, 1));
+    // Clamp to reasonable bounds (min 17) unless in step mode
+    if (!stepMode) {
+      iterationsPerBatch = Math.max(17, iterationsPerBatch);
+    }
 
     // Update effort for scheduler (reflects actual iterations per call)
     this.effort = iterationsPerBatch;
@@ -8217,7 +8288,9 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     try {
     // Calculate batch size first (needed to determine reference orbit buffer)
     const pixelsToIterate = this.un + this.ch;
-    const iterationsPerBatch = Math.max(17,
+    // Check for step mode debug flag 's'
+    const stepMode = hasDebugFlag(this.config, 's');
+    const iterationsPerBatch = stepMode ? 1 : Math.max(17,
       Math.floor(333337 / Math.max(pixelsToIterate, 1)));
 
     // Update effort for scheduler (reflects actual iterations per call)
@@ -9049,12 +9122,22 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
           var zr = refr + dzr_actual;
           var zi = refi + dzi_actual;
 
+          // === ESCAPE CHECK ===
+          // Check BEFORE rebasing to match QDZhuoranBoard behavior
+          let z_mag_sq = zr * zr + zi * zi;
+          // Check divergence (escape radius 2, or NaN/Infinity from numerical errors)
+          if (z_mag_sq > 4.0 || !(z_mag_sq <= 1e38)) {  // NaN/Inf check: !(x <= large) catches both
+            pixels[index].status = 1;
+            pixels[index].period = i32(pp);
+            break;
+          }
+
           // === REBASING ===
           let z_norm = max(abs(zr), abs(zi));
           let dz_norm = max(abs(dzr_actual), abs(dzi_actual));
           if (ref_iter > 0u && z_norm < dz_norm * 2.0 && z_norm > 1e-13) {
             let new_log2 = floor(log2(z_norm));
-            let new_scale = max(i32(new_log2), -126);
+            let new_scale = max(i32(new_log2), params.initial_scale);
             dzr = ldexp(zr, -new_scale);
             dzi = ldexp(zi, -new_scale);
             scale = new_scale;
@@ -9074,17 +9157,6 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
             dzi_actual = ldexp(dzi, scale);
             zr = refr + dzr_actual;
             zi = refi + dzi_actual;
-          }
-
-          // === ESCAPE CHECK ===
-          // Always check escape: when scale < -126, dz is effectively 0, so z = ref
-          // The magnitude check still works since zr, zi are computed above
-          let z_mag_sq = zr * zr + zi * zi;
-          // Check divergence (escape radius 2, or NaN/Infinity from numerical errors)
-          if (z_mag_sq > 4.0 || !(z_mag_sq <= 1e38)) {  // NaN/Inf check: !(x <= large) catches both
-            pixels[index].status = 1;
-            pixels[index].period = i32(pp);
-            break;
           }
 
           // === CONVERGENCE DETECTION ===
@@ -9280,13 +9352,16 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
           // === ADAPTIVE RESCALING ===
           let dz_mag = max(abs(new_dzr), abs(new_dzi));
-          if (dz_mag > 0.0) {
+          if (dz_mag > 0.0 && dz_mag < 1e30) {  // Guard against Infinity/NaN
             let log2_mag = floor(log2(dz_mag));
             if (log2_mag >= 1.0) {
               let steps = i32(log2_mag);
-              new_dzr = ldexp(new_dzr, -steps);
-              new_dzi = ldexp(new_dzi, -steps);
-              new_scale = new_scale + steps;
+              // Clamp scale to prevent overflow (max scale ~100, min scale ~initial_scale)
+              if (new_scale + steps <= 100) {
+                new_dzr = ldexp(new_dzr, -steps);
+                new_dzi = ldexp(new_dzi, -steps);
+                new_scale = new_scale + steps;
+              }
             } else if (log2_mag < -1.0 && new_scale > params.initial_scale) {
               let steps = min(i32(-log2_mag) - 1, new_scale - params.initial_scale);
               if (steps > 0) {
@@ -9367,7 +9442,9 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
       // Calculate batch size
       const pixelsToIterate = this.un + this.ch;
-      const iterationsPerBatch = Math.max(17,
+      // Check for step mode debug flag 's'
+      const stepMode = hasDebugFlag(this.config, 's');
+      const iterationsPerBatch = stepMode ? 1 : Math.max(17,
         Math.floor(333337 / Math.max(pixelsToIterate, 1)));
       this.effort = iterationsPerBatch;
 
@@ -9827,6 +9904,352 @@ async function iterateBoards() {
 }
 
 </script>
+<script id="debugCode">
+// Debug flag 'w': Load worker code on main thread and provide MockWorker
+// Check URL parameter directly (synchronous, before explorer is created)
+if (location.search.includes('debug=')) {
+  const debugValue = decodeURIComponent(location.search.match(/[?&]debug=([^&]*)/)?.[1] || '');
+  if (debugValue.split(',').includes('w')) {
+    const workerCodeEl = document.getElementById('workerCode');
+    if (workerCodeEl) {
+      document.write('<script>' + workerCodeEl.textContent + '<\/script>');
+      console.log('Worker code loaded on main thread via document.write (debug mode)');
+    }
+
+    // Define MockWorker class for running boards on main thread
+    window.MockWorker = class MockWorker {
+      constructor(workerNumber) {
+        this.workerNumber = workerNumber;
+        this.name = `MockWorker ${workerNumber}`;
+        this.onmessage = null;
+
+        // Create isolated worker scope
+        this.boards = new Map();
+        this.hiddenBoards = new Set();
+        this.focusedBoardK = null;
+        this.computationPaused = false;
+        this.steps = 0;
+        this.startTime = 0;
+        this.endTime = -1;
+        this.timer = null;
+        this.gpuMaxBufferSize = null;
+
+        // Step mode support (debug=s flag)
+        this.stepMode = false;
+        this.stepsRequested = 0;
+
+        // Bind the global worker functions to this instance's scope
+        this._messageHandler = this._createMessageHandler();
+        this._iterateBoards = this._createIterateLoop();
+      }
+
+      postMessage(msg) {
+        // Handle message asynchronously like real worker
+        setTimeout(() => this._messageHandler(msg), 0);
+      }
+
+      _createMessageHandler() {
+        // Return async message handler that uses this worker's state
+        return async (e) => {
+          const { type, data } = e;
+          switch (type) {
+            case 'addBoard':
+              const enableGPU = data.config.enableGPU;
+              const webGPUAvailable = typeof GpuBoard !== 'undefined' && GpuBoard.isAvailable();
+
+              // Query GPU limits once on first use
+              if (enableGPU && webGPUAvailable && this.gpuMaxBufferSize === null) {
+                this.gpuMaxBufferSize = await GpuBaseBoard.queryMaxBufferSize();
+              }
+
+              const forceBoard = data.config.forceBoard;
+              const size = data.size;
+              const dimsArea = data.config.dimsArea;
+              const pixelSize = size / data.config.dimsWidth;
+              const BoardClass = selectBoardClass(pixelSize, dimsArea, this.gpuMaxBufferSize, forceBoard);
+
+              // Construct the board instance
+              let board = new BoardClass(data.k, size, data.reQD, data.imQD, data.config, data.id);
+              this.boards.set(data.k, board);
+              board.sizesQD = [size, data.reQD, data.imQD];
+
+              // Log board creation
+              const digits = Math.ceil(-Math.log10(pixelSize)) + 3;
+              const re_str = qdToDecimalString(data.reQD, digits);
+              const im_str = qdToDecimalString(data.imQD, digits);
+              const coordStr = `c=(${re_str}, ${im_str})`;
+              console.log(
+                `Board ${data.k}: ${board.constructor.name} @ ${coordStr}, ` +
+                `pixel=${pixelSize.toExponential(3)} [main thread]`
+              );
+
+              // Send board type info
+              if (this.onmessage) {
+                this.onmessage({
+                  data: {
+                    type: 'boardCreated',
+                    data: {
+                      k: data.k,
+                      boardType: board.constructor.name,
+                      isGPUBoard: board instanceof GpuBoard || board instanceof GpuZhuoranBoard
+                    }
+                  }
+                });
+              }
+              break;
+
+            case 'removeBoard':
+              this.boards.delete(data.k);
+              break;
+
+            case 'setFocusedBoard':
+              this.focusedBoardK = data.k;
+              break;
+
+            case 'setHiddenBoards':
+              this.hiddenBoards = new Set(data.hiddenBoards);
+              break;
+
+            case 'pause':
+              this.computationPaused = data.pause;
+              break;
+          }
+
+          // Start iteration loop if not running (check after every message, like real Worker)
+          if (!this.timer && this.boards.size && !this.computationPaused) {
+            this._iterateBoards();
+          }
+        };
+      }
+
+      _createIterateLoop() {
+        // Return iteration function bound to this worker's state
+        return async () => {
+          this.timer = null;
+
+          // Step mode: only iterate if steps are requested
+          if (this.stepMode && this.stepsRequested === 0) {
+            // Wait for step() to be called
+            this.timer = setTimeout(() => this._iterateBoards(), 100);
+            return;
+          }
+          if (this.stepsRequested > 0) {
+            this.stepsRequested--; // Consume one step request
+          }
+
+          // Get priority list of boards to iterate
+          const pri = [];
+          for (const board of this.boards.values()) {
+            if (!this.hiddenBoards.has(board.k) && board.unfinished()) {
+              pri.push(board);
+            }
+          }
+
+          if (pri.length) {
+            // Start timer if not already running
+            if (this.endTime) {
+              this.startTime = Date.now();
+              this.endTime = 0;
+            }
+
+            // Prioritize boards
+            if (this.steps % 2) {
+              pri.sort((a, b) => b.un - a.un);
+            } else {
+              pri.sort((a, b) => b.k - a.k);
+              if (this.focusedBoardK !== null) {
+                pri.sort((a, b) => (a.k === this.focusedBoardK ? -1 : b.k === this.focusedBoardK ? 1 : 0));
+              }
+            }
+
+            // Exponential scheduling policy
+            let shift = Math.floor(this.steps++ / 2) + 1;
+            let p = 0;
+            while (shift & (1 << p)) { p += 1; }
+            const board = pri[Math.min(p, pri.length) % pri.length];
+
+            // Iterate the selected board
+            if (this.stepMode) {
+              // In step mode: exactly one iteration
+              await board.iterate();
+            } else {
+              // Normal mode: batch iterations for performance
+              for (let workDone = 0; workDone < 17377 && board.unfinished(); ) {
+                workDone += board.un * board.effort;
+                await board.iterate();
+                if (board.isComputing) break;
+              }
+            }
+
+            // Send progress update
+            const now = Date.now();
+            if (this.focusedBoardK == board.k ?
+                (board.updateSize >= 1429 || now - board.lastTime >= 100) :
+                (board.updateSize >= 4673 || now - board.lastTime >= 500)) {
+              const boardEffort = board.un * board.effort;
+              const remainingWork = pri.map(b => b.un * b.effort).reduce((a, b) => a + b, 0);
+              const workerInfo = `${this.name}: ` + (board.unfinished() ?
+                   `boards {${[...this.boards.keys()]}}, work: ${remainingWork}` :
+                   `board finished`);
+
+              if (this.onmessage) {
+                this.onmessage({
+                  data: {
+                    type: 'iterations',
+                    data: {
+                      k: board.k,
+                      id: board.id,
+                      it: board.it,
+                      un: board.un,
+                      di: board.di,
+                      ch: board.ch,
+                      changeList: board.changeList,
+                      boardEffort,
+                      remainingWork,
+                      workerInfo,
+                      boardType: board.constructor.name
+                    }
+                  }
+                });
+              }
+
+              board.lastTime = now;
+              board.updateSize = 0;
+              board.changeList = [];
+
+              if (!board.unfinished()) {
+                this.boards.delete(board.k);
+              }
+            }
+          } else {
+            // End timer when no work remains
+            if (!this.endTime) {
+              this.endTime = Date.now();
+            }
+            return;
+          }
+
+          // Reschedule
+          this.timer = setTimeout(() => this._iterateBoards(), 0);
+        };
+      }
+    };
+
+    console.log('MockWorker class defined for main thread debugging');
+
+    // Enable step mode if 's' flag is set
+    if (debugValue.split(',').includes('s')) {
+      // Set step mode flag on MockWorker initialization
+      const originalConstructor = window.MockWorker;
+      window.MockWorker = class extends originalConstructor {
+        constructor(workerNumber) {
+          super(workerNumber);
+          this.stepMode = true;
+          console.log(`MockWorker ${workerNumber} created in step mode`);
+        }
+      };
+
+      // Helper functions for stepping through iterations
+      window.step = function(n = 1) {
+        const worker = window.worker0;
+        if (!worker || !worker.stepMode) {
+          console.log('Step mode not active. Load page with ?debug=w,s');
+          return;
+        }
+
+        worker.stepsRequested += n;
+
+        console.log(`Stepping ${n} iteration(s)...`);
+        return worker.boards;
+      };
+
+      window.stepAll = function() {
+        const worker = window.worker0;
+        if (!worker) {
+          console.log('No worker available');
+          return;
+        }
+
+        worker.stepMode = false;
+        worker.stepsRequested = 1; // Queue one step to trigger continuous iteration
+        console.log('Resuming continuous iteration...');
+      };
+
+      window.pause = function() {
+        const worker = window.worker0;
+        if (!worker) {
+          console.log('No worker available');
+          return;
+        }
+
+        worker.stepMode = true;
+        worker.stepsRequested = 0; // Clear any pending steps
+        console.log('Paused. Use step() or step(n) to continue.');
+      };
+
+      window.inspectBoard = function(k = 0) {
+        const worker = window.worker0;
+        if (!worker || !worker.boards.has(k)) {
+          console.log(`Board ${k} not found. Available:`, Array.from(worker?.boards?.keys() || []));
+          return null;
+        }
+
+        const board = worker.boards.get(k);
+        console.log(`Board ${k} (${board.constructor.name}):`);
+        console.log(`  Iteration: ${board.it}`);
+        console.log(`  Unfinished pixels: ${board.un}`);
+        console.log(`  Diverged: ${board.di}`);
+        console.log(`  Converged: ${board.ch}`);
+
+        return board;
+      };
+
+      window.tracePixel = async function(k, pixelIndex) {
+        const worker = window.worker0;
+        if (!worker || !worker.boards.has(k)) {
+          console.log(`Board ${k} not found`);
+          return null;
+        }
+
+        const board = worker.boards.get(k);
+        const info = {
+          boardType: board.constructor.name,
+          iteration: board.it,
+          nn: board.nn[pixelIndex]
+        };
+
+        // For Adaptive boards, read GPU state
+        if (board.constructor.name === 'AdaptiveGpuBoard') {
+          const pixelData = await board.readBuffer(board.buffers.pixels, Uint8Array);
+          const offset = pixelIndex * 60;
+          const pixelU32 = new Uint32Array(pixelData.buffer, offset, 15);
+          const pixelF32 = new Float32Array(pixelData.buffer, offset, 15);
+
+          info.status = new Int32Array([pixelU32[0]])[0];
+          info.refIter = pixelU32[2];
+          info.scale = new Int32Array([pixelU32[4]])[0];
+          info.dzr = pixelF32[7];
+          info.dzi = pixelF32[8];
+          info.dzr_scaled = info.dzr * Math.pow(2, info.scale);
+          info.dzi_scaled = info.dzi * Math.pow(2, info.scale);
+        }
+
+        // For QDZ boards, read CPU state
+        if (board.constructor.name === 'QDZhuoranBoard') {
+          info.refIter = board.refIter[pixelIndex];
+          info.dzr = board.dz[pixelIndex * 2];
+          info.dzi = board.dz[pixelIndex * 2 + 1];
+        }
+
+        console.table(info);
+        return info;
+      };
+
+      console.log('Step mode enabled. Use step(), step(n), pause(), stepAll(), inspectBoard(k), tracePixel(k, pixelIndex)');
+    }
+  }
+}
+</script>
 <script id="mathCode">
 //////////// DD (double-double) precision utilities ///////////
 
@@ -9978,6 +10401,38 @@ function decimalToQD(decimalString) {
   t0 = s1 + s2; s2 = s2 - (t0 - s1); s1 = t0;
   t0 = s2 + s3; s3 = s3 - (t0 - s2); s2 = t0;
   return [s0, s1, s2, s3];
+}
+
+// Parse a complex number string into QD precision real and imaginary parts.
+// Accepts formats like: "-0.74543+0.11301i", "0.5i", "-i", "0.25", ""
+// Returns { re: QD array, im: QD array } or null if parsing fails
+function parseComplexToQD(coordString) {
+  const trimmed = coordString.trim();
+
+  // Empty string returns null to signal default/inherit behavior
+  if (trimmed === '') {
+    return null;
+  }
+
+  // Match: optional real part, then optional imaginary part (with 'i' or just 'i')
+  const match = trimmed.match(
+    /([-+]?\d*\.?\d+(?:e[-+]?\d+)?\b)?(?:([-+]?\d*\.?\d+(?:e[-+]?\d+)?)i|([-+]?i))?$/
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  // Extract real part (default to '0' if not present)
+  const realStr = match[1] || '0';
+
+  // Extract imaginary part: either match[2] (number with 'i') or match[3] (just 'i' or '-i')
+  let imagStr = match[2] || (match[3] ? match[3].replace('i', '1') : '0');
+
+  return {
+    re: decimalToQD(realStr),
+    im: decimalToQD(imagStr)
+  };
 }
 
 // Convert QD value to decimal string with exact BigInt arithmetic.
