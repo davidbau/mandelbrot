@@ -10465,7 +10465,7 @@ function ddSquare(a) {
   return fast2Sum(p1, p2 + 2 * a1 * a0);
 }
 
-function qdcPow(q, n) {
+function ddcPow(q, n) {
   if (n === 1) return q;
   if (n === 2) return ddcSquare(q);
   if (n === 3) return ddcMul(ddcSquare(q), q);
@@ -10506,14 +10506,14 @@ function ddReciprocal(b, iters = 2) {
 }
 
 // Complex operations in DD precision
-function qdcAdd(a, b) {
+function ddcAdd(a, b) {
   let realSum = ddAdd([a[0], a[1]], [b[0], b[1]]);
   let imagSum = ddAdd([a[2], a[3]], [b[2], b[3]]);
   return [realSum[0], realSum[1], imagSum[0], imagSum[1]];
 }
 
 // Complex subtraction in DD precision
-function qdcSub(a, b) {
+function ddcSub(a, b) {
   let realDiff = ddSub([a[0], a[1]], [b[0], b[1]]);
   let imagDiff = ddSub([a[2], a[3]], [b[2], b[3]]);
   return [realDiff[0], realDiff[1], imagDiff[0], imagDiff[1]];
@@ -10530,7 +10530,7 @@ function ddcMul(a, b) {
 }
 
 // Complex doubling in DD precision
-function qdcDouble(a) {
+function ddcDouble(a) {
   let realDouble = ddDouble([a[0], a[1]]);
   let imagDouble = ddDouble([a[2], a[3]]);
   return [realDouble[0], realDouble[1], imagDouble[0], imagDouble[1]];
@@ -10547,7 +10547,7 @@ function ddcSquare(a) {
 }
 
 // Complex absolute value in DD precision
-function qdcAbs(a) {
+function ddcAbs(a) {
   let a0a0 = ddSquare([a[0], a[1]]);
   let a1a1 = ddSquare([a[2], a[3]]);
   return ddAdd(a0a0, a1a1);

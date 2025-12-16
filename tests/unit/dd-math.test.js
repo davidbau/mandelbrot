@@ -378,16 +378,16 @@ describe('Quad-Double Arithmetic', () => {
       expect(c[2]).toBe(2);
     });
 
-    test('qdcAdd should add two complex numbers', () => {
+    test('ddcAdd should add two complex numbers', () => {
       // (1 + 0i) + (0 + 1i) = 1 + 1i
-      const result = qd.qdcAdd(cOne, cI);
+      const result = qd.ddcAdd(cOne, cI);
       expect(result[0]).toBe(1);
       expect(result[2]).toBe(1);
     });
 
-    test('qdcSub should subtract two complex numbers', () => {
+    test('ddcSub should subtract two complex numbers', () => {
       // (1 + 0i) - (0 + 1i) = 1 - 1i
-      const result = qd.qdcSub(cOne, cI);
+      const result = qd.ddcSub(cOne, cI);
       expect(result[0]).toBe(1);
       expect(result[2]).toBe(-1);
     });
@@ -399,10 +399,10 @@ describe('Quad-Double Arithmetic', () => {
       expect(result[2]).toBe(0); // 0i
     });
 
-    test('qdcDouble should double a complex number', () => {
+    test('ddcDouble should double a complex number', () => {
       // 2 * (1 + 1i) = 2 + 2i
       const onePlusI = [1, 0, 1, 0];
-      const result = qd.qdcDouble(onePlusI);
+      const result = qd.ddcDouble(onePlusI);
       expect(result[0]).toBe(2);
       expect(result[2]).toBe(2);
     });
@@ -415,29 +415,29 @@ describe('Quad-Double Arithmetic', () => {
       expect(result[2]).toBeCloseTo(2, 15);
     });
 
-    test('qdcAbs should return squared magnitude (norm)', () => {
+    test('ddcAbs should return squared magnitude (norm)', () => {
       // |3 + 4i|^2 = 3^2 + 4^2 = 9 + 16 = 25
       const c = [3, 0, 4, 0];
-      // qdcAbs returns a real quad-double (array of 2), not complex
-      const result = qd.qdcAbs(c);
+      // ddcAbs returns a real quad-double (array of 2), not complex
+      const result = qd.ddcAbs(c);
       expect(result[0]).toBe(25);
     });
 
-    test('qdcPow should compute integer powers', () => {
+    test('ddcPow should compute integer powers', () => {
       // (1 + i)^4 = (2i)^2 = -4
       const onePlusI = [1, 0, 1, 0];
-      const result = qd.qdcPow(onePlusI, 4);
+      const result = qd.ddcPow(onePlusI, 4);
       expect(result[0]).toBeCloseTo(-4, 15);
       expect(result[2]).toBeCloseTo(0, 15);
 
       // Power of 0? Function logic: `let result = [1, 0, 0, 0]`.
       // If n=0, loop `while (n>0)` doesn't run. Returns 1. Correct.
-      const res0 = qd.qdcPow(onePlusI, 0);
+      const res0 = qd.ddcPow(onePlusI, 0);
       expect(res0[0]).toBe(1);
       expect(res0[2]).toBe(0);
 
       // Power of 1
-      const res1 = qd.qdcPow(onePlusI, 1);
+      const res1 = qd.ddcPow(onePlusI, 1);
       expect(res1[0]).toBe(1);
       expect(res1[2]).toBe(1);
     });

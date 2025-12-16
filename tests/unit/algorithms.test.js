@@ -59,13 +59,13 @@ const qdFuncs = createTestEnvironment([
   'AtwoProduct',
   // Complex quad-double operations
   'toDDc',
-  'qdcAdd',
-  'qdcSub',
+  'ddcAdd',
+  'ddcSub',
   'ddcMul',
-  'qdcDouble',
+  'ddcDouble',
   'ddcSquare',
-  'qdcAbs',
-  'qdcPow'
+  'ddcAbs',
+  'ddcPow'
 ]);
 
 describe('Fibonacci Period Algorithm', () => {
@@ -308,12 +308,12 @@ describe('Complex Quad-Double Arithmetic', () => {
     return qdFuncs.toDDc([re, im]);
   }
 
-  describe('qdcAdd - Complex Addition', () => {
+  describe('ddcAdd - Complex Addition', () => {
     test('should add two complex numbers', () => {
       // (1 + 2i) + (3 + 4i) = (4 + 6i)
       const a = makeComplex(1, 2);
       const b = makeComplex(3, 4);
-      const result = qdFuncs.qdcAdd(a, b);
+      const result = qdFuncs.ddcAdd(a, b);
 
       expect(result[0]).toBeCloseTo(4, 10);  // real part
       expect(result[2]).toBeCloseTo(6, 10);  // imaginary part
@@ -323,19 +323,19 @@ describe('Complex Quad-Double Arithmetic', () => {
       // (1 + 2i) + (-3 - 4i) = (-2 - 2i)
       const a = makeComplex(1, 2);
       const b = makeComplex(-3, -4);
-      const result = qdFuncs.qdcAdd(a, b);
+      const result = qdFuncs.ddcAdd(a, b);
 
       expect(result[0]).toBeCloseTo(-2, 10);
       expect(result[2]).toBeCloseTo(-2, 10);
     });
   });
 
-  describe('qdcSub - Complex Subtraction', () => {
+  describe('ddcSub - Complex Subtraction', () => {
     test('should subtract two complex numbers', () => {
       // (5 + 7i) - (2 + 3i) = (3 + 4i)
       const a = makeComplex(5, 7);
       const b = makeComplex(2, 3);
-      const result = qdFuncs.qdcSub(a, b);
+      const result = qdFuncs.ddcSub(a, b);
 
       expect(result[0]).toBeCloseTo(3, 10);
       expect(result[2]).toBeCloseTo(4, 10);
@@ -403,22 +403,22 @@ describe('Complex Quad-Double Arithmetic', () => {
     });
   });
 
-  describe('qdcDouble - Complex Doubling', () => {
+  describe('ddcDouble - Complex Doubling', () => {
     test('should double a complex number', () => {
       // 2 * (3 + 4i) = 6 + 8i
       const a = makeComplex(3, 4);
-      const result = qdFuncs.qdcDouble(a);
+      const result = qdFuncs.ddcDouble(a);
 
       expect(result[0]).toBeCloseTo(6, 10);
       expect(result[2]).toBeCloseTo(8, 10);
     });
   });
 
-  describe('qdcAbs - Complex Absolute Value Squared', () => {
+  describe('ddcAbs - Complex Absolute Value Squared', () => {
     test('should compute |z|^2', () => {
       // |3 + 4i|^2 = 9 + 16 = 25
       const a = makeComplex(3, 4);
-      const result = qdFuncs.qdcAbs(a);
+      const result = qdFuncs.ddcAbs(a);
 
       expect(result[0]).toBeCloseTo(25, 10);
     });
@@ -427,16 +427,16 @@ describe('Complex Quad-Double Arithmetic', () => {
       // |cos(45°) + i*sin(45°)|^2 = 1
       const angle = Math.PI / 4;
       const a = makeComplex(Math.cos(angle), Math.sin(angle));
-      const result = qdFuncs.qdcAbs(a);
+      const result = qdFuncs.ddcAbs(a);
 
       expect(result[0]).toBeCloseTo(1, 10);
     });
   });
 
-  describe('qdcPow - Complex Power', () => {
+  describe('ddcPow - Complex Power', () => {
     test('should compute z^1 = z', () => {
       const a = makeComplex(2, 3);
-      const result = qdFuncs.qdcPow(a, 1);
+      const result = qdFuncs.ddcPow(a, 1);
 
       expect(result[0]).toBeCloseTo(2, 10);
       expect(result[2]).toBeCloseTo(3, 10);
@@ -444,7 +444,7 @@ describe('Complex Quad-Double Arithmetic', () => {
 
     test('should compute z^2 same as ddcSquare', () => {
       const a = makeComplex(2, 3);
-      const pow2 = qdFuncs.qdcPow(a, 2);
+      const pow2 = qdFuncs.ddcPow(a, 2);
       const squared = qdFuncs.ddcSquare(a);
 
       expect(pow2[0]).toBeCloseTo(squared[0], 10);
@@ -454,7 +454,7 @@ describe('Complex Quad-Double Arithmetic', () => {
     test('should compute z^3 correctly', () => {
       // (1 + i)^3 = (1 + i)^2 * (1 + i) = (2i) * (1 + i) = -2 + 2i
       const a = makeComplex(1, 1);
-      const result = qdFuncs.qdcPow(a, 3);
+      const result = qdFuncs.ddcPow(a, 3);
 
       expect(result[0]).toBeCloseTo(-2, 10);
       expect(result[2]).toBeCloseTo(2, 10);
@@ -463,7 +463,7 @@ describe('Complex Quad-Double Arithmetic', () => {
     test('should compute higher powers', () => {
       // i^4 = 1
       const i = makeComplex(0, 1);
-      const result = qdFuncs.qdcPow(i, 4);
+      const result = qdFuncs.ddcPow(i, 4);
 
       expect(result[0]).toBeCloseTo(1, 10);
       expect(result[2]).toBeCloseTo(0, 10);
@@ -477,7 +477,7 @@ describe('Complex Quad-Double Arithmetic', () => {
       let z = makeComplex(0, 0);
 
       for (let i = 0; i < 10; i++) {
-        z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);
+        z = qdFuncs.ddcAdd(qdFuncs.ddcSquare(z), c);
       }
 
       expect(z[0]).toBeCloseTo(0, 10);
@@ -489,13 +489,13 @@ describe('Complex Quad-Double Arithmetic', () => {
       const c = makeComplex(2, 0);
       let z = makeComplex(0, 0);
 
-      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z1 = 0 + 2 = 2
+      z = qdFuncs.ddcAdd(qdFuncs.ddcSquare(z), c);  // z1 = 0 + 2 = 2
       expect(z[0]).toBeCloseTo(2, 10);
 
-      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z2 = 4 + 2 = 6
+      z = qdFuncs.ddcAdd(qdFuncs.ddcSquare(z), c);  // z2 = 4 + 2 = 6
       expect(z[0]).toBeCloseTo(6, 10);
 
-      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z3 = 36 + 2 = 38
+      z = qdFuncs.ddcAdd(qdFuncs.ddcSquare(z), c);  // z3 = 36 + 2 = 38
       expect(z[0]).toBeCloseTo(38, 10);
     });
 
@@ -504,13 +504,13 @@ describe('Complex Quad-Double Arithmetic', () => {
       const c = makeComplex(-1, 0);
       let z = makeComplex(0, 0);
 
-      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z1 = 0 + (-1) = -1
+      z = qdFuncs.ddcAdd(qdFuncs.ddcSquare(z), c);  // z1 = 0 + (-1) = -1
       expect(z[0]).toBeCloseTo(-1, 10);
 
-      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z2 = 1 + (-1) = 0
+      z = qdFuncs.ddcAdd(qdFuncs.ddcSquare(z), c);  // z2 = 1 + (-1) = 0
       expect(z[0]).toBeCloseTo(0, 10);
 
-      z = qdFuncs.qdcAdd(qdFuncs.ddcSquare(z), c);  // z3 = 0 + (-1) = -1
+      z = qdFuncs.ddcAdd(qdFuncs.ddcSquare(z), c);  // z3 = 0 + (-1) = -1
       expect(z[0]).toBeCloseTo(-1, 10);
     });
   });
