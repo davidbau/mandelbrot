@@ -48,7 +48,9 @@ New features in the 2020 version:
 
 ## 2022: Keyboard Controls
 
-Added keyboard shortcuts for power users:
+Added keyboard shortcuts for power users. You can see the state of the code at
+[mandelbrot.page/version-2022.html](https://mandelbrot.page/version-2022.html).
+
 - `T` to cycle color themes
 - `I` to zoom in
 - `U` to highlight unfinished pixels
