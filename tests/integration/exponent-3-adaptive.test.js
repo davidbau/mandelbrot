@@ -30,7 +30,7 @@ describe('Exponent 3 - AdaptiveGpuBoard vs GpuZhuoranBoard', () => {
     await page1.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
     await page1.waitForFunction(() => {
       const view = window.explorer?.grid?.views?.[0];
-      return view && view.di > 0;
+      return view && view.un === 0;  // Wait for all pixels to finish
     }, { timeout: 30000 });
 
     const zhuoran = await page1.evaluate(() => {
@@ -65,7 +65,7 @@ describe('Exponent 3 - AdaptiveGpuBoard vs GpuZhuoranBoard', () => {
     await page2.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
     await page2.waitForFunction(() => {
       const view = window.explorer?.grid?.views?.[0];
-      return view && view.di > 0;
+      return view && view.un === 0;  // Wait for all pixels to finish
     }, { timeout: 30000 });
 
     const adaptive = await page2.evaluate(() => {
