@@ -148,7 +148,29 @@ class Scheduler {
 }
 ```
 
-If one worker finishes its board early while another is still busy, the Scheduler can transfer boards between them to balance the load.
+### Dynamic Load Balancing
+
+Every 5 seconds, the Scheduler checks for load imbalance. If one worker's load exceeds twice the lowest worker's load, a board is transferred to balance the work:
+
+```javascript
+checkAndBalance() {
+  const workerLoads = this.workers.map((_, i) => this.getWorkerLoad(i));
+  const lowEffort = Math.min(...workerLoads);
+
+  // Find overloaded workers and transfer their second-heaviest board
+  for (let [workerIndex, load] of sortedByLoad) {
+    if (load > 2 * lowEffort && hasTransferableBoards(workerIndex)) {
+      this.requestTransfers([secondHeaviestBoard]);
+    }
+  }
+}
+```
+
+**Board effort** is calculated as `unfinishedPixels × effortPerPixel`, where the effort multiplier varies by board type (e.g., QD boards have higher effort than simple CPU boards).
+
+**Transfer mechanism:** When a board is transferred, the source worker serializes the board's complete state—pixel arrays, reference orbits, checkpoint data—and sends it to the destination worker, which reconstructs the board using `Board.fromSerialized()`. GPU boards cannot be transferred since their state lives on the GPU.
+
+This rebalancing ensures that deep-zoom views (which take longer to compute) don't monopolize a single worker while others sit idle.
 
 ## GPU Computation Strategy
 
