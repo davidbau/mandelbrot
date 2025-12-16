@@ -5942,7 +5942,10 @@ class ReferenceOrbitThreading {
 // Based on Zhuoran Li's 2021 approach:
 // https://mathr.co.uk/blog/2021-05-14_stretching_deep_zoom.html
 // Rebasing implementation follows Imagina: https://github.com/ImaginaFractal/Imagina
-class DDZhuoranBoard extends Board {
+
+// Base class for CPU-based Zhuoran perturbation boards (DD and QD precision)
+// Subclasses implement precision-specific reference orbit computation
+class CpuZhuoranBaseBoard extends Board {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
@@ -5951,23 +5954,292 @@ class DDZhuoranBoard extends Board {
     this.threadDeltaRe = new Array(this.config.dimsArea).fill(0);
     this.threadDeltaIm = new Array(this.config.dimsArea).fill(0);
 
-    // Reference orbit data (DD precision)
+    // Reference orbit management
     this.maxRefIterations = 10000;  // Will grow dynamically
-    this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low] for each iteration
     this.refOrbitEscaped = false;
-    this.refIterations = 0;  // Current length of reference orbit
+    this.refIterations = 1;  // Start with iterations 0 and 1
 
-    // Reference point (center of image) in DD precision
-    const refRe = qdToDD(this.re);
-    const refIm = qdToDD(this.im);
-    this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
-
-    // Per-pixel data (double precision)
+    // Per-pixel data (double precision) - shared by all subclasses
     this.dc = [];  // Delta c from reference point [real, imag] pairs
     this.dz = [];  // Current perturbation delta [real, imag] pairs
     this.refIter = [];  // Which iteration of reference each pixel is following
     this.pixelIndexes = [];  // Active pixel indices
     this.maxRefIter = 1;  // Track maximum refIter to avoid scanning all pixels
+
+    this.effort = 2;  // Effort level for scheduling
+  }
+
+  // Abstract methods - subclasses must implement these
+
+  // Get the double value of the real part from a ref orbit entry
+  getRefReal(refEntry) { throw new Error('Abstract method'); }
+
+  // Get the double value of the imaginary part from a ref orbit entry
+  getRefImag(refEntry) { throw new Error('Abstract method'); }
+
+  // Get the reference orbit entry at the given iteration
+  getRefOrbit(iter) { throw new Error('Abstract method'); }
+
+  // Get the current length of the reference orbit
+  getRefOrbitLength() { throw new Error('Abstract method'); }
+
+  // Get reference C real part as double
+  getRefCReal() { throw new Error('Abstract method'); }
+
+  // Get reference C imaginary part as double
+  getRefCImag() { throw new Error('Abstract method'); }
+
+  // Extend reference orbit by one iteration (precision-specific)
+  extendReferenceOrbit() { throw new Error('Abstract method'); }
+
+  // Initialize pixels (precision-specific)
+  initPixels() { throw new Error('Abstract method'); }
+
+  // Shared iterate() method - works for both DD and QD
+  iterate() {
+    let changes = null;
+    // Step 1: Extend reference orbit if needed and not escaped
+    const targetRefIterations = Math.max(this.it + 100, this.maxRefIter + 100);
+    while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
+      this.extendReferenceOrbit();
+    }
+    // Step 2: Iterate all active pixels using perturbation
+    const newPixelIndexes = [];
+    for (const index of this.pixelIndexes) {
+      if (this.nn[index]) continue;  // Skip finished pixels
+      const result = this.iteratePixel(index);
+      if (result !== 0) {
+        if (!changes) {
+          changes = { iter: this.it, nn: [], vv: [] };
+        }
+        if (result > 0) {
+          // Diverged
+          changes.nn.push(index);
+          this.nn[index] = this.it;
+          this.di += 1;
+          this.un -= 1;
+        } else {
+          // Converged
+          const index2 = index * 2;
+          const nextRefIter = this.refIter[index] + 1;
+          const ref = this.getRefOrbit(Math.min(nextRefIter, this.getRefOrbitLength() - 1));
+          const refR = this.getRefReal(ref);
+          const refI = this.getRefImag(ref);
+          changes.vv.push({
+            index: index,
+            z: [refR + this.dz[index2], refI + this.dz[index2 + 1]],
+            p: this.pp[index]
+          });
+          this.nn[index] = -this.it;
+          this.un -= 1;
+          if (this.inspike(
+            this.dc[index2] + this.getRefCReal(),
+            this.dc[index2 + 1] + this.getRefCImag()
+          ) && this.ch > 0) {
+            this.ch -= 1;
+          }
+        }
+      } else {
+        newPixelIndexes.push(index);
+      }
+    }
+    this.pixelIndexes = newPixelIndexes;
+    // Compact if needed
+    if (this.pixelIndexes.length > this.un * 1.25) {
+      this.pixelIndexes = this.pixelIndexes.filter(i => !this.nn[i]);
+    }
+    this.it++;
+    this.queueChanges(changes);
+  }
+
+  // Shared iteratePixel() method - works for both DD and QD
+  iteratePixel(index) {
+    const index2 = index * 2;
+    let refIter = this.refIter[index];
+
+    // Check if current z has escaped BEFORE doing iteration
+    if (refIter < this.getRefOrbitLength()) {
+      const ref = this.getRefOrbit(refIter);
+      const refR = this.getRefReal(ref);
+      const refI = this.getRefImag(ref);
+      const dr = this.dz[index2];
+      const di = this.dz[index2 + 1];
+      const currentZR = refR + dr;
+      const currentZI = refI + di;
+      const currentMag2 = currentZR * currentZR + currentZI * currentZI;
+      if (currentMag2 > 4) {
+        return 1;  // Diverged
+      }
+    }
+
+    // Ensure reference orbit exists
+    if (refIter >= this.getRefOrbitLength()) {
+      if (this.refOrbitEscaped) {
+        // Rebase to beginning
+        const lastRef = this.getRefOrbit(this.getRefOrbitLength() - 1);
+        const lastRefR = this.getRefReal(lastRef);
+        const lastRefI = this.getRefImag(lastRef);
+        const dr = this.dz[index2];
+        const di = this.dz[index2 + 1];
+        this.dz[index2] = lastRefR + dr;
+        this.dz[index2 + 1] = lastRefI + di;
+        this.refIter[index] = 0;
+        refIter = 0;
+      } else {
+        return 1;  // Mark as diverged if unexpected
+      }
+    }
+
+    // Check if we need to rebase (Zhuoran's key innovation)
+    if (this.shouldRebase(index)) {
+      const ref = this.getRefOrbit(refIter);
+      const refR = this.getRefReal(ref);
+      const refI = this.getRefImag(ref);
+      const dr = this.dz[index2];
+      const di = this.dz[index2 + 1];
+      this.dz[index2] = refR + dr;
+      this.dz[index2 + 1] = refI + di;
+      this.refIter[index] = 0;
+      refIter = 0;
+    }
+
+    // Get reference orbit value
+    const ref = this.getRefOrbit(refIter);
+    if (!ref) {
+      return 0;
+    }
+    const refR = this.getRefReal(ref);
+    const refI = this.getRefImag(ref);
+
+    // Perturbation iteration using binomial expansion (Horner's method)
+    const dr = this.dz[index2];
+    const di = this.dz[index2 + 1];
+
+    const exponent = this.config.exponent || 2;
+
+    // Build binomial powers: coeff * z_ref^power for each term
+    let zPowR = refR;
+    let zPowI = refI;
+    let coeff = exponent;
+
+    // Start Horner's method with innermost term (just dz)
+    let resultR = dr;
+    let resultI = di;
+
+    // Horner's method: accumulate terms from highest to lowest power of z_ref
+    for (let k = 1; k < exponent; k++) {
+      // Add coeff * z_ref^power term
+      const termR = coeff * zPowR;
+      const termI = coeff * zPowI;
+      resultR = resultR + termR;
+      resultI = resultI + termI;
+
+      // Multiply by dz (complex multiplication)
+      const tempR = resultR * dr - resultI * di;
+      resultI = resultR * di + resultI * dr;
+      resultR = tempR;
+
+      // Update z_ref power: z_pow = z_pow * z_ref
+      const newZPowR = zPowR * refR - zPowI * refI;
+      zPowI = zPowR * refI + zPowI * refR;
+      zPowR = newZPowR;
+
+      // Update coefficient: coeff *= (n-k) / (k+1)
+      coeff *= (exponent - k) / (k + 1);
+    }
+
+    // Add perturbation in c
+    const newDr = resultR + this.dc[index2];
+    const newDi = resultI + this.dc[index2 + 1];
+    this.dz[index2] = newDr;
+    this.dz[index2 + 1] = newDi;
+
+    // CONVERGENCE DETECTION: fibonacciPeriod returns 1 at Fibonacci checkpoints
+    const justUpdatedCheckpoint = (fibonacciPeriod(this.it) == 1);
+    if (justUpdatedCheckpoint) {
+      this.bb[index2] = dr;
+      this.bb[index2 + 1] = di;
+      this.pp[index] = 0;
+      this.currentThreadIter[index] = refIter;
+      this.threadDeltaRe[index] = 0;
+      this.threadDeltaIm[index] = 0;
+    } else {
+      // Incrementally advance threads when thread.next == refIter
+      let currentThread = this.currentThreadIter[index];
+      const thread = this.threading.getThread(currentThread);
+      if (thread.next == refIter) {
+        this.threadDeltaRe[index] += thread.deltaRe;
+        this.threadDeltaIm[index] += thread.deltaIm;
+        currentThread = thread.next;
+        this.currentThreadIter[index] = currentThread;
+      }
+
+      // Check convergence when currentThreadIter matches refIter
+      if (this.currentThreadIter[index] === refIter) {
+        const checkpoint_dr = this.bb[index2];
+        const checkpoint_di = this.bb[index2 + 1];
+        const dzDiffR = dr - checkpoint_dr;
+        const dzDiffI = di - checkpoint_di;
+        const totalDiffR = this.threadDeltaRe[index] + dzDiffR;
+        const totalDiffI = this.threadDeltaIm[index] + dzDiffI;
+        const db = Math.max(Math.abs(totalDiffR), Math.abs(totalDiffI));
+
+        if (db <= this.epsilon2) {
+          if (!this.pp[index]) {
+            this.pp[index] = this.it - 1;
+          }
+          if (db <= this.epsilon) {
+            return -1;  // Converged via threading!
+          }
+        }
+      }
+    }
+
+    // Update reference iteration counter
+    this.refIter[index]++;
+    if (this.refIter[index] > this.maxRefIter) {
+      this.maxRefIter = this.refIter[index];
+    }
+    return 0;  // Continue iterating
+  }
+
+  // Shared shouldRebase() method - works for both DD and QD
+  shouldRebase(index) {
+    const index2 = index * 2;
+    const dr = this.dz[index2];
+    const di = this.dz[index2 + 1];
+    const refIter = this.refIter[index];
+
+    if (refIter === 0) return false;
+    if (refIter >= this.getRefOrbitLength()) return false;
+
+    const ref = this.getRefOrbit(refIter);
+    if (!ref) return false;
+
+    const refR = this.getRefReal(ref);
+    const refI = this.getRefImag(ref);
+
+    const dzNorm = Math.max(Math.abs(dr), Math.abs(di));
+    const totalR = refR + dr;
+    const totalI = refI + di;
+    const totalNorm = Math.max(Math.abs(totalR), Math.abs(totalI));
+
+    return totalNorm < dzNorm * 2.0;
+  }
+}
+
+// DD-precision implementation of CpuZhuoranBaseBoard
+class DDZhuoranBoard extends CpuZhuoranBaseBoard {
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+
+    // DD-specific: Reference orbit data
+    this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low] for each iteration
+
+    // Reference point (center of image) in DD precision
+    const refRe = qdToDD(this.re);
+    const refIm = qdToDD(this.im);
+    this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
 
     // Working array for DD precision operations
     this.tt = new Array(16);
@@ -5975,20 +6247,24 @@ class DDZhuoranBoard extends Board {
     // Initialize reference orbit with z = 0 and z = c
     this.refOrbit.push([0, 0, 0, 0]);  // Iteration 0: z = 0
     this.refOrbit.push(this.refC.slice());  // Iteration 1: z = 0^2 + c = c
-    this.refIterations = 1;  // We have computed 1 iteration beyond z=0
 
     // Threading for robust cycle detection
-    // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
-    // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
     const threadingEpsilon = 10000 * this.epsilon;
-    const getDDPoint = (i) => this.refOrbit[i] || null;  // [re_hi, re_lo, im_hi, im_lo]
+    const getDDPoint = (i) => this.refOrbit[i] || null;
     const spatialBucket = new DDSpatialBucket(threadingEpsilon, getDDPoint);
     this.threading = new ReferenceOrbitThreading(spatialBucket);
-    this.threading.addPoint(0);  // iter 0
-    this.threading.addPoint(1);  // iter 1
+    this.threading.addPoint(0);
+    this.threading.addPoint(1);
     this.initPixels();
-    this.effort = 2;  // Slightly lower than PerturbationBoard since simpler
   }
+
+  // Abstract method implementations for DD precision
+  getRefReal(ref) { return ref[0] + ref[1]; }
+  getRefImag(ref) { return ref[2] + ref[3]; }
+  getRefOrbit(iter) { return this.refOrbit[iter]; }
+  getRefOrbitLength() { return this.refOrbit.length; }
+  getRefCReal() { return this.refC[0] + this.refC[1]; }
+  getRefCImag() { return this.refC[2] + this.refC[3]; }
 
   initPixels() {
     const sizeScalar = this.size;
@@ -6058,74 +6334,8 @@ class DDZhuoranBoard extends Board {
     return {
       ...super.serialize(),
       refOrbit: this.refOrbit,
-      refOrbitEscaped: this.refOrbitEscaped,
-      refIterations: this.refIterations,
       refC: this.refC,
-      dc: this.dc,
-      dz: this.dz,
-      refIter: this.refIter,
-      pixelIndexes: this.pixelIndexes
     };
-  }
-
-  iterate() {
-    let changes = null;
-    // Step 1: Extend reference orbit if needed and not escaped
-    // Use cached maxRefIter to avoid scanning all pixels every iteration
-    const targetRefIterations = Math.max(this.it + 100, this.maxRefIter + 100);
-    while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
-      this.extendReferenceOrbit();
-    }
-    // Step 2: Iterate all active pixels using perturbation
-    const newPixelIndexes = [];
-    for (const index of this.pixelIndexes) {
-      if (this.nn[index]) continue;  // Skip finished pixels
-      const result = this.iteratePixel(index);
-      if (result !== 0) {
-        if (!changes) {
-          changes = { iter: this.it, nn: [], vv: [] };
-        }
-        if (result > 0) {
-          // Diverged
-          changes.nn.push(index);
-          this.nn[index] = this.it;
-          this.di += 1;
-          this.un -= 1;
-        } else {
-          // Converged
-          const index2 = index * 2;
-          // Report the CURRENT z position after the iteration
-          // Note: refIter was NOT incremented (returned before increment)
-          // dz corresponds to refIter+1
-          const nextRefIter = this.refIter[index] + 1;
-          const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
-          const refR = ref[0] + ref[1];
-          const refI = ref[2] + ref[3];
-          changes.vv.push({
-            index: index,
-            z: [refR + this.dz[index2], refI + this.dz[index2 + 1]],
-            p: this.pp[index]  // period = iter when convergence first detected
-          });
-          this.nn[index] = -this.it;
-          this.un -= 1;
-          if (this.inspike(
-            this.dc[index2] + this.refC[0] + this.refC[1],
-            this.dc[index2 + 1] + this.refC[2] + this.refC[3]
-          ) && this.ch > 0) {
-            this.ch -= 1;
-          }
-        }
-      } else {
-        newPixelIndexes.push(index);
-      }
-    }
-    this.pixelIndexes = newPixelIndexes;
-    // Compact if needed
-    if (this.pixelIndexes.length > this.un * 1.25) {
-      this.pixelIndexes = this.pixelIndexes.filter(i => !this.nn[i]);
-    }
-    this.it++;
-    this.queueChanges(changes);
   }
 
   extendReferenceOrbit() {
@@ -6183,215 +6393,6 @@ class DDZhuoranBoard extends Board {
     }
   }
 
-  iteratePixel(index) {
-    const index2 = index * 2;
-    let refIter = this.refIter[index];
-
-    // Check if current z has escaped BEFORE doing iteration (matches CpuBoard behavior)
-    // This check must happen before any rebasing logic
-    if (refIter < this.refOrbit.length) {
-      const ref = this.refOrbit[refIter];
-      const refR = ref[0] + ref[1];
-      const refI = ref[2] + ref[3];
-      const dr = this.dz[index2];
-      const di = this.dz[index2 + 1];
-      const currentZR = refR + dr;
-      const currentZI = refI + di;
-      const currentMag2 = currentZR * currentZR + currentZI * currentZI;
-      if (currentMag2 > 4) {
-        return 1;  // Diverged before iteration: report this.it
-      }
-    }
-
-    // Ensure reference orbit exists
-    if (refIter >= this.refOrbit.length) {
-      if (this.refOrbitEscaped) {
-        // Rebase to beginning
-        const lastRef = this.refOrbit[this.refOrbit.length - 1];
-        const lastRefR = lastRef[0] + lastRef[1];
-        const lastRefI = lastRef[2] + lastRef[3];
-        const dr = this.dz[index2];
-        const di = this.dz[index2 + 1];
-        this.dz[index2] = lastRefR + dr;
-        this.dz[index2 + 1] = lastRefI + di;
-        this.refIter[index] = 0;
-        refIter = 0;
-      } else {
-        return 1;  // Mark as diverged if unexpected
-      }
-    }
-
-    // Check if we need to rebase (Zhuoran's key innovation)
-    if (this.shouldRebase(index)) {
-      // Imagina's rebasing: set dz = z_total and restart from refIter = 0
-      const ref = this.refOrbit[refIter];
-      const refR = ref[0] + ref[1];
-      const refI = ref[2] + ref[3];
-      const dr = this.dz[index2];
-      const di = this.dz[index2 + 1];
-      // Set dz to current total position (z_ref + dz)
-      this.dz[index2] = refR + dr;
-      this.dz[index2 + 1] = refI + di;
-      // Restart from iteration 0 (where z_ref = 0)
-      this.refIter[index] = 0;
-      refIter = 0;
-
-      // Checkpoint unchanged; difference-based comparison works across rebases
-    }
-    // Get reference orbit value for current iteration
-    const ref = this.refOrbit[refIter];
-    if (!ref) {
-      // Safety check - this shouldn't happen with the fix above
-      console.error(`Missing reference orbit at iteration ${refIter}`);
-      return 0;
-    }
-    const refR = ref[0] + ref[1];  // Convert quad to double
-    const refI = ref[2] + ref[3];
-
-    // Perturbation iteration using binomial expansion (Horner's method)
-    // (z_ref+dz)^n - z_ref^n = sum(k=1 to n) C(n,k) * z_ref^(n-k) * dz^k
-    const dr = this.dz[index2];
-    const di = this.dz[index2 + 1];
-    // Save the OLD z value (before this iteration) for checkpoint timing
-    // This matches CpuBoard's behavior where bb is set BEFORE computing the new z
-    const oldZR = refR + dr;
-    const oldZI = refI + di;
-
-    const exponent = this.config.exponent || 2;
-
-    // Build binomial powers: coeff * z_ref^power for each term
-    let zPowR = refR;
-    let zPowI = refI;
-    let coeff = exponent;
-
-    // Start Horner's method with innermost term (just dz)
-    let resultR = dr;
-    let resultI = di;
-
-    // Horner's method: accumulate terms from highest to lowest power of z_ref
-    for (let k = 1; k < exponent; k++) {
-      // Add coeff * z_ref^power term
-      const termR = coeff * zPowR;
-      const termI = coeff * zPowI;
-      resultR = resultR + termR;
-      resultI = resultI + termI;
-
-      // Multiply by dz (complex multiplication)
-      const tempR = resultR * dr - resultI * di;
-      resultI = resultR * di + resultI * dr;
-      resultR = tempR;
-
-      // Update z_ref power: z_pow = z_pow * z_ref
-      const newZPowR = zPowR * refR - zPowI * refI;
-      zPowI = zPowR * refI + zPowI * refR;
-      zPowR = newZPowR;
-
-      // Update coefficient: coeff *= (n-k) / (k+1)
-      coeff *= (exponent - k) / (k + 1);
-    }
-
-    // Add perturbation in c
-    const newDr = resultR + this.dc[index2];
-    const newDi = resultI + this.dc[index2 + 1];
-    // Update dz first before checking divergence
-    this.dz[index2] = newDr;
-    this.dz[index2 + 1] = newDi;
-    // Note: We don't check escape here after iteration.
-    // Instead, the next iteration's pre-check will detect it.
-    //  This matches CpuBoard's behavior and keeps nn counting simple.
-
-    // CONVERGENCE DETECTION: fibonacciPeriod returns 1 at Fibonacci checkpoints
-    // Step 1: Update checkpoint at fibonacciPeriod intervals
-    const justUpdatedCheckpoint = (fibonacciPeriod(this.it) == 1);
-    if (justUpdatedCheckpoint) {
-      // Store dz (perturbation) and which reference iteration we're at
-      this.bb[index2] = dr;  // dz real at checkpoint (BEFORE iteration)
-      this.bb[index2 + 1] = di;  // dz imag at checkpoint
-      this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
-      // Reset thread tracking for this pixel
-      this.currentThreadIter[index] = refIter;
-      this.threadDeltaRe[index] = 0;
-      this.threadDeltaIm[index] = 0;
-    }
-    // Step 2: Check convergence EVERY iteration (if we have a checkpoint and didn't just update it)
-    else {
-      // Incrementally advance threads when thread.next == refIter
-      let currentThread = this.currentThreadIter[index];
-      const thread = this.threading.getThread(currentThread);
-      if (thread.next == refIter) {
-        // Advance thread: accumulate delta and move to next
-        this.threadDeltaRe[index] += thread.deltaRe;
-        this.threadDeltaIm[index] += thread.deltaIm;
-        currentThread = thread.next;
-        this.currentThreadIter[index] = currentThread;
-      }
-
-      // Check convergence when currentThreadIter matches refIter
-      if (this.currentThreadIter[index] === refIter) {
-        const checkpoint_dr = this.bb[index2];
-        const checkpoint_di = this.bb[index2 + 1];
-
-        // Total difference = thread deltas + perturbation difference
-        const dzDiffR = dr - checkpoint_dr;
-        const dzDiffI = di - checkpoint_di;
-        const totalDiffR = this.threadDeltaRe[index] + dzDiffR;
-        const totalDiffI = this.threadDeltaIm[index] + dzDiffI;
-        const db = Math.max(Math.abs(totalDiffR), Math.abs(totalDiffI));
-
-        if (db <= this.epsilon2) {
-          if (!this.pp[index]) {
-            this.pp[index] = this.it - 1;
-          }
-          if (db <= this.epsilon) {
-            return -1;  // Converged via threading!
-          }
-        }
-      }
-    }
-    // Update reference iteration counter (dz was already updated above)
-    this.refIter[index]++;
-    // Update cached maximum to avoid scanning all pixels
-    if (this.refIter[index] > this.maxRefIter) {
-      this.maxRefIter = this.refIter[index];
-    }
-    return 0;  // Continue iterating
-  }
-
-  shouldRebase(index) {
-    // Zhuoran's rebasing condition using Chebyshev norm (Imagina's optimization)
-    // Rebase when max(|z_total|) < max(|dz|)
-    // This detects when we're near the critical point (0 for Mandelbrot)
-    const index2 = index * 2;
-    const dr = this.dz[index2];
-    const di = this.dz[index2 + 1];
-
-    const refIter = this.refIter[index];
-
-    // Don't rebase if we're already at iteration 0 (start of reference orbit)
-    if (refIter === 0) {
-      return false;
-    }
-
-    // Check if reference orbit exists for this iteration
-    if (refIter >= this.refOrbit.length || !this.refOrbit[refIter]) {
-      return false; // Can't check, don't rebase
-    }
-
-    const ref = this.refOrbit[refIter];
-    const refR = ref[0] + ref[1];
-    const refI = ref[2] + ref[3];
-
-    // Compute Chebyshev norm (L-infinity norm) - cheaper than magnitude squared
-    const dzNorm = Math.max(Math.abs(dr), Math.abs(di));
-    const totalR = refR + dr;
-    const totalI = refI + di;
-    const totalNorm = Math.max(Math.abs(totalR), Math.abs(totalI));
-
-    // Rebase when orbit approaches critical point (0)
-    // Use factor of 2 to rebase less aggressively, reducing cumulative errors
-    return totalNorm < dzNorm * 2.0;
-  }
-
   getCurrentRefZ(index) {
     const refIter = this.refIter[index];
     if (refIter <= this.refIterations && this.refOrbit[refIter]) {
@@ -6401,24 +6402,13 @@ class DDZhuoranBoard extends Board {
   }
 }
 
-// QD-precision perturbation board - independent implementation using QD reference orbit
+// QD-precision implementation of CpuZhuoranBaseBoard
 // Provides higher precision (~212 bits) reference for very deep zooms
-// Perturbations use double precision which is sufficient for practical zoom depths
-class QDZhuoranBoard extends Board {
+class QDZhuoranBoard extends CpuZhuoranBaseBoard {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
-    // Per-pixel thread tracking for convergence detection
-    this.currentThreadIter = new Array(this.config.dimsArea).fill(0);
-    this.threadDeltaRe = new Array(this.config.dimsArea).fill(0);
-    this.threadDeltaIm = new Array(this.config.dimsArea).fill(0);
-
-    // Reference orbit management
-    this.maxRefIterations = 10000;  // Will grow dynamically
-    this.refOrbitEscaped = false;
-    this.refIterations = 1;  // Start with iterations 0 and 1
-
-    // Store QD-precision reference point
+    // QD-specific: Reference orbit data
     const refReQD = this.re.slice();
     const refImQD = this.im.slice();
     this.refC_qd = [...refReQD, ...refImQD];
@@ -6428,13 +6418,6 @@ class QDZhuoranBoard extends Board {
       [0, 0, 0, 0, 0, 0, 0, 0],  // Iteration 0: z = 0
       [...refReQD, ...refImQD]   // Iteration 1: z = c
     ];
-
-    // Per-pixel data (double precision)
-    this.dc = [];  // Delta c from reference point [real, imag] pairs
-    this.dz = [];  // Current perturbation delta [real, imag] pairs
-    this.refIter = [];  // Which iteration of reference each pixel is following
-    this.pixelIndexes = [];  // Active pixel indices
-    this.maxRefIter = 1;  // Track maximum refIter to avoid scanning all pixels
 
     // Working array for QD precision operations
     this.tt = new Array(32);
@@ -6446,13 +6429,18 @@ class QDZhuoranBoard extends Board {
     this.threading = new ReferenceOrbitThreading(spatialBucket);
     this.threading.addPoint(0);
     this.threading.addPoint(1);
-
-    // Initialize pixels
-    this.initPixelsQD();
-    this.effort = 2;  // Similar to DDZhuoranBoard
+    this.initPixels();
   }
 
-  initPixelsQD() {
+  // Abstract method implementations for QD precision
+  getRefReal(ref) { return ref[0] + ref[1] + ref[2] + ref[3]; }
+  getRefImag(ref) { return ref[4] + ref[5] + ref[6] + ref[7]; }
+  getRefOrbit(iter) { return this.qdRefOrbit[iter]; }
+  getRefOrbitLength() { return this.qdRefOrbit.length; }
+  getRefCReal() { return this.refC_qd[0] + this.refC_qd[1] + this.refC_qd[2] + this.refC_qd[3]; }
+  getRefCImag() { return this.refC_qd[4] + this.refC_qd[5] + this.refC_qd[6] + this.refC_qd[7]; }
+
+  initPixels() {
     // Compute delta c directly without precision loss.
     // At deep zoom, computing cr = center + offset loses precision.
     // Since the reference point IS the view center, dc is just the pixel offset from center.
@@ -6553,252 +6541,6 @@ class QDZhuoranBoard extends Board {
     if (this.refIterations >= this.maxRefIterations) {
       this.maxRefIterations *= 2;
     }
-  }
-
-  iterate() {
-    let changes = null;
-    // Step 1: Extend reference orbit if needed
-    const targetRefIterations = Math.max(this.it + 100, this.maxRefIter + 100);
-    while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
-      this.extendReferenceOrbit();
-    }
-    // Step 2: Iterate all active pixels using perturbation
-    const newPixelIndexes = [];
-    for (const index of this.pixelIndexes) {
-      if (this.nn[index]) continue;  // Skip finished pixels
-      const result = this.iteratePixel(index);
-      if (result !== 0) {
-        if (!changes) {
-          changes = { iter: this.it, nn: [], vv: [] };
-        }
-        if (result > 0) {
-          // Diverged
-          changes.nn.push(index);
-          this.nn[index] = this.it;
-          this.di += 1;
-          this.un -= 1;
-        } else {
-          // Converged
-          const index2 = index * 2;
-          const nextRefIter = this.refIter[index] + 1;
-          const ref = this.qdRefOrbit[Math.min(nextRefIter, this.qdRefOrbit.length - 1)];
-          const refR = ref[0] + ref[1] + ref[2] + ref[3];
-          const refI = ref[4] + ref[5] + ref[6] + ref[7];
-          changes.vv.push({
-            index: index,
-            z: [refR + this.dz[index2], refI + this.dz[index2 + 1]],
-            p: this.pp[index]
-          });
-          this.nn[index] = -this.it;
-          this.un -= 1;
-          const refC_re = this.refC_qd[0] + this.refC_qd[1] + this.refC_qd[2] + this.refC_qd[3];
-          const refC_im = this.refC_qd[4] + this.refC_qd[5] + this.refC_qd[6] + this.refC_qd[7];
-          if (this.inspike(
-            this.dc[index2] + refC_re,
-            this.dc[index2 + 1] + refC_im
-          ) && this.ch > 0) {
-            this.ch -= 1;
-          }
-        }
-      } else {
-        newPixelIndexes.push(index);
-      }
-    }
-    this.pixelIndexes = newPixelIndexes;
-    // Compact if needed
-    if (this.pixelIndexes.length > this.un * 1.25) {
-      this.pixelIndexes = this.pixelIndexes.filter(i => !this.nn[i]);
-    }
-    this.it++;
-    this.queueChanges(changes);
-  }
-
-  iteratePixel(index) {
-    const index2 = index * 2;
-    let refIter = this.refIter[index];
-
-    // Check if current z has escaped BEFORE doing iteration
-    if (refIter < this.qdRefOrbit.length) {
-      const ref = this.qdRefOrbit[refIter];
-      const refR = ref[0] + ref[1] + ref[2] + ref[3];
-      const refI = ref[4] + ref[5] + ref[6] + ref[7];
-      const dr = this.dz[index2];
-      const di = this.dz[index2 + 1];
-      const currentZR = refR + dr;
-      const currentZI = refI + di;
-      const currentMag2 = currentZR * currentZR + currentZI * currentZI;
-      if (currentMag2 > 4) {
-        return 1;  // Diverged
-      }
-    }
-
-    // Ensure reference orbit exists
-    if (refIter >= this.qdRefOrbit.length) {
-      if (this.refOrbitEscaped) {
-        // Rebase to beginning
-        const lastRef = this.qdRefOrbit[this.qdRefOrbit.length - 1];
-        const lastRefR = lastRef[0] + lastRef[1] + lastRef[2] + lastRef[3];
-        const lastRefI = lastRef[4] + lastRef[5] + lastRef[6] + lastRef[7];
-        const dr = this.dz[index2];
-        const di = this.dz[index2 + 1];
-        this.dz[index2] = lastRefR + dr;
-        this.dz[index2 + 1] = lastRefI + di;
-        this.refIter[index] = 0;
-        refIter = 0;
-      } else {
-        return 1;  // Mark as diverged if unexpected
-      }
-    }
-
-    // Check if we need to rebase
-    if (this.shouldRebase(index)) {
-      const ref = this.qdRefOrbit[refIter];
-      const refR = ref[0] + ref[1] + ref[2] + ref[3];
-      const refI = ref[4] + ref[5] + ref[6] + ref[7];
-      const dr = this.dz[index2];
-      const di = this.dz[index2 + 1];
-      this.dz[index2] = refR + dr;
-      this.dz[index2 + 1] = refI + di;
-      this.refIter[index] = 0;
-      refIter = 0;
-    }
-
-    // Get reference orbit value
-    const ref = this.qdRefOrbit[refIter];
-    if (!ref) {
-      return 0;
-    }
-    const refR = ref[0] + ref[1] + ref[2] + ref[3];
-    const refI = ref[4] + ref[5] + ref[6] + ref[7];
-
-    // Perturbation iteration using binomial expansion (Horner's method)
-    // (z_ref+dz)^n - z_ref^n = sum(k=1 to n) C(n,k) * z_ref^(n-k) * dz^k
-    const dr = this.dz[index2];
-    const di = this.dz[index2 + 1];
-    // Save the OLD z value (before this iteration) for checkpoint timing
-    // This matches CpuBoard's behavior where bb is set BEFORE computing the new z
-    const oldZR = refR + dr;
-    const oldZI = refI + di;
-
-    const exponent = this.config.exponent || 2;
-
-    // Build binomial powers: coeff * z_ref^power for each term
-    let zPowR = refR;
-    let zPowI = refI;
-    let coeff = exponent;
-
-    // Start Horner's method with innermost term (just dz)
-    let resultR = dr;
-    let resultI = di;
-
-    // Horner's method: accumulate terms from highest to lowest power of z_ref
-    for (let k = 1; k < exponent; k++) {
-      // Add coeff * z_ref^power term
-      const termR = coeff * zPowR;
-      const termI = coeff * zPowI;
-      resultR = resultR + termR;
-      resultI = resultI + termI;
-
-      // Multiply by dz (complex multiplication)
-      const tempR = resultR * dr - resultI * di;
-      resultI = resultR * di + resultI * dr;
-      resultR = tempR;
-
-      // Update z_ref power: z_pow = z_pow * z_ref
-      const newZPowR = zPowR * refR - zPowI * refI;
-      zPowI = zPowR * refI + zPowI * refR;
-      zPowR = newZPowR;
-
-      // Update coefficient: coeff *= (n-k) / (k+1)
-      coeff *= (exponent - k) / (k + 1);
-    }
-
-    // Add perturbation in c
-    const newDr = resultR + this.dc[index2];
-    const newDi = resultI + this.dc[index2 + 1];
-    // Update dz first before checking divergence
-    this.dz[index2] = newDr;
-    this.dz[index2 + 1] = newDi;
-    // Note: We don't check escape here after iteration.
-    // Instead, the next iteration's pre-check will detect it.
-    //  This matches CpuBoard's behavior and keeps nn counting simple.
-
-    // CONVERGENCE DETECTION: fibonacciPeriod returns 1 at Fibonacci checkpoints
-    // Step 1: Update checkpoint at fibonacciPeriod intervals
-    const justUpdatedCheckpoint = (fibonacciPeriod(this.it) == 1);
-    if (justUpdatedCheckpoint) {
-      // Store dz (perturbation) and which reference iteration we're at
-      this.bb[index2] = dr;  // dz real at checkpoint (BEFORE iteration)
-      this.bb[index2 + 1] = di;  // dz imag at checkpoint
-      this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
-      // Reset thread tracking for this pixel
-      this.currentThreadIter[index] = refIter;
-      this.threadDeltaRe[index] = 0;
-      this.threadDeltaIm[index] = 0;
-    }
-    // Step 2: Check convergence EVERY iteration (if we have a checkpoint and didn't just update it)
-    else {
-      // Incrementally advance threads when thread.next == refIter
-      let currentThread = this.currentThreadIter[index];
-      const thread = this.threading.getThread(currentThread);
-      if (thread.next == refIter) {
-        // Advance thread: accumulate delta and move to next
-        this.threadDeltaRe[index] += thread.deltaRe;
-        this.threadDeltaIm[index] += thread.deltaIm;
-        currentThread = thread.next;
-        this.currentThreadIter[index] = currentThread;
-      }
-
-      // Check convergence when currentThreadIter matches refIter
-      if (this.currentThreadIter[index] === refIter) {
-        const checkpoint_dr = this.bb[index2];
-        const checkpoint_di = this.bb[index2 + 1];
-
-        // Total difference = thread deltas + perturbation difference
-        const dzDiffR = dr - checkpoint_dr;
-        const dzDiffI = di - checkpoint_di;
-        const totalDiffR = this.threadDeltaRe[index] + dzDiffR;
-        const totalDiffI = this.threadDeltaIm[index] + dzDiffI;
-        const db = Math.max(Math.abs(totalDiffR), Math.abs(totalDiffI));
-
-        if (db <= this.epsilon2) {
-          if (!this.pp[index]) {
-            this.pp[index] = this.it - 1;
-          }
-          if (db <= this.epsilon) {
-            return -1;  // Converged via threading!
-          }
-        }
-      }
-    }
-    // Update reference iteration counter (dz was already updated above)
-    this.refIter[index]++;
-    // Update cached maximum to avoid scanning all pixels
-    if (this.refIter[index] > this.maxRefIter) {
-      this.maxRefIter = this.refIter[index];
-    }
-    return 0;  // Continue iterating
-  }
-
-  shouldRebase(index) {
-    const index2 = index * 2;
-    const dr = this.dz[index2];
-    const di = this.dz[index2 + 1];
-    const refIter = this.refIter[index];
-
-    if (refIter === 0) return false;
-    if (refIter >= this.qdRefOrbit.length || !this.qdRefOrbit[refIter]) return false;
-
-    const ref = this.qdRefOrbit[refIter];
-    const refR = ref[0] + ref[1] + ref[2] + ref[3];
-    const refI = ref[4] + ref[5] + ref[6] + ref[7];
-
-    const dzNorm = Math.max(Math.abs(dr), Math.abs(di));
-    const totalR = refR + dr;
-    const totalI = refI + di;
-    const totalNorm = Math.max(Math.abs(totalR), Math.abs(totalI));
-
-    return totalNorm < dzNorm * 2.0;
   }
 
   serialize() {
