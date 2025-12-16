@@ -9769,7 +9769,7 @@ class FractalWorker {
       }
 
         // Send board type info once on creation
-        this.postMessage({
+        this.sendToScheduler({
           type: 'boardCreated',
           data: {
             k: data.k,
@@ -9804,7 +9804,7 @@ class FractalWorker {
           }
         }
         // Send the serialized boards back to the scheduler
-        this.postMessage({
+        this.sendToScheduler({
           type: 'downloadTransfer',
           data: { transferredBoards }
         });
@@ -9826,7 +9826,7 @@ class FractalWorker {
       const remainingWork = Array.from(this.boards.values()).
           filter(board => !this.hiddenBoards.has(board.k)).
           map(b => b.un * b.effort).reduce((a, b) => a + b, 0);
-      this.postMessage({
+      this.sendToScheduler({
         type: 'update',
         data: {
           remainingWork,
@@ -9879,7 +9879,7 @@ class FractalWorker {
         const workerInfo = `${this.name}: ` + (board.unfinished() ?
              `boards {${[...this.boards.keys()]}}, work: ${remainingWork}` :
              `board finished`);
-        this.postMessage({
+        this.sendToScheduler({
           type: 'iterations',
           data: {
             k: board.k,
@@ -9914,8 +9914,9 @@ class FractalWorker {
   }
 
   // Abstract method to be overridden by subclasses
-  postMessage(msg) {
-    throw new Error('FractalWorker.postMessage() must be implemented by subclass');
+  // Sends messages from worker back to scheduler
+  sendToScheduler(msg) {
+    throw new Error('FractalWorker.sendToScheduler() must be implemented by subclass');
   }
 }
 
@@ -9925,7 +9926,7 @@ class FractalWorker {
 // Instantiate the FractalWorker and set up message handling
 
 class RealWorker extends FractalWorker {
-  postMessage(msg) {
+  sendToScheduler(msg) {
     // In real workers, send messages back to main thread
     self.postMessage(msg);
   }
@@ -9976,9 +9977,18 @@ if (location.search.includes('debug=')) {
         await super.iterateBoards();
       }
 
-      // Override to send messages to Scheduler on main thread
+      // Handle incoming messages from Scheduler (when Scheduler calls worker.postMessage())
+      // Real Workers receive messages via self.onmessage, but MockWorker receives via this method
       postMessage(msg) {
-        // Call onmessage callback if set (matches real Worker interface)
+        // Schedule handleMessage asynchronously to match real Worker behavior
+        setTimeout(async () => {
+          const { type, data } = msg;
+          await this.handleMessage(type, data);
+        }, 0);
+      }
+
+      // Override abstract method to send messages back to Scheduler
+      sendToScheduler(msg) {
         if (this.onmessage) {
           this.onmessage({ data: msg });
         }
