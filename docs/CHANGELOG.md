@@ -81,12 +81,10 @@ This technique was pioneered by K.I. Martin in [SuperFractalThing](https://fract
 
 ### Movie Mode
 
-Added video export capability:
+Added video preview capability:
 - Press `M` to create a smooth zoom animation
 - Catmull-Rom spline interpolation for smooth camera paths
 - Logarithmic zoom interpolation for natural zoom speed
-- WebCodecs-based H.264 encoding
-- MP4 export with mp4-muxer
 
 ### Web Workers
 
@@ -117,7 +115,11 @@ The result: WebGPU support with massive parallelism, plus significant UI enhance
 - **GpuZhuoranBoard**: GPU perturbation with DD-precision reference orbits for
   deep zooms up to 10^30
 - **AdaptiveGpuBoard**: GPU perturbation with QD-precision reference for ultra-deep
-  zooms beyond 10^30, using per-pixel adaptive scaling
+  zooms beyond 10^30. Standard GPU perturbation fails at extreme depths because
+  float32 can't represent both tiny pixel deltas (~10^-40) and escape magnitudes (~2)
+  with a single global scale. AdaptiveGpuBoard solves this by giving each pixel its
+  own scale exponent that adjusts dynamically as the delta grows during iteration.
+  See [ADAPTIVE-SCALING.md](ADAPTIVE-SCALING.md) for the full design.
 
 ### Zhuoran's Rebasing
 
@@ -149,6 +151,15 @@ Extended precision from ~31 decimal digits (DD, double-double) to ~62 decimal di
 - Internationalization (11 languages)
 - Browser history support (back/forward navigation)
 
+### Movie Export
+
+Added MP4 video export to the movie mode introduced in 2024:
+- WebCodecs-based H.264 encoding for high-quality output
+- MP4 export using [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) library
+- Custom minification script that analyzes our specific usage patterns to strip
+  unused code paths from mp4-muxer, achieving size reductions beyond what standard
+  tree-shaking compilers can accomplish
+
 ### Bug Fixes and Refinements
 
 - Float32 precision handling for deep zoom cycle detection
@@ -163,8 +174,8 @@ Extended precision from ~31 decimal digits (DD, double-double) to ~62 decimal di
 | 2009 | Table-cell and canvas rendering, cycle detection |
 | 2020 | High DPI, orbit visualization |
 | 2022 | Keyboard controls |
-| 2024 | Double-double (DD) precision (~31 digits), perturbation, movies, web workers |
-| 2025 | WebGPU acceleration, quad-double (QD) precision (~62 digits), i18n, fullscreen |
+| 2024 | Double-double (DD) precision (~31 digits), perturbation, movie preview, web workers |
+| 2025 | WebGPU acceleration, quad-double (QD) precision (~62 digits), MP4 export, i18n, fullscreen |
 
 ## The Philosophy
 
