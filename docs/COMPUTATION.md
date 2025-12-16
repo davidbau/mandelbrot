@@ -168,13 +168,20 @@ changeList: [
     iter: 1000,              // Iteration count when these pixels finished
     nn: [index1, index2],    // Pixel indices that diverged
     vv: [                    // Pixels that converged
-      { index: i1, z: [re, im], p: period1 },
-      { index: i2, z: [re, im], p: period2 }
+      { index: i1, z: [...], p: period1 },  // z in board's native format
+      { index: i2, z: [...], p: period2 }
     ]
   },
   { iter: 1001, nn: [...], vv: [...] }
 ]
 ```
+
+The `z` value is sent in the board's native format to minimize bandwidth:
+- **CpuBoard, GpuBoard**: float64 pair `[re, im]`
+- **PerturbationBoard, GpuZhuoranBoard, DDZhuoranBoard**: DDc format `[re_hi, re_lo, im_hi, im_lo]`
+- **QDCpuBoard, AdaptiveGpuBoard, QDZhuoranBoard**: QDc format `[re0..re3, im0..im3]`
+
+On the main thread, `View.handleUpdates` normalizes all formats to QDc using `toQDc()` before storing in `convergedData`, so `currentz()` always returns 8-element QDc format.
 
 On the main thread, `updateViewFromWorkerResult` applies these sparse changes:
 

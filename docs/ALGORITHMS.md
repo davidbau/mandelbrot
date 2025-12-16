@@ -141,7 +141,7 @@ The beauty of rebasing is that it *avoids* glitches rather than detecting and co
 
 `PerturbationBoard` uses a different approach: a grid of reference points rather than a single reference with rebasing. Each reference point is computed in DD precision, and nearby pixels use double-precision perturbations. When a pixel's perturbation grows too large, it switches to full DD precision iteration for the remainder.
 
-This multi-reference approach handles regions where orbits diverge significantly from any single reference. Compared to `ZhuoranBoard`'s single-reference rebasing, it has higher overhead from computing many reference orbits, but the memory access pattern is more cache-friendly and the per-pixel bookkeeping is simpler.
+This multi-reference approach handles regions where orbits diverge significantly from any single reference. Compared to `DDZhuoranBoard`'s single-reference rebasing, it has higher overhead from computing many reference orbits, but the memory access pattern is more cache-friendly and the per-pixel bookkeeping is simpler.
 
 ## DD and QD Precision Arithmetic
 

@@ -145,9 +145,9 @@ The threshold 1e-13 prevents underflow when z² would be too small to represent.
 | Board | Zoom Range | Precision | GPU |
 |-------|------------|-----------|-----|
 | GpuBoard | < 10^7 | float32 direct | Yes |
-| GpuZhuoranBoard | 10^7 - 10^14 | float32 perturbation, DD reference | Yes |
-| AdaptiveGpuBoard | 10^14 - 10^60 | float32 perturbation, QD reference, adaptive scaling | Yes |
-| QDZhuoranBoard | 10^30 - 10^60 | float64 perturbation, QD reference | No (CPU) |
+| GpuZhuoranBoard | 10^7 - 10^30 | float32 perturbation, DD reference | Yes |
+| AdaptiveGpuBoard | > 10^30 | float32 perturbation, QD reference, adaptive scaling | Yes |
+| QDZhuoranBoard | > 10^30 | float64 perturbation, QD reference | No (CPU) |
 
 ## Performance
 

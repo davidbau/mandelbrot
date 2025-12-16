@@ -97,7 +97,7 @@ With these building blocks, we can implement arithmetic on double-double pairs.
 ### Addition
 
 ```javascript
-function qdAdd(a, b) {
+function ddAdd(a, b) {
   let [a1, a0] = a;           // Unpack [hi, lo]
   let [b1, b0] = b;
   let [h1, h2] = slow2Sum(a1, b1);  // Add high parts
@@ -112,7 +112,7 @@ The algorithm first sums the high parts (a1, b1) and low parts (a0, b0) separate
 ### Multiplication
 
 ```javascript
-function qdMul(a, b) {
+function ddMul(a, b) {
   let [a1, a0] = a;
   let [b1, b0] = b;
   let [p1, p2] = twoProduct(a1, b1);  // Exact product of high parts
@@ -127,11 +127,11 @@ The dominant term is `a1 * b1` (the product of the high parts). The cross terms 
 Division uses iterative refinement. Starting with an approximate reciprocal, Newton-Raphson doubles the precision with each iteration:
 
 ```javascript
-function qdReciprocal(b, iters = 2) {
+function ddReciprocal(b, iters = 2) {
   let x = [1 / b[0], 0];  // Initial approximation
   for (let i = 0; i < iters; i++) {
     // Newton-Raphson: x_new = x * (2 - x * b)
-    x = qdMul(x, qdSub([2, 0], qdMul(x, b)));
+    x = ddMul(x, ddSub([2, 0], ddMul(x, b)));
   }
   return x;
 }
@@ -146,17 +146,17 @@ The Mandelbrot iteration `z = z² + c` involves complex numbers. The explorer re
 ### Complex Multiplication
 
 ```javascript
-function qdcMul(a, b) {
+function ddcMul(a, b) {
   // (a_re + i*a_im) * (b_re + i*b_im)
   // = (a_re*b_re - a_im*b_im) + i*(a_re*b_im + a_im*b_re)
-  let ac = qdMul([a[0], a[1]], [b[0], b[1]]);   // a_re * b_re
-  let bd = qdMul([a[2], a[3]], [b[2], b[3]]);   // a_im * b_im
-  let adbc = qdMul(
-    qdAdd([a[0], a[1]], [a[2], a[3]]),
-    qdAdd([b[0], b[1]], [b[2], b[3]])
+  let ac = ddMul([a[0], a[1]], [b[0], b[1]]);   // a_re * b_re
+  let bd = ddMul([a[2], a[3]], [b[2], b[3]]);   // a_im * b_im
+  let adbc = ddMul(
+    ddAdd([a[0], a[1]], [a[2], a[3]]),
+    ddAdd([b[0], b[1]], [b[2], b[3]])
   );  // (a_re + a_im) * (b_re + b_im)
-  let real = qdSub(ac, bd);
-  let imag = qdSub(adbc, qdAdd(ac, bd));  // Karatsuba trick
+  let real = ddSub(ac, bd);
+  let imag = ddSub(adbc, ddAdd(ac, bd));  // Karatsuba trick
   return [real[0], real[1], imag[0], imag[1]];
 }
 ```
@@ -168,12 +168,12 @@ This uses a Karatsuba-like identity to compute the imaginary part with three mul
 Since `z²` is the most common operation in Mandelbrot iteration, there's an optimized version:
 
 ```javascript
-function qdcSquare(a) {
-  let a0a0 = qdSquare([a[0], a[1]]);   // re²
-  let a1a1 = qdSquare([a[2], a[3]]);   // im²
-  let a0a1 = qdMul([a[0], a[1]], [a[2], a[3]]);  // re * im
-  let real = qdSub(a0a0, a1a1);        // re² - im²
-  let imag = qdDouble(a0a1);            // 2 * re * im
+function ddcSquare(a) {
+  let a0a0 = ddSquare([a[0], a[1]]);   // re²
+  let a1a1 = ddSquare([a[2], a[3]]);   // im²
+  let a0a1 = ddMul([a[0], a[1]], [a[2], a[3]]);  // re * im
+  let real = ddSub(a0a0, a1a1);        // re² - im²
+  let imag = ddDouble(a0a1);            // 2 * re * im
   return [real[0], real[1], imag[0], imag[1]];
 }
 ```
@@ -201,7 +201,7 @@ By building the number incrementally in DD or QD precision, digits beyond the 15
 For performance-critical inner loops, the code provides "array in-place" variants that avoid allocating new arrays:
 
 ```javascript
-function AqdAdd(r, i, a1, a2, b1, b2) {
+function ArddAdd(r, i, a1, a2, b1, b2) {
   // Writes result to r[i] and r[i+1]
   Aslow2Sum(r, i, a1, b1);
   const h1 = r[i], h2 = r[i+1];

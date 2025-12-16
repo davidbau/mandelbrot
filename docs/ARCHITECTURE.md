@@ -212,12 +212,14 @@ The application's JavaScript is contained within `<script>` tags inside `index.h
 
 | Script ID | Approx Lines | Contents |
 |-----------|-------------|----------|
-| `mainCode` | 217-4509 | Core classes (MandelbrotExplorer, StateStore, Config, View, Grid, ZoomManager), UI classes (URLHandler, EventHandler, MovieMode), Scheduler |
-| `workerCode` | 4510-9606 | Board classes, mixins (DDReferenceOrbitMixin, QDReferenceOrbitMixin), and computational algorithms |
-| `mathCode` | 9796-11532 | DD and QD precision math library |
-| `i18nCode` | 11533-11711 | Internationalization messages |
-| `mp4Muxer` | 11712-12754 | Bundled mp4-muxer library |
-| `startApp` | 12755-12762 | Application startup |
+| `mainCode` | 217-4501 | Core classes (MandelbrotExplorer, StateStore, Config, View, Grid, ZoomManager), UI classes (URLHandler, EventHandler, MovieMode), Scheduler, OrbitComputer |
+| `workerCode` | 4502-9616 | Board classes, mixins (DDReferenceOrbitMixin, QDReferenceOrbitMixin), and computational algorithms |
+| `workerStart` | 9617-9637 | Worker initialization code (injected into blob) |
+| `debugCode` | 9638-9805 | Debug utilities for main-thread board inspection |
+| `mathCode` | 9806-11568 | DD and QD precision math library (shared by main thread and workers) |
+| `i18nCode` | 11569-11747 | Internationalization messages |
+| `mp4Muxer` | 11748-12790 | Bundled mp4-muxer library |
+| `startApp` | 12791-12795 | Application startup |
 
 The line numbers are approximate and shift as the code evolves. The script IDs are used for code coverage reporting.
 

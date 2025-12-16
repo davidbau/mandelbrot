@@ -93,14 +93,14 @@ function ArqdMul(r, a, b) {
 The critical `z² + c` operation in Mandelbrot iteration uses optimized complex squaring:
 
 ```javascript
-function toQDcSq(z) {
+function toQDcSquare(z) {
   const re = [z[0], z[1], z[2], z[3]];
   const im = [z[4], z[5], z[6], z[7]];
   // real = re² - im²
   // imag = 2 * re * im
-  const reSq = ArqdSquare(re, re);  // Optimized squaring
-  const imSq = ArqdSquare(im, im);
-  const reIm = ArqdMul(re, im);
+  const reSq = toQDSquare(re);
+  const imSq = toQDSquare(im);
+  const reIm = toQDMul(re, im);
   const real = toQDSub(reSq, imSq);
   const imag = toQDDouble(reIm);  // 2 * re * im
   return [...real, ...imag];
