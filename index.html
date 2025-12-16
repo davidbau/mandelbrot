@@ -1171,7 +1171,7 @@ class View {
       for (const entry of vv) {
         const { index, z, p } = entry;
         this.nn[index] = -iter;
-        this.convergedData.set(index, { z: toDDc(z), p });
+        this.convergedData.set(index, { z, p });  // z is QDc format (8 elements)
         changedIndices.push(index);
       }
       this.di += nn.length;
@@ -4098,13 +4098,6 @@ class Scheduler {
   }
 }
 
-// Convert DD complex (4 elements: [r_hi, r_lo, i_hi, i_lo]) to
-// QD complex format (8 elements: 4 real, 4 imaginary)
-function ddcToQDComplex(ddc) {
-  if (!ddc || ddc.length !== 4) return null;
-  return [ddc[0], ddc[1], 0, 0, ddc[2], ddc[3], 0, 0];
-}
-
 // Computes and displays iteration orbits when hovering over points.
 class OrbitComputer {
   constructor(explorer) {
@@ -4153,8 +4146,8 @@ class OrbitComputer {
     let view = this.explorer.grid.views[k];
 
     if (view && j >= 0 && j < this.explorer.config.dimsArea) {
-      let c = view.currentc(j);  // Now returns QD complex format (8 elements)
-      let zQd = view.currentz(j);  // Returns QD format (4 elements)
+      let c = view.currentc(j);  // Returns QD complex format (8 elements)
+      let z = view.currentz(j);  // Returns QD complex format (8 elements)
 
       // Calculate a further orbit beyond the old orbit.
       // Orbits now use 8 elements per point (QD complex format)
@@ -4190,8 +4183,7 @@ class OrbitComputer {
             title += MSG.after_ + iters + MSG.period_ + periodStr;
           }
           let clen = fibonacciPeriod(view.currentp(j));
-          // Convert z from DDc (4 elements) to QD complex format (8 elements) for suborbit
-          const z = ddcToQDComplex(zQd);
+          // z is already in QD complex format (8 elements)
           cyc = z ? this.suborbit(z, c, clen) : [];
         }
       } else {
@@ -4713,9 +4705,11 @@ class CpuBoard extends Board {
           changes = { iter: this.it, nn: [], vv: [] };
         }
         if (computeResult < 0) {
+          const zr = this.zz[index * 2];
+          const zi = this.zz[index * 2 + 1];
           changes.vv.push({
             index: index,
-            z: [this.zz[index * 2], this.zz[index * 2 + 1]],
+            z: [zr, 0, 0, 0, zi, 0, 0, 0],  // QDc format (8 elements)
             p: this.pp[index]  // period
           });
         } else {
@@ -4936,10 +4930,11 @@ class QDCpuBoard extends Board {
         }
         if (computeResult < 0) {
           const m8 = index * 8;
+          // Preserve full QD precision (8 elements: 4 real + 4 imag)
           changes.vv.push({
             index: index,
-            z: [this.zz[m8] + this.zz[m8+1] + this.zz[m8+2] + this.zz[m8+3],
-                this.zz[m8+4] + this.zz[m8+5] + this.zz[m8+6] + this.zz[m8+7]],
+            z: [this.zz[m8], this.zz[m8+1], this.zz[m8+2], this.zz[m8+3],
+                this.zz[m8+4], this.zz[m8+5], this.zz[m8+6], this.zz[m8+7]],
             p: this.pp[index]  // period
           });
         } else {
@@ -5193,9 +5188,10 @@ class PerturbationBoard extends Board {
           changes = { iter: this.it, nn: [], vv: [] };
         }
         if (r < 0) {
+          const ddc = ArddcGet(this.nz, index*4);  // DDc format
           changes.vv.push({
             index: index,
-            z: ArddcGet(this.nz, index*4),
+            z: [ddc[0], ddc[1], 0, 0, ddc[2], ddc[3], 0, 0],  // QDc format
             p: this.pp[index]  // period
           });
         } else {
@@ -5217,9 +5213,10 @@ class PerturbationBoard extends Board {
             changes = { iter: this.it, nn: [], vv: [] };
           }
           if (r < 0) {
+            const ddc = ArddcGet(this.nz, index*4);  // DDc format
             changes.vv.push({
               index: index,
-              z: z,
+              z: [ddc[0], ddc[1], 0, 0, ddc[2], ddc[3], 0, 0],  // QDc format
               p: this.pp[index]  // period
             });
           } else {
@@ -5982,6 +5979,14 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
   getRefCReal() { return this.refC[0] + this.refC[1]; }
   getRefCImag() { return this.refC[2] + this.refC[3]; }
 
+  // Compute z = ref + dz in QDc format (8 elements)
+  refDzToQDc(ref, dzr, dzi) {
+    // ref is DD: [r_hi, r_lo, i_hi, i_lo]
+    const zrQD = toQDAdd([ref[0], ref[1], 0, 0], [dzr, 0, 0, 0]);
+    const ziQD = toQDAdd([ref[2], ref[3], 0, 0], [dzi, 0, 0, 0]);
+    return [...zrQD, ...ziQD];
+  }
+
   // Extend reference orbit by one iteration in DD precision
   extendReferenceOrbit() {
     const lastIndex = this.refIterations;
@@ -6074,6 +6079,14 @@ const QDReferenceOrbitMixin = (Base) => class extends Base {
   getRefOrbitLength() { return this.qdRefOrbit.length; }
   getRefCReal() { return this.refC_qd[0] + this.refC_qd[1] + this.refC_qd[2] + this.refC_qd[3]; }
   getRefCImag() { return this.refC_qd[4] + this.refC_qd[5] + this.refC_qd[6] + this.refC_qd[7]; }
+
+  // Compute z = ref + dz in QDc format (8 elements)
+  refDzToQDc(ref, dzr, dzi) {
+    // ref is QD: [r0,r1,r2,r3, i0,i1,i2,i3]
+    const zrQD = toQDAdd([ref[0], ref[1], ref[2], ref[3]], [dzr, 0, 0, 0]);
+    const ziQD = toQDAdd([ref[4], ref[5], ref[6], ref[7]], [dzi, 0, 0, 0]);
+    return [...zrQD, ...ziQD];
+  }
 
   // Extend reference orbit by one iteration in QD precision
   extendReferenceOrbit() {
@@ -6218,11 +6231,11 @@ class CpuZhuoranBaseBoard extends Board {
           const index2 = index * 2;
           const nextRefIter = this.refIter[index] + 1;
           const ref = this.getRefOrbit(Math.min(nextRefIter, this.getRefOrbitLength() - 1));
-          const refR = this.getRefReal(ref);
-          const refI = this.getRefImag(ref);
+          const dzr = this.dz[index2];
+          const dzi = this.dz[index2 + 1];
           changes.vv.push({
             index: index,
-            z: [refR + this.dz[index2], refI + this.dz[index2 + 1]],
+            z: this.refDzToQDc(ref, dzr, dzi),  // QDc format (8 elements)
             p: this.pp[index]
           });
           this.nn[index] = -this.it;
@@ -7264,7 +7277,7 @@ class GpuBoard extends GpuBaseBoard {
           }
           convergedByIteration.get(iters).push({
             index: i,
-            z: [zr, 0, zi, 0],
+            z: [zr, 0, 0, 0, zi, 0, 0, 0],  // QDc format (8 elements)
             p: this.pp[i]
           });
           this.lastReportedIters[i] = iters;
@@ -8272,15 +8285,17 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
           const dzi = pixelF32[idx14 + FLOAT_DZI];
 
           const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
-          const refR = ref[0] + ref[1];
-          const refI = ref[2] + ref[3];
+          // Compute z = ref + dz in QD precision (8 elements for complex)
+          // ref is DD format [r_hi, r_lo, i_hi, i_lo], dz is float64
+          const zrQD = toQDAdd([ref[0], ref[1], 0, 0], [dzr, 0, 0, 0]);
+          const ziQD = toQDAdd([ref[2], ref[3], 0, 0], [dzi, 0, 0, 0]);
 
           if (!convergedByIteration.has(iters)) {
             convergedByIteration.set(iters, []);
           }
           convergedByIteration.get(iters).push({
             index: i,
-            z: [refR + dzr, refI + dzi],
+            z: [...zrQD, ...ziQD],
             p: this.pp[i]  // Raw pp value (UI will call fibonacciPeriod to calculate period)
           });
           this.un--;
@@ -9264,11 +9279,12 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
             const dzr = pixelsF32[idx + P_DZR] * Math.pow(2, scale);
             const dzi = pixelsF32[idx + P_DZI] * Math.pow(2, scale);
             const ref = this.qdRefOrbit[Math.min(refIter, this.qdRefOrbit.length - 1)];
-            const refR = ref[0] + ref[1] + ref[2] + ref[3];
-            const refI = ref[4] + ref[5] + ref[6] + ref[7];
+            // Compute z = ref + dz in full QD precision (8 elements for complex)
+            const zrQD = toQDAdd([ref[0], ref[1], ref[2], ref[3]], [dzr, 0, 0, 0]);
+            const ziQD = toQDAdd([ref[4], ref[5], ref[6], ref[7]], [dzi, 0, 0, 0]);
             if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
             convergedByIteration.get(iters).push(
-              { index: i, z: [refR + dzr, refI + dzi], p: this.pp[i] });
+              { index: i, z: [...zrQD, ...ziQD], p: this.pp[i] });
             this.un--;
             if (this.inSpike && this.inSpike[i] && this.ch > 0) this.ch -= 1;
           }
@@ -9800,6 +9816,7 @@ function toDD(x) {
   return Array.isArray(x) ? x : [x, 0];
 }
 
+// Convert complex [real, imag] to DDc format [r_hi, r_lo, i_hi, i_lo]
 function toDDc(c) {
   if (c.length == 4) { return c; }
   const r = toDD(c[0]);

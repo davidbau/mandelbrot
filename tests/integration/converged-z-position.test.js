@@ -59,9 +59,9 @@ describe('Converged z position (red dots)', () => {
             // Calculate the period
             const period = fibonacciPeriod(p);
 
-            // Get z values
-            let zr = z[0] + (z[1] || 0);
-            let zi = z[2] + (z[3] || 0);
+            // Get z values from QDc format (8 elements: 4 real + 4 imag)
+            let zr = z[0] + (z[1] || 0) + (z[2] || 0) + (z[3] || 0);
+            let zi = z[4] + (z[5] || 0) + (z[6] || 0) + (z[7] || 0);
             const cr = c[0];
             const ci = c[4];
             const origZ = [zr, zi];
@@ -164,8 +164,9 @@ describe('Converged z position (red dots)', () => {
           if (z && p && p > 0) {
             const period = fibonacciPeriod(p);
 
-            let zr = z[0] + (z[1] || 0);
-            let zi = z[2] + (z[3] || 0);
+            // Get z values from QDc format (8 elements: 4 real + 4 imag)
+            let zr = z[0] + (z[1] || 0) + (z[2] || 0) + (z[3] || 0);
+            let zi = z[4] + (z[5] || 0) + (z[6] || 0) + (z[7] || 0);
             const cr = c[0];
             const ci = c[4];
             const origZ = [zr, zi];
