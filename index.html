@@ -4098,11 +4098,11 @@ class Scheduler {
   }
 }
 
-// Convert QD complex (4 elements: [r0, r1, i0, i1]) to
+// Convert DD complex (4 elements: [r_hi, r_lo, i_hi, i_lo]) to
 // QD complex format (8 elements: 4 real, 4 imaginary)
-function qdcToQDComplex(qdc) {
-  if (!qdc || qdc.length !== 4) return null;
-  return [qdc[0], qdc[1], 0, 0, qdc[2], qdc[3], 0, 0];
+function ddcToQDComplex(ddc) {
+  if (!ddc || ddc.length !== 4) return null;
+  return [ddc[0], ddc[1], 0, 0, ddc[2], ddc[3], 0, 0];
 }
 
 // Computes and displays iteration orbits when hovering over points.
@@ -4190,8 +4190,8 @@ class OrbitComputer {
             title += MSG.after_ + iters + MSG.period_ + periodStr;
           }
           let clen = fibonacciPeriod(view.currentp(j));
-          // Convert z from QD (4 elements) to QD complex format (8 elements) for suborbit
-          const z = qdcToQDComplex(zQd);
+          // Convert z from DDc (4 elements) to QD complex format (8 elements) for suborbit
+          const z = ddcToQDComplex(zQd);
           cyc = z ? this.suborbit(z, c, clen) : [];
         }
       } else {
@@ -9258,12 +9258,12 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
             this.nn[i] = -iters;
             this.pp[i] = period - 1;
             const refIter = pixelsI32[idx + P_REF_ITER];
-            const nextRefIter = refIter + 1;
-            // dz is in per-pixel scale, need to convert to actual for z position
+            // AdaptiveGpuBoard stores dz BEFORE iteration (break before iter step),
+            // so dz corresponds to refIter, not refIter+1
             const scale = pixelsI32[idx + P_SCALE];
             const dzr = pixelsF32[idx + P_DZR] * Math.pow(2, scale);
             const dzi = pixelsF32[idx + P_DZI] * Math.pow(2, scale);
-            const ref = this.qdRefOrbit[Math.min(nextRefIter, this.qdRefOrbit.length - 1)];
+            const ref = this.qdRefOrbit[Math.min(refIter, this.qdRefOrbit.length - 1)];
             const refR = ref[0] + ref[1] + ref[2] + ref[3];
             const refI = ref[4] + ref[5] + ref[6] + ref[7];
             if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
