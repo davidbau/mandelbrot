@@ -1171,7 +1171,7 @@ class View {
       for (const entry of vv) {
         const { index, z, p } = entry;
         this.nn[index] = -iter;
-        this.convergedData.set(index, { z, p });  // z is QDc format (8 elements)
+        this.convergedData.set(index, { z: toQDc(z), p });  // Normalize to QDc format
         changedIndices.push(index);
       }
       this.di += nn.length;
@@ -4705,11 +4705,9 @@ class CpuBoard extends Board {
           changes = { iter: this.it, nn: [], vv: [] };
         }
         if (computeResult < 0) {
-          const zr = this.zz[index * 2];
-          const zi = this.zz[index * 2 + 1];
           changes.vv.push({
             index: index,
-            z: [zr, 0, 0, 0, zi, 0, 0, 0],  // QDc format (8 elements)
+            z: [this.zz[index * 2], this.zz[index * 2 + 1]],  // float64 pair
             p: this.pp[index]  // period
           });
         } else {
@@ -5188,10 +5186,9 @@ class PerturbationBoard extends Board {
           changes = { iter: this.it, nn: [], vv: [] };
         }
         if (r < 0) {
-          const ddc = ArddcGet(this.nz, index*4);  // DDc format
           changes.vv.push({
             index: index,
-            z: [ddc[0], ddc[1], 0, 0, ddc[2], ddc[3], 0, 0],  // QDc format
+            z: ArddcGet(this.nz, index*4),  // DDc format
             p: this.pp[index]  // period
           });
         } else {
@@ -5213,10 +5210,9 @@ class PerturbationBoard extends Board {
             changes = { iter: this.it, nn: [], vv: [] };
           }
           if (r < 0) {
-            const ddc = ArddcGet(this.nz, index*4);  // DDc format
             changes.vv.push({
               index: index,
-              z: [ddc[0], ddc[1], 0, 0, ddc[2], ddc[3], 0, 0],  // QDc format
+              z: ArddcGet(this.nz, index*4),  // DDc format
               p: this.pp[index]  // period
             });
           } else {
@@ -5979,12 +5975,12 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
   getRefCReal() { return this.refC[0] + this.refC[1]; }
   getRefCImag() { return this.refC[2] + this.refC[3]; }
 
-  // Compute z = ref + dz in QDc format (8 elements)
-  refDzToQDc(ref, dzr, dzi) {
-    // ref is DD: [r_hi, r_lo, i_hi, i_lo]
-    const zrQD = toQDAdd([ref[0], ref[1], 0, 0], [dzr, 0, 0, 0]);
-    const ziQD = toQDAdd([ref[2], ref[3], 0, 0], [dzi, 0, 0, 0]);
-    return [...zrQD, ...ziQD];
+  // Compute z = ref + dz in native DDc format (4 elements)
+  refDzNative(ref, dzr, dzi) {
+    // ref is DD: [r_hi, r_lo, i_hi, i_lo], returns DDc with proper DD addition
+    const zr = toDDAdd([ref[0], ref[1]], dzr);
+    const zi = toDDAdd([ref[2], ref[3]], dzi);
+    return [zr[0], zr[1], zi[0], zi[1]];
   }
 
   // Extend reference orbit by one iteration in DD precision
@@ -6080,9 +6076,9 @@ const QDReferenceOrbitMixin = (Base) => class extends Base {
   getRefCReal() { return this.refC_qd[0] + this.refC_qd[1] + this.refC_qd[2] + this.refC_qd[3]; }
   getRefCImag() { return this.refC_qd[4] + this.refC_qd[5] + this.refC_qd[6] + this.refC_qd[7]; }
 
-  // Compute z = ref + dz in QDc format (8 elements)
-  refDzToQDc(ref, dzr, dzi) {
-    // ref is QD: [r0,r1,r2,r3, i0,i1,i2,i3]
+  // Compute z = ref + dz in native QDc format (8 elements)
+  refDzNative(ref, dzr, dzi) {
+    // ref is QD: [r0,r1,r2,r3, i0,i1,i2,i3], returns QDc
     const zrQD = toQDAdd([ref[0], ref[1], ref[2], ref[3]], [dzr, 0, 0, 0]);
     const ziQD = toQDAdd([ref[4], ref[5], ref[6], ref[7]], [dzi, 0, 0, 0]);
     return [...zrQD, ...ziQD];
@@ -6235,7 +6231,7 @@ class CpuZhuoranBaseBoard extends Board {
           const dzi = this.dz[index2 + 1];
           changes.vv.push({
             index: index,
-            z: this.refDzToQDc(ref, dzr, dzi),  // QDc format (8 elements)
+            z: this.refDzNative(ref, dzr, dzi),  // Native format (DDc or QDc)
             p: this.pp[index]
           });
           this.nn[index] = -this.it;
@@ -7277,7 +7273,7 @@ class GpuBoard extends GpuBaseBoard {
           }
           convergedByIteration.get(iters).push({
             index: i,
-            z: [zr, 0, 0, 0, zi, 0, 0, 0],  // QDc format (8 elements)
+            z: [zr, zi],  // float64 pair
             p: this.pp[i]
           });
           this.lastReportedIters[i] = iters;
@@ -8285,17 +8281,15 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
           const dzi = pixelF32[idx14 + FLOAT_DZI];
 
           const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
-          // Compute z = ref + dz in QD precision (8 elements for complex)
-          // ref is DD format [r_hi, r_lo, i_hi, i_lo], dz is float64
-          const zrQD = toQDAdd([ref[0], ref[1], 0, 0], [dzr, 0, 0, 0]);
-          const ziQD = toQDAdd([ref[2], ref[3], 0, 0], [dzi, 0, 0, 0]);
-
+          // Compute z = ref + dz with proper DD addition
+          const zr = toDDAdd([ref[0], ref[1]], dzr);
+          const zi = toDDAdd([ref[2], ref[3]], dzi);
           if (!convergedByIteration.has(iters)) {
             convergedByIteration.set(iters, []);
           }
           convergedByIteration.get(iters).push({
             index: i,
-            z: [...zrQD, ...ziQD],
+            z: [zr[0], zr[1], zi[0], zi[1]],  // DDc format
             p: this.pp[i]  // Raw pp value (UI will call fibonacciPeriod to calculate period)
           });
           this.un--;
@@ -9822,6 +9816,31 @@ function toDDc(c) {
   const r = toDD(c[0]);
   const j = toDD(c[1]);
   return [r[0], r[1], j[0], j[1]];
+}
+
+// Add two DD values, returning DD result
+function toDDAdd(a, b) {
+  const aa = toDD(a);
+  const bb = toDD(b);
+  const out = [0, 0];
+  ArddAdd(out, 0, aa[0], aa[1], bb[0], bb[1]);
+  return out;
+}
+
+// Convert various complex formats to QDc format (8 elements)
+// Handles: float64 pair [r, i], DDc [r_hi, r_lo, i_hi, i_lo], QDc [r0..r3, i0..i3]
+function toQDc(c) {
+  if (!c) return null;
+  if (c.length === 8) return c;  // Already QDc
+  if (c.length === 4) {
+    // DDc format: [r_hi, r_lo, i_hi, i_lo]
+    return [c[0], c[1], 0, 0, c[2], c[3], 0, 0];
+  }
+  if (c.length === 2) {
+    // Float64 pair: [real, imag]
+    return [c[0], 0, 0, 0, c[1], 0, 0, 0];
+  }
+  return null;
 }
 
 // Oct helpers for both main thread and workers (via mathCode)
