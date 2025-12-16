@@ -105,7 +105,6 @@ describe('Converged z position (red dots)', () => {
     // Count valid cycle points
     let validCount = 0;
     let invalidDetails = [];
-
     for (const r of results.results) {
       if (r.isValid) {
         validCount++;
@@ -114,18 +113,16 @@ describe('Converged z position (red dots)', () => {
       }
     }
 
-    // Log any invalid results for debugging
+    // Log invalid results for debugging failures
     if (invalidDetails.length > 0) {
       console.log('Invalid cycle points:');
       for (const r of invalidDetails.slice(0, 5)) {
-        console.log(`  Pixel ${r.index}: period=${r.period}, z=${r.origZ[0].toFixed(6)}+${r.origZ[1].toFixed(6)}i, ` +
-                    `afterCycle=${r.afterCycleZ[0].toFixed(6)}+${r.afterCycleZ[1].toFixed(6)}i, error=${r.cycleError.toFixed(6)}`);
+        console.log(`  Pixel ${r.index}: period=${r.period}, error=${r.cycleError.toFixed(6)}`);
       }
     }
 
     // All reported z values should be valid cycle points
     const validRatio = validCount / results.results.length;
-    console.log(`Valid cycle points: ${validCount}/${results.results.length} (${(validRatio * 100).toFixed(1)}%)`);
     expect(validRatio).toBeGreaterThan(0.8);
 
   }, TEST_TIMEOUT);
@@ -213,16 +210,15 @@ describe('Converged z position (red dots)', () => {
       }
     }
 
+    // Log invalid results for debugging failures
     if (invalidDetails.length > 0) {
       console.log('GpuBoard invalid cycle points:');
       for (const r of invalidDetails.slice(0, 5)) {
-        console.log(`  Pixel ${r.index}: period=${r.period}, z=${r.origZ[0].toFixed(6)}+${r.origZ[1].toFixed(6)}i, ` +
-                    `afterCycle=${r.afterCycleZ[0].toFixed(6)}+${r.afterCycleZ[1].toFixed(6)}i, error=${r.cycleError.toFixed(6)}`);
+        console.log(`  Pixel ${r.index}: period=${r.period}, error=${r.cycleError.toFixed(6)}`);
       }
     }
 
     const validRatio = validCount / results.results.length;
-    console.log(`Valid cycle points: ${validCount}/${results.results.length} (${(validRatio * 100).toFixed(1)}%)`);
     expect(validRatio).toBeGreaterThan(0.8);
 
   }, TEST_TIMEOUT);
