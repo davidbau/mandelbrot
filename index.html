@@ -5290,31 +5290,31 @@ class PerturbationBoard extends Board {
     const br2 = this.bb[m4+1];
     const bj1 = this.bb[m4+2];
     const bj2 = this.bb[m4+3];
-    AddSquare(tt, 0, r1, r2);                    // 0: rsq = r**2
-    AddSquare(tt, 2, j1, j2);                    // 2: jsq = j**2
-    AddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // 4: d = rsq+jsq
+    ArddSquare(tt, 0, r1, r2);                    // 0: rsq = r**2
+    ArddSquare(tt, 2, j1, j2);                    // 2: jsq = j**2
+    ArddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // 4: d = rsq+jsq
     if (tt[4] > 4) {  // Check divergence: |z|² > 4
       this.nn[m] = this.it;
       ArddcCopy(nz, m4, this.zz, m4);
       return 1;  // Diverged
     }
-    AddMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // 6: ja = 2*r*j
-    AddAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // 8: ra = rsq-jsq
+    ArddMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // 6: ja = 2*r*j
+    ArddAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // 8: ra = rsq-jsq
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      AddMul(tt, 0, j1, j2, tt[6], tt[7]);         // 0: j * ja
-      AddMul(tt, 2, r1, r2, tt[8], tt[9]);         // 2: r * ra
-      AddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // 4: rt = r*ra - j*ja
-      AddMul(tt, 0, r1, r2, tt[6], tt[7]);         // 0: r * ja
-      AddMul(tt, 2, j1, j2, tt[8], tt[9]);         // 2: j * ra
-      AddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // 6: ja = r*ja + j*ra
+      ArddMul(tt, 0, j1, j2, tt[6], tt[7]);         // 0: j * ja
+      ArddMul(tt, 2, r1, r2, tt[8], tt[9]);         // 2: r * ra
+      ArddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // 4: rt = r*ra - j*ja
+      ArddMul(tt, 0, r1, r2, tt[6], tt[7]);         // 0: r * ja
+      ArddMul(tt, 2, j1, j2, tt[8], tt[9]);         // 2: j * ra
+      ArddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // 6: ja = r*ja + j*ra
       ArddSet(tt, 8, tt[4], tt[5]);                 // 8: ra = rt
     }
-    AddAdd(nz, m4, tt[8], tt[9], cr1, cr2);        // nz: nzr = ra + cr
-    AddAdd(nz, m4+2, tt[6], tt[7], cj1, cj2);      // nz+2: nzj = ja + cj
+    ArddAdd(nz, m4, tt[8], tt[9], cr1, cr2);        // nz: nzr = ra + cr
+    ArddAdd(nz, m4+2, tt[6], tt[7], cj1, cj2);      // nz+2: nzj = ja + cj
     // Check convergence: compare new z to checkpoint
     ArddAbsSub(tt, 0, br1, br2, nz[m4], nz[m4+1]);  // 0: abs(nzr - br)
     ArddAbsSub(tt, 2, bj1, bj2, nz[m4+2], nz[m4+3]);// 2: abs(nzj - bj)
-    AddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);     // 4: db = abs(nzr-br)+abs(nzj-bj)
+    ArddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);     // 4: db = abs(nzr-br)+abs(nzj-bj)
     const db = tt[4] + tt[5]  // distance from checkpoint
     if (db <= this.epsilon2) {
       if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
@@ -5417,10 +5417,10 @@ class PerturbationBoard extends Board {
     const ci = this.cc[m4+1];
     const refIndex = this.cc[m4+2];
     const ri4 = refIndex * 4;
-    AddAdd(this.zz, m4, dr, 0, this.zz[ri4], this.zz[ri4+1])
-    AddAdd(this.zz, m4+2, di, 0, this.zz[ri4+2], this.zz[ri4+3])
-    AddAdd(this.cc, m4, cr, 0, this.cc[ri4], this.cc[ri4+1])
-    AddAdd(this.cc, m4+2, ci, 0, this.cc[ri4+2], this.cc[ri4+3])
+    ArddAdd(this.zz, m4, dr, 0, this.zz[ri4], this.zz[ri4+1])
+    ArddAdd(this.zz, m4+2, di, 0, this.zz[ri4+2], this.zz[ri4+3])
+    ArddAdd(this.cc, m4, cr, 0, this.cc[ri4], this.cc[ri4+1])
+    ArddAdd(this.cc, m4+2, ci, 0, this.cc[ri4+2], this.cc[ri4+3])
   }
 
   initAsDDPrecision(index, refcc) {
@@ -5429,8 +5429,8 @@ class PerturbationBoard extends Board {
     const ci = this.cc[m4+1];
     const refIndex = this.cc[m4+2];
     const ri4 = refIndex * 4;
-    AddAdd(this.cc, m4, cr, 0, refcc[ri4], refcc[ri4+1])
-    AddAdd(this.cc, m4+2, ci, 0, refcc[ri4+2], refcc[ri4+3])
+    ArddAdd(this.cc, m4, cr, 0, refcc[ri4], refcc[ri4+1])
+    ArddAdd(this.cc, m4+2, ci, 0, refcc[ri4+2], refcc[ri4+3])
   }
 }
 
@@ -5994,9 +5994,9 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
     const j2 = last[3];
 
     // Check for escape
-    AddSquare(tt, 0, r1, r2);                    // rsq = r**2
-    AddSquare(tt, 2, j1, j2);                    // jsq = j**2
-    AddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
+    ArddSquare(tt, 0, r1, r2);                    // rsq = r**2
+    ArddSquare(tt, 2, j1, j2);                    // jsq = j**2
+    ArddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
 
     if (tt[4] > 1e10) {
       this.refOrbitEscaped = true;
@@ -6004,23 +6004,23 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
     }
 
     // Compute z^n for general exponent
-    AddMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // ja = 2*r*j
-    AddAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // ra = rsq - jsq
+    ArddMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // ja = 2*r*j
+    ArddAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // ra = rsq - jsq
 
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      AddMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
-      AddMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
-      AddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
-      AddMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
-      AddMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
-      AddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
+      ArddMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
+      ArddMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
+      ArddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
+      ArddMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
+      ArddMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
+      ArddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
       ArddSet(tt, 8, tt[4], tt[5]);                // ra = rt
     }
 
     // Add c to get next z
     const newZ = [0, 0, 0, 0];
-    AddAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
-    AddAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
+    ArddAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
+    ArddAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
 
     this.refOrbit.push(newZ);
     this.refIterations++;
@@ -7387,22 +7387,22 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
       const yFrac = (dimsHeight / 2 - y) / dimsHeight;
 
       // ci_dd = im_dd + yFrac * sizeY_dd (in DD precision)
-      AddMul(temp, 0, toDD(yFrac)[0], toDD(yFrac)[1], sizeY_dd[0], sizeY_dd[1]);
-      AddAdd(ci_dd, 0, im_dd[0], im_dd[1], temp[0], temp[1]);
+      ArddMul(temp, 0, toDD(yFrac)[0], toDD(yFrac)[1], sizeY_dd[0], sizeY_dd[1]);
+      ArddAdd(ci_dd, 0, im_dd[0], im_dd[1], temp[0], temp[1]);
 
       // dci_dd = ci_dd - refC_imag
-      AddAdd(dci_dd, 0, ci_dd[0], ci_dd[1], -this.refC[2], -this.refC[3]);
+      ArddAdd(dci_dd, 0, ci_dd[0], ci_dd[1], -this.refC[2], -this.refC[3]);
 
       for (let x = 0; x < dimsWidth; x++) {
         // Use integer arithmetic to avoid float64 rounding: (x - dims/2) / dims
         const xFrac = (x - dimsWidth / 2) / dimsWidth;
 
         // cr_dd = re_dd + xFrac * size_dd (in DD precision)
-        AddMul(temp, 0, toDD(xFrac)[0], toDD(xFrac)[1], size_dd[0], size_dd[1]);
-        AddAdd(cr_dd, 0, re_dd[0], re_dd[1], temp[0], temp[1]);
+        ArddMul(temp, 0, toDD(xFrac)[0], toDD(xFrac)[1], size_dd[0], size_dd[1]);
+        ArddAdd(cr_dd, 0, re_dd[0], re_dd[1], temp[0], temp[1]);
 
         // dcr_dd = cr_dd - refC_real
-        AddAdd(dcr_dd, 0, cr_dd[0], cr_dd[1], -this.refC[0], -this.refC[1]);
+        ArddAdd(dcr_dd, 0, cr_dd[0], cr_dd[1], -this.refC[0], -this.refC[1]);
 
         const index = y * dimsWidth + x;
         const index2 = index * 2;
@@ -7569,8 +7569,8 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
     // Compute delta in DD precision
     const closestPt = this.refOrbit[closestIter];
     const tt = this.tt;
-    AddAdd(tt, 0, endpoint[0], endpoint[1], -closestPt[0], -closestPt[1]); // real delta
-    AddAdd(tt, 2, endpoint[2], endpoint[3], -closestPt[2], -closestPt[3]); // imag delta
+    ArddAdd(tt, 0, endpoint[0], endpoint[1], -closestPt[0], -closestPt[1]); // real delta
+    ArddAdd(tt, 2, endpoint[2], endpoint[3], -closestPt[2], -closestPt[3]); // imag delta
 
     // Store loop parameters
     this.refOrbitLoop = {
@@ -10435,7 +10435,7 @@ function ArqdThreeSum(a, b, c) {
   return [newA, newB, newC];
 }
 
-function AddAdd(r, i, a1, a2, b1, b2) {
+function ArddAdd(r, i, a1, a2, b1, b2) {
   Aslow2Sum(r, i, a1, b1);
   const h1 = r[i];
   const h2 = r[i+1];
@@ -10448,7 +10448,7 @@ function AddAdd(r, i, a1, a2, b1, b2) {
   Afast2Sum(r, i, v1, v2 + l2);
 }
 
-function AddMul(r, i, a1, a2, b1, b2) {
+function ArddMul(r, i, a1, a2, b1, b2) {
   AtwoProduct(r, i, a1, b1);
   const p1 = r[i];
   const p2 = r[i+1];
@@ -10471,7 +10471,7 @@ function ArddcGet(s, si) {
   return s.slice(si, si+4);
 }
 
-function AddSquare(r, i, a1, a2) {
+function ArddSquare(r, i, a1, a2) {
   AtwoSquare(r, i, a1);
   const p1 = r[i];
   const p2 = r[i+1];
@@ -10479,7 +10479,7 @@ function AddSquare(r, i, a1, a2) {
 }
 
 function ArddAbsSub(r, i, a1, a2, b1, b2) {
-  AddAdd(r, i, a1, a2, -b1, -b2);
+  ArddAdd(r, i, a1, a2, -b1, -b2);
   if (r[i] + r[i+1] < 0) {
     r[i] = -r[i];
     r[i+1] = -r[i+1];
