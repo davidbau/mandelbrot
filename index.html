@@ -6035,6 +6035,109 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
   }
 };
 
+// Mixin that adds QD-precision reference orbit methods to any board class.
+// Used by both QDZhuoranBoard (CPU) and AdaptiveGpuBoard (GPU) to share
+// the reference orbit computation logic.
+const QDReferenceOrbitMixin = (Base) => class extends Base {
+  // Initialize QD reference orbit state. Call from constructor after super().
+  initQDReferenceOrbit(refC_qd) {
+    // Reference point in QD precision [re0, re1, re2, re3, im0, im1, im2, im3]
+    this.refC_qd = refC_qd;
+
+    // QD reference orbit array - each entry is [re0, re1, re2, re3, im0, im1, im2, im3]
+    this.qdRefOrbit = [
+      [0, 0, 0, 0, 0, 0, 0, 0],  // Iteration 0: z = 0
+      [...refC_qd]               // Iteration 1: z = c
+    ];
+
+    // Reference orbit state
+    this.refOrbitEscaped = false;
+    this.refIterations = 1;
+    this.maxRefIterations = 10000;
+
+    // Working array for QD precision operations
+    this.tt = new Array(32);
+
+    // Threading for robust cycle detection
+    const threadingEpsilon = 10000 * this.epsilon;
+    const getQDPoint = (i) => this.qdRefOrbit[i] || null;
+    const spatialBucket = new QDSpatialBucket(threadingEpsilon, getQDPoint);
+    this.threading = new ReferenceOrbitThreading(spatialBucket);
+    this.threading.addPoint(0);
+    this.threading.addPoint(1);
+  }
+
+  // QD accessor methods
+  getRefReal(ref) { return ref[0] + ref[1] + ref[2] + ref[3]; }
+  getRefImag(ref) { return ref[4] + ref[5] + ref[6] + ref[7]; }
+  getRefOrbit(iter) { return this.qdRefOrbit[iter]; }
+  getRefOrbitLength() { return this.qdRefOrbit.length; }
+  getRefCReal() { return this.refC_qd[0] + this.refC_qd[1] + this.refC_qd[2] + this.refC_qd[3]; }
+  getRefCImag() { return this.refC_qd[4] + this.refC_qd[5] + this.refC_qd[6] + this.refC_qd[7]; }
+
+  // Extend reference orbit by one iteration in QD precision
+  extendReferenceOrbit() {
+    const last = this.qdRefOrbit[this.refIterations];
+    const rr = [last[0], last[1], last[2], last[3]];
+    const ri = [last[4], last[5], last[6], last[7]];
+    const tt = this.tt;
+
+    // Check for escape using sum of QD components
+    const rSum = rr[0] + rr[1] + rr[2] + rr[3];
+    const iSum = ri[0] + ri[1] + ri[2] + ri[3];
+    const mag = rSum * rSum + iSum * iSum;
+    if (mag > 1e10) {
+      this.refOrbitEscaped = true;
+      return;
+    }
+
+    // Compute z^n for general exponent
+    // z^2 = (zr + zi*i)^2 = zr^2 - zi^2 + 2*zr*zi*i
+    ArqdSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
+    ArqdSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
+    ArqdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3],
+      ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
+    ArqdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3],
+      -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
+
+    for (let ord = 2; ord < this.config.exponent; ord++) {
+      ArqdMul(tt, 0, ri[0], ri[1], ri[2], ri[3],
+        tt[8], tt[9], tt[10], tt[11]);         // j * ja
+      ArqdMul(tt, 4, rr[0], rr[1], rr[2], rr[3],
+        tt[16], tt[17], tt[18], tt[19]);       // r * ra
+      ArqdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3],
+        tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
+      ArqdMul(tt, 0, rr[0], rr[1], rr[2], rr[3],
+        tt[8], tt[9], tt[10], tt[11]);         // r * ja
+      ArqdMul(tt, 4, ri[0], ri[1], ri[2], ri[3],
+        tt[16], tt[17], tt[18], tt[19]);       // j * ra
+      ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3],
+        tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
+      ArqdSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);  // ra = rt
+    }
+
+    // Add c to get next z
+    const nzrQD = new Array(4);
+    const nziQD = new Array(4);
+    ArqdAdd(nzrQD, 0, tt[16], tt[17], tt[18], tt[19],
+      this.refC_qd[0], this.refC_qd[1], this.refC_qd[2], this.refC_qd[3]);
+    ArqdAdd(nziQD, 0, tt[8], tt[9], tt[10], tt[11],
+      this.refC_qd[4], this.refC_qd[5], this.refC_qd[6], this.refC_qd[7]);
+
+    this.qdRefOrbit.push([nzrQD[0], nzrQD[1], nzrQD[2], nzrQD[3],
+                          nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
+    this.refIterations++;
+
+    // Build thread-following map
+    this.threading.addPoint(this.refIterations);
+
+    // Grow array if needed
+    if (this.refIterations >= this.maxRefIterations) {
+      this.maxRefIterations *= 2;
+    }
+  }
+};
+
 // Base class for CPU-based Zhuoran perturbation boards (DD and QD precision)
 // Subclasses implement precision-specific reference orbit computation
 class CpuZhuoranBaseBoard extends Board {
@@ -6417,41 +6520,18 @@ class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
 
 // QD-precision implementation of CpuZhuoranBaseBoard
 // Provides higher precision (~212 bits) reference for very deep zooms
-class QDZhuoranBoard extends CpuZhuoranBaseBoard {
+// Uses QDReferenceOrbitMixin for reference orbit computation
+class QDZhuoranBoard extends QDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
-    // QD-specific: Reference orbit data
+    // Initialize QD reference orbit (refC_qd, qdRefOrbit, threading, etc.)
     const refReQD = this.re.slice();
     const refImQD = this.im.slice();
-    this.refC_qd = [...refReQD, ...refImQD];
+    this.initQDReferenceOrbit([...refReQD, ...refImQD]);
 
-    // QD precision reference orbit - each entry is [re0, re1, re2, re3, im0, im1, im2, im3]
-    this.qdRefOrbit = [
-      [0, 0, 0, 0, 0, 0, 0, 0],  // Iteration 0: z = 0
-      [...refReQD, ...refImQD]   // Iteration 1: z = c
-    ];
-
-    // Working array for QD precision operations
-    this.tt = new Array(32);
-
-    // Threading for robust cycle detection
-    const threadingEpsilon = 10000 * this.epsilon;
-    const getQDPoint = (i) => this.qdRefOrbit[i] || null;
-    const spatialBucket = new QDSpatialBucket(threadingEpsilon, getQDPoint);
-    this.threading = new ReferenceOrbitThreading(spatialBucket);
-    this.threading.addPoint(0);
-    this.threading.addPoint(1);
     this.initPixels();
   }
-
-  // Abstract method implementations for QD precision
-  getRefReal(ref) { return ref[0] + ref[1] + ref[2] + ref[3]; }
-  getRefImag(ref) { return ref[4] + ref[5] + ref[6] + ref[7]; }
-  getRefOrbit(iter) { return this.qdRefOrbit[iter]; }
-  getRefOrbitLength() { return this.qdRefOrbit.length; }
-  getRefCReal() { return this.refC_qd[0] + this.refC_qd[1] + this.refC_qd[2] + this.refC_qd[3]; }
-  getRefCImag() { return this.refC_qd[4] + this.refC_qd[5] + this.refC_qd[6] + this.refC_qd[7]; }
 
   initPixels() {
     // Compute delta c directly without precision loss.
@@ -6491,68 +6571,6 @@ class QDZhuoranBoard extends CpuZhuoranBaseBoard {
           this.ch += 1;
         }
       }
-    }
-  }
-
-  extendReferenceOrbit() {
-    // Compute one more iteration of the reference orbit in QD precision
-    const last = this.qdRefOrbit[this.refIterations];
-    const rr = [last[0], last[1], last[2], last[3]];
-    const ri = [last[4], last[5], last[6], last[7]];
-    const tt = this.tt;
-
-    // Check for escape using sum of QD components
-    const rSum = rr[0] + rr[1] + rr[2] + rr[3];
-    const iSum = ri[0] + ri[1] + ri[2] + ri[3];
-    const mag = rSum * rSum + iSum * iSum;
-    if (mag > 1e10) {
-      this.refOrbitEscaped = true;
-      return;
-    }
-
-    // Compute z^n for general exponent
-    // z^2 = (zr + zi*i)^2 = zr^2 - zi^2 + 2*zr*zi*i
-    ArqdSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
-    ArqdSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
-    ArqdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3],
-      ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
-    ArqdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3],
-      -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
-
-    for (let ord = 2; ord < this.config.exponent; ord++) {
-      ArqdMul(tt, 0, ri[0], ri[1], ri[2], ri[3],
-        tt[8], tt[9], tt[10], tt[11]);         // j * ja
-      ArqdMul(tt, 4, rr[0], rr[1], rr[2], rr[3],
-        tt[16], tt[17], tt[18], tt[19]);       // r * ra
-      ArqdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3],
-        tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
-      ArqdMul(tt, 0, rr[0], rr[1], rr[2], rr[3],
-        tt[8], tt[9], tt[10], tt[11]);         // r * ja
-      ArqdMul(tt, 4, ri[0], ri[1], ri[2], ri[3], tt[16], tt[17], tt[18], tt[19]);       // j * ra
-      ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3],
-        tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
-      ArqdSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);                                   // ra = rt
-    }
-
-    // Add c to get next z
-    const nzrQD = new Array(4);
-    const nziQD = new Array(4);
-    ArqdAdd(nzrQD, 0, tt[16], tt[17], tt[18], tt[19],
-      this.refC_qd[0], this.refC_qd[1], this.refC_qd[2], this.refC_qd[3]);
-    ArqdAdd(nziQD, 0, tt[8], tt[9], tt[10], tt[11],
-      this.refC_qd[4], this.refC_qd[5], this.refC_qd[6], this.refC_qd[7]);
-
-    // Store in QD orbit
-    this.qdRefOrbit.push([nzrQD[0], nzrQD[1], nzrQD[2], nzrQD[3],
-                          nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
-    this.refIterations++;
-
-    // Build thread-following map
-    this.threading.addPoint(this.refIterations);
-
-    // Grow array if needed
-    if (this.refIterations >= this.maxRefIterations) {
-      this.maxRefIterations *= 2;
     }
   }
 
@@ -8333,7 +8351,8 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
  *
  * See docs/ADAPTIVE-SCALING.md for full mathematical derivation.
  */
-class AdaptiveGpuBoard extends GpuBaseBoard {
+// Uses QDReferenceOrbitMixin for reference orbit computation
+class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
   static BYTES_PER_PIXEL = 60;  // 15 × 4 bytes (7 i32 + 8 f32)
 
   constructor(k, size, re, im, config, id) {
@@ -8341,34 +8360,10 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
 
     this.effort = 2;  // Same as DDZhuoranBoard
 
-    // Reference orbit for perturbation theory (computed on CPU in QD precision only)
-    this.refOrbitEscaped = false;
-    this.refIterations = 0;
-    this.maxRefIterations = 10000;
-
-    // Build QD reference point
+    // Initialize QD reference orbit (refC_qd, qdRefOrbit, threading, etc.)
     const refReQD = toQD(re);
     const refImQD = toQD(im);
-
-    // Reference point (center of image) in QD precision
-    this.refC_qd = [...refReQD, ...refImQD];
-
-    // Reference orbit in QD precision: [r0, r1, r2, r3, i0, i1, i2, i3] per iteration
-    this.refOrbit = [[0, 0, 0, 0, 0, 0, 0, 0], [...refReQD, ...refImQD]];
-    this.refIterations = 1;
-
-    // Working array for QD precision operations
-    this.tt = new Array(32);
-
-    // Threading for robust cycle detection
-    // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
-    // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
-    const threadingEpsilon = 10000 * this.epsilon;
-    const getQDPoint = (i) => this.refOrbit[i] || null;  // [re0..re3, im0..im3]
-    const spatialBucket = new QDSpatialBucket(threadingEpsilon, getQDPoint);
-    this.threading = new ReferenceOrbitThreading(spatialBucket);
-    this.threading.addPoint(0);
-    this.threading.addPoint(1);
+    this.initQDReferenceOrbit([...refReQD, ...refImQD]);
 
     // Initialize per-pixel perturbation data (sets initialScale and pixelScale)
     this.initPixels(size, re, im);
@@ -8377,64 +8372,9 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     this.gpuInitPromise = this.initGPU();
   }
 
-  // Extend reference orbit in QD precision
-  extendReferenceOrbit() {
-    // Compute one more iteration of the reference orbit in QD precision
-    const last = this.refOrbit[this.refIterations];
-    const rr = [last[0], last[1], last[2], last[3]];
-    const ri = [last[4], last[5], last[6], last[7]];
-    const tt = this.tt;
+  // extendReferenceOrbit() inherited from QDReferenceOrbitMixin
 
-    // Check for escape using sum of QD components
-    const rSum = rr[0] + rr[1] + rr[2] + rr[3];
-    const iSum = ri[0] + ri[1] + ri[2] + ri[3];
-    const mag = rSum * rSum + iSum * iSum;
-    if (mag > 1e10) {
-      this.refOrbitEscaped = true;
-      return;
-    }
-
-    // Compute z^2 = (zr + zi*i)^2 = zr^2 - zi^2 + 2*zr*zi*i
-    ArqdSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
-    ArqdSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
-    ArqdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3],
-      ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
-    ArqdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3],
-      -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
-
-    // For higher exponents (z^n where n > 2), multiply by z iteratively
-    for (let ord = 2; ord < this.config.exponent; ord++) {
-      ArqdMul(tt, 0, ri[0], ri[1], ri[2], ri[3],
-        tt[8], tt[9], tt[10], tt[11]);         // j * ja
-      ArqdMul(tt, 4, rr[0], rr[1], rr[2], rr[3],
-        tt[16], tt[17], tt[18], tt[19]);       // r * ra
-      ArqdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3],
-        tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
-      ArqdMul(tt, 0, rr[0], rr[1], rr[2], rr[3],
-        tt[8], tt[9], tt[10], tt[11]);         // r * ja
-      ArqdMul(tt, 4, ri[0], ri[1], ri[2], ri[3], tt[16], tt[17], tt[18], tt[19]);       // j * ra
-      ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3],
-        tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
-      ArqdSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);                                   // ra = rt
-    }
-
-    const nzrQD = new Array(4);
-    const nziQD = new Array(4);
-    ArqdAdd(nzrQD, 0, tt[16], tt[17], tt[18], tt[19],
-      this.refC_qd[0], this.refC_qd[1], this.refC_qd[2], this.refC_qd[3]);
-    ArqdAdd(nziQD, 0, tt[8], tt[9], tt[10], tt[11],
-      this.refC_qd[4], this.refC_qd[5], this.refC_qd[6], this.refC_qd[7]);
-
-    this.refOrbit.push([nzrQD[0], nzrQD[1], nzrQD[2], nzrQD[3],
-                        nziQD[0], nziQD[1], nziQD[2], nziQD[3]]);
-    this.refIterations++;
-
-    // Threading: add new orbit point from iteration 0
-    // (Shader only uses threading after F(18) = 2584 iterations)
-    this.threading.addPoint(this.refIterations);
-  }
-
-  // Setup reference orbit loop for very long orbits (copied from GpuZhuoranBoard)
+  // Setup reference orbit loop for very long orbits
   setupReferenceOrbitLoop() {
     // When reference orbit hits threading limit, find a close point to loop back to
     const THREADING_CAPACITY = 1048576;  // 2^20
@@ -8445,7 +8385,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     }
 
     // Get endpoint (current position at threading limit) - QD precision
-    const endpoint = this.refOrbit[THREADING_CAPACITY];
+    const endpoint = this.qdRefOrbit[THREADING_CAPACITY];
 
     // Search back to find closest point (using QD arithmetic)
     let closestIter = THREADING_CAPACITY - SEARCH_WINDOW;
@@ -8453,7 +8393,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     const tt = this.tt;
 
     for (let i = THREADING_CAPACITY - SEARCH_WINDOW; i < THREADING_CAPACITY; i++) {
-      const pt = this.refOrbit[i];
+      const pt = this.qdRefOrbit[i];
       // Compute difference in QD precision
       ArqdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
                      -pt[0], -pt[1], -pt[2], -pt[3]); // dr
@@ -8472,7 +8412,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     }
 
     // Compute delta in QD precision
-    const closestPt = this.refOrbit[closestIter];
+    const closestPt = this.qdRefOrbit[closestIter];
     ArqdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
                    -closestPt[0], -closestPt[1], -closestPt[2], -closestPt[3]); // real delta
     ArqdAdd(tt, 4, endpoint[4], endpoint[5], endpoint[6], endpoint[7],
@@ -8502,15 +8442,15 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
     // For each iteration in the loop segment, check if it can thread to another iteration
     // considering the loop wrap (iterations will repeat with a delta offset)
     for (let i = closestIter; i <= THREADING_CAPACITY; i++) {
-      const iPt = this.refOrbit[i];
+      const iPt = this.qdRefOrbit[i];
       const iR = iPt[0] + iPt[1] + iPt[2] + iPt[3];
       const iI = iPt[4] + iPt[5] + iPt[6] + iPt[7];
 
       // Check if we can thread to same or later iteration (considering it will wrap with delta)
       // Allow j = i for self-threading within the loop (period-N orbits repeat with delta)
       for (let j = i; j <= THREADING_CAPACITY; j++) {
-        const jPt = this.refOrbit[j];
-        // After loop, iteration j will be at position refOrbit[j] + loop_delta
+        const jPt = this.qdRefOrbit[j];
+        // After loop, iteration j will be at position qdRefOrbit[j] + loop_delta
         const jR = jPt[0] + jPt[1] + jPt[2] + jPt[3] + loopDeltaR;
         const jI = jPt[4] + jPt[5] + jPt[6] + jPt[7] + loopDeltaI;
 
@@ -8555,7 +8495,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
       const itersF32 = new Float32Array(count * 5);
       for (let i = 0; i < count; i++) {
         const orbitIdx = startIdx + i;
-        const ref = this.refOrbit[orbitIdx];
+        const ref = this.qdRefOrbit[orbitIdx];
         const thread = threadingData[orbitIdx] || { next: -1, deltaRe: 0, deltaIm: 0 };
 
         const idx = i * 5;
@@ -9323,7 +9263,7 @@ class AdaptiveGpuBoard extends GpuBaseBoard {
             const scale = pixelsI32[idx + P_SCALE];
             const dzr = pixelsF32[idx + P_DZR] * Math.pow(2, scale);
             const dzi = pixelsF32[idx + P_DZI] * Math.pow(2, scale);
-            const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
+            const ref = this.qdRefOrbit[Math.min(nextRefIter, this.qdRefOrbit.length - 1)];
             const refR = ref[0] + ref[1] + ref[2] + ref[3];
             const refI = ref[4] + ref[5] + ref[6] + ref[7];
             if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
