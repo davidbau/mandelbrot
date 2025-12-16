@@ -5943,6 +5943,98 @@ class ReferenceOrbitThreading {
 // https://mathr.co.uk/blog/2021-05-14_stretching_deep_zoom.html
 // Rebasing implementation follows Imagina: https://github.com/ImaginaFractal/Imagina
 
+// Mixin that adds DD-precision reference orbit methods to any board class.
+// Used by both DDZhuoranBoard (CPU) and GpuZhuoranBoard (GPU) to share
+// the reference orbit computation logic.
+const DDReferenceOrbitMixin = (Base) => class extends Base {
+  // Initialize DD reference orbit state. Call from constructor after super().
+  initDDReferenceOrbit(refC) {
+    // Reference point in DD precision [r_hi, r_lo, i_hi, i_lo]
+    this.refC = refC;
+
+    // Reference orbit array - each entry is [r_hi, r_lo, i_hi, i_lo]
+    this.refOrbit = [];
+    this.refOrbit.push([0, 0, 0, 0]);      // Iteration 0: z = 0
+    this.refOrbit.push(this.refC.slice()); // Iteration 1: z = c
+
+    // Reference orbit state
+    this.refOrbitEscaped = false;
+    this.refIterations = 1;
+    this.maxRefIterations = 10000;
+
+    // Working array for DD precision operations
+    this.tt = new Array(16);
+
+    // Threading for robust cycle detection
+    const threadingEpsilon = 10000 * this.epsilon;
+    const getDDPoint = (i) => this.refOrbit[i] || null;
+    const spatialBucket = new DDSpatialBucket(threadingEpsilon, getDDPoint);
+    this.threading = new ReferenceOrbitThreading(spatialBucket);
+    this.threading.addPoint(0);
+    this.threading.addPoint(1);
+  }
+
+  // DD accessor methods
+  getRefReal(ref) { return ref[0] + ref[1]; }
+  getRefImag(ref) { return ref[2] + ref[3]; }
+  getRefOrbit(iter) { return this.refOrbit[iter]; }
+  getRefOrbitLength() { return this.refOrbit.length; }
+  getRefCReal() { return this.refC[0] + this.refC[1]; }
+  getRefCImag() { return this.refC[2] + this.refC[3]; }
+
+  // Extend reference orbit by one iteration in DD precision
+  extendReferenceOrbit() {
+    const lastIndex = this.refIterations;
+    const last = this.refOrbit[lastIndex];
+    const tt = this.tt;
+
+    const r1 = last[0];
+    const r2 = last[1];
+    const j1 = last[2];
+    const j2 = last[3];
+
+    // Check for escape
+    AddSquare(tt, 0, r1, r2);                    // rsq = r**2
+    AddSquare(tt, 2, j1, j2);                    // jsq = j**2
+    AddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
+
+    if (tt[4] > 1e10) {
+      this.refOrbitEscaped = true;
+      return;
+    }
+
+    // Compute z^n for general exponent
+    AddMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // ja = 2*r*j
+    AddAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // ra = rsq - jsq
+
+    for (let ord = 2; ord < this.config.exponent; ord++) {
+      AddMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
+      AddMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
+      AddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
+      AddMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
+      AddMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
+      AddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
+      ArddSet(tt, 8, tt[4], tt[5]);                // ra = rt
+    }
+
+    // Add c to get next z
+    const newZ = [0, 0, 0, 0];
+    AddAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
+    AddAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
+
+    this.refOrbit.push(newZ);
+    this.refIterations++;
+
+    // Build thread-following map
+    this.threading.addPoint(this.refIterations);
+
+    // Grow array if needed
+    if (this.refIterations >= this.maxRefIterations) {
+      this.maxRefIterations *= 2;
+    }
+  }
+};
+
 // Base class for CPU-based Zhuoran perturbation boards (DD and QD precision)
 // Subclasses implement precision-specific reference orbit computation
 class CpuZhuoranBaseBoard extends Board {
@@ -6229,42 +6321,18 @@ class CpuZhuoranBaseBoard extends Board {
 }
 
 // DD-precision implementation of CpuZhuoranBaseBoard
-class DDZhuoranBoard extends CpuZhuoranBaseBoard {
+// Uses DDReferenceOrbitMixin for reference orbit computation
+class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
 
-    // DD-specific: Reference orbit data
-    this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low] for each iteration
-
-    // Reference point (center of image) in DD precision
+    // Initialize DD reference orbit (refC, refOrbit, threading, etc.)
     const refRe = qdToDD(this.re);
     const refIm = qdToDD(this.im);
-    this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
+    this.initDDReferenceOrbit([refRe[0], refRe[1], refIm[0], refIm[1]]);
 
-    // Working array for DD precision operations
-    this.tt = new Array(16);
-
-    // Initialize reference orbit with z = 0 and z = c
-    this.refOrbit.push([0, 0, 0, 0]);  // Iteration 0: z = 0
-    this.refOrbit.push(this.refC.slice());  // Iteration 1: z = 0^2 + c = c
-
-    // Threading for robust cycle detection
-    const threadingEpsilon = 10000 * this.epsilon;
-    const getDDPoint = (i) => this.refOrbit[i] || null;
-    const spatialBucket = new DDSpatialBucket(threadingEpsilon, getDDPoint);
-    this.threading = new ReferenceOrbitThreading(spatialBucket);
-    this.threading.addPoint(0);
-    this.threading.addPoint(1);
     this.initPixels();
   }
-
-  // Abstract method implementations for DD precision
-  getRefReal(ref) { return ref[0] + ref[1]; }
-  getRefImag(ref) { return ref[2] + ref[3]; }
-  getRefOrbit(iter) { return this.refOrbit[iter]; }
-  getRefOrbitLength() { return this.refOrbit.length; }
-  getRefCReal() { return this.refC[0] + this.refC[1]; }
-  getRefCImag() { return this.refC[2] + this.refC[3]; }
 
   initPixels() {
     const sizeScalar = this.size;
@@ -6336,61 +6404,6 @@ class DDZhuoranBoard extends CpuZhuoranBaseBoard {
       refOrbit: this.refOrbit,
       refC: this.refC,
     };
-  }
-
-  extendReferenceOrbit() {
-    // Compute one more iteration of the reference orbit in DD precision
-    const lastIndex = this.refIterations;
-    const last = this.refOrbit[lastIndex];
-    const tt = this.tt;
-
-    const r1 = last[0];
-    const r2 = last[1];
-    const j1 = last[2];
-    const j2 = last[3];
-
-    // Check for escape
-    AddSquare(tt, 0, r1, r2);                    // rsq = r**2
-    AddSquare(tt, 2, j1, j2);                    // jsq = j**2
-    AddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
-
-    // tt[4] is the high part of the magnitude squared (tt[5] is just the low correction)
-    // Use very large escape radius for reference orbit to support all pixel iterations
-    // Reference must stay valid longer than any pixel, so use much larger threshold
-    if (tt[4] > 1e10) {
-      this.refOrbitEscaped = true;
-      return;
-    }
-
-    // Compute z^n for general exponent
-    AddMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // ja = 2*r*j
-    AddAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // ra = rsq - jsq
-
-    for (let ord = 2; ord < this.config.exponent; ord++) {
-      AddMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
-      AddMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
-      AddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
-      AddMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
-      AddMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
-      AddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
-      ArddSet(tt, 8, tt[4], tt[5]);                 // ra = rt
-    }
-
-    // Add c to get next z
-    const newZ = [0, 0, 0, 0];
-    AddAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
-    AddAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
-
-    this.refOrbit.push(newZ);
-    this.refIterations++;
-
-    // Build thread-following map
-    this.threading.addPoint(this.refIterations);
-
-    // Grow array if needed
-    if (this.refIterations >= this.maxRefIterations) {
-      this.maxRefIterations *= 2;
-    }
   }
 
   getCurrentRefZ(index) {
@@ -7301,7 +7314,8 @@ class GpuBoard extends GpuBaseBoard {
 
 // WebGPU-accelerated perturbation board using Zhuoran's approach
 // Computes high-precision reference orbit on CPU, perturbations on GPU
-class GpuZhuoranBoard extends GpuBaseBoard {
+// Uses DDReferenceOrbitMixin for reference orbit computation
+class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
   static BYTES_PER_PIXEL = 56;  // 6 u32 + 8 f32 (unified PixelState struct)
 
   constructor(k, size, re, im, config, id) {
@@ -7309,34 +7323,10 @@ class GpuZhuoranBoard extends GpuBaseBoard {
 
     this.effort = 2;  // Same as DDZhuoranBoard
 
-    // Reference orbit for perturbation theory (computed on CPU in DD precision)
-    this.refOrbit = [];  // Array of [r_high, r_low, i_high, i_low]
-    this.refOrbitEscaped = false;
-    this.refIterations = 0;
-    this.maxRefIterations = 10000;
-
-    // Reference point (center of image)
+    // Initialize DD reference orbit (refC, refOrbit, threading, etc.)
     const refRe = Array.isArray(re) ? re : toDD(re);
     const refIm = Array.isArray(im) ? im : toDD(im);
-    this.refC = [refRe[0], refRe[1], refIm[0], refIm[1]];
-
-    // Initialize reference orbit: iteration 0 is z=0, iteration 1 is z=c
-    this.refOrbit.push([0, 0, 0, 0]);
-    this.refOrbit.push(this.refC.slice());
-    this.refIterations = 1;
-
-    // Working array for DD precision operations
-    this.tt = new Array(16);
-
-    // Threading for robust cycle detection
-    // threadingEpsilon ~1000 pixels: epsilon=pix/10, so 1000 pixels = 10000*epsilon
-    // Deltas stored as fp32 (~1e7 precision); 10000*epsilon allows 1e5 cancellation margin
-    const threadingEpsilon = 10000 * this.epsilon;
-    const getDDPoint = (i) => this.refOrbit[i] || null;  // [re_hi, re_lo, im_hi, im_lo]
-    const spatialBucket = new DDSpatialBucket(threadingEpsilon, getDDPoint);
-    this.threading = new ReferenceOrbitThreading(spatialBucket);
-    this.threading.addPoint(0);
-    this.threading.addPoint(1);
+    this.initDDReferenceOrbit([refRe[0], refRe[1], refIm[0], refIm[1]]);
 
     // Initialize per-pixel perturbation data
     this.initPixels(size, re, im);
@@ -7524,59 +7514,7 @@ class GpuZhuoranBoard extends GpuBaseBoard {
     });
   }
 
-  // Copy extendReferenceOrbit from DDZhuoranBoard
-  extendReferenceOrbit() {
-    // Compute one more iteration of the reference orbit in DD precision
-    const lastIndex = this.refIterations;
-    const last = this.refOrbit[lastIndex];
-    const tt = this.tt;
-
-    const r1 = last[0];
-    const r2 = last[1];
-    const j1 = last[2];
-    const j2 = last[3];
-
-    // Check for escape
-    AddSquare(tt, 0, r1, r2);                    // rsq = r**2
-    AddSquare(tt, 2, j1, j2);                    // jsq = j**2
-    AddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
-
-    // Use very large escape radius for reference orbit
-    if (tt[4] > 1e10) {
-      this.refOrbitEscaped = true;
-      return;
-    }
-
-    // Compute z^exponent using DD precision
-    ArddSet(tt, 8, r1, r2);  // ra = r
-    ArddSet(tt, 6, j1, j2);  // ja = j
-    for (let ex = 1; ex < this.config.exponent; ex++) {
-      AddMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
-      AddMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
-      AddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
-      AddMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
-      AddMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
-      AddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
-      ArddSet(tt, 8, tt[4], tt[5]);                 // ra = rt
-    }
-
-    // Add c to get next z
-    const newZ = [0, 0, 0, 0];
-    AddAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
-    AddAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
-
-    this.refOrbit.push(newZ);
-    this.refIterations++;
-
-    // Threading: add new orbit point from iteration 0
-    // (Shader only uses threading after F(18) = 2584 iterations)
-    this.threading.addPoint(this.refIterations);
-
-    // Grow array if needed
-    if (this.refIterations >= this.maxRefIterations) {
-      this.maxRefIterations *= 2;
-    }
-  }
+  // extendReferenceOrbit() inherited from DDReferenceOrbitMixin
 
   setupReferenceOrbitLoop() {
     // When reference orbit hits threading limit, find a close point to loop back to
