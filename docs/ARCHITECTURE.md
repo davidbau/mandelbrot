@@ -150,7 +150,7 @@ Both classes inherit identical reference orbit logic while maintaining their res
 | 10^13 - 10^28 | GpuZhuoranBoard | GpuZhuoranBoard |
 | > 10^28    | AdaptiveGpuBoard | AdaptiveGpuBoard |
 
-The `AdaptiveGpuBoard` can fall back to CPU computation (`QDZhuoranBoard`) when GPU precision is insufficient for the current zoom level.
+The `AdaptiveGpuBoard` uses per-pixel adaptive scaling to handle extreme zoom depths where standard float32 GPU computation fails. See [ADAPTIVE-SCALING.md](ADAPTIVE-SCALING.md) for the design. It can fall back to CPU computation (`QDZhuoranBoard`) when GPU precision is insufficient.
 
 ## State Management and URL Synchronization
 
