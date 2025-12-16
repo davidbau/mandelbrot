@@ -19,6 +19,12 @@ to handle high device pixel ratios, show orbits, and calculate
 periodicity. Updated again in 2024 to add double-double (DD) precision for zooms to 10^30.
 Updated in 2025 to add GPU support and quad-double (QD) precision for zooms beyond 10^60.
 
+This project is an experiment in
+[vibe coding](https://davidbau.com/archives/2025/12/16/vibe_coding.html), using
+LLM agents to build complexity beyond what a single human coder has time to understand.
+The 2022 version was the last written without AI assistance; since then, the codebase
+has grown from 779 to over 12,000 lines with the help of Claude.
+
 URL parameter options: use `?grid=3` to select 3-column view,
                    `c=-0.14-0.65i` to set center,
                and `z=5.0` to set zoom level.
