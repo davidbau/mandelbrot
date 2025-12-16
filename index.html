@@ -3820,6 +3820,7 @@ class Scheduler {
   assembleWorkerCode() {
     const workerCode = document.getElementById('workerCode');
     const mathCode = document.getElementById('mathCode');
+    const workerStart = document.getElementById('workerStart');
     return '// Linefeeds to align line numbers with HTML.\n' +
            ''.padStart(lastScriptLineNumber, '\n') +
            '// <script id="workerCode">' +
@@ -3827,6 +3828,9 @@ class Scheduler {
            '// <\/script>\n' +
            '// <script id="mathCode">' +
            mathCode.textContent +
+           '// <\/script>\n' +
+           '// <script id="workerStart">' +
+           workerStart.textContent +
            '// <\/script>\n';
   }
 
@@ -4503,7 +4507,7 @@ function estimateLimit(data) {
 var lastScriptLineNumber = navigator.webdriver ? 0 :
   new Error().stack.match(/:(\d+)/)[1] | 0;
 </script>
-<script id="workerCode" type="text/webworker">
+<script id="workerCode">
 // Constants
 const MAX_CHAOTIC_ITERATIONS = 100000;
 
@@ -9697,40 +9701,46 @@ function selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard) {
 }
 
 
-const workerName = self.name;
-const boards = new Map();
-let hiddenBoards = new Set();
-let focusedBoardK = null;
-let computationPaused = false;
-let steps = 0;
-let startTime = 0;
-let endTime = -1;
-let timer = null;
-let gpuMaxBufferSize = null;
+// FractalWorker manages board computation on both main thread and in workers
+// Always defined on the main thread (for MockWorker to extend)
+// and instantiated in real workers via workerStart
+class FractalWorker {
+  constructor(workerNumber, name) {
+    this.workerNumber = workerNumber;
+    this.name = name;
+    this.boards = new Map();
+    this.hiddenBoards = new Set();
+    this.focusedBoardK = null;
+    this.computationPaused = false;
+    this.steps = 0;
+    this.startTime = 0;
+    this.endTime = -1;
+    this.timer = null;
+    this.gpuMaxBufferSize = null;
+  }
 
-self.onmessage = async function(e) {
-  const { type, data } = e.data;
-  switch (type) {
-    case 'addBoard':
-      workerNumber = data.workerNumber;
-      const enableGPU = data.config.enableGPU;
-      const webGPUAvailable = GpuBoard.isAvailable();
+  async handleMessage(type, data) {
+    switch (type) {
+      case 'addBoard':
+        this.workerNumber = data.workerNumber;
+        const enableGPU = data.config.enableGPU;
+        const webGPUAvailable = GpuBoard.isAvailable();
 
-      // Query GPU limits once on first use
-      if (enableGPU && webGPUAvailable && gpuMaxBufferSize === null) {
-        gpuMaxBufferSize = await GpuBaseBoard.queryMaxBufferSize();
-      }
+        // Query GPU limits once on first use
+        if (enableGPU && webGPUAvailable && this.gpuMaxBufferSize === null) {
+          this.gpuMaxBufferSize = await GpuBaseBoard.queryMaxBufferSize();
+        }
 
-      // Explicit board selection via board= parameter
-      const forceBoard = data.config.forceBoard;
-      const size = data.size;
-      const dimsArea = data.config.dimsArea;
-      const pixelSize = size / data.config.dimsWidth;
-      const BoardClass = selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard);
+        // Explicit board selection via board= parameter
+        const forceBoard = data.config.forceBoard;
+        const size = data.size;
+        const dimsArea = data.config.dimsArea;
+        const pixelSize = size / data.config.dimsWidth;
+        const BoardClass = selectBoardClass(pixelSize, dimsArea, this.gpuMaxBufferSize, forceBoard);
 
-      // Construct the board instance
-      let board = new BoardClass(data.k, size, data.reQD, data.imQD, data.config, data.id);
-      boards.set(data.k, board);
+        // Construct the board instance
+        let board = new BoardClass(data.k, size, data.reQD, data.imQD, data.config, data.id);
+        this.boards.set(data.k, board);
 
       // Store QD-precision coordinates
       board.sizesQD = [size, data.reQD, data.imQD];
@@ -9758,98 +9768,100 @@ self.onmessage = async function(e) {
           `${qdToDecimalString(refImQD, digits)})`);
       }
 
-      // Send board type info once on creation
-      self.postMessage({
-        type: 'boardCreated',
-        data: {
-          k: data.k,
-          boardType: board.constructor.name,
-          isGPUBoard: board instanceof GpuBoard || board instanceof GpuZhuoranBoard
-        }
-      });
-      break;
-    case 'removeBoard':
-      boards.delete(data.k);
-      break;
-    case 'setFocusedBoard':
-      focusedBoardK = data.k;
-      break;
-    case 'setHiddenBoards':
-      hiddenBoards = new Set(data.hiddenBoards);
-      break;
-    case 'requestTransfer':
-      const transferredBoards = [];
-      for (const k of data.boardKeys) {
-        if (boards.has(k)) {
-          const board = boards.get(k);
-          // Skip GPU boards - they cannot be transferred as they lose GPU state
-          if (board instanceof GpuBoard || board instanceof GpuZhuoranBoard) {
-            console.log(`Skipping transfer of GPU board ${k} (${board.constructor.name})`);
-            continue;
+        // Send board type info once on creation
+        this.postMessage({
+          type: 'boardCreated',
+          data: {
+            k: data.k,
+            boardType: board.constructor.name,
+            isGPUBoard: board instanceof GpuBoard || board instanceof GpuZhuoranBoard
           }
-          board.compact();
-          const serializedBoard = board.serialize();
-          boards.delete(k);
-          transferredBoards.push(serializedBoard);
+        });
+        break;
+      case 'removeBoard':
+        this.boards.delete(data.k);
+        break;
+      case 'setFocusedBoard':
+        this.focusedBoardK = data.k;
+        break;
+      case 'setHiddenBoards':
+        this.hiddenBoards = new Set(data.hiddenBoards);
+        break;
+      case 'requestTransfer':
+        const transferredBoards = [];
+        for (const k of data.boardKeys) {
+          if (this.boards.has(k)) {
+            const board = this.boards.get(k);
+            // Skip GPU boards - they cannot be transferred as they lose GPU state
+            if (board instanceof GpuBoard || board instanceof GpuZhuoranBoard) {
+              console.log(`Skipping transfer of GPU board ${k} (${board.constructor.name})`);
+              continue;
+            }
+            board.compact();
+            const serializedBoard = board.serialize();
+            this.boards.delete(k);
+            transferredBoards.push(serializedBoard);
+          }
+        }
+        // Send the serialized boards back to the scheduler
+        this.postMessage({
+          type: 'downloadTransfer',
+          data: { transferredBoards }
+        });
+        break;
+      case 'uploadTransfer':
+        // Recreate the board from the serialized data and add it to this worker
+        const newBoard = Board.fromSerialized(data.boardData);
+        this.boards.set(newBoard.k, newBoard);
+        break;
+      case 'pause':
+        this.computationPaused = data.pause;
+        break;
+    }
+
+    // Start iteration loop if not running (check after every message)
+    if (!this.timer && this.boards.size && !this.computationPaused) {
+      this.iterateBoards();
+    } else {
+      const remainingWork = Array.from(this.boards.values()).
+          filter(board => !this.hiddenBoards.has(board.k)).
+          map(b => b.un * b.effort).reduce((a, b) => a + b, 0);
+      this.postMessage({
+        type: 'update',
+        data: {
+          remainingWork,
+        }
+      });
+    }
+  }
+
+  async iterateBoards() {
+    this.timer = null;
+    if (this.computationPaused) {
+      return;
+    }
+    let pri = Array.from(this.boards.values())
+          .filter(board => (board.unfinished() || board.updateSize))
+          .filter(board => !this.hiddenBoards.has(board.k));
+    if (pri.length) {
+      // Start timer if it is not already running.
+      if (this.endTime) {
+        this.startTime = (new Date).getTime();
+        this.endTime = 0;
+      }
+      if (this.steps % 2) {
+        // Prioritize most unfinished half the time.
+        pri = pri.sort((a, b) => b.un - a.un);
+      } else {
+        // Prioritize the most recent half the time.
+        pri = pri.sort((a, b) => b.k - a.k);
+        // Allow the user to prioritize by pointing the mouse.
+        if (this.focusedBoardK !== null) {
+          pri.sort((a, b) => (a.k === this.focusedBoardK ? -1 : b.k === this.focusedBoardK ? 1 : 0));
         }
       }
-      // Send the serialized boards back to the scheduler
-      self.postMessage({
-        type: 'downloadTransfer',
-        data: { transferredBoards }
-      });
-      break;
-    case 'uploadTransfer':
-      // Recreate the board from the serialized data and add it to this worker
-      const newBoard = Board.fromSerialized(data.boardData);
-      boards.set(newBoard.k, newBoard);
-      break;
-    case 'pause':
-      computationPaused = data.pause;
-      break;
-  }
-  if (!timer && boards.size && !computationPaused) {
-    iterateBoards();
-  } else {
-    const remainingWork = Array.from(boards.values()).
-        filter(board => !hiddenBoards.has(board.k)).
-        map(b => b.un * b.effort).reduce((a, b) => a + b, 0);
-    self.postMessage({
-      type: 'update',
-      data: {
-        remainingWork,
-      }
-    });
-  }
-};
-
-async function iterateBoards() {
-  timer = null;
-  if (computationPaused) {
-    return;
-  }
-  let pri = Array.from(boards.values())
-        .filter(board => (board.unfinished() || board.updateSize))
-        .filter(board => !hiddenBoards.has(board.k));
-  if (pri.length) {
-    // Start timer if it is not already running.
-    if (endTime) {
-      startTime = (new Date).getTime();
-      endTime = 0;
-    }
-    if (steps % 2) {
-      // Prioritize most unfinished half the time.
-      pri = pri.sort((a, b) => b.un - a.un);
-    } else {
-      // Prioritize the most recent half the time.
-      pri = pri.sort((a, b) => b.k - a.k);
-      // Allow the user to prioritize by pointing the mouse.
-      if (focusedBoardK !== null) {
-        pri.sort((a, b) => (a.k === focusedBoardK ? -1 : b.k === focusedBoardK ? 1 : 0));
-      }
-    }
-    // Exponential scheduling policy
-    let shift = Math.floor(steps++ / 2) + 1;
+      // Exponential scheduling policy
+      let shift = Math.floor(this.steps++ / 2) + 1;
     let p = 0;
     while (shift & (1 << p)) { p += 1; }
     const board = pri[Math.min(p, pri.length) % pri.length];
@@ -9858,280 +9870,118 @@ async function iterateBoards() {
       await board.iterate();
       if (board.isComputing) break;
     }
-    const now = (new Date()).getTime();
-    if (focusedBoardK == board.k ?
-        (board.updateSize >= 1429 || now - board.lastTime >= 100) :
-        (board.updateSize >= 4673 || now - board.lastTime >= 500)) {
-      const boardEffort = board.un * board.effort;
-      const remainingWork = pri.map(b => b.un * b.effort).reduce((a, b) => a + b, 0);
-      const workerInfo = `${workerName}: ` + (board.unfinished() ?
-           `boards {${[...boards.keys()]}}, work: ${remainingWork}` :
-           `board finished`);
-      self.postMessage({
-        type: 'iterations',
-        data: {
-          k: board.k,
-          id: board.id,
-          it: board.it,
-          un: board.un,
-          di: board.di,
-          ch: board.ch,
-          changeList: board.changeList,
-          boardEffort,
-          remainingWork,
-          workerInfo,
-          boardType: board.constructor.name
+      const now = (new Date()).getTime();
+      if (this.focusedBoardK == board.k ?
+          (board.updateSize >= 1429 || now - board.lastTime >= 100) :
+          (board.updateSize >= 4673 || now - board.lastTime >= 500)) {
+        const boardEffort = board.un * board.effort;
+        const remainingWork = pri.map(b => b.un * b.effort).reduce((a, b) => a + b, 0);
+        const workerInfo = `${this.name}: ` + (board.unfinished() ?
+             `boards {${[...this.boards.keys()]}}, work: ${remainingWork}` :
+             `board finished`);
+        this.postMessage({
+          type: 'iterations',
+          data: {
+            k: board.k,
+            id: board.id,
+            it: board.it,
+            un: board.un,
+            di: board.di,
+            ch: board.ch,
+            changeList: board.changeList,
+            boardEffort,
+            remainingWork,
+            workerInfo,
+            boardType: board.constructor.name
+          }
+        });
+        board.lastTime = now;
+        board.updateSize = 0;
+        board.changeList = [];
+        if (!board.unfinished()) {
+          // Delete board when done.
+          this.boards.delete(board.k);
         }
-      });
-      board.lastTime = now;
-      board.updateSize = 0;
-      board.changeList = [];
-      if (!board.unfinished()) {
-        // Delete board when done.
-        boards.delete(board.k);
-        // workerLog(`Board ${board.k} finished, leaving {${[...boards.keys()]}}`);
       }
+    } else {
+      // End timer when there is no remaining work
+      if (!this.endTime) {
+         this.endTime = (new Date).getTime();
+      }
+      return;
     }
-  } else {
-    // End timer when there is no remaining work
-    if (!endTime) {
-       endTime = (new Date).getTime();
-       // workerLog(`Finished in ${((endTime - startTime) / 1000).toFixed(3)}s`);
-    }
-    return;
+    this.timer = setTimeout(() => this.iterateBoards(), 0);
   }
-  timer = setTimeout(iterateBoards, 0);
+
+  // Abstract method to be overridden by subclasses
+  postMessage(msg) {
+    throw new Error('FractalWorker.postMessage() must be implemented by subclass');
+  }
 }
 
 </script>
+<script id="workerStart" type="text/webworker">
+// This code runs only in real workers (not on main thread)
+// Instantiate the FractalWorker and set up message handling
+
+class RealWorker extends FractalWorker {
+  postMessage(msg) {
+    // In real workers, send messages back to main thread
+    self.postMessage(msg);
+  }
+}
+
+// Create the worker instance
+const worker = new RealWorker(undefined, self.name);
+
+// Set up message handler
+self.onmessage = async function(e) {
+  const { type, data } = e.data;
+  await worker.handleMessage(type, data);
+};
+
+</script>
 <script id="debugCode">
-// Debug flag 'w': Load worker code on main thread and provide MockWorker
-// Check URL parameter directly (synchronous, before explorer is created)
+// Debug flag 'w': Define MockWorker for main thread debugging
+// FractalWorker class is always available on main thread now (workerCode is a regular script)
 if (location.search.includes('debug=')) {
   const debugValue = decodeURIComponent(location.search.match(/[?&]debug=([^&]*)/)?.[1] || '');
   if (debugValue.split(',').includes('w')) {
-    const workerCodeEl = document.getElementById('workerCode');
-    if (workerCodeEl) {
-      document.write('<script>' + workerCodeEl.textContent + '<\/script>');
-      console.log('Worker code loaded on main thread via document.write (debug mode)');
-    }
-
-    // Define MockWorker class for running boards on main thread
-    window.MockWorker = class MockWorker {
+    // Define MockWorker class that extends FractalWorker
+    window.MockWorker = class MockWorker extends FractalWorker {
       constructor(workerNumber) {
-        this.workerNumber = workerNumber;
-        this.name = `MockWorker ${workerNumber}`;
-        this.onmessage = null;
-
-        // Create isolated worker scope
-        this.boards = new Map();
-        this.hiddenBoards = new Set();
-        this.focusedBoardK = null;
-        this.computationPaused = false;
-        this.steps = 0;
-        this.startTime = 0;
-        this.endTime = -1;
-        this.timer = null;
-        this.gpuMaxBufferSize = null;
+        super(workerNumber, `MockWorker ${workerNumber}`);
+        this.onmessage = null;  // Callback for sending messages back to Scheduler
 
         // Step mode support (debug=s flag)
         this.stepMode = false;
         this.stepsRequested = 0;
-
-        // Bind the global worker functions to this instance's scope
-        this._messageHandler = this._createMessageHandler();
-        this._iterateBoards = this._createIterateLoop();
       }
 
+      // Override to add step mode support
+      async iterateBoards() {
+        this.timer = null;
+
+        // Step mode: only iterate if steps are requested
+        if (this.stepMode && this.stepsRequested === 0) {
+          // Wait for step() to be called
+          this.timer = setTimeout(() => this.iterateBoards(), 100);
+          return;
+        }
+        if (this.stepsRequested > 0) {
+          this.stepsRequested--; // Consume one step request
+        }
+
+        // Call parent implementation
+        await super.iterateBoards();
+      }
+
+      // Override to send messages to Scheduler on main thread
       postMessage(msg) {
-        // Handle message asynchronously like real worker
-        setTimeout(() => this._messageHandler(msg), 0);
-      }
-
-      _createMessageHandler() {
-        // Return async message handler that uses this worker's state
-        return async (e) => {
-          const { type, data } = e;
-          switch (type) {
-            case 'addBoard':
-              const enableGPU = data.config.enableGPU;
-              const webGPUAvailable = typeof GpuBoard !== 'undefined' && GpuBoard.isAvailable();
-
-              // Query GPU limits once on first use
-              if (enableGPU && webGPUAvailable && this.gpuMaxBufferSize === null) {
-                this.gpuMaxBufferSize = await GpuBaseBoard.queryMaxBufferSize();
-              }
-
-              const forceBoard = data.config.forceBoard;
-              const size = data.size;
-              const dimsArea = data.config.dimsArea;
-              const pixelSize = size / data.config.dimsWidth;
-              const BoardClass = selectBoardClass(pixelSize, dimsArea, this.gpuMaxBufferSize, forceBoard);
-
-              // Construct the board instance
-              let board = new BoardClass(data.k, size, data.reQD, data.imQD, data.config, data.id);
-              this.boards.set(data.k, board);
-              board.sizesQD = [size, data.reQD, data.imQD];
-
-              // Log board creation
-              const digits = Math.ceil(-Math.log10(pixelSize)) + 3;
-              const re_str = qdToDecimalString(data.reQD, digits);
-              const im_str = qdToDecimalString(data.imQD, digits);
-              const coordStr = `c=(${re_str}, ${im_str})`;
-              console.log(
-                `Board ${data.k}: ${board.constructor.name} @ ${coordStr}, ` +
-                `pixel=${pixelSize.toExponential(3)} [main thread]`
-              );
-
-              // Send board type info
-              if (this.onmessage) {
-                this.onmessage({
-                  data: {
-                    type: 'boardCreated',
-                    data: {
-                      k: data.k,
-                      boardType: board.constructor.name,
-                      isGPUBoard: board instanceof GpuBoard || board instanceof GpuZhuoranBoard
-                    }
-                  }
-                });
-              }
-              break;
-
-            case 'removeBoard':
-              this.boards.delete(data.k);
-              break;
-
-            case 'setFocusedBoard':
-              this.focusedBoardK = data.k;
-              break;
-
-            case 'setHiddenBoards':
-              this.hiddenBoards = new Set(data.hiddenBoards);
-              break;
-
-            case 'pause':
-              this.computationPaused = data.pause;
-              break;
-          }
-
-          // Start iteration loop if not running (check after every message, like real Worker)
-          if (!this.timer && this.boards.size && !this.computationPaused) {
-            this._iterateBoards();
-          }
-        };
-      }
-
-      _createIterateLoop() {
-        // Return iteration function bound to this worker's state
-        return async () => {
-          this.timer = null;
-
-          // Step mode: only iterate if steps are requested
-          if (this.stepMode && this.stepsRequested === 0) {
-            // Wait for step() to be called
-            this.timer = setTimeout(() => this._iterateBoards(), 100);
-            return;
-          }
-          if (this.stepsRequested > 0) {
-            this.stepsRequested--; // Consume one step request
-          }
-
-          // Get priority list of boards to iterate
-          const pri = [];
-          for (const board of this.boards.values()) {
-            if (!this.hiddenBoards.has(board.k) && board.unfinished()) {
-              pri.push(board);
-            }
-          }
-
-          if (pri.length) {
-            // Start timer if not already running
-            if (this.endTime) {
-              this.startTime = Date.now();
-              this.endTime = 0;
-            }
-
-            // Prioritize boards
-            if (this.steps % 2) {
-              pri.sort((a, b) => b.un - a.un);
-            } else {
-              pri.sort((a, b) => b.k - a.k);
-              if (this.focusedBoardK !== null) {
-                pri.sort((a, b) => (a.k === this.focusedBoardK ? -1 : b.k === this.focusedBoardK ? 1 : 0));
-              }
-            }
-
-            // Exponential scheduling policy
-            let shift = Math.floor(this.steps++ / 2) + 1;
-            let p = 0;
-            while (shift & (1 << p)) { p += 1; }
-            const board = pri[Math.min(p, pri.length) % pri.length];
-
-            // Iterate the selected board
-            if (this.stepMode) {
-              // In step mode: exactly one iteration
-              await board.iterate();
-            } else {
-              // Normal mode: batch iterations for performance
-              for (let workDone = 0; workDone < 17377 && board.unfinished(); ) {
-                workDone += board.un * board.effort;
-                await board.iterate();
-                if (board.isComputing) break;
-              }
-            }
-
-            // Send progress update
-            const now = Date.now();
-            if (this.focusedBoardK == board.k ?
-                (board.updateSize >= 1429 || now - board.lastTime >= 100) :
-                (board.updateSize >= 4673 || now - board.lastTime >= 500)) {
-              const boardEffort = board.un * board.effort;
-              const remainingWork = pri.map(b => b.un * b.effort).reduce((a, b) => a + b, 0);
-              const workerInfo = `${this.name}: ` + (board.unfinished() ?
-                   `boards {${[...this.boards.keys()]}}, work: ${remainingWork}` :
-                   `board finished`);
-
-              if (this.onmessage) {
-                this.onmessage({
-                  data: {
-                    type: 'iterations',
-                    data: {
-                      k: board.k,
-                      id: board.id,
-                      it: board.it,
-                      un: board.un,
-                      di: board.di,
-                      ch: board.ch,
-                      changeList: board.changeList,
-                      boardEffort,
-                      remainingWork,
-                      workerInfo,
-                      boardType: board.constructor.name
-                    }
-                  }
-                });
-              }
-
-              board.lastTime = now;
-              board.updateSize = 0;
-              board.changeList = [];
-
-              if (!board.unfinished()) {
-                this.boards.delete(board.k);
-              }
-            }
-          } else {
-            // End timer when no work remains
-            if (!this.endTime) {
-              this.endTime = Date.now();
-            }
-            return;
-          }
-
-          // Reschedule
-          this.timer = setTimeout(() => this._iterateBoards(), 0);
-        };
+        // Call onmessage callback if set (matches real Worker interface)
+        if (this.onmessage) {
+          this.onmessage({ data: msg });
+        }
       }
     };
 
