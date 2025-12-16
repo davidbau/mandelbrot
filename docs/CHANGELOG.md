@@ -12,7 +12,7 @@ through the night, iterating polynomials to generate fractal images.
 The first 2009 JavaScript version used colored **table cells** as pixels - each `<td>`
 element with class "c" was a tiny colored square, assembled into a 180×180 grid
 (32,400 table cells!). You can still see this version at
-[davidbau.com/mandelbrot/oldversion.html](https://davidbau.com/mandelbrot/oldversion.html).
+[mandelbrot.page/version-2009.html](https://mandelbrot.page/version-2009.html).
 
 A canvas-based version followed shortly after, taking advantage of HTML5 canvas
 support in Chrome and Safari. This version is preserved at
@@ -36,7 +36,7 @@ Key features from 2009:
 
 The project moved to GitHub in October 2020, starting fresh with a modernized codebase.
 You can see the state of the code at that time at
-[davidbau.com/mandelbrot/version-2020.html](https://davidbau.com/mandelbrot/version-2020.html).
+[mandelbrot.page/version-2020.html](https://mandelbrot.page/version-2020.html).
 
 New features in the 2020 version:
 

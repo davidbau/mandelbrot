@@ -1,0 +1,328 @@
+<title>Mandelbrot</title>
+<style>
+body { font-family: Arial; background: #888}
+td.c { height:1px; width: 1px; }
+</style>
+<center>
+<table style=table-layout:fixed border=0 cellpadding=0 cellspacing=20 id=grid>
+</table>
+</center>
+
+
+<script>
+var gridcols = 5;
+var dims = 180;
+var dims2 = dims * dims;
+var zz = [];
+var cc = [];
+var bb = [];
+var nn = [];
+var it = [];
+var un = [];
+var ss = [];
+var sizes = [];
+var gridboards = 0;
+var steps = 0;
+var unknowncolor = "#100";
+var convergence = 1.0 / (1 << 20);
+
+function compute(m, i, n, z, c, b, converge) {
+  if (n[m]) return 0;
+  var r = z[m * 2]
+  var j = z[m * 2 + 1]
+  var ra = r * r - j * j + c[m * 2];
+  var ja = 2 * r * j + c[m * 2 + 1];
+  var d = ra * ra + ja * ja;
+  if (d > 4.0) {
+    n[m] = i;
+    return 1;
+  }
+  z[m * 2] = ra;
+  z[m * 2 + 1] = ja;
+  var rb = b[m * 2];
+  if (Math.abs(rb - ra) <= converge) {
+    var jb = b[m * 2 + 1];
+    if (Math.abs(jb - ja) <= converge) {
+      n[m] = -i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+function iterate(k) {
+  var i = ++it[k];
+  var z = zz[k];
+  var c = cc[k];
+  var n = nn[k];
+  var b = bb[k];
+  var s = ss[k];
+  var converge = convergence / (1 << k);
+  var shift = i;
+  while ((shift & 1) == 0) shift >>= 1;
+  if (s === null && un[k] < 4096) {
+    var news = [];
+    for (var m = 0; m < dims2; ++m) {
+      if (n[m]) continue;
+      news.push(m);
+    }
+    s = ss[k] = news;
+  }
+  if (s === null) {
+    if (shift <= (4 << (k * 2))) {
+      for (var m = 0; m < dims2; ++m) {
+        if (n[m]) continue;
+        b[m * 2] = z[m * 2];
+        b[m * 2 + 1] = z[m * 2 + 1];
+      }
+    }
+    var count = 0;
+    for (var m = 0; m < dims2; ++m) {
+      count += compute(m, i, n, z, c, b, converge);
+    }
+    un[k] -= count;
+  } else {
+    if (s.length < un[k] / 2) {
+      var news = [];
+      for (var t = 0; t < s.length; ++t) {
+        if (n[s[t]]) continue;
+        news.push(s[t]);
+      }
+      s = ss[k] = news;
+    }
+    if (shift <= (4 << (k * 2))) {
+      for (var t = 0; t < s.length; ++t) {
+        var m = s[t];
+        if (n[m]) continue;
+        b[m * 2] = z[m * 2];
+        b[m * 2 + 1] = z[m * 2 + 1];
+      }
+    }
+    var count = 0;
+    for (var t = 0; t < s.length; ++t) {
+      count += compute(s[t], i, n, z, c, b, converge);
+    }
+    un[k] -= count;
+  }
+}
+
+function setboard(k, size, re, im) {
+  while (it.length <= k) {
+    it.push(0);
+    zz.push([]);
+    cc.push([]);
+    nn.push([]);
+    bb.push([]);
+    ss.push(null);
+    sizes.push([0, 0, 0]);
+    un.push(dims2);
+  }
+  sizes[k] = [size, re, im];
+  it[k] = 0;
+  var z = zz[k] = [];
+  var c = cc[k] = [];
+  var n = nn[k] = [];
+  var b = bb[k] = [];
+  ss[k] = null;
+  for (var y = 0; y < dims; y++) {
+    var j = ((y / dims) - 0.5) * size + im;
+    for (var x = 0; x < dims; x++) {
+      var r = ((x / dims) - 0.5) * size + re;
+      z.push(r, j);
+      c.push(r, j);
+      n.push(r * r + j * j > 4 ? 1 : 0);
+      b.push(r, j);
+    }
+  }
+}
+
+function truncateboards(k) {
+  if (it.length > k) {
+    it.length = k;
+    zz.length = k;
+    cc.length = k;
+    nn.length = k;
+    sizes.length = k;
+  }
+}
+
+function drawcolor(k, i) {
+  var color = makecolor(k, i);
+  var converged = makecolor(k, -i);
+  var n = nn[k];
+  for (var m = 0; m < dims2; ++m) {
+    if (n[m] == i || n[m] == -i) {
+      document.getElementById("c_" + k + "_" + m).style.background =
+        n[m] > 0 ? color : converged;
+    }
+  }
+}
+
+function colornum(n) {
+  if (n <= 0) { return "0"; }
+  if (n < 16) { return n.toString(16); }
+  return "f";
+}
+
+function makecolor(k, i) {
+  if (i == 0) return unknowncolor;
+  if (i < 0) return "#000";
+  var r = colornum(k - 3 + ((i - 2) >> ((k + 1) >> 1)));
+  var g = colornum((i - 5) >> ((k + 1) >> 1));
+  var b = colornum((12 - k) + ((i - 1) >> ((k + 1) >> 1)));
+  return "#" + r + g + b;
+}
+
+function draw(k) {
+  if (nn.length <= k) return;
+  var n = nn[k];
+  for (var m = 0; m < dims2; ++m) {
+    document.getElementById("c_" + k + "_" + m).style.background =
+      makecolor(k, n[m]);
+  }
+}
+
+function drawall() {
+  for (var k = 0; k < nn.length; ++k) {
+    draw(k);
+  }
+}
+
+function tablestring(k) {
+  var result = [
+    "<table id=b_" + k +
+    " style=table-layout:fixed border=0 cellspacing=0 cellpadding=0>"
+  ];
+  for (var m = 0; m < dims2; ++m) {
+    if (m % dims == 0) {
+      result.push("<tr>");
+    }
+    result.push("<td class=c id=c_"
+                 + k + "_" + m + "></td>");
+    if (m % dims == dims - 1) {
+      result.push("</tr>");
+    }
+  }
+  result.push("</table>");
+  return result.join("\n");
+}
+
+function progress() {
+  var shift = steps++;
+  var k = 0;
+  while (1 << k & shift) k += 1;
+  k = it.length - 1 - (k % it.length);
+  iterate(k);
+  drawcolor(k, it[k]);
+  setTimeout(progress, 0);
+}
+
+document.onmousedown = function(e) {
+  if (!e) var e = window.target;
+  var target = (e.target ? e.target : e.srcElement ? e.srcElement : null);
+  if (target.nodeType == 3) target = target.parentNode;
+  if (target.id) {
+    var m = target.id.match(/c_(\d+)_(\d+)/);
+    if (m) {
+      cellclick(parseInt(m[1]), parseInt(m[2]));
+      return false;
+    }
+  }
+  return true;
+}
+
+function grid() {
+  return document.getElementById('grid');
+}
+
+function ensurerow(k) {
+  var r = (k - (k % gridcols)) / gridcols;
+  var table = grid();
+  while (table.rows.length <= r) {
+    var index = table.rows.length;
+    var row = table.insertRow(index);
+    for (var c = 0; c < gridcols; ++c) {
+      var cell = row.insertCell(c);
+      cell.style.width = dims;
+      cell.style.height = dims;
+    }
+  }
+}
+
+function makeboard(k) {
+  var table = grid();
+  while (gridboards <= k) {
+    var c = gridboards % gridcols;
+    var r = (gridboards - c) / gridcols;
+    table.rows[r].cells[c].innerHTML = tablestring(gridboards);
+    gridboards += 1;
+  }
+}
+
+function showpreview(k) {
+  if (k < gridboards) board(k).style.visiblility = 'hidden';
+  var table = grid();
+  var c = k % gridcols;
+  var r = (k - c) / gridcols;
+  table.rows[r].cells[c].style.background = unknowncolor;
+}
+
+function hidepreview(k) {
+  board(k).style.visiblility = 'visible';
+  var table = grid();
+  var c = k % gridcols;
+  var r = (k - c) / gridcols;
+  table.rows[r].cells[c].style.background = "none";
+}
+
+function hideboardspast(k) {
+  for (var j = 0; j <= k && j < gridboards; ++j) {
+    board(j).style.visibility = 'visible';
+  }
+  for (var j = k + 1; j < gridboards; ++j) {
+    board(j).style.visibility = 'hidden';
+  }
+}
+
+function board(k) {
+  return document.getElementById("b_" + k);
+}
+
+function cellclick(k, m) {
+  if (k >= sizes.length) return;
+  hideboardspast(k);
+  ensurerow(k + 1);
+  showpreview(k + 1);
+  setTimeout(function() { cellclickdelay(k, m); }, 2);
+}
+
+function cellclickdelay(k, m) {
+  if (k >= sizes.length) return;
+  makeboard(k + 1);
+  hideboardspast(k + 1);
+  osize = sizes[k][0];
+  ore = sizes[k][1];
+  oim = sizes[k][2];
+  cx = m % dims;
+  cy = (m - cx) / dims;
+  nsize = osize / 4;
+  nre = ore + ((cx / dims) - 0.5) * osize;
+  nim = oim + ((cy / dims) - 0.5) * osize;
+  setboard(k + 1, nsize, nre, nim);
+  truncateboards(k + 2);
+  hidepreview(k + 1);
+  draw(k + 1);
+}
+
+function start() {
+  setboard(0, 3.0, -0.5, 0,0);
+  makeboard(0);
+  draw(0);
+  hidepreview(0);
+  progress();
+}
+
+ensurerow(0);
+showpreview(0);
+setTimeout(start, 0);
+</script>
