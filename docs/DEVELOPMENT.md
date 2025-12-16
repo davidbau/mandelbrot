@@ -98,13 +98,17 @@ The application's JavaScript is contained within `<script>` tags inside `index.h
 
 You can use the browser's developer console to observe computation progress, worker messages, and GPU status. The `?board=` URL parameter is invaluable for forcing a specific algorithm for testing:
 
-- `?board=cpu`: Force the simple double-precision CPU board.
-- `?board=gpu`: Force the WebGPU float32 board.
-- `?board=ddz`: Force the DD-precision CPU board with rebasing.
-- `?board=gpuz`: Force the DD-precision GPU board with rebasing.
-- `?board=pert`: Force the DD-precision CPU board (perturbation without rebasing).
-- `?board=qdz`: Force the QD-precision CPU board with rebasing.
-- `?board=adaptive`: Force the QD-precision GPU board with adaptive per-pixel scaling.
+| Parameter | Board Class | Description |
+|-----------|-------------|-------------|
+| `?board=cpu` | CpuBoard | Simple float64 CPU board |
+| `?board=gpu` | GpuBoard | WebGPU float32 board |
+| `?board=pert` | PerturbationBoard | DD-precision CPU perturbation (no rebasing) |
+| `?board=ddz` | DDZhuoranBoard | DD-precision CPU with Zhuoran rebasing |
+| `?board=gpuz` | GpuZhuoranBoard | DD-precision GPU with Zhuoran rebasing |
+| `?board=qdpert` | QDPerturbationBoard | QD-precision CPU perturbation (no rebasing) |
+| `?board=qdz` | QDZhuoranBoard | QD-precision CPU with Zhuoran rebasing |
+| `?board=qdcpu` | QDCpuBoard | Simple QD-precision CPU board |
+| `?board=adaptive` | AdaptiveGpuBoard | QD-precision GPU with adaptive per-pixel scaling |
 
 ### Main Thread Debugging with MockWorker
 
