@@ -101,6 +101,57 @@ The traffic controller for computation. It manages a pool of Web Workers, distri
 ### Board Classes (in Workers)
 The actual computation happens inside `Board` objects within the workers. Different boards are optimized for different zoom depths, from simple `CpuBoard` and `GpuBoard` to high-precision `PerturbationBoard` and `GpuZhuoranBoard` for deep zooms beyond 10^15.
 
+#### Board Class Hierarchy
+
+```
+Board (abstract base)
+├── CpuBoard                           Float64 CPU, zoom < 10^13
+├── QDCpuBoard                         QD CPU, simple iteration
+├── PerturbationBoard                  DD perturbation, CPU
+├── QDPerturbationBoard                QD perturbation, CPU
+│
+├── CpuZhuoranBaseBoard                Shared CPU Zhuoran logic
+│   ├── DDZhuoranBoard                 DD precision (via DDReferenceOrbitMixin)
+│   └── QDZhuoranBoard                 QD precision (via QDReferenceOrbitMixin)
+│
+└── GpuBaseBoard                       Shared GPU infrastructure
+    ├── GpuBoard                       Float64 GPU, zoom < 10^13
+    ├── GpuZhuoranBoard                DD GPU perturbation (via DDReferenceOrbitMixin)
+    └── AdaptiveGpuBoard               QD GPU perturbation (via QDReferenceOrbitMixin)
+```
+
+#### Reference Orbit Mixins
+
+Two mixins factor out reference orbit computation shared between CPU and GPU boards:
+
+**DDReferenceOrbitMixin** - Double-double precision (~31 digits):
+- Used by: `DDZhuoranBoard`, `GpuZhuoranBoard`
+- Provides: `initDDReferenceOrbit()`, `extendReferenceOrbit()`, `getRefOrbit()`, etc.
+- Storage: `refOrbit` array of 4-element arrays `[r_hi, r_lo, i_hi, i_lo]`
+
+**QDReferenceOrbitMixin** - Quad-double precision (~62 digits):
+- Used by: `QDZhuoranBoard`, `AdaptiveGpuBoard`
+- Provides: `initQDReferenceOrbit()`, `extendReferenceOrbit()`, `getRefOrbit()`, etc.
+- Storage: `qdRefOrbit` array of 8-element arrays `[re0..re3, im0..im3]`
+
+The mixin pattern enables code sharing between classes with different base classes (CPU vs GPU). For example:
+```javascript
+class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) { ... }
+class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) { ... }
+```
+
+Both classes inherit identical reference orbit logic while maintaining their respective CPU/GPU computation pipelines.
+
+#### Board Selection by Zoom Level
+
+| Zoom Range | Exponent=2 | Exponent>2 |
+|------------|------------|------------|
+| < 10^13    | GpuBoard   | GpuBoard   |
+| 10^13 - 10^28 | GpuZhuoranBoard | GpuZhuoranBoard |
+| > 10^28    | AdaptiveGpuBoard | AdaptiveGpuBoard |
+
+The `AdaptiveGpuBoard` can fall back to CPU computation (`QDZhuoranBoard`) when GPU precision is insufficient for the current zoom level.
+
 ## State Management and URL Synchronization
 
 The application uses a unidirectional data flow:
@@ -161,12 +212,12 @@ The application's JavaScript is contained within `<script>` tags inside `index.h
 
 | Script ID | Approx Lines | Contents |
 |-----------|-------------|----------|
-| `mainCode` | 198-4316 | Core classes (MandelbrotExplorer, StateStore, Config, View, Grid, ZoomManager), UI classes (URLHandler, EventHandler, MovieMode), Scheduler |
-| `workerCode` | 4317-7818 | Board classes and computational algorithms |
-| `mathCode` | 7819-9031 | DD and QD precision math library |
-| `i18nCode` | 9032-9209 | Internationalization messages |
-| `mp4Muxer` | 9210-10171 | Bundled mp4-muxer library |
-| `startApp` | 10172-10186 | Application startup |
+| `mainCode` | 217-4509 | Core classes (MandelbrotExplorer, StateStore, Config, View, Grid, ZoomManager), UI classes (URLHandler, EventHandler, MovieMode), Scheduler |
+| `workerCode` | 4510-9606 | Board classes, mixins (DDReferenceOrbitMixin, QDReferenceOrbitMixin), and computational algorithms |
+| `mathCode` | 9796-11532 | DD and QD precision math library |
+| `i18nCode` | 11533-11711 | Internationalization messages |
+| `mp4Muxer` | 11712-12754 | Bundled mp4-muxer library |
+| `startApp` | 12755-12762 | Application startup |
 
 The line numbers are approximate and shift as the code evolves. The script IDs are used for code coverage reporting.
 
