@@ -3,7 +3,7 @@
  * Generates call graph data from git history for visualization.
  *
  * Usage: node build/build-callgraph.js
- * Output: media/callgraph-data.json
+ * Output: coverage/callgraph-data.js
  */
 
 const { execSync } = require('child_process');
@@ -144,12 +144,31 @@ function extractCallGraph(js, scriptRanges = []) {
     // Detect class declarations
     if (node.type === 'ClassDeclaration' && node.id?.name) {
       const className = node.id.name;
-      const extendsName = node.superClass?.name || null;
+      let extendsName = null;
+      let mixinName = null;
+      let mixinBase = null;
+
+      // Handle simple extends: class Foo extends Bar
+      if (node.superClass?.type === 'Identifier') {
+        extendsName = node.superClass.name;
+      }
+      // Handle mixin pattern: class Foo extends Mixin(Base)
+      else if (node.superClass?.type === 'CallExpression') {
+        if (node.superClass.callee?.type === 'Identifier') {
+          mixinName = node.superClass.callee.name;
+        }
+        if (node.superClass.arguments?.[0]?.type === 'Identifier') {
+          mixinBase = node.superClass.arguments[0].name;
+        }
+      }
+
       const loc = node.start || 0;
       const jsLine = node.loc?.start?.line || offsetToLine(loc, lineOffsets);
       const jsEndLine = node.loc?.end?.line || jsLine;
       classes.set(className, {
         extends: extendsName,
+        mixinName,
+        mixinBase,
         methods: new Set(),
         loc,
         script: getScriptIndex(loc, scriptRanges),
@@ -272,6 +291,13 @@ function extractCallGraph(js, scriptRanges = []) {
     if (data.extends && classes.has(data.extends)) {
       edges.push({ source: name, target: data.extends, type: 'extends' });
     }
+    // Add mixin edges (weak links)
+    if (data.mixinName && functions.has(data.mixinName)) {
+      edges.push({ source: name, target: data.mixinName, type: 'mixin' });
+    }
+    if (data.mixinBase && classes.has(data.mixinBase)) {
+      edges.push({ source: name, target: data.mixinBase, type: 'mixin-base' });
+    }
   }
 
   // Add function/method nodes
@@ -344,8 +370,19 @@ async function main() {
 
   console.log('\n');
 
+  // Ensure coverage directory exists
+  const coverageDir = path.join(__dirname, '..', 'coverage');
+  if (!fs.existsSync(coverageDir)) {
+    fs.mkdirSync(coverageDir, { recursive: true });
+  }
+
+  // Copy HTML viewer to coverage directory
+  const htmlSource = path.join(__dirname, 'callgraph.html');
+  const htmlDest = path.join(coverageDir, 'callgraph.html');
+  fs.copyFileSync(htmlSource, htmlDest);
+
   // Write output as JSONP (allows loading via file:// URL without server)
-  const outputPath = path.join(__dirname, '..', 'media', 'callgraph-data.js');
+  const outputPath = path.join(coverageDir, 'callgraph-data.js');
   const jsonp = `loadCallgraphData(${JSON.stringify(timeline, null, 2)});`;
   fs.writeFileSync(outputPath, jsonp);
   console.log(`Written to ${outputPath}`);

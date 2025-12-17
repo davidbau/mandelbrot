@@ -91,6 +91,17 @@
       stroke-width: 0;
       stroke-opacity: 0;
     }
+    .link.mixin-base {
+      stroke: #e94560;
+      stroke-width: 2px;
+      stroke-opacity: 0.8;
+    }
+    .link.mixin {
+      stroke: #e94560;
+      stroke-width: 1.5px;
+      stroke-opacity: 0.6;
+      stroke-dasharray: 4,2;
+    }
     .link.new {
       animation: fadeIn 0.3s ease-out;
     }
@@ -436,7 +447,7 @@
       const linkEnter = link.enter()
         .append('path')
         .attr('class', d => 'link new ' + (d.type || 'calls'))
-        .attr('marker-end', d => (d.type === 'contains' || d.type === 'samescript') ? null : 'url(#arrowhead)');
+        .attr('marker-end', d => ['contains', 'samescript'].includes(d.type) ? null : 'url(#arrowhead)');
 
       const linkMerge = linkEnter.merge(link)
         .classed('new', false);
