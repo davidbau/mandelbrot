@@ -313,8 +313,9 @@
       const width = container.clientWidth;
       const height = container.clientHeight;
 
+      // Use centered coordinate system: (0,0) is at center of viewport
       const svg = d3.select('svg')
-        .attr('viewBox', [0, 0, width, height]);
+        .attr('viewBox', [-width / 2, -height / 2, width, height]);
 
       // Add zoom behavior
       const g = svg.append('g');
@@ -338,17 +339,26 @@
       g.append('g').attr('class', 'links');
       g.append('g').attr('class', 'nodes');
 
-      // Create simulation with 2:1 elliptical bias (wider than tall)
-      // Use slow annealing for better layout convergence
+      // Create simulation with elliptical bias matching viewport aspect ratio
+      // Forces center at (0,0) since we use centered coordinate system
+      const aspectRatio = width / height;
+      const totalStrength = 0.09;
+      const xStrength = totalStrength / (1 + aspectRatio);
+      const yStrength = totalStrength * aspectRatio / (1 + aspectRatio);
+
       simulation = d3.forceSimulation()
         .force('link', d3.forceLink().id(d => d.id).distance(50))
         .force('charge', d3.forceManyBody().strength(-80))
-        .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('x', d3.forceX(width / 2).strength(0.03))
-        .force('y', d3.forceY(height / 2).strength(0.06))
+        .force('center', d3.forceCenter(0, 0))
+        .force('x', d3.forceX(0).strength(xStrength))
+        .force('y', d3.forceY(0).strength(yStrength))
         .force('collision', d3.forceCollide().radius(15))
         .alphaDecay(0.01)      // Slower cooling (default 0.0228)
         .velocityDecay(0.3);   // More momentum (default 0.4)
+
+      // Track viewport dimensions
+      lastWidth = width;
+      lastHeight = height;
     }
 
     function updateGraph(index) {
@@ -446,7 +456,8 @@
       }, 100);
 
       // Color scale: older nodes are cooler colors, newer are warmer
-      const maxIdx = timeline.length - 1;
+      // Use current index as max so colors are relative to project age at this commit
+      const maxIdx = index || 1; // Avoid division by zero at index 0
 
       // Update links
       const link = g.select('.links')
@@ -501,13 +512,19 @@
           return label.length > 20 ? label.slice(0, 20) + '...' : label;
         });
 
-      // Update simulation with forces scaled by node count
-      // Fewer nodes = weaker centering but larger repulsion radius to spread out
+      // Update simulation with forces scaled by node count and viewport aspect ratio
+      // Fewer nodes = larger collision radius to spread out, but keep elliptical bias constant
+      // Forces center at (0,0) since we use centered coordinate system
       const forceScale = Math.max(0.33, Math.min(1, nodes.length / 200));
       const collisionRadius = 15 + 30 * (1 - forceScale); // 15 at full, 45 at sparse
+      const aspectRatio = width / height;
+      // Keep elliptical centering at full strength so aspect ratio is always visible
+      const totalStrength = 0.09;
+      const xStrength = totalStrength / (1 + aspectRatio);
+      const yStrength = totalStrength * aspectRatio / (1 + aspectRatio);
       simulation.force('charge').strength(-80);
-      simulation.force('x').strength(0.03 * forceScale);
-      simulation.force('y').strength(0.06 * forceScale);
+      simulation.force('x').x(0).strength(xStrength);
+      simulation.force('y').y(0).strength(yStrength);
       simulation.force('collision').radius(collisionRadius);
 
       simulation.nodes(nodes);
@@ -605,9 +622,21 @@
       const container = document.getElementById('graph-container');
       const width = container.clientWidth;
       const height = container.clientHeight;
-      d3.select('svg').attr('viewBox', [0, 0, width, height]);
-      simulation.force('center', d3.forceCenter(width / 2, height / 2));
-      simulation.alpha(0.3).restart();
+
+      // Update centered viewBox - graph stays centered automatically
+      d3.select('svg').attr('viewBox', [-width / 2, -height / 2, width, height]);
+
+      // Update force strengths for new aspect ratio (no forceScale - keep ellipse visible)
+      const aspectRatio = width / height;
+      const totalStrength = 0.09;
+      const xStrength = totalStrength / (1 + aspectRatio);
+      const yStrength = totalStrength * aspectRatio / (1 + aspectRatio);
+
+      simulation.force('x').strength(xStrength);
+      simulation.force('y').strength(yStrength);
+
+      // Gentle restart to adapt to new aspect ratio
+      simulation.alpha(0.1).restart();
     });
   </script>
   <!-- JSONP data load - works with file:// URLs -->
