@@ -164,14 +164,26 @@
       display: flex;
       justify-content: space-between;
     }
-    #date { color: #e94560; font-weight: 500; }
+    #date {
+      color: #e94560;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    #date:hover { text-decoration: underline; }
     #message {
       flex: 1;
       margin-left: 20px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      cursor: pointer;
     }
+    #message:hover { text-decoration: underline; }
+    #hash {
+      cursor: pointer;
+      font-family: monospace;
+    }
+    #hash:hover { text-decoration: underline; }
     .tooltip {
       position: absolute;
       background: rgba(240,240,240,0.95);
@@ -249,6 +261,11 @@
       return timeline.length - 1;
     }
 
+    function shouldAutoPlay() {
+      const hash = window.location.hash.slice(1);
+      return hash === 'play' || hash.startsWith('play&') || hash.includes('&play');
+    }
+
     function updateURL(index) {
       const hash = timeline[index]?.hash;
       if (hash) {
@@ -299,13 +316,33 @@
       const playBtn = document.getElementById('play-btn');
       playBtn.addEventListener('click', togglePlay);
 
+      // Setup commit info click handlers
+      document.getElementById('hash').addEventListener('click', () => {
+        const hash = timeline[currentIndex]?.hash;
+        if (hash) window.open(`https://github.com/davidbau/mandelbrot/commit/${hash}`, '_blank');
+      });
+      document.getElementById('message').addEventListener('click', () => {
+        const hash = timeline[currentIndex]?.hash;
+        if (hash) window.open(`https://github.com/davidbau/mandelbrot/commit/${hash}`, '_blank');
+      });
+      document.getElementById('date').addEventListener('click', () => {
+        const hash = timeline[currentIndex]?.hash;
+        if (hash) window.open(`https://github.com/davidbau/mandelbrot/blob/${hash}/index.html`, '_blank');
+      });
+
       // Initialize SVG
       setupSVG();
 
-      // Read initial position from URL hash
-      currentIndex = getIndexFromURL();
+      // Read initial position from URL hash, or start at 0 for auto-play
+      const autoPlay = shouldAutoPlay();
+      currentIndex = autoPlay ? 0 : getIndexFromURL();
       slider.value = currentIndex;
       updateGraph(currentIndex);
+
+      // Start playback if #play is in URL
+      if (autoPlay) {
+        setTimeout(togglePlay, 100);  // Small delay to let graph render first
+      }
     }
 
     function setupSVG() {
