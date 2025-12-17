@@ -53,6 +53,10 @@
     .node.class circle {
       stroke-width: 2.5px;
     }
+    .node.mixin circle {
+      stroke-width: 2.5px;
+      stroke-dasharray: 3,3;
+    }
     .node.method circle {
       stroke-dasharray: 2,2;
     }
@@ -352,11 +356,13 @@
 
       // Update UI
       const classCount = snapshot.nodes.filter(n => n.type === 'class').length;
+      const mixinCount = snapshot.nodes.filter(n => n.type === 'mixin').length;
       const methodCount = snapshot.nodes.filter(n => n.type === 'method').length;
       const funcCount = snapshot.nodes.filter(n => n.type === 'function').length;
       const lineCount = snapshot.lineCount || 0;
+      const mixinText = mixinCount > 0 ? `, ${mixinCount} mixins` : '';
       document.getElementById('stats').textContent =
-        `${lineCount.toLocaleString()} lines, ${classCount} classes, ${methodCount} methods, ${funcCount} functions`;
+        `${lineCount.toLocaleString()} lines, ${classCount} classes${mixinText}, ${methodCount} methods, ${funcCount} functions`;
       document.getElementById('date').textContent = snapshot.date;
       document.getElementById('message').textContent = snapshot.message;
       document.getElementById('hash').textContent = snapshot.hash;
@@ -468,7 +474,7 @@
           .on('end', dragended));
 
       nodeEnter.append('circle')
-        .attr('r', d => d.type === 'class' ? 10 : 6);
+        .attr('r', d => (d.type === 'class' || d.type === 'mixin') ? 10 : 6);
 
       nodeEnter.append('text')
         .attr('dx', 10)

@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mandelbrot Call Graph Evolution</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #fff;
+      color: #333;
+      overflow: hidden;
+    }
+    #container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    #header {
+      padding: 12px 20px;
+      background: #f5f5f5;
+      border-bottom: 1px solid #ddd;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    h1 {
+      font-size: 18px;
+      font-weight: 500;
+    }
+    #stats {
+      font-size: 14px;
+      color: #666;
+    }
+    #graph-container {
+      flex: 1;
+      position: relative;
+    }
+    svg {
+      width: 100%;
+      height: 100%;
+    }
+    .node {
+      cursor: pointer;
+    }
+    .node circle {
+      stroke: #333;
+      stroke-width: 1.5px;
+      transition: r 0.3s ease;
+    }
+    .node.class circle {
+      stroke-width: 2.5px;
+    }
+    .node.mixin circle {
+      stroke-width: 2.5px;
+      stroke-dasharray: 3,3;
+    }
+    .node.method circle {
+      stroke-dasharray: 2,2;
+    }
+    .node text {
+      font-size: 9px;
+      fill: #333;
+      pointer-events: none;
+    }
+    .node.new circle {
+      animation: pulse 0.5s ease-out;
+    }
+    @keyframes pulse {
+      0% { r: 0; opacity: 0; }
+      50% { opacity: 1; }
+      100% { r: 6; opacity: 1; }
+    }
+    .link {
+      stroke: #666;
+      stroke-opacity: 0.5;
+      stroke-width: 1.5px;
+      fill: none;
+    }
+    .link.extends {
+      stroke: #e94560;
+      stroke-width: 2px;
+      stroke-opacity: 0.8;
+    }
+    .link.contains {
+      stroke: #999;
+      stroke-width: 1px;
+      stroke-opacity: 0.3;
+      stroke-dasharray: 2,4;
+    }
+    .link.samescript {
+      stroke: none;
+      stroke-width: 0;
+      stroke-opacity: 0;
+    }
+    .link.mixin-base {
+      stroke: #e94560;
+      stroke-width: 2px;
+      stroke-opacity: 0.8;
+    }
+    .link.mixin {
+      stroke: #e94560;
+      stroke-width: 1.5px;
+      stroke-opacity: 0.6;
+      stroke-dasharray: 4,2;
+    }
+    .link.new {
+      animation: fadeIn 0.3s ease-out;
+    }
+    @keyframes fadeIn {
+      from { stroke-opacity: 0; }
+      to { stroke-opacity: 0.6; }
+    }
+    #controls {
+      padding: 15px 20px;
+      background: #f5f5f5;
+      border-top: 1px solid #ddd;
+    }
+    #timeline-container {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+    #timeline {
+      flex: 1;
+      height: 8px;
+      -webkit-appearance: none;
+      background: #ddd;
+      border-radius: 4px;
+      outline: none;
+    }
+    #timeline::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      background: #e94560;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    #play-btn {
+      background: #e94560;
+      border: none;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      min-width: 80px;
+    }
+    #play-btn:hover {
+      background: #ff6b6b;
+    }
+    #commit-info {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #666;
+      display: flex;
+      justify-content: space-between;
+    }
+    #date { color: #e94560; font-weight: 500; }
+    #message {
+      flex: 1;
+      margin-left: 20px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tooltip {
+      position: absolute;
+      background: rgba(240,240,240,0.95);
+      color: #333;
+      padding: 8px 12px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      font-size: 12px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="header">
+      <h1><a href="https://github.com/davidbau/mandelbrot/commits/main" style="color: inherit; text-decoration: none;">Mandelbrot Call Graph Evolution</a></h1>
+      <div id="stats">Loading...</div>
+    </div>
+    <div id="graph-container">
+      <svg></svg>
+      <div class="tooltip"></div>
+    </div>
+    <div id="controls">
+      <div id="timeline-container">
+        <button id="play-btn">Play</button>
+        <input type="range" id="timeline" min="0" max="100" value="0">
+      </div>
+      <div id="commit-info">
+        <span id="date">-</span>
+        <span id="message">-</span>
+        <span id="hash">-</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let timeline = [];
+    let currentIndex = 0;
+    let isPlaying = false;
+    let playInterval = null;
+    let simulation = null;
+
+    // Persistent node positions across timeline scrubbing
+    const nodePositions = new Map();
+
+    // Color scale for nodes based on when they were added
+    const colorScale = d3.scaleSequential(d3.interpolateViridis);
+
+    // Platform-specific modifier key hint
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const modifierHint = isMac ? '⌘-click' : 'Ctrl-click';
+
+    // URL hash handling for shareable links
+    function getIndexFromURL() {
+      const hash = window.location.hash.slice(1);
+      const params = new URLSearchParams(hash);
+
+      // Try index first
+      if (params.has('i')) {
+        const idx = parseInt(params.get('i'));
+        if (idx >= 0 && idx < timeline.length) return idx;
+      }
+
+      // Try commit hash
+      if (params.has('c')) {
+        const commitHash = params.get('c');
+        const idx = timeline.findIndex(s => s.hash === commitHash || s.hash.startsWith(commitHash));
+        if (idx >= 0) return idx;
+      }
+
+      // Default to last (most recent)
+      return timeline.length - 1;
+    }
+
+    function updateURL(index) {
+      const hash = timeline[index]?.hash;
+      if (hash) {
+        history.replaceState(null, '', `#c=${hash}`);
+      }
+    }
+
+    // JSONP callback - called when callgraph-data.js loads
+    function loadCallgraphData(data) {
+      timeline = data;
+      initWithData();
+    }
+
+    // Initialize after data loads
+    function initWithData() {
+      if (timeline.length === 0) {
+        document.getElementById('stats').textContent = 'No data found';
+        return;
+      }
+
+      // Track when each node first appeared
+      const nodeFirstSeen = new Map();
+      timeline.forEach((snapshot, idx) => {
+        snapshot.nodes.forEach(node => {
+          if (!nodeFirstSeen.has(node.id)) {
+            nodeFirstSeen.set(node.id, idx);
+          }
+        });
+      });
+
+      // Attach first-seen index to all nodes
+      timeline.forEach(snapshot => {
+        snapshot.nodes.forEach(node => {
+          node.firstSeen = nodeFirstSeen.get(node.id);
+        });
+      });
+
+      // Setup timeline slider
+      const slider = document.getElementById('timeline');
+      slider.max = timeline.length - 1;
+      slider.addEventListener('input', (e) => {
+        currentIndex = parseInt(e.target.value);
+        updateGraph(currentIndex);
+        updateURL(currentIndex);
+      });
+
+      // Setup play button
+      const playBtn = document.getElementById('play-btn');
+      playBtn.addEventListener('click', togglePlay);
+
+      // Initialize SVG
+      setupSVG();
+
+      // Read initial position from URL hash
+      currentIndex = getIndexFromURL();
+      slider.value = currentIndex;
+      updateGraph(currentIndex);
+    }
+
+    function setupSVG() {
+      const container = document.getElementById('graph-container');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      const svg = d3.select('svg')
+        .attr('viewBox', [0, 0, width, height]);
+
+      // Add zoom behavior
+      const g = svg.append('g');
+      svg.call(d3.zoom()
+        .scaleExtent([0.1, 4])
+        .on('zoom', (event) => g.attr('transform', event.transform)));
+
+      // Add arrow marker for directed edges
+      svg.append('defs').append('marker')
+        .attr('id', 'arrowhead')
+        .attr('viewBox', '-0 -5 10 10')
+        .attr('refX', 16)
+        .attr('refY', 0)
+        .attr('orient', 'auto')
+        .attr('markerWidth', 5)
+        .attr('markerHeight', 5)
+        .append('path')
+        .attr('d', 'M 0,-5 L 10,0 L 0,5')
+        .attr('fill', '#666');
+
+      g.append('g').attr('class', 'links');
+      g.append('g').attr('class', 'nodes');
+
+      // Create simulation with 2:1 elliptical bias (wider than tall)
+      // Use slow annealing for better layout convergence
+      simulation = d3.forceSimulation()
+        .force('link', d3.forceLink().id(d => d.id).distance(50))
+        .force('charge', d3.forceManyBody().strength(-80))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('x', d3.forceX(width / 2).strength(0.03))
+        .force('y', d3.forceY(height / 2).strength(0.06))
+        .force('collision', d3.forceCollide().radius(15))
+        .alphaDecay(0.01)      // Slower cooling (default 0.0228)
+        .velocityDecay(0.3);   // More momentum (default 0.4)
+    }
+
+    function updateGraph(index) {
+      const snapshot = timeline[index];
+      if (!snapshot) return;
+
+      const container = document.getElementById('graph-container');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      // Update UI
+      const classCount = snapshot.nodes.filter(n => n.type === 'class').length;
+      const mixinCount = snapshot.nodes.filter(n => n.type === 'mixin').length;
+      const methodCount = snapshot.nodes.filter(n => n.type === 'method').length;
+      const funcCount = snapshot.nodes.filter(n => n.type === 'function').length;
+      const lineCount = snapshot.lineCount || 0;
+      const mixinText = mixinCount > 0 ? `, ${mixinCount} mixins` : '';
+      document.getElementById('stats').textContent =
+        `${lineCount.toLocaleString()} lines, ${classCount} classes${mixinText}, ${methodCount} methods, ${funcCount} functions`;
+      document.getElementById('date').textContent = snapshot.date;
+      document.getElementById('message').textContent = snapshot.message;
+      document.getElementById('hash').textContent = snapshot.hash;
+
+      const svg = d3.select('svg');
+      const g = svg.select('g');
+
+      // Save current node positions before updating
+      if (simulation) {
+        simulation.nodes().forEach(n => {
+          if (n.x !== undefined && n.y !== undefined) {
+            nodePositions.set(n.id, { x: n.x, y: n.y });
+          }
+        });
+      }
+
+      // Prepare data with positions preserved from previous frame
+      const nodes = snapshot.nodes.map(n => {
+        const pos = nodePositions.get(n.id);
+        const isNew = n.firstSeen === index;
+        if (pos) {
+          // Existing node: restore position, fix it initially
+          return { ...n, isNew, x: pos.x, y: pos.y, fx: pos.x, fy: pos.y };
+        } else {
+          // New node: position near center with small random offset
+          return {
+            ...n,
+            isNew,
+            x: width / 2 + (Math.random() - 0.5) * 100,
+            y: height / 2 + (Math.random() - 0.5) * 100
+          };
+        }
+      });
+
+      const edges = snapshot.edges.map(e => ({
+        source: e.source,
+        target: e.target,
+        type: e.type || 'calls'
+      }));
+
+      // Add invisible "contains" links between classes and their methods
+      const nodeIds = new Set(nodes.map(n => n.id));
+      nodes.forEach(n => {
+        if (n.type === 'method' && n.id.includes('.')) {
+          const className = n.id.split('.')[0];
+          if (nodeIds.has(className)) {
+            edges.push({ source: className, target: n.id, type: 'contains' });
+          }
+        }
+      });
+
+      // Add invisible "same-script" links between nodes in the same script element
+      // Group nodes by script
+      const byScript = new Map();
+      nodes.forEach(n => {
+        if (n.script !== undefined) {
+          if (!byScript.has(n.script)) byScript.set(n.script, []);
+          byScript.get(n.script).push(n.id);
+        }
+      });
+      // Create edges between nodes in same script (limit to avoid O(n^2) explosion)
+      byScript.forEach(nodeList => {
+        if (nodeList.length > 1 && nodeList.length <= 50) {
+          // Connect each node to a "hub" (first node) to create star topology
+          const hub = nodeList[0];
+          for (let i = 1; i < nodeList.length; i++) {
+            edges.push({ source: hub, target: nodeList[i], type: 'samescript' });
+          }
+        }
+      });
+
+      // After a short delay, release fixed positions so graph can settle
+      setTimeout(() => {
+        nodes.forEach(n => { n.fx = null; n.fy = null; });
+        simulation.alpha(0.5).restart();
+      }, 100);
+
+      // Color scale: older nodes are cooler colors, newer are warmer
+      const maxIdx = timeline.length - 1;
+
+      // Update links
+      const link = g.select('.links')
+        .selectAll('path')
+        .data(edges, d => `${d.source}-${d.target}`);
+
+      link.exit().remove();
+
+      const linkEnter = link.enter()
+        .append('path')
+        .attr('class', d => 'link new ' + (d.type || 'calls'))
+        .attr('marker-end', d => ['contains', 'samescript'].includes(d.type) ? null : 'url(#arrowhead)');
+
+      const linkMerge = linkEnter.merge(link)
+        .classed('new', false);
+
+      // Update nodes
+      const node = g.select('.nodes')
+        .selectAll('.node')
+        .data(nodes, d => d.id);
+
+      node.exit().remove();
+
+      const nodeEnter = node.enter()
+        .append('g')
+        .attr('class', d => 'node ' + (d.type || 'function') + (d.isNew ? ' new' : ''))
+        .call(d3.drag()
+          .on('start', dragstarted)
+          .on('drag', dragged)
+          .on('end', dragended));
+
+      nodeEnter.append('circle')
+        .attr('r', d => (d.type === 'class' || d.type === 'mixin') ? 10 : 6);
+
+      nodeEnter.append('text')
+        .attr('dx', 10)
+        .attr('dy', 3);
+
+      const nodeMerge = nodeEnter.merge(node);
+
+      nodeMerge.select('circle')
+        .attr('fill', d => {
+          const t = d.firstSeen / maxIdx;
+          // Offset to avoid dark colors, use brighter range (0.4 to 1.0)
+          return d3.interpolateTurbo(0.15 + t * 0.7);
+        });
+
+      nodeMerge.select('text')
+        .text(d => {
+          // For methods, strip class prefix (show full name on hover)
+          let label = d.type === 'method' && d.id.includes('.') ? d.id.split('.').pop() : d.id;
+          return label.length > 20 ? label.slice(0, 20) + '...' : label;
+        });
+
+      // Update simulation with forces scaled by node count
+      // Fewer nodes = weaker centering but larger repulsion radius to spread out
+      const forceScale = Math.max(0.33, Math.min(1, nodes.length / 200));
+      const collisionRadius = 15 + 30 * (1 - forceScale); // 15 at full, 45 at sparse
+      simulation.force('charge').strength(-80);
+      simulation.force('x').strength(0.03 * forceScale);
+      simulation.force('y').strength(0.06 * forceScale);
+      simulation.force('collision').radius(collisionRadius);
+
+      simulation.nodes(nodes);
+      simulation.force('link').links(edges);
+      simulation.alpha(0.3).restart();
+
+      simulation.on('tick', () => {
+        linkMerge.attr('d', d => {
+          const dx = d.target.x - d.source.x;
+          const dy = d.target.y - d.source.y;
+          return `M${d.source.x},${d.source.y}L${d.target.x},${d.target.y}`;
+        });
+
+        nodeMerge.attr('transform', d => `translate(${d.x},${d.y})`);
+      });
+
+      // Tooltip and click handlers
+      const tooltip = d3.select('.tooltip');
+      nodeMerge
+        .on('mouseover', (event, d) => {
+          tooltip
+            .style('opacity', 1)
+            .style('left', (event.pageX + 10) + 'px')
+            .style('top', (event.pageY - 10) + 'px')
+            .html(`<strong>${d.id}</strong><br>Type: ${d.type || 'function'}<br>Added: ${timeline[d.firstSeen]?.date || 'unknown'}` +
+                  (d.line ? `<br>Lines: ${d.line}-${d.endLine}` : '') +
+                  `<br><em>${modifierHint} to view on GitHub</em>`);
+        })
+        .on('mouseout', () => {
+          tooltip.style('opacity', 0);
+        })
+        .on('click', (event, d) => {
+          // Command-click (Mac) or Ctrl-click (Windows/Linux) opens GitHub
+          if (event.metaKey || event.ctrlKey) {
+            event.preventDefault();
+            const hash = snapshot.hash;
+            const lineRange = d.line && d.endLine ? `#L${d.line}-L${d.endLine}` : '';
+            const url = `https://github.com/davidbau/mandelbrot/blob/${hash}/index.html${lineRange}`;
+            window.open(url, '_blank');
+          }
+        });
+    }
+
+    function togglePlay() {
+      const btn = document.getElementById('play-btn');
+      const slider = document.getElementById('timeline');
+
+      if (isPlaying) {
+        isPlaying = false;
+        btn.textContent = 'Play';
+        clearInterval(playInterval);
+        updateURL(currentIndex);  // Update URL when pausing
+      } else {
+        isPlaying = true;
+        btn.textContent = 'Pause';
+
+        // Start from beginning if at end
+        if (currentIndex >= timeline.length - 1) {
+          currentIndex = 0;
+        }
+
+        playInterval = setInterval(() => {
+          currentIndex++;
+          if (currentIndex >= timeline.length) {
+            currentIndex = timeline.length - 1;
+            updateURL(currentIndex);
+            togglePlay();
+            return;
+          }
+          slider.value = currentIndex;
+          updateGraph(currentIndex);
+        }, 500);
+      }
+    }
+
+    function dragstarted(event, d) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+    }
+
+    function dragged(event, d) {
+      d.fx = event.x;
+      d.fy = event.y;
+    }
+
+    function dragended(event, d) {
+      if (!event.active) simulation.alphaTarget(0);
+      d.fx = null;
+      d.fy = null;
+    }
+
+    // Handle resize
+    window.addEventListener('resize', () => {
+      const container = document.getElementById('graph-container');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      d3.select('svg').attr('viewBox', [0, 0, width, height]);
+      simulation.force('center', d3.forceCenter(width / 2, height / 2));
+      simulation.alpha(0.3).restart();
+    });
+  </script>
+  <!-- JSONP data load - works with file:// URLs -->
+  <script src="callgraph-data.js" onerror="document.getElementById('stats').textContent='Run: npm run callgraph'"></script>
+</body>
+</html>

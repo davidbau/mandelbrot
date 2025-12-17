@@ -205,8 +205,51 @@ function extractCallGraph(js, scriptRanges = []) {
       classes.get(currentClass)?.methods.add(methodName);
     } else if (node.type === 'VariableDeclarator' &&
                node.id?.name &&
-               node.init?.type?.includes('Function')) {
+               (node.init?.type?.includes('Function') || node.init?.type === 'ArrowFunctionExpression')) {
       name = node.id.name;
+
+      // Check if this is a mixin pattern: (Base) => class extends Base { ... }
+      const arrowBody = node.init?.body;
+      if (node.init?.type === 'ArrowFunctionExpression' && arrowBody?.type === 'ClassExpression') {
+        type = 'mixin';
+        // Register the mixin as a class-like entity to track its methods
+        const mixinName = node.id.name;
+        const loc = node.start || 0;
+        const jsLine = node.loc?.start?.line || offsetToLine(loc, lineOffsets);
+        const jsEndLine = node.loc?.end?.line || jsLine;
+        classes.set(mixinName, {
+          extends: null,
+          mixinName: null,
+          mixinBase: null,
+          methods: new Set(),
+          loc,
+          script: getScriptIndex(loc, scriptRanges),
+          line: getHtmlLine(jsLine, loc),
+          endLine: getHtmlLine(jsEndLine, loc),
+          isMixin: true
+        });
+        // Recurse into the class body to find methods
+        if (arrowBody.body?.body) {
+          for (const member of arrowBody.body.body) {
+            if (member.type === 'MethodDefinition' && member.key) {
+              const methodName = member.key.name || member.key.value;
+              classes.get(mixinName)?.methods.add(methodName);
+              const methodLoc = member.start || 0;
+              const methodJsLine = member.loc?.start?.line || offsetToLine(methodLoc, lineOffsets);
+              const methodJsEndLine = member.loc?.end?.line || methodJsLine;
+              functions.set(`${mixinName}.${methodName}`, {
+                calls: new Set(),
+                loc: methodLoc,
+                type: 'method',
+                script: getScriptIndex(methodLoc, scriptRanges),
+                line: getHtmlLine(methodJsLine, methodLoc),
+                endLine: getHtmlLine(methodJsEndLine, methodLoc)
+              });
+            }
+          }
+        }
+        name = null; // Don't add as a regular function, we added it as a class
+      }
     }
 
     if (name && !name.includes('undefined')) {
@@ -284,15 +327,16 @@ function extractCallGraph(js, scriptRanges = []) {
   const nodes = [];
   const edges = [];
 
-  // Add class nodes
+  // Add class nodes (including mixins)
   for (const [name, data] of classes) {
-    nodes.push({ id: name, type: 'class', script: data.script, line: data.line, endLine: data.endLine });
+    const nodeType = data.isMixin ? 'mixin' : 'class';
+    nodes.push({ id: name, type: nodeType, script: data.script, line: data.line, endLine: data.endLine });
     // Add inheritance edge
     if (data.extends && classes.has(data.extends)) {
       edges.push({ source: name, target: data.extends, type: 'extends' });
     }
     // Add mixin edges (weak links)
-    if (data.mixinName && functions.has(data.mixinName)) {
+    if (data.mixinName && classes.has(data.mixinName)) {
       edges.push({ source: name, target: data.mixinName, type: 'mixin' });
     }
     if (data.mixinBase && classes.has(data.mixinBase)) {
