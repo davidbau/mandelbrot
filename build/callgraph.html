@@ -164,14 +164,26 @@
       display: flex;
       justify-content: space-between;
     }
-    #date { color: #e94560; font-weight: 500; }
+    #date {
+      color: #e94560;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    #date:hover { text-decoration: underline; }
     #message {
       flex: 1;
       margin-left: 20px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      cursor: pointer;
     }
+    #message:hover { text-decoration: underline; }
+    #hash {
+      cursor: pointer;
+      font-family: monospace;
+    }
+    #hash:hover { text-decoration: underline; }
     .tooltip {
       position: absolute;
       background: rgba(240,240,240,0.95);
@@ -249,6 +261,11 @@
       return timeline.length - 1;
     }
 
+    function shouldAutoPlay() {
+      const hash = window.location.hash.slice(1);
+      return hash === 'play' || hash.startsWith('play&') || hash.includes('&play');
+    }
+
     function updateURL(index) {
       const hash = timeline[index]?.hash;
       if (hash) {
@@ -259,7 +276,8 @@
     // JSONP callback - called when callgraph-data.js loads
     function loadCallgraphData(data) {
       timeline = data;
-      initWithData();
+      // Wait for layout to complete before initializing
+      requestAnimationFrame(() => requestAnimationFrame(() => initWithData()));
     }
 
     // Initialize after data loads
@@ -299,13 +317,33 @@
       const playBtn = document.getElementById('play-btn');
       playBtn.addEventListener('click', togglePlay);
 
+      // Setup commit info click handlers
+      document.getElementById('hash').addEventListener('click', () => {
+        const hash = timeline[currentIndex]?.hash;
+        if (hash) window.open(`https://github.com/davidbau/mandelbrot/commit/${hash}`, '_blank');
+      });
+      document.getElementById('message').addEventListener('click', () => {
+        const hash = timeline[currentIndex]?.hash;
+        if (hash) window.open(`https://github.com/davidbau/mandelbrot/commit/${hash}`, '_blank');
+      });
+      document.getElementById('date').addEventListener('click', () => {
+        const hash = timeline[currentIndex]?.hash;
+        if (hash) window.open(`https://github.com/davidbau/mandelbrot/blob/${hash}/index.html`, '_blank');
+      });
+
       // Initialize SVG
       setupSVG();
 
-      // Read initial position from URL hash
-      currentIndex = getIndexFromURL();
+      // Read initial position from URL hash, or start at 0 for auto-play
+      const autoPlay = shouldAutoPlay();
+      currentIndex = autoPlay ? 0 : getIndexFromURL();
       slider.value = currentIndex;
       updateGraph(currentIndex);
+
+      // Start playback if #play is in URL
+      if (autoPlay) {
+        setTimeout(togglePlay, 100);  // Small delay to let graph render first
+      }
     }
 
     function setupSVG() {
@@ -355,10 +393,6 @@
         .force('collision', d3.forceCollide().radius(15))
         .alphaDecay(0.01)      // Slower cooling (default 0.0228)
         .velocityDecay(0.3);   // More momentum (default 0.4)
-
-      // Track viewport dimensions
-      lastWidth = width;
-      lastHeight = height;
     }
 
     function updateGraph(index) {
@@ -617,16 +651,19 @@
       d.fy = null;
     }
 
-    // Handle resize
-    window.addEventListener('resize', () => {
+    // Handle resize/orientation change
+    function handleResize() {
       const container = document.getElementById('graph-container');
       const width = container.clientWidth;
       const height = container.clientHeight;
 
+      // Skip if dimensions are invalid (layout not ready)
+      if (width === 0 || height === 0) return;
+
       // Update centered viewBox - graph stays centered automatically
       d3.select('svg').attr('viewBox', [-width / 2, -height / 2, width, height]);
 
-      // Update force strengths for new aspect ratio (no forceScale - keep ellipse visible)
+      // Update force strengths for new aspect ratio
       const aspectRatio = width / height;
       const totalStrength = 0.09;
       const xStrength = totalStrength / (1 + aspectRatio);
@@ -637,6 +674,13 @@
 
       // Gentle restart to adapt to new aspect ratio
       simulation.alpha(0.1).restart();
+    }
+
+    window.addEventListener('resize', handleResize);
+
+    // Mobile orientation change - dimensions update after a delay on iOS
+    window.addEventListener('orientationchange', () => {
+      setTimeout(handleResize, 100);
     });
   </script>
   <!-- JSONP data load - works with file:// URLs -->
