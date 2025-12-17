@@ -12,7 +12,8 @@
     "test:stress": "jest --testMatch='**/tests/**/*.stress.js' --verbose",
     "test:coverage": "node tests/scripts/run-coverage.js",
     "test:coverage:integration": "COLLECT_COVERAGE=1 jest tests/integration --runInBand --globalSetup ./tests/global-setup.js --globalTeardown ./tests/global-teardown.js && nyc report --reporter=html --reporter=text",
-    "bench": "jest --testMatch='**/tests/**/*.bench.js' --verbose"
+    "bench": "jest --testMatch='**/tests/**/*.bench.js' --verbose",
+    "callgraph": "node build/build-callgraph.js"
   },
   "jest": {
     "testEnvironment": "node",
