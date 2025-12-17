@@ -335,27 +335,33 @@ class MandelbrotExplorer {
 
     // Convert zoom/size from URL to absolute size
     // zoomFromUrl: {mantissa, exponent} from z= parameter
+    // sizeFromUrl: {mantissa, exponent} from s= parameter (legacy)
     let actualSize = null;
-    if (this.config.zoomFromUrl !== undefined) {
-      const zoom = this.config.zoomFromUrl;
-      delete this.config.zoomFromUrl;
-      if (typeof zoom === 'object') {
-        // z= parameter: {mantissa, exponent} for extreme zoom values
-        const { mantissa, exponent } = zoom;
-        // Compute size = firstsize / zoom = (firstsize / mantissa) * 10^(-exponent)
-        // Now firstsize has the correct aspect-ratio-adjusted value
-        const baseSize = this.config.firstsize / mantissa;
-        const size = baseSize * Math.pow(10, -exponent);
-        if (size === 0 || !isFinite(size)) {
-          // Cap at ~1e310 zoom to ensure pixel sizes remain representable
-          console.warn(`Zoom too extreme, capping at maximum supported zoom (~1e310)`);
-          actualSize = 3e-310;
-        } else {
-          actualSize = size;
-        }
+    if (this.config.sizeFromUrl !== undefined) {
+      // s= parameter: size value directly (e.g., s=1e-15)
+      const { mantissa, exponent } = this.config.sizeFromUrl;
+      delete this.config.sizeFromUrl;
+      const size = mantissa * Math.pow(10, exponent);
+      if (size === 0 || !isFinite(size)) {
+        console.warn(`Size too extreme, capping at minimum supported size (~3e-310)`);
+        actualSize = 3e-310;
       } else {
-        // s= parameter: simple zoom factor (3.0 / size from URL)
-        actualSize = this.config.firstsize / zoom;
+        actualSize = size;
+      }
+    } else if (this.config.zoomFromUrl !== undefined) {
+      // z= parameter: {mantissa, exponent} for extreme zoom values
+      const { mantissa, exponent } = this.config.zoomFromUrl;
+      delete this.config.zoomFromUrl;
+      // Compute size = firstsize / zoom = (firstsize / mantissa) * 10^(-exponent)
+      // Now firstsize has the correct aspect-ratio-adjusted value
+      const baseSize = this.config.firstsize / mantissa;
+      const size = baseSize * Math.pow(10, -exponent);
+      if (size === 0 || !isFinite(size)) {
+        // Cap at ~1e310 zoom to ensure pixel sizes remain representable
+        console.warn(`Zoom too extreme, capping at maximum supported zoom (~1e310)`);
+        actualSize = 3e-310;
+      } else {
+        actualSize = size;
       }
     }
 
@@ -1142,6 +1148,7 @@ class View {
     this.it = 0;
     this.hi = [[0, 1, 1, 0]];
     this.convergedData.clear();
+    this.boardStartTime = Date.now();
   }
 
   setParentView(parentView) {
@@ -1474,7 +1481,22 @@ class View {
     const maxEscape = this.nn.reduce((a, b) => Math.max(a, b), 0)
     this.nn.reduce((iMin, x, i, arr) => x < arr[iMin] ? i : iMin, 0);
     const boardName = this.boardType || 'Board';
-    return `${boardName} ${this.id}:\n` +
+
+    // Calculate performance metrics
+    const elapsedSecs = (Date.now() - this.boardStartTime) / 1000;
+    const finishedPixels = this.di + this.ch;
+    const itersPerSec = elapsedSecs > 0 ? this.it / elapsedSecs : 0;
+    const pixelsPerSec = elapsedSecs > 0 ? finishedPixels / elapsedSecs : 0;
+
+    // Format rate: always show 3 significant digits, readable format
+    const formatRate = (r) => {
+      if (r === 0) return '0';
+      if (r >= 1000) return formatLargeInt(Math.round(r));  // comma-formatted integers
+      return r.toPrecision(3);  // handles 0.001 to 999, and scientific for very small/large
+    };
+
+    return `${formatRate(itersPerSec)} iter/s, ${formatRate(pixelsPerSec)} px/s (${elapsedSecs.toFixed(1)}s)\n` +
+           `${boardName} ${this.id}:\n` +
            `${this.di} diverged, ${this.un} unfinished, ${this.ch} chaotic\n` +
            `max period ${maxPeriod}, max escape ${maxEscape}\n` +
            `${this.workerInfo}\n` +
@@ -2703,7 +2725,7 @@ class URLHandler {
       {
         name: 'z',
         parse: (val, configUpdates) => {
-          // URLSearchParams decodes '+' as space, convert back for, e.g., 3e+20 
+          // URLSearchParams decodes '+' as space, convert back for, e.g., 3e+20
           val = val.replace(/ /g, '+');
           // Parse scientific notation to handle extreme zoom values (e.g., 1e400)
           const { mantissa, exponent } = this.parseScientificNotation(val);
@@ -2711,6 +2733,17 @@ class URLHandler {
           // aspect-ratio-adjusted firstsize
           // which isn't available until after initSizes() is called
           this.config.zoomFromUrl = { mantissa, exponent };
+        }
+      },
+      {
+        name: 's',
+        parse: (val, configUpdates) => {
+          // Legacy size parameter (e.g., s=1e-15 means view size of 1e-15)
+          // Read-only: we accept it but output z= in URLs
+          val = val.replace(/ /g, '+');
+          const { mantissa, exponent } = this.parseScientificNotation(val);
+          // Store size directly - will be used as actualSize in initSizes()
+          this.config.sizeFromUrl = { mantissa, exponent };
         }
       },
       {
