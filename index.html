@@ -7037,6 +7037,7 @@ class GpuBaseBoard extends Board {
     this.computePromise = null;  // Track current async computation
     this.lastReportedIters = null;
     this.cpuStatus = null;
+    this._readPixelBufferPromise = null;  // Lock for readPixelBuffer
   }
 
   checkSpike(size, re, im) {
@@ -7225,6 +7226,7 @@ class GpuBaseBoard extends Board {
   /**
    * Read the pixels buffer from GPU and return as ArrayBuffer.
    * Subclasses must have created buffers.pixels and buffers.stagingPixels.
+   * Uses a lock to prevent concurrent mapAsync calls.
    * @returns {Promise<ArrayBuffer>} The pixel buffer data
    */
   async readPixelBuffer() {
@@ -7232,34 +7234,49 @@ class GpuBaseBoard extends Board {
       return null;
     }
 
-    const bytesPerPixel = this.constructor.BYTES_PER_PIXEL;
-    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
-    const bufferSize = dimsArea * bytesPerPixel;
-
-    // Create staging buffer if not present
-    if (!this.buffers.stagingPixels) {
-      this.buffers.stagingPixels = this.device.createBuffer({
-        size: bufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer (serialization)'
-      });
+    // Wait for any pending read to complete before starting a new one
+    if (this._readPixelBufferPromise) {
+      await this._readPixelBufferPromise;
     }
 
-    // Copy pixels buffer to staging
-    const commandEncoder = this.device.createCommandEncoder();
-    commandEncoder.copyBufferToBuffer(
-      this.buffers.pixels, 0, this.buffers.stagingPixels, 0, bufferSize);
-    this.device.queue.submit([commandEncoder.finish()]);
-    await this.device.queue.onSubmittedWorkDone();
+    // Create the actual read operation as a promise we can track
+    const doRead = async () => {
+      const bytesPerPixel = this.constructor.BYTES_PER_PIXEL;
+      const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
+      const bufferSize = dimsArea * bytesPerPixel;
 
-    // Read back the data
-    await this.buffers.stagingPixels.mapAsync(GPUMapMode.READ);
-    const pixelData = new ArrayBuffer(bufferSize);
-    const srcData = this.buffers.stagingPixels.getMappedRange();
-    new Uint8Array(pixelData).set(new Uint8Array(srcData));
-    this.buffers.stagingPixels.unmap();
+      // Create staging buffer if not present
+      if (!this.buffers.stagingPixels) {
+        this.buffers.stagingPixels = this.device.createBuffer({
+          size: bufferSize,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+          label: 'Staging pixels buffer (serialization)'
+        });
+      }
 
-    return pixelData;
+      // Copy pixels buffer to staging
+      const commandEncoder = this.device.createCommandEncoder();
+      commandEncoder.copyBufferToBuffer(
+        this.buffers.pixels, 0, this.buffers.stagingPixels, 0, bufferSize);
+      this.device.queue.submit([commandEncoder.finish()]);
+      await this.device.queue.onSubmittedWorkDone();
+
+      // Read back the data
+      await this.buffers.stagingPixels.mapAsync(GPUMapMode.READ);
+      const pixelData = new ArrayBuffer(bufferSize);
+      const srcData = this.buffers.stagingPixels.getMappedRange();
+      new Uint8Array(pixelData).set(new Uint8Array(srcData));
+      this.buffers.stagingPixels.unmap();
+
+      return pixelData;
+    };
+
+    this._readPixelBufferPromise = doRead();
+    try {
+      return await this._readPixelBufferPromise;
+    } finally {
+      this._readPixelBufferPromise = null;
+    }
   }
 
   /**
