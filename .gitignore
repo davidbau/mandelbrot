@@ -8,3 +8,5 @@ npm-debug.log
 .nyc_output/
 *.log
 .puppeteer-profile/
+.puppeteer-profile-*/
+.chrome-home-*/

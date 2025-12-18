@@ -4809,7 +4809,7 @@ class Board {
   // Derived scalar property
   get pixelSize() { return this.size / this.config.dimsWidth; }
 
-  serialize() {
+  async serialize() {
     return {
       type: this.constructor.name,
       k: this.k,
@@ -4911,6 +4911,14 @@ class CpuBoard extends Board {
     // Override initialized values with serialized data
     Object.assign(board, serialized);
 
+    // Restore nn values for completed pixels
+    board.nn = new Array(serialized.config.dimsArea).fill(0);
+    if (serialized.completedIndexes) {
+      for (let i = 0; i < serialized.completedIndexes.length; i++) {
+        board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+      }
+    }
+
     // Reconstruct sparse arrays from serialized data
     const cc = board.cc;
     board.cc = [];
@@ -4931,13 +4939,24 @@ class CpuBoard extends Board {
     return board;
   }
 
-  serialize() {
+  async serialize() {
+    // Build sparse nn array for completed pixels (non-zero nn values)
+    const completedIndexes = [];
+    const completedNn = [];
+    for (let i = 0; i < this.nn.length; i++) {
+      if (this.nn[i] !== 0) {
+        completedIndexes.push(i);
+        completedNn.push(this.nn[i]);
+      }
+    }
     return {
-      ...super.serialize(),
+      ...(await super.serialize()),
       ss: this.ss,
       zz: this.ss.flatMap(i => [this.zz[i*2], this.zz[i*2+1]]),
       bb: this.ss.flatMap(i => [this.bb[i*2], this.bb[i*2+1]]),
       pp: this.ss.map(index => this.pp[index]),
+      completedIndexes,
+      completedNn,
     }
   }
 
@@ -5124,6 +5143,14 @@ class QDCpuBoard extends Board {
     // Override initialized values with serialized data
     Object.assign(board, serialized);
 
+    // Restore nn values for completed pixels
+    board.nn = new Array(serialized.config.dimsArea).fill(0);
+    if (serialized.completedIndexes) {
+      for (let i = 0; i < serialized.completedIndexes.length; i++) {
+        board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+      }
+    }
+
     // Reconstruct sparse arrays from serialized data (8 floats per pixel)
     const cc = board.cc;
     board.cc = [];
@@ -5144,9 +5171,18 @@ class QDCpuBoard extends Board {
     return board;
   }
 
-  serialize() {
+  async serialize() {
+    // Build sparse nn array for completed pixels (non-zero nn values)
+    const completedIndexes = [];
+    const completedNn = [];
+    for (let i = 0; i < this.nn.length; i++) {
+      if (this.nn[i] !== 0) {
+        completedIndexes.push(i);
+        completedNn.push(this.nn[i]);
+      }
+    }
     return {
-      ...super.serialize(),
+      ...(await super.serialize()),
       ss: this.ss,
       zz: this.ss.flatMap(i => {
         const i8 = i * 8;
@@ -5159,6 +5195,8 @@ class QDCpuBoard extends Board {
                 this.bb[i8+4], this.bb[i8+5], this.bb[i8+6], this.bb[i8+7]];
       }),
       pp: this.ss.map(index => this.pp[index]),
+      completedIndexes,
+      completedNn,
     }
   }
 
@@ -5381,6 +5419,14 @@ class PerturbationBoard extends Board {
     Object.assign(board, serialized);
     delete board.pertZZ;
 
+    // Restore nn values for completed pixels
+    board.nn = new Array(serialized.config.dimsArea).fill(0);
+    if (serialized.completedIndexes) {
+      for (let i = 0; i < serialized.completedIndexes.length; i++) {
+        board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+      }
+    }
+
     // Reconstruct arrays from serialized data, leaving empty spots
     board.cc = [];
     board.zz = [];
@@ -5412,9 +5458,18 @@ class PerturbationBoard extends Board {
     return board;
   }
 
-  serialize() {
+  async serialize() {
+    // Build sparse nn array for completed pixels (non-zero nn values)
+    const completedIndexes = [];
+    const completedNn = [];
+    for (let i = 0; i < this.nn.length; i++) {
+      if (this.nn[i] !== 0) {
+        completedIndexes.push(i);
+        completedNn.push(this.nn[i]);
+      }
+    }
     return {
-      ...super.serialize(),
+      ...(await super.serialize()),
       ddIndexes: this.ddIndexes,
       pertIndexes: this.pertIndexes,
       zz: this.ddIndexes.flatMap(i =>
@@ -5423,6 +5478,8 @@ class PerturbationBoard extends Board {
         [this.bb[i*4], this.bb[i*4+1], this.bb[i*4+2], this.bb[i*4+3]]),
       pp: this.ddIndexes.map(index => this.pp[index]),
       pertZZ: this.pertIndexes.flatMap(i => [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2]]),
+      completedIndexes,
+      completedNn,
     };
   }
 
@@ -5748,48 +5805,51 @@ class QDPerturbationBoard extends Board {
 
     // Override initialized values with serialized data
     Object.assign(board, serialized);
-    delete board.pertZZ;
 
-    // Reconstruct arrays from serialized data, leaving empty spots
+    // Restore nn values for completed pixels
+    board.nn = new Array(serialized.config.dimsArea).fill(0);
+    if (serialized.completedIndexes) {
+      for (let i = 0; i < serialized.completedIndexes.length; i++) {
+        board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+      }
+    }
+
+    // Reconstruct arrays from serialized data (8 floats per pixel for QD)
     board.cc = [];
     board.zz = [];
-    board.nz = [];
     board.bb = [];
     board.pp = [];
     const qdIdx = serialized.qdIndexes || [];
     for (let i = 0; i < qdIdx.length; i++) {
       const index = qdIdx[i];
       for (let j = 0; j < 8; j++) {
-        board.zz[index * 8 + j] = board.nz[index * 8 + j] = serialized.zz[i * 8 + j];
+        board.zz[index * 8 + j] = serialized.zz[i * 8 + j];
         board.bb[index * 8 + j] = serialized.bb[i * 8 + j];
         board.cc[index * 8 + j] = cc[index * 8 + j];
       }
-      if (!isFinite(cc[index * 8 + 7])) {
-        board.initAsQDPrecision(index, cc);
-      }
       board.pp[index] = serialized.pp[i];
-    }
-    for (let i = 0; i < serialized.pertIndexes.length; i++) {
-      const index = serialized.pertIndexes[i];
-      for (let j = 0; j < 3; j++) {
-        board.zz[index * 8 + j] = serialized.pertZZ[i * 3 + j];
-        board.cc[index * 8 + j] = cc[index * 8 + j];
-      }
-      board.zz[index * 8 + 7] = board.cc[index * 8 + 7] = Infinity;
-      board.pp[index] = 0;
     }
     return board;
   }
 
-  serialize() {
+  async serialize() {
+    // Build sparse nn array for completed pixels (non-zero nn values)
+    const completedIndexes = [];
+    const completedNn = [];
+    for (let i = 0; i < this.nn.length; i++) {
+      if (this.nn[i] !== 0) {
+        completedIndexes.push(i);
+        completedNn.push(this.nn[i]);
+      }
+    }
     return {
-      ...super.serialize(),
+      ...(await super.serialize()),
       qdIndexes: this.qdIndexes,
-      pertIndexes: this.pertIndexes,
       zz: this.qdIndexes.flatMap(i => this.zz.slice(i*8, i*8+8)),
       bb: this.qdIndexes.flatMap(i => this.bb.slice(i*8, i*8+8)),
       pp: this.qdIndexes.map(index => this.pp[index]),
-      pertZZ: this.pertIndexes.flatMap(i => this.zz.slice(i*8, i*8+3)),
+      completedIndexes,
+      completedNn,
     };
   }
 
@@ -6216,13 +6276,20 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
     // Working array for DD precision operations
     this.tt = new Array(16);
 
-    // Threading for robust cycle detection
+    // Build threading structure
+    this.rebuildDDThreading();
+  }
+
+  // Rebuild threading structure from reference orbit (for serialization restore)
+  rebuildDDThreading() {
     const threadingEpsilon = 10000 * this.epsilon;
     const getDDPoint = (i) => this.refOrbit[i] || null;
     const spatialBucket = new DDSpatialBucket(threadingEpsilon, getDDPoint);
     this.threading = new ReferenceOrbitThreading(spatialBucket);
-    this.threading.addPoint(0);
-    this.threading.addPoint(1);
+    // Add all points from reference orbit
+    for (let i = 0; i <= this.refIterations; i++) {
+      this.threading.addPoint(i);
+    }
   }
 
   // DD accessor methods
@@ -6317,13 +6384,20 @@ const QDReferenceOrbitMixin = (Base) => class extends Base {
     // Working array for QD precision operations
     this.tt = new Array(32);
 
-    // Threading for robust cycle detection
+    // Build threading structure
+    this.rebuildQDThreading();
+  }
+
+  // Rebuild threading structure from reference orbit (for serialization restore)
+  rebuildQDThreading() {
     const threadingEpsilon = 10000 * this.epsilon;
     const getQDPoint = (i) => this.qdRefOrbit[i] || null;
     const spatialBucket = new QDSpatialBucket(threadingEpsilon, getQDPoint);
     this.threading = new ReferenceOrbitThreading(spatialBucket);
-    this.threading.addPoint(0);
-    this.threading.addPoint(1);
+    // Add all points from reference orbit
+    for (let i = 0; i <= this.refIterations; i++) {
+      this.threading.addPoint(i);
+    }
   }
 
   // QD accessor methods
@@ -6688,6 +6762,83 @@ class CpuZhuoranBaseBoard extends Board {
 
     return totalNorm < dzNorm * 2.0;
   }
+
+  async serialize() {
+    // Build sparse nn array for completed pixels (non-zero nn values)
+    const completedIndexes = [];
+    const completedNn = [];
+    for (let i = 0; i < this.nn.length; i++) {
+      if (this.nn[i] !== 0) {
+        completedIndexes.push(i);
+        completedNn.push(this.nn[i]);
+      }
+    }
+    return {
+      ...(await super.serialize()),
+      // Per-pixel state (sparse - only for active pixels)
+      pixelIndexes: this.pixelIndexes,
+      dc: this.pixelIndexes.flatMap(i => [this.dc[i*2], this.dc[i*2+1]]),
+      dz: this.pixelIndexes.flatMap(i => [this.dz[i*2], this.dz[i*2+1]]),
+      refIter: this.pixelIndexes.map(i => this.refIter[i]),
+      pp: this.pixelIndexes.map(i => this.pp[i]),
+      // Convergence detection state
+      currentThreadIter: this.pixelIndexes.map(i => this.currentThreadIter[i]),
+      threadDeltaRe: this.pixelIndexes.map(i => this.threadDeltaRe[i]),
+      threadDeltaIm: this.pixelIndexes.map(i => this.threadDeltaIm[i]),
+      // Reference orbit state
+      refOrbitEscaped: this.refOrbitEscaped,
+      refIterations: this.refIterations,
+      maxRefIter: this.maxRefIter,
+      // Completed pixels
+      completedIndexes,
+      completedNn,
+    };
+  }
+
+  static restoreBaseState(board, serialized) {
+    // Restore nn values for completed pixels
+    board.nn = new Array(serialized.config.dimsArea).fill(0);
+    if (serialized.completedIndexes) {
+      for (let i = 0; i < serialized.completedIndexes.length; i++) {
+        board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+      }
+    }
+
+    // Restore per-pixel state from sparse serialized data
+    board.dc = new Array(serialized.config.dimsArea * 2).fill(0);
+    board.dz = new Array(serialized.config.dimsArea * 2).fill(0);
+    board.refIter = new Array(serialized.config.dimsArea).fill(0);
+    board.pp = new Array(serialized.config.dimsArea).fill(0);
+    board.currentThreadIter = new Array(serialized.config.dimsArea).fill(0);
+    board.threadDeltaRe = new Array(serialized.config.dimsArea).fill(0);
+    board.threadDeltaIm = new Array(serialized.config.dimsArea).fill(0);
+
+    const pixelIndexes = serialized.pixelIndexes || [];
+    for (let i = 0; i < pixelIndexes.length; i++) {
+      const index = pixelIndexes[i];
+      board.dc[index * 2] = serialized.dc[i * 2];
+      board.dc[index * 2 + 1] = serialized.dc[i * 2 + 1];
+      board.dz[index * 2] = serialized.dz[i * 2];
+      board.dz[index * 2 + 1] = serialized.dz[i * 2 + 1];
+      board.refIter[index] = serialized.refIter[i];
+      board.pp[index] = serialized.pp[i];
+      board.currentThreadIter[index] = serialized.currentThreadIter[i];
+      board.threadDeltaRe[index] = serialized.threadDeltaRe[i];
+      board.threadDeltaIm[index] = serialized.threadDeltaIm[i];
+    }
+    board.pixelIndexes = pixelIndexes.slice();
+
+    // Restore reference orbit state
+    board.refOrbitEscaped = serialized.refOrbitEscaped || false;
+    board.refIterations = serialized.refIterations || 1;
+    board.maxRefIter = serialized.maxRefIter || 1;
+
+    // Restore scalar values
+    board.it = serialized.it;
+    board.un = serialized.un;
+    board.di = serialized.di;
+    board.ch = serialized.ch || 0;
+  }
 }
 
 // DD-precision implementation of CpuZhuoranBaseBoard
@@ -6752,25 +6903,22 @@ class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
       serialized.id
     );
 
-    // Restore state
-    Object.assign(board, serialized);
+    // Restore base Zhuoran state (nn, dc, dz, refIter, etc.)
+    CpuZhuoranBaseBoard.restoreBaseState(board, serialized);
 
-    // Recompute maxRefIter if not in serialized data
-    if (!serialized.maxRefIter) {
-      board.maxRefIter = 1;
-      for (let i = 0; i < board.refIter.length; i++) {
-        if (board.refIter[i] > board.maxRefIter) {
-          board.maxRefIter = board.refIter[i];
-        }
-      }
-    }
+    // Restore DD reference orbit
+    board.refOrbit = serialized.refOrbit || [];
+    board.refC = serialized.refC || [0, 0, 0, 0];
+
+    // Rebuild threading structure from restored reference orbit
+    board.rebuildDDThreading();
 
     return board;
   }
 
-  serialize() {
+  async serialize() {
     return {
-      ...super.serialize(),
+      ...(await super.serialize()),
       refOrbit: this.refOrbit,
       refC: this.refC,
     };
@@ -6841,22 +6989,16 @@ class QDZhuoranBoard extends QDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
     }
   }
 
-  serialize() {
+  async serialize() {
     return {
-      ...super.serialize(),
-      refOrbitEscaped: this.refOrbitEscaped,
-      refIterations: this.refIterations,
+      ...(await super.serialize()),
       refC_qd: this.refC_qd,
       qdRefOrbit: this.qdRefOrbit,
-      dc: this.dc,
-      dz: this.dz,
-      refIter: this.refIter,
-      pixelIndexes: this.pixelIndexes
     };
   }
 
   static fromSerialized(serialized) {
-    return new QDZhuoranBoard(
+    const board = new QDZhuoranBoard(
       serialized.k,
       serialized.sizesQD[0],
       serialized.sizesQD[1],
@@ -6864,6 +7006,18 @@ class QDZhuoranBoard extends QDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
       serialized.config,
       serialized.id
     );
+
+    // Restore base Zhuoran state (nn, dc, dz, refIter, etc.)
+    CpuZhuoranBaseBoard.restoreBaseState(board, serialized);
+
+    // Restore QD reference orbit
+    board.refC_qd = serialized.refC_qd || new Array(8).fill(0);
+    board.qdRefOrbit = serialized.qdRefOrbit || [];
+
+    // Rebuild threading structure from restored reference orbit
+    board.rebuildQDThreading();
+
+    return board;
   }
 }
 
@@ -7072,6 +7226,59 @@ class GpuBaseBoard extends Board {
 
   async compute() {
     throw new Error('compute() must be implemented by subclass');
+  }
+
+  /**
+   * Read the pixels buffer from GPU and return as ArrayBuffer.
+   * Subclasses must have created buffers.pixels and buffers.stagingPixels.
+   * @returns {Promise<ArrayBuffer>} The pixel buffer data
+   */
+  async readPixelBuffer() {
+    if (!this.isGPUReady || !this.buffers.pixels) {
+      return null;
+    }
+
+    const bytesPerPixel = this.constructor.BYTES_PER_PIXEL;
+    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
+    const bufferSize = dimsArea * bytesPerPixel;
+
+    // Create staging buffer if not present
+    if (!this.buffers.stagingPixels) {
+      this.buffers.stagingPixels = this.device.createBuffer({
+        size: bufferSize,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Staging pixels buffer (serialization)'
+      });
+    }
+
+    // Copy pixels buffer to staging
+    const commandEncoder = this.device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(
+      this.buffers.pixels, 0, this.buffers.stagingPixels, 0, bufferSize);
+    this.device.queue.submit([commandEncoder.finish()]);
+    await this.device.queue.onSubmittedWorkDone();
+
+    // Read back the data
+    await this.buffers.stagingPixels.mapAsync(GPUMapMode.READ);
+    const pixelData = new ArrayBuffer(bufferSize);
+    const srcData = this.buffers.stagingPixels.getMappedRange();
+    new Uint8Array(pixelData).set(new Uint8Array(srcData));
+    this.buffers.stagingPixels.unmap();
+
+    return pixelData;
+  }
+
+  /**
+   * Write ArrayBuffer data back to the GPU pixels buffer.
+   * @param {ArrayBuffer} data - The pixel buffer data to write
+   */
+  async writePixelBuffer(data) {
+    if (!this.isGPUReady || !this.buffers.pixels) {
+      return false;
+    }
+    this.device.queue.writeBuffer(this.buffers.pixels, 0, data);
+    await this.device.queue.onSubmittedWorkDone();
+    return true;
   }
 }
 
@@ -7585,8 +7792,39 @@ class GpuBoard extends GpuBaseBoard {
     }
   }
 
-  static fromSerialized(serialized) {
-    return new GpuBoard(
+  async serialize() {
+    // Ensure GPU is ready before reading buffers
+    await this.ensureGPUReady();
+
+    // Read GPU pixel buffer
+    const gpuPixelData = await this.readPixelBuffer();
+
+    // Build sparse nn array for completed pixels (like CPU boards)
+    const completedIndexes = [];
+    const completedNn = [];
+    for (let i = 0; i < this.nn.length; i++) {
+      if (this.nn[i] !== 0) {
+        completedIndexes.push(i);
+        completedNn.push(this.nn[i]);
+      }
+    }
+
+    return {
+      ...(await super.serialize()),
+      // GPU pixel buffer as array (for JSON serialization)
+      gpuPixelData: gpuPixelData ? Array.from(new Uint8Array(gpuPixelData)) : null,
+      // CPU-side state
+      cpuStatus: this.cpuStatus ? Array.from(this.cpuStatus) : null,
+      lastReportedIters: this.lastReportedIters ? Array.from(this.lastReportedIters) : null,
+      effort: this.effort,
+      // Completed pixels (sparse format)
+      completedIndexes,
+      completedNn,
+    };
+  }
+
+  static async fromSerializedAsync(serialized) {
+    const board = new GpuBoard(
       serialized.k,
       serialized.sizesQD[0],
       serialized.sizesQD[1],
@@ -7594,6 +7832,88 @@ class GpuBoard extends GpuBaseBoard {
       serialized.config,
       serialized.id
     );
+
+    // Wait for GPU initialization
+    await board.ensureGPUReady();
+
+    // Restore GPU pixel buffer
+    if (serialized.gpuPixelData && board.isGPUReady) {
+      const pixelData = new Uint8Array(serialized.gpuPixelData).buffer;
+      await board.writePixelBuffer(pixelData);
+    }
+
+    // Restore CPU-side state
+    if (serialized.cpuStatus) {
+      board.cpuStatus = new Uint32Array(serialized.cpuStatus);
+    }
+    if (serialized.lastReportedIters) {
+      board.lastReportedIters = new Uint32Array(serialized.lastReportedIters);
+    }
+    board.effort = serialized.effort || 1;
+
+    // Restore Board state
+    board.it = serialized.it;
+    board.un = serialized.un;
+    board.di = serialized.di;
+    board.ch = serialized.ch || 0;
+
+    // Restore nn array from base serialization
+    board.nn = new Array(serialized.config.dimsArea).fill(0);
+    if (serialized.completedIndexes) {
+      for (let i = 0; i < serialized.completedIndexes.length; i++) {
+        board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+      }
+    }
+
+    return board;
+  }
+
+  static fromSerialized(serialized) {
+    // For backwards compatibility with sync Board.fromSerialized
+    // GPU boards require async initialization, so this returns a board
+    // that will continue initializing in the background
+    const board = new GpuBoard(
+      serialized.k,
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
+      serialized.config,
+      serialized.id
+    );
+
+    // Schedule async restoration
+    board.gpuInitPromise = board.gpuInitPromise.then(async () => {
+      // Restore GPU pixel buffer
+      if (serialized.gpuPixelData && board.isGPUReady) {
+        const pixelData = new Uint8Array(serialized.gpuPixelData).buffer;
+        await board.writePixelBuffer(pixelData);
+      }
+
+      // Restore CPU-side state
+      if (serialized.cpuStatus) {
+        board.cpuStatus = new Uint32Array(serialized.cpuStatus);
+      }
+      if (serialized.lastReportedIters) {
+        board.lastReportedIters = new Uint32Array(serialized.lastReportedIters);
+      }
+      board.effort = serialized.effort || 1;
+
+      // Restore Board state
+      board.it = serialized.it;
+      board.un = serialized.un;
+      board.di = serialized.di;
+      board.ch = serialized.ch || 0;
+
+      // Restore nn array
+      board.nn = new Array(serialized.config.dimsArea).fill(0);
+      if (serialized.completedIndexes) {
+        for (let i = 0; i < serialized.completedIndexes.length; i++) {
+          board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+        }
+      }
+    });
+
+    return board;
   }
 }
 
@@ -8590,8 +8910,45 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
     }
   }
 
+  async serialize() {
+    // Ensure GPU is ready before reading buffers
+    await this.ensureGPUReady();
+
+    // Read GPU pixel buffer
+    const gpuPixelData = await this.readPixelBuffer();
+
+    // Build sparse nn array for completed pixels
+    const completedIndexes = [];
+    const completedNn = [];
+    for (let i = 0; i < this.nn.length; i++) {
+      if (this.nn[i] !== 0) {
+        completedIndexes.push(i);
+        completedNn.push(this.nn[i]);
+      }
+    }
+
+    return {
+      ...(await super.serialize()),
+      // GPU pixel buffer as array (for JSON serialization)
+      gpuPixelData: gpuPixelData ? Array.from(new Uint8Array(gpuPixelData)) : null,
+      // DD reference orbit state
+      refOrbit: this.refOrbit,
+      refC: this.refC,
+      refIterations: this.refIterations,
+      refOrbitEscaped: this.refOrbitEscaped,
+      refOrbitLoop: this.refOrbitLoop || null,
+      refOrbitLoopConfigured: this.refOrbitLoopConfigured || false,
+      // Board state
+      effort: this.effort,
+      completedIndexes,
+      completedNn,
+    };
+  }
+
   static fromSerialized(serialized) {
-    return new GpuZhuoranBoard(
+    // GPU boards require async initialization, so this returns a board
+    // that will continue initializing in the background
+    const board = new GpuZhuoranBoard(
       serialized.k,
       serialized.sizesQD[0],
       serialized.sizesQD[1],
@@ -8599,6 +8956,43 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
       serialized.config,
       serialized.id
     );
+
+    // Schedule async restoration after GPU init
+    board.gpuInitPromise = board.gpuInitPromise.then(async () => {
+      // Restore GPU pixel buffer
+      if (serialized.gpuPixelData && board.isGPUReady) {
+        const pixelData = new Uint8Array(serialized.gpuPixelData).buffer;
+        await board.writePixelBuffer(pixelData);
+      }
+
+      // Restore DD reference orbit state
+      board.refOrbit = serialized.refOrbit || [];
+      board.refC = serialized.refC || [0, 0, 0, 0];
+      board.refIterations = serialized.refIterations || 1;
+      board.refOrbitEscaped = serialized.refOrbitEscaped || false;
+      board.refOrbitLoop = serialized.refOrbitLoop || null;
+      board.refOrbitLoopConfigured = serialized.refOrbitLoopConfigured || false;
+
+      // Rebuild threading structure from restored reference orbit
+      board.rebuildDDThreading();
+
+      // Restore Board state
+      board.it = serialized.it;
+      board.un = serialized.un;
+      board.di = serialized.di;
+      board.ch = serialized.ch || 0;
+      board.effort = serialized.effort || 2;
+
+      // Restore nn array
+      board.nn = new Array(serialized.config.dimsArea).fill(0);
+      if (serialized.completedIndexes) {
+        for (let i = 0; i < serialized.completedIndexes.length; i++) {
+          board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+        }
+      }
+    });
+
+    return board;
   }
 }
 
@@ -9561,8 +9955,47 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
     }
   }
 
+  async serialize() {
+    // Ensure GPU is ready before reading buffers
+    await this.ensureGPUReady();
+
+    // Read GPU pixel buffer
+    const gpuPixelData = await this.readPixelBuffer();
+
+    // Build sparse nn array for completed pixels
+    const completedIndexes = [];
+    const completedNn = [];
+    for (let i = 0; i < this.nn.length; i++) {
+      if (this.nn[i] !== 0) {
+        completedIndexes.push(i);
+        completedNn.push(this.nn[i]);
+      }
+    }
+
+    return {
+      ...(await super.serialize()),
+      // GPU pixel buffer as array (for JSON serialization)
+      gpuPixelData: gpuPixelData ? Array.from(new Uint8Array(gpuPixelData)) : null,
+      // QD reference orbit state
+      qdRefOrbit: this.qdRefOrbit,
+      refC_qd: this.refC_qd,
+      refIterations: this.refIterations,
+      refOrbitEscaped: this.refOrbitEscaped,
+      refOrbitLoop: this.refOrbitLoop || null,
+      refOrbitLoopConfigured: this.refOrbitLoopConfigured || false,
+      // Per-pixel adaptive scaling
+      initialScale: this.initialScale,
+      // Board state
+      effort: this.effort,
+      completedIndexes,
+      completedNn,
+    };
+  }
+
   static fromSerialized(serialized) {
-    return new AdaptiveGpuBoard(
+    // GPU boards require async initialization, so this returns a board
+    // that will continue initializing in the background
+    const board = new AdaptiveGpuBoard(
       serialized.k,
       serialized.sizesQD[0],
       serialized.sizesQD[1],
@@ -9570,6 +10003,48 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
       serialized.config,
       serialized.id
     );
+
+    // Schedule async restoration after GPU init
+    board.gpuInitPromise = board.gpuInitPromise.then(async () => {
+      // Restore GPU pixel buffer
+      if (serialized.gpuPixelData && board.isGPUReady) {
+        const pixelData = new Uint8Array(serialized.gpuPixelData).buffer;
+        await board.writePixelBuffer(pixelData);
+      }
+
+      // Restore QD reference orbit state
+      board.qdRefOrbit = serialized.qdRefOrbit || [];
+      board.refC_qd = serialized.refC_qd || new Array(8).fill(0);
+      board.refIterations = serialized.refIterations || 1;
+      board.refOrbitEscaped = serialized.refOrbitEscaped || false;
+      board.refOrbitLoop = serialized.refOrbitLoop || null;
+      board.refOrbitLoopConfigured = serialized.refOrbitLoopConfigured || false;
+
+      // Restore per-pixel adaptive scaling
+      if (serialized.initialScale !== undefined) {
+        board.initialScale = serialized.initialScale;
+      }
+
+      // Rebuild threading structure from restored reference orbit
+      board.rebuildQDThreading();
+
+      // Restore Board state
+      board.it = serialized.it;
+      board.un = serialized.un;
+      board.di = serialized.di;
+      board.ch = serialized.ch || 0;
+      board.effort = serialized.effort || 2;
+
+      // Restore nn array
+      board.nn = new Array(serialized.config.dimsArea).fill(0);
+      if (serialized.completedIndexes) {
+        for (let i = 0; i < serialized.completedIndexes.length; i++) {
+          board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+        }
+      }
+    });
+
+    return board;
   }
 }
 
@@ -9727,13 +10202,8 @@ class FractalWorker {
         for (const k of data.boardKeys) {
           if (this.boards.has(k)) {
             const board = this.boards.get(k);
-            // Skip GPU boards - they cannot be transferred as they lose GPU state
-            if (board instanceof GpuBoard || board instanceof GpuZhuoranBoard) {
-              console.log(`Skipping transfer of GPU board ${k} (${board.constructor.name})`);
-              continue;
-            }
             board.compact();
-            const serializedBoard = board.serialize();
+            const serializedBoard = await board.serialize();
             this.boards.delete(k);
             transferredBoards.push(serializedBoard);
           }

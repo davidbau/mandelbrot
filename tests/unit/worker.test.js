@@ -132,15 +132,15 @@ describe('Worker Board Computations (Unit)', () => {
       // expect(converged).toBeGreaterThan(0); // Depends on grid alignment
     });
     
-    test('should handle serialization', () => {
+    test('should handle serialization', async () => {
       const config = createConfig();
       config.enableGPU = false;
       const board = new CpuBoard(0, 3.0, [0,0], [0,0], config, 'test-id');
-      
-      const data = board.serialize();
+
+      const data = await board.serialize();
       expect(data.type).toBe('CpuBoard');
       expect(data.k).toBe(0);
-      
+
       const restored = CpuBoard.fromSerialized(data);
       expect(restored).toBeInstanceOf(CpuBoard);
       expect(restored.id).toBe(board.id);
