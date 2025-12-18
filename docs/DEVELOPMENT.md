@@ -64,6 +64,22 @@ The report is written to the `coverage/` directory. Open `coverage/index.html` i
 
 **Note on Worker Coverage:** Worker code is executed in a context (a `blob:` URL) that is separate from the main page. Because of this, standard coverage tools cannot fully track its execution. The coverage report for worker code may only reflect the main thread's initial parsing of the script, not the actual computation performed within the worker.
 
+## Call Graph Visualization
+
+Run `npm run callgraph` to generate an interactive visualization of the codebase's evolution over time. This extracts the call graph from each commit in the git history and creates an animated timeline.
+
+Open `coverage/callgraph.html` in a browser to explore:
+- **Timeline scrubbing**: Drag the slider or press Play to animate through commits
+- **Node colors**: Viridis color scale shows when each function/class was added
+- **Click nodes**: Opens the source file at that line on GitHub
+- **Shareable URLs**: `#i=123` or `#c=abc1234` link to specific commits
+
+The visualization includes:
+- Original 2009 branch history (table-cell and canvas versions)
+- Claude co-author badges (orange icon) for AI-assisted commits
+- Test count per commit (parsed from `*.test.js` files)
+- Statistics: lines, classes, mixins, methods, functions
+
 ## Project Structure
 
 The main application file, `index.html`, is located in the project's root directory, one level above this `docs` folder.
