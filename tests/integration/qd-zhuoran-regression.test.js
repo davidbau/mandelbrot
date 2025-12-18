@@ -97,9 +97,17 @@ describe('GpuZhuoran Regression Tests', () => {
       await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
 
       // Wait for significant computation progress
+      // Wait for sufficient pixels AND varied iteration counts
       await page.waitForFunction(() => {
         const view = window.explorer?.grid?.views?.[0];
-        return view && view.di > 500;
+        if (!view || view.di < 500) return false;
+        // Count unique iteration values
+        const nn = view.nn;
+        const iterCounts = new Set();
+        for (let i = 0; i < nn.length; i++) {
+          if (nn[i] !== 0) iterCounts.add(nn[i]);
+        }
+        return iterCounts.size > 3;
       }, { timeout: 30000 });
 
       const stats = await page.evaluate(() => {
