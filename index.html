@@ -4026,7 +4026,6 @@ class Scheduler {
     this.boardEfforts = new Map();
     this.boardIds = new Map();  // Track board ID at each index k
     this.assignments = {};
-    this.gpuBoards = new Set(); // Track GPU boards that cannot be transferred
     this.lastBalanceTime = 0;
     this.lastReportTime = 0;
     this.balanceInterval = 5000; // Move jobs to load-balance every 5 seconds
@@ -4149,7 +4148,6 @@ class Scheduler {
 
     this.boardEfforts.set(k, 0);
     this.boardIds.delete(k);
-    this.gpuBoards.delete(k);
     this.workers.forEach(worker => {
       worker.postMessage({
         type: 'removeBoard',
@@ -4213,9 +4211,7 @@ class Scheduler {
         console.log(`Worker ${workerIndex}: ${data}`);
         break;
       case 'boardCreated':
-        if (data.isGPUBoard) {
-          this.gpuBoards.add(data.k);
-        }
+        // GPU boards are now transferable via serialization, no special tracking needed
         break;
       case 'iterations':
         this.grid.updateViewFromWorkerResult(data.k, data, workerIndex);
@@ -4250,12 +4246,8 @@ class Scheduler {
         if (load > 2 * lowEffort) {
           const workerBoards = this.getWorkerBoards(workerIndex);
           if (workerBoards.length > 1) {
-            // Filter out GPU boards which cannot be transferred
-            const transferableBoards = workerBoards.filter(k => !this.gpuBoards.has(k));
-            if (transferableBoards.length < 2) {
-              continue; // Skip this worker - need at least 2 transferable boards
-            }
-            const sortedBoards = transferableBoards.sort(
+            // All boards are transferable now (GPU boards support serialization)
+            const sortedBoards = workerBoards.sort(
                 (a, b) => this.boardEfforts.get(b) + b/1000 - this.boardEfforts.get(a) - a/1000);
             if (now - this.lastReportTime > this.reportInterval) {
               console.log(this.report());
@@ -10185,8 +10177,7 @@ class FractalWorker {
           type: 'boardCreated',
           data: {
             k: data.k,
-            boardType: board.constructor.name,
-            isGPUBoard: board instanceof GpuBoard || board instanceof GpuZhuoranBoard
+            boardType: board.constructor.name
           }
         });
         break;
