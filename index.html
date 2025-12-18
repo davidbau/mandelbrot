@@ -1755,9 +1755,9 @@ class Grid {
       const sizeRatio = targetSize / viewSize;
       if (sizeRatio < 0.999 || sizeRatio > 1.001) return false;
 
-      // Check coordinates - tolerance is 0.1% of view extent
+      // Check coordinates - tolerance is 0.01% of view extent
       // Use QD precision for comparison
-      const tolerance = viewSize * 0.001;
+      const tolerance = viewSize * 0.0001;
       const viewReVal = qdToNumber(viewReQD);
       const viewImVal = qdToNumber(viewImQD);
       const targetReVal = targetRe[0] + (targetRe[1] || 0);
@@ -2316,9 +2316,46 @@ class ZoomManager {
   }
 
   centerViews(includeFirst) {
-    let k = this.grid.views.length - 1;
-    let oreQD = this.grid.views[k].re;
-    let oimQD = this.grid.views[k].im;
+    const lastK = this.grid.views.length - 1;
+    const oreQD = this.grid.views[lastK].re;
+    const oimQD = this.grid.views[lastK].im;
+
+    // Helper to check if view center is within 0.01% tolerance of target
+    const isWithinTolerance = (view, targetReQD, targetImQD) => {
+      const viewSize = view.size;
+      const tolerance = viewSize * 0.0001; // 0.01% of view extent
+      const viewRe = qdToNumber(view.re);
+      const viewIm = qdToNumber(view.im);
+      const targetRe = qdToNumber(targetReQD);
+      const targetIm = qdToNumber(targetImQD);
+      return Math.abs(targetRe - viewRe) < tolerance &&
+             Math.abs(targetIm - viewIm) < tolerance;
+    };
+
+    // PHASE 1: Identify which views need board recreation (using ORIGINAL coords)
+    // Must do this BEFORE updating any coordinates
+    const needsRecreation = [];
+    for (let k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
+      if (qdCompare(this.grid.views[k].re, oreQD) ||
+          qdCompare(this.grid.views[k].im, oimQD)) {
+        if (!isWithinTolerance(this.grid.views[k], oreQD, oimQD)) {
+          needsRecreation.push(k);
+        }
+      }
+    }
+
+    // PHASE 2: Update all view coordinates to target
+    // This ensures URL will be correct immediately
+    for (let k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
+      this.grid.views[k].sizesQD[1] = oreQD;
+      this.grid.views[k].sizesQD[2] = oimQD;
+    }
+
+    // PHASE 3: Update URL immediately (before expensive board recreation)
+    // This prevents race condition if user refreshes during processing
+    this.grid.notifyurl();
+
+    // PHASE 4: Show zoom rectangles (coordinates are now all centered)
     if (!includeFirst) {
       const invPrevSize = 1 / this.grid.views[0].size;
       this.showZoomRect(
@@ -2337,40 +2374,19 @@ class ZoomManager {
           ))),
            this.grid.views[0].size / this.grid.views[1].size);
     }
-
-    // Helper to check if view center is within 0.1% tolerance of target
-    const isWithinTolerance = (view, targetReQD, targetImQD) => {
-      const viewSize = view.size;
-      const tolerance = viewSize * 0.001; // 0.1% of view extent
-      const viewRe = qdToNumber(view.re);
-      const viewIm = qdToNumber(view.im);
-      const targetRe = qdToNumber(targetReQD);
-      const targetIm = qdToNumber(targetImQD);
-      return Math.abs(targetRe - viewRe) < tolerance &&
-             Math.abs(targetIm - viewIm) < tolerance;
-    };
-
-    for (k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
+    for (let k = includeFirst ? 0 : 1; k < this.grid.views.length - 1; k += 1) {
       this.showZoomRect(
           k, 0.5, 0.5, this.grid.views[k].size / this.grid.views[k+1].size);
-      if (qdCompare(this.grid.views[k].re, oreQD) ||
-          qdCompare(this.grid.views[k].im, oimQD)) {
-        // View center differs from target - check if within 0.1% tolerance
-        if (isWithinTolerance(this.grid.views[k], oreQD, oimQD)) {
-          // Within tolerance: update coordinates to exact target without recreating
-          this.grid.views[k].sizesQD[1] = oreQD;
-          this.grid.views[k].sizesQD[2] = oimQD;
-        } else {
-          // Beyond tolerance: recreate the view
-          this.grid.scheduler.removeBoardFromWorker(k);
-          let nsize = this.grid.views[k].size;
-          this.grid.makeView(k, nsize, oreQD, oimQD);
-          this.grid.views[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
-          this.grid.clearseq(k);
-        }
-      }
     }
-    this.grid.notifyurl();
+
+    // PHASE 5: Recreate boards that were beyond tolerance
+    for (const k of needsRecreation) {
+      this.grid.scheduler.removeBoardFromWorker(k);
+      const nsize = this.grid.views[k].size;
+      this.grid.makeView(k, nsize, oreQD, oimQD);
+      this.grid.views[k].clearcanvas(this.grid.canvas(k).getContext('2d'));
+      this.grid.clearseq(k);
+    }
   }
 }
 
@@ -2535,17 +2551,17 @@ class URLHandler {
 
     // Match target views against current views by coordinates AND zoom level
     // A view is defined by both its center and its size (zoom level)
-    // Uses QD precision coordinates with 0.1% tolerance thresholds
+    // Uses QD precision coordinates with 0.01% tolerance thresholds
     const viewsMatch = (targetSize, targetRe, targetIm,
                         currentSize, currentRe, currentIm) => {
       // Check zoom level first - must be within 0.1% of each other
       const sizeRatio = targetSize / currentSize;
       if (sizeRatio < 0.999 || sizeRatio > 1.001) return false;
 
-      // Check coordinates - tolerance is 0.1% of the view's visible extent
+      // Check coordinates - tolerance is 0.01% of the view's visible extent
       // Compute difference in QD precision first, then convert magnitude to double
       // (converting coords to double first would lose precision at deep zooms)
-      const tolerance = currentSize * 0.001;
+      const tolerance = currentSize * 0.0001;
       const reDiff = Math.abs(qdToNumber(toQDSub(targetRe, currentRe)));
       const imDiff = Math.abs(qdToNumber(toQDSub(targetIm, currentIm)));
       return reDiff < tolerance && imDiff < tolerance;
