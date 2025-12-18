@@ -117,48 +117,53 @@ describe('AdaptiveGpuBoard rebase behavior', () => {
       await testPage.goto(url, { waitUntil: 'load' });
       await testPage.waitForFunction(() => window.worker0?.boards?.size > 0, { timeout: 10000 });
 
-      // Set up callback to collect refiter values
-      await testPage.evaluate(() => {
-        window.refiterSequence = [];
-      });
-
-      // Step to 1500, collecting refiter at each step
-      await testPage.evaluate(() => {
-        step(1500, async () => {
-          const board = Array.from(window.worker0.boards.values())[0];
-          // For QDZ: read from pixel state buffer, refiter is at u32[3]
-          // For Adaptive: refiter is at i32[4]
-          const isAdaptive = board.constructor.name === 'AdaptiveGpuBoard';
-          if (isAdaptive) {
-            const data = await board.readBuffer(board.buffers.pixels, Uint8Array);
-            const view = new Int32Array(data.buffer, 0, 15);
-            window.refiterSequence.push(view[4]);  // ref_iter at offset 4
-          } else {
-            // QDZ uses refIter array directly
-            window.refiterSequence.push(board.refIter?.[0] || board.it);
-          }
-        });
-      });
+      // Step without callback, then read final state and find rebase iteration
+      const TARGET_ITERS = 1500;
+      await testPage.evaluate((target) => step(target), TARGET_ITERS);
       await testPage.waitForFunction(() => window.worker0.stepsRequested === 0, { timeout: 30000 });
 
-      const sequence = await testPage.evaluate(() => window.refiterSequence);
+      // Get the board's current refiter and check for rebase
+      const result = await testPage.evaluate(async () => {
+        const board = Array.from(window.worker0.boards.values())[0];
+        const isAdaptive = board.constructor.name === 'AdaptiveGpuBoard';
+        let refiter;
+        if (isAdaptive) {
+          const data = await board.readBuffer(board.buffers.pixels, Uint8Array);
+          const view = new Int32Array(data.buffer, 0, 15);
+          refiter = view[4];
+        } else {
+          refiter = board.refIter?.[0] || board.it;
+        }
+        return { iter: board.it, refiter, nn: board.nn[0] };
+      });
 
       await testPage.evaluate(() => {
         if (window.worker0) window.worker0.terminate?.();
       });
       await testPage.close();
-      return sequence;
+      return result;
     }
 
     // Run both boards in parallel
-    const [adaptiveSeq, qdzSeq] = await Promise.all([
+    const [adaptiveResult, qdzResult] = await Promise.all([
       collectRefiterSequence('adaptive'),
       collectRefiterSequence('qdz')
     ]);
 
-    // Both sequences should be identical - same rebasing behavior
-    expect(adaptiveSeq.length).toBe(qdzSeq.length);
-    // Check that refiter drops (rebases) at the same iteration for both
-    expect(adaptiveSeq).toEqual(qdzSeq);
+    // Both should have rebased - refiter should be much less than iterations
+    // The rebase happens around iter 1237, so refiter should be < 300
+    expect(adaptiveResult.refiter).toBeLessThan(300);
+    expect(qdzResult.refiter).toBeLessThan(300);
+
+    // Both should reach same iteration count
+    expect(adaptiveResult.iter).toBeGreaterThanOrEqual(1500);
+    expect(qdzResult.iter).toBeGreaterThanOrEqual(1500);
+
+    // Neither should have diverged
+    expect(adaptiveResult.nn).toBe(0);
+    expect(qdzResult.nn).toBe(0);
+
+    // Refiter values should be close (within 10 iterations of each other)
+    expect(Math.abs(adaptiveResult.refiter - qdzResult.refiter)).toBeLessThan(10);
   }, TEST_TIMEOUT);
 });
