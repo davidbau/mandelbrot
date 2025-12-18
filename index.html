@@ -81,8 +81,10 @@ div a div.status { /* tooltips */
   width: auto; background-color: #ddd; color: #444;
   font: 11pt Arial; text-align: right; white-space: pre;
   padding: 3px 7px; box-shadow: 2px 2px 5px #777;
-  /* pointer-events: none; */ z-index: 2;
+  /* pointer-events: none; */ z-index: 100;
   opacity: 0; transition: opacity 0.25s ease; }
+div a div.status.align-left { right: auto; text-align: left; }
+#grid div:has(a:hover) { z-index: 10; }  /* Raise view when popup shown */
 #grid div:hover a div.status {
   display: block; }
 div:hover a:focus div.status, div a:hover div.status {
@@ -2055,8 +2057,12 @@ class Grid {
       if (!statusDiv) return;
 
       if (!overtarget.matches(':hover')) {
-        // (Clear text after animation transition)
-        setTimeout(() => { statusDiv.textContent = ''; }, 300);
+        // Clear text and reset alignment after animation transition
+        setTimeout(() => {
+          statusDiv.textContent = '';
+          statusDiv.classList.remove('align-left');
+          statusDiv.style.left = '';
+        }, 300);
         return;
       }
 
@@ -2079,6 +2085,18 @@ class Grid {
       // Debug status
       if (overtarget.showDebug) {
         statusDiv.innerHTML += `\n${this.views[k].debugStatus()}`;
+      }
+
+      // Reposition popup if it would go off the left edge of the screen
+      // Only check once (when not already aligned) to avoid flickering
+      if (!statusDiv.classList.contains('align-left')) {
+        const rect = statusDiv.getBoundingClientRect();
+        if (rect.left < 0) {
+          // Align with viewport left edge: calculate offset from zoomnum to viewport
+          const zomnumRect = overtarget.getBoundingClientRect();
+          statusDiv.classList.add('align-left');
+          statusDiv.style.left = `${-zomnumRect.left}px`;
+        }
       }
 
       setTimeout(() => this.updateProgress(overtarget, k), 100);
