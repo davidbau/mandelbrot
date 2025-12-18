@@ -97,7 +97,7 @@ body.starting div#b_0:after { display: flex; position: absolute;
 #moviestatus { position: absolute; left: 0; bottom: -11pt;
   font-size: 11pt; color: yellow; }
 #fullscreen-button { position: fixed; bottom: 20px; right: 20px; font-size: 36px;
-  cursor: pointer; user-select: none; opacity: 0.7; transition: opacity 0.3s;
+  cursor: pointer; user-select: none; opacity: 0.7; transition: opacity 0.15s;
   color: white; font-weight: bold; z-index: 10; display: none; }
 #fullscreen-button:hover { opacity: 1; }
 :fullscreen #fullscreen-button { display: none !important; }
@@ -385,6 +385,7 @@ class MandelbrotExplorer {
 
     this.initPlatform();
     this.grid.updateLayout(startState);
+    this.grid.setupFullscreenButtonHover();
     this.eventHandler.setup();
     this.grid.updateHiddenViews(); // Initial update of hidden boards
   }
@@ -1578,6 +1579,7 @@ class Grid {
     // Holds union of views that can be reused if popstate fires mid-update.
     // Cleared to null when update completes (this.views is then the stable state).
     this.stableViews = null;
+    this._mouseOverBoard = false;  // Track if mouse is over board views
   }
 
   makeView(k, size, re, im, deferComputation = false) {
@@ -2145,12 +2147,62 @@ class Grid {
   updateFullscreenButton() {
     const button = document.getElementById('fullscreen-button');
     if (button && !document.fullscreenElement) {
-      const gridElement = document.getElementById('grid');
-      const visibleCanvases = gridElement ?
-        Array.from(gridElement.children)
-          .filter(child => child.style.display !== 'none').length : 0;
-      button.style.display = (visibleCanvases === 1) ? 'block' : 'none';
+      // Show button unless mouse is over a board view
+      button.style.display = 'block';
+      if (!this._mouseOverBoard) {
+        button.style.opacity = '0.7';
+      }
     }
+  }
+
+  setupFullscreenButtonHover() {
+    const button = document.getElementById('fullscreen-button');
+    const gridElement = document.getElementById('grid');
+    if (!button || !gridElement) return;
+
+    this._mouseOverBoard = false;
+
+    // Check if button overlaps with any visible view
+    const buttonOverlapsViews = () => {
+      const btnRect = button.getBoundingClientRect();
+      for (const child of gridElement.children) {
+        if (child.style.display === 'none') continue;
+        const viewRect = child.getBoundingClientRect();
+        // Check for rectangle overlap
+        if (btnRect.left < viewRect.right && btnRect.right > viewRect.left &&
+            btnRect.top < viewRect.bottom && btnRect.bottom > viewRect.top) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Update button visibility based on mouse position and view overlap
+    const updateButtonVisibility = () => {
+      if (document.fullscreenElement) return;
+      if (this._mouseOverBoard && buttonOverlapsViews()) {
+        button.style.opacity = '0';
+        button.style.pointerEvents = 'none';
+      } else {
+        button.style.opacity = '0.7';
+        button.style.pointerEvents = '';
+      }
+    };
+
+    // Fade out button when mouse enters grid AND button overlaps views
+    gridElement.addEventListener('mouseenter', (e) => {
+      this._mouseOverBoard = true;
+      updateButtonVisibility();
+    }, true);
+
+    // Fade in button when mouse leaves the grid entirely
+    gridElement.addEventListener('mouseleave', (e) => {
+      this._mouseOverBoard = false;
+      updateButtonVisibility();
+    }, true);
+
+    // Re-check on scroll in case views now overlap button
+    window.addEventListener('scroll', updateButtonVisibility, { passive: true });
   }
 }
 
@@ -7056,6 +7108,7 @@ class GpuBaseBoard extends Board {
     this.lastReportedIters = null;
     this.cpuStatus = null;
     this._readPixelBufferPromise = null;  // Lock for readPixelBuffer
+    this.selfBatching = true;  // GPU boards handle batching internally
   }
 
   checkSpike(size, re, im) {
@@ -10313,10 +10366,14 @@ class FractalWorker {
         // If stepsRequested is 0, don't do anything (wait for step() call)
       } else {
         // Normal mode - loop until workDone threshold
-        for (let workDone = 0; workDone < 17377 && board.unfinished(); ) {
-          workDone += board.un * board.effort;
+        // GPU boards handle batching internally, so only call iterate() once
+        if (board.selfBatching) {
           await board.iterate();
-          if (board.isComputing) break;
+        } else {
+          for (let workDone = 0; workDone < 17377 && board.unfinished(); ) {
+            workDone += board.un * board.effort;
+            await board.iterate();
+          }
         }
       }
       const now = (new Date()).getTime();
