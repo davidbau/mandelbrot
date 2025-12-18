@@ -367,17 +367,100 @@ function getFileAtCommit(commit, filepath) {
   }
 }
 
-// Get commit history with dates
+// Check if a commit was co-authored by Claude
+function isClaudeCoauthored(hash) {
+  try {
+    const body = execSync(`git log -1 --format="%b" ${hash}`, {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024
+    });
+    return /Co-Authored-By.*Claude/i.test(body);
+  } catch (e) {
+    return false;
+  }
+}
+
+// Count test cases at a given commit
+function countTests(hash) {
+  try {
+    // Get list of test files at this commit
+    const files = execSync(
+      `git ls-tree -r --name-only ${hash} -- tests/`,
+      { encoding: 'utf8', maxBuffer: 1024 * 1024 }
+    ).trim();
+
+    if (!files) return 0;
+
+    let testCount = 0;
+    for (const file of files.split('\n')) {
+      if (!file.endsWith('.test.js')) continue;
+      try {
+        const content = execSync(`git show ${hash}:${file}`, {
+          encoding: 'utf8',
+          maxBuffer: 5 * 1024 * 1024
+        });
+        // Count test() and it() calls - match start of statement
+        const matches = content.match(/^\s*(test|it)\s*\(/gm);
+        if (matches) testCount += matches.length;
+      } catch (e) {
+        // File might not exist at this commit
+      }
+    }
+    return testCount;
+  } catch (e) {
+    // tests/ directory doesn't exist at this commit
+    return 0;
+  }
+}
+
+// Get commit history with dates, including original branch
 function getCommitHistory() {
-  const log = execSync(
+  // Get commits from main branch
+  const mainLog = execSync(
     'git log --format="%H|%ad|%s" --date=short --follow -- index.html',
     { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
   );
 
-  return log.trim().split('\n').map(line => {
+  const mainCommits = mainLog.trim().split('\n').map(line => {
     const [hash, date, ...msgParts] = line.split('|');
     return { hash, date, message: msgParts.join('|') };
-  }).reverse(); // Oldest first
+  });
+
+  // Get the oldest commit hash from main branch to check if we need original branch
+  const oldestMainHash = mainCommits[mainCommits.length - 1]?.hash;
+
+  // Try to get commits from "original" branch that aren't in main
+  let originalCommits = [];
+  try {
+    const originalLog = execSync(
+      'git log original --format="%H|%ad|%s" --date=short -- index.html',
+      { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
+    );
+
+    const allOriginalCommits = originalLog.trim().split('\n').map(line => {
+      const [hash, date, ...msgParts] = line.split('|');
+      return { hash, date, message: msgParts.join('|') };
+    });
+
+    // Filter to only commits not already in main (by hash prefix)
+    const mainHashes = new Set(mainCommits.map(c => c.hash.slice(0, 7)));
+    originalCommits = allOriginalCommits.filter(c => !mainHashes.has(c.hash.slice(0, 7)));
+  } catch (e) {
+    // Original branch doesn't exist or is inaccessible
+    console.log('Note: "original" branch not found, using only main branch history');
+  }
+
+  // Combine: original commits first (reversed to oldest-first), then main commits (reversed)
+  const allCommits = [...originalCommits.reverse(), ...mainCommits.reverse()];
+
+  // Deduplicate by hash (in case of overlap)
+  const seen = new Set();
+  return allCommits.filter(c => {
+    const key = c.hash.slice(0, 7);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 
@@ -404,7 +487,9 @@ async function main() {
       hash: commit.hash.slice(0, 7),
       date: commit.date,
       message: commit.message.slice(0, 60),
+      claudeCoauthored: isClaudeCoauthored(commit.hash),
       lineCount,
+      testCount: countTests(commit.hash),
       nodeCount: graph.nodes.length,
       edgeCount: graph.edges.length,
       nodes: graph.nodes,
