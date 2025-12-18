@@ -55,32 +55,22 @@ describe('Aspect Ratio Tests', () => {
     });
 
     // --- Calculate the expected 'top' position ---
-    // These values correspond to the state in the URL.
+    // These values correspond to the state in the URL: s=3,0.6
     const prevCenterIm = 0;
     const currCenterIm = 0.4;
-    // prevSize is NOT 3.0 because of aspect ratio override in Config.initSizes
-    // it will be Math.max(3.0, 2.5 * aspectRatio)
+    // prevSize is 3.0 as explicitly set in the URL (s=3,0.6)
+    // Note: firstsize would be Math.max(3.0, 2.5 * aspectRatio) = 4.444 for 16:9,
+    // but explicit sizes in URL override that
     const aspectRatio = 16 / 9;
-    const prevSize = Math.max(3.0, 2.5 * aspectRatio); // Corrected prevSize
-    
-    const zoomFactor = 5; // s=3, s=0.6 -> zf=5
+    const prevSize = 3.0; // From URL s=3,0.6
+
+    const zoomFactor = 5; // s=3 / s=0.6 = 5
 
     // The correct 'y' fraction calculation, accounting for aspect ratio.
     const y_fraction = 0.5 - (currCenterIm - prevCenterIm) / (prevSize / aspectRatio);
 
     const border = 1;
     const expectedTop = y_fraction * view0_dims.height - view0_dims.height / 2 / zoomFactor - border;
-
-    // console.log('--- TEST DEBUG ---'); // Removed debug logs
-    // console.log('View 0 Height (pixels):', view0_dims.height);
-    // console.log('Previous Imaginary Center:', prevCenterIm);
-    // console.log('Current Imaginary Center:', currCenterIm);
-    // console.log('Previous Size (width):', prevSize);
-    // console.log('Aspect Ratio:', aspectRatio);
-    // console.log('Calculated Y Fraction:', y_fraction);
-    // console.log('Expected Top (pixels):', expectedTop);
-    // console.log('Received Top (pixels):', zoomRectTop);
-    // console.log('--- END TEST DEBUG ---');
 
     expect(zoomRectTop).toBeCloseTo(expectedTop, 1);
   }, TEST_TIMEOUT);
