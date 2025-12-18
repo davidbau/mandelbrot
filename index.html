@@ -1149,6 +1149,7 @@ class View {
     this.hi = [[0, 1, 1, 0]];
     this.convergedData.clear();
     this.boardStartTime = Date.now();
+    this.boardEndTime = null;
   }
 
   setParentView(parentView) {
@@ -1192,6 +1193,10 @@ class View {
     this.workerInfo = workerInfo;
     if (boardType) {
       this.boardType = boardType;
+    }
+    // Freeze stats timing when board completes (un === 0 means 100%)
+    if (this.un === 0 && !this.boardEndTime) {
+      this.boardEndTime = Date.now();
     }
 
     // Propagate updates to child view
@@ -1482,8 +1487,9 @@ class View {
     this.nn.reduce((iMin, x, i, arr) => x < arr[iMin] ? i : iMin, 0);
     const boardName = this.boardType || 'Board';
 
-    // Calculate performance metrics
-    const elapsedSecs = (Date.now() - this.boardStartTime) / 1000;
+    // Calculate performance metrics (freeze timing when board completes)
+    const endTime = this.boardEndTime || Date.now();
+    const elapsedSecs = (endTime - this.boardStartTime) / 1000;
     const finishedPixels = this.di + this.ch;
     const itersPerSec = elapsedSecs > 0 ? this.it / elapsedSecs : 0;
     const pixelsPerSec = elapsedSecs > 0 ? finishedPixels / elapsedSecs : 0;
