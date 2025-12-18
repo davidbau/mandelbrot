@@ -7112,7 +7112,7 @@ class GpuBaseBoard extends Board {
     this.cpuStatus = null;
     this._readPixelBufferPromise = null;  // Lock for readPixelBuffer
     this.selfBatching = true;  // GPU boards handle batching internally
-    this.effort = 12;  // Benchmarked: ~1 μs/pixel-iter, ~8× faster than CPU (100/8≈12)
+    this.effort = 12;  // Default for GPU boards (8× faster than CPU), overridden by subclasses
   }
 
   checkSpike(size, re, im) {
@@ -7374,7 +7374,7 @@ class GpuBoard extends GpuBaseBoard {
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    this.effort = 1;
+    this.effort = 7;  // Benchmarked: ~0.6 μs/pixel-iter, 14× faster than CPU
     // Epsilon values for convergence detection scale with pixel size
     const pix = this.pixelSize;
     // GPU uses float32 precision, so thresholds must be larger than CPU's float64
@@ -8010,7 +8010,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    // effort=12 inherited from GpuBaseBoard (8× faster than CPU)
+    this.effort = 11;  // Benchmarked: ~0.9-1.0 μs/pixel-iter, ~9× faster than CPU
 
     // Initialize DD reference orbit (refC, refOrbit, threading, etc.)
     const refRe = Array.isArray(re) ? re : toDD(re);
@@ -9100,7 +9100,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    // effort=12 inherited from GpuBaseBoard (8× faster than CPU)
+    this.effort = 11;  // Benchmarked: ~0.9 μs/pixel-iter, 9× faster than CPU
 
     // Initialize QD reference orbit (refC_qd, qdRefOrbit, threading, etc.)
     const refReQD = toQD(re);
