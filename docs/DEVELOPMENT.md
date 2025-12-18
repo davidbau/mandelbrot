@@ -56,6 +56,16 @@ npm run test:coverage # Generate a code coverage report
 
 See `tests/README.md` for more details on the test structure.
 
+## Performance Benchmarking
+
+Run `node tests/debug-benchmark.js` to measure board performance across all 9 board types. This script:
+- Tests at multiple zoom levels (shallow, medium, deep)
+- Varies grid size and iteration count to separate per-pixel vs per-batch costs
+- Uses linear regression to fit the model: `time = perBatch + perPixelIter × pixels × iters`
+- Outputs per-pixel-iteration cost (μs) and per-batch overhead for each board
+
+The benchmark results inform the `effort` values used by the scheduler for load balancing across workers. See `docs/BENCHMARKS.md` for detailed methodology and results.
+
 ## Code Coverage
 
 Run `npm run test:coverage` to generate a coverage report. This command runs the integration test suite while using Puppeteer's V8 coverage tools to track which code paths are exercised.
