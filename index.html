@@ -1762,14 +1762,11 @@ class Grid {
       if (sizeRatio < 0.999 || sizeRatio > 1.001) return false;
 
       // Check coordinates - tolerance is 0.01% of view extent
-      // Use QD precision for comparison
+      // Use QD subtraction to avoid precision loss at deep zoom
       const tolerance = viewSize * 0.0001;
-      const viewReVal = qdToNumber(viewReQD);
-      const viewImVal = qdToNumber(viewImQD);
-      const targetReVal = targetRe[0] + (targetRe[1] || 0);
-      const targetImVal = targetIm[0] + (targetIm[1] || 0);
-      return Math.abs(targetReVal - viewReVal) < tolerance &&
-             Math.abs(targetImVal - viewImVal) < tolerance;
+      const reDiff = Math.abs(qdToNumber(toQDSub(viewReQD, targetRe)));
+      const imDiff = Math.abs(qdToNumber(toQDSub(viewImQD, targetIm)));
+      return reDiff < tolerance && imDiff < tolerance;
     };
 
     for (let targetIdx = 0; targetIdx < targetSizes.length; targetIdx++) {
@@ -2327,15 +2324,14 @@ class ZoomManager {
     const oimQD = this.grid.views[lastK].im;
 
     // Helper to check if view center is within 0.01% tolerance of target
+    // Uses QD arithmetic to avoid precision loss at deep zoom
     const isWithinTolerance = (view, targetReQD, targetImQD) => {
       const viewSize = view.size;
       const tolerance = viewSize * 0.0001; // 0.01% of view extent
-      const viewRe = qdToNumber(view.re);
-      const viewIm = qdToNumber(view.im);
-      const targetRe = qdToNumber(targetReQD);
-      const targetIm = qdToNumber(targetImQD);
-      return Math.abs(targetRe - viewRe) < tolerance &&
-             Math.abs(targetIm - viewIm) < tolerance;
+      // Compute difference in QD space, then convert to number
+      const reDiff = Math.abs(qdToNumber(toQDSub(view.re, targetReQD)));
+      const imDiff = Math.abs(qdToNumber(toQDSub(view.im, targetImQD)));
+      return reDiff < tolerance && imDiff < tolerance;
     };
 
     // PHASE 1: Identify which views need board recreation (using ORIGINAL coords)
