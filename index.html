@@ -8652,8 +8652,23 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
     // Initialize per-pixel perturbation data
     this.initPixels(size, re, im);
 
+    // Double-buffered staging for overlapping CPU/GPU work
+    this.stagingBufferIndex = 0;
+    this.hasPendingResults = false;
+    this.pendingIterationsPerBatch = 0;
+    this._baseIt = 1;  // Committed iteration count (BoardBase initializes this.it = 1)
+
     // Start GPU initialization (async)
     this.gpuInitPromise = this.initGPU();
+  }
+
+  // Return iteration count including pending (for accurate reporting)
+  get it() {
+    return this._baseIt + (this.hasPendingResults ? this.pendingIterationsPerBatch : 0);
+  }
+
+  set it(value) {
+    this._baseIt = value;
   }
 
   initPixels(size, re, im) {
@@ -8772,6 +8787,20 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: 'Params buffer'
     });
+
+    // Double-buffered staging for overlapping CPU/GPU work
+    this.buffers.stagingPixels = [
+      this.device.createBuffer({
+        size: pixelBufferSize,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Staging pixels buffer 0'
+      }),
+      this.device.createBuffer({
+        size: pixelBufferSize,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Staging pixels buffer 1'
+      })
+    ];
 
     // Initialize pixel state buffer using overlapping typed array views
     // ArrayBuffer holds 56 bytes per pixel (14 x 4 bytes)
@@ -9318,9 +9347,123 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
     }
     this.isComputing = true;
     const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
+    const BYTES_PER_PIXEL = 56;  // 6 u32 + 8 f32 = 56 bytes per pixel
+    const THREADING_CAPACITY = 1048576;  // 2^20
+    const BYTES_PER_ITER = 20;  // 5 f32 = 20 bytes
 
     try {
-    // Calculate batch size - use passed targetIters or calculate based on pixels
+    // ================================================================
+    // STEP 1: Process pending results from PREVIOUS batch (overlaps with GPU work)
+    // ================================================================
+    if (this.hasPendingResults) {
+      const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
+      const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
+
+      await readBuffer.mapAsync(GPUMapMode.READ);
+      const pixelData = new ArrayBuffer(pixelBufferSize);
+      const srcData = readBuffer.getMappedRange();
+      new Uint8Array(pixelData).set(new Uint8Array(srcData));
+      readBuffer.unmap();
+
+      const pixelU32 = new Uint32Array(pixelData);
+      const pixelF32 = new Float32Array(pixelData);
+
+      // Update global iteration counter (before processing results, like CPU implementations)
+      // Use _baseIt directly to avoid getter adding pending twice
+      this._baseIt += this.pendingIterationsPerBatch;
+
+      // PixelState struct offsets (14 values per pixel, matching shader struct layout)
+      const INT_ITER = 0, INT_STATUS = 1, INT_PERIOD = 2, INT_REF_ITER = 3;
+      const FLOAT_DZR = 6, FLOAT_DZI = 7;  // f32 fields start at offset 6
+
+      // Update board state
+      const pixelsByIteration = new Map();
+      const convergedByIteration = new Map();
+      let hasConverged = false;
+
+      // First pass: check for diverged pixels and count converged
+      for (let i = 0; i < dimsArea; i++) {
+        const idx14 = i * 14;
+        const status = pixelU32[idx14 + INT_STATUS];
+        const period = pixelU32[idx14 + INT_PERIOD];
+
+        if (this.nn[i] !== 0) continue;
+
+        if (status === 1) {
+          const iters = pixelU32[idx14 + INT_ITER];
+          this.nn[i] = iters;
+          this.pp[i] = period;
+
+          if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
+          pixelsByIteration.get(iters).push(i);
+          this.di++;
+          this.un--;
+
+          if (this.inSpike && this.inSpike[i] && this.ch > 0) this.ch -= 1;
+        } else if (status === 2) {
+          hasConverged = true;
+        }
+      }
+
+      // Second pass: process converged pixels
+      if (hasConverged) {
+        for (let i = 0; i < dimsArea; i++) {
+          const idx14 = i * 14;
+          const status = pixelU32[idx14 + INT_STATUS];
+          const period = pixelU32[idx14 + INT_PERIOD];
+
+          if (this.nn[i]) continue;
+
+          if (status === 2) {
+            const iters = pixelU32[idx14 + INT_ITER];
+            this.nn[i] = -iters;
+            this.pp[i] = period - 1;
+
+            const refIter = pixelU32[idx14 + INT_REF_ITER];
+            const nextRefIter = refIter + 1;
+            const dzr = pixelF32[idx14 + FLOAT_DZR];
+            const dzi = pixelF32[idx14 + FLOAT_DZI];
+
+            const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
+            const zr = toDDAdd([ref[0], ref[1]], dzr);
+            const zi = toDDAdd([ref[2], ref[3]], dzi);
+            if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
+            convergedByIteration.get(iters).push({
+              index: i,
+              z: [zr[0], zr[1], zi[0], zi[1]],
+              p: this.pp[i]
+            });
+            this.un--;
+
+            if (this.inSpike && this.inSpike[i] && this.ch > 0) this.ch -= 1;
+          }
+        }
+      }
+
+      // Create change objects grouped by iteration
+      const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+      for (const iter of Array.from(allIterations).sort((a, b) => a - b)) {
+        const divergedIndices = pixelsByIteration.get(iter) || [];
+        const convergedData = convergedByIteration.get(iter) || [];
+        if (divergedIndices.length > 0 || convergedData.length > 0) {
+          this.queueChanges({ iter, nn: divergedIndices, vv: convergedData });
+        }
+      }
+
+      this.hasPendingResults = false;
+    }
+
+    // ================================================================
+    // STEP 2: Check if all done (after processing pending results)
+    // ================================================================
+    if (this.un === 0) {
+      this.isComputing = false;
+      return;
+    }
+
+    // ================================================================
+    // STEP 3: Calculate batch size and extend reference orbit for this batch
+    // ================================================================
     const pixelsToIterate = this.un + this.ch;
     let iterationsPerBatch;
     if (targetIters !== null) {
@@ -9329,19 +9472,10 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
       iterationsPerBatch = Math.max(17, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
     }
 
-    // Step 1: Extend reference orbit on CPU as needed
-    // Extend to what pixels need (this.it) plus enough buffer for next batch
-    const THREADING_CAPACITY = 1048576;  // 2^20
+    // Extend reference orbit to exactly what this batch needs (no buffer)
+    // Step 6 will speculatively extend further while GPU works
     const currentNeed = this.it + iterationsPerBatch;
-    // Also allow growth for thread-following, but cap to avoid waste
-    // Use proportional buffer (10%) for long periods, or fixed 10k buffer for short periods
-    const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
-    const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
-    // Cap at threading capacity - don't extend beyond this point
-    const targetRefIterations = Math.min(
-      Math.max(currentNeed, threadingBuffer),
-      THREADING_CAPACITY
-    );
+    const targetRefIterations = Math.min(currentNeed, THREADING_CAPACITY);
     while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
       this.extendReferenceOrbit();
     }
@@ -9351,11 +9485,10 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
       this.setupReferenceOrbitLoop();
     }
 
-    // Step 2: Upload iteration state to GPU (INCREMENTAL UPLOADS)
-    // IterState struct: 5 f32 per iteration
-    // (ref_re, ref_im, thread_next, thread_delta_re, thread_delta_im)
-    const totalIters = this.refIterations + 1;  // Include iteration 0
-    const BYTES_PER_ITER = 20;  // 5 f32 = 20 bytes
+    // ================================================================
+    // STEP 4: Upload iteration state to GPU (INCREMENTAL UPLOADS)
+    // ================================================================
+    const totalIters = this.refIterations + 1;
 
     // Resize iters buffer if needed, cap at 128MB
     const requiredIterSize = totalIters * BYTES_PER_ITER;
@@ -9363,7 +9496,6 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
     const allocSize = Math.min(Math.max(requiredIterSize * 2, 1024), maxBufferSize);
     if (this.buffers.iters.size < requiredIterSize &&
         this.buffers.iters.size < allocSize) {
-      // Only resize if we can actually allocate a larger buffer (not already at max cap)
       await this.device.queue.onSubmittedWorkDone();
       this.buffers.iters.destroy();
       this.buffers.iters = this.device.createBuffer({
@@ -9371,20 +9503,19 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         label: 'Iteration state buffer'
       });
-      this.lastUploadedIterLength = -1;  // Reset after resize
+      this.lastUploadedIterLength = -1;
       this.createBindGroup();
     }
 
     // INCREMENTAL UPLOAD: Only upload new iteration data
     if (this.lastUploadedIterLength < this.refIterations) {
       const startIdx = Math.max(0, this.lastUploadedIterLength + 1);
-      // Cap to buffer capacity
       const maxIters = Math.floor(this.buffers.iters.size / BYTES_PER_ITER);
       const endIdx = Math.min(this.refIterations, maxIters - 1);
       const count = endIdx - startIdx + 1;
 
       if (count > 0) {
-        const iterF32 = new Float32Array(count * 5);  // 5 floats per iteration
+        const iterF32 = new Float32Array(count * 5);
 
         for (let i = 0; i < count; i++) {
           const iterIdx = startIdx + i;
@@ -9392,14 +9523,12 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
           const thread = this.threading.getThread(iterIdx);
 
           const base = i * 5;
-          // Reference orbit (DD precision -> f32)
-          iterF32[base + 0] = ref[0] + ref[1];      // ref_re
-          iterF32[base + 1] = ref[2] + ref[3];      // ref_im
-          // Threading data
+          iterF32[base + 0] = ref[0] + ref[1];
+          iterF32[base + 1] = ref[2] + ref[3];
           if (!thread) {
-            iterF32[base + 2] = -1;   // thread_next (-1 = no thread)
-            iterF32[base + 3] = 0;    // thread_delta_re
-            iterF32[base + 4] = 0;    // thread_delta_im
+            iterF32[base + 2] = -1;
+            iterF32[base + 3] = 0;
+            iterF32[base + 4] = 0;
           } else {
             iterF32[base + 2] = thread.next;
             iterF32[base + 3] = thread.deltaRe;
@@ -9414,67 +9543,44 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
       this.lastUploadedIterLength = this.refIterations;
     }
 
-    // Step 3: Check if all done
-    if (this.un === 0) {
-      this.isComputing = false;
-      return;  // All pixels finished
-    }
-
-    // Step 4: Set up parameters
-    // Batch size already calculated above (before reference orbit extension)
+    // ================================================================
+    // STEP 5: Set up parameters and dispatch GPU
+    // ================================================================
     const pixelSize = this.pixelSize;
-
-    // Step 4a: Precompute checkpoint offsets for this batch using fibonacciPeriod
     const checkpointOffsets = [];
     const bufferIter = this.it;
     for (let i = 0; i < iterationsPerBatch; i++) {
-      const globalIter = bufferIter + i;
-      if (fibonacciPeriod(globalIter) === 1) {
-        checkpointOffsets.push(i);
-      }
+      if (fibonacciPeriod(bufferIter + i) === 1) checkpointOffsets.push(i);
     }
-
-    // Cap at 8 checkpoints (hardware limit based on uniform buffer fields)
-    // Note: checkpointCount can be 0 if no checkpoints in this batch
-    // That's OK - we'll keep comparing to the last checkpoint from a previous batch
     const checkpointCount = Math.min(checkpointOffsets.length, 8);
 
-    // Step 5: Dispatch GPU compute - process all pixels
     const workgroupSize = 64;
     const numWorkgroups = Math.ceil(dimsArea / workgroupSize);
-
-    // 2D workgroup dispatch
     const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
     const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
 
-    // Pack params: dims_width, dims_height, iterations_per_batch, active_count,
-    // ref_orbit_length, exponent, workgroups_x, start_iter, checkpoint_count,
-    // ckpt0-7, loop params, pixel_size, aspect_ratio, loop deltas
-    const paramsBuffer = new ArrayBuffer(128);  // Extended for new layout
+    const paramsBuffer = new ArrayBuffer(128);
     const paramsU32 = new Uint32Array(paramsBuffer);
     const paramsF32 = new Float32Array(paramsBuffer);
     paramsU32[0] = this.config.dimsWidth;
     paramsU32[1] = this.config.dimsHeight;
     paramsU32[2] = iterationsPerBatch;
-    paramsU32[3] = dimsArea;  // active_count: Process all pixels, skip finished ones in shader
-    paramsU32[4] = this.refIterations + 1;  // ref_orbit_length: includes iteration 0
+    paramsU32[3] = dimsArea;
+    paramsU32[4] = this.refIterations + 1;
     paramsU32[5] = this.config.exponent || 2;
-    paramsU32[6] = workgroupsX * workgroupSize;  // Total threads in X dimension
-    // start_iter: Starting iteration (what's in the buffer before iter++)
+    paramsU32[6] = workgroupsX * workgroupSize;
     paramsU32[7] = bufferIter;
-    paramsU32[8] = checkpointCount;  // Number of checkpoints in this batch
+    paramsU32[8] = checkpointCount;
 
-    // Pack all 8 checkpoint offsets (fill unused slots with 0)
     for (let i = 0; i < 8; i++) {
       paramsU32[9 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
     }
 
-    // Pack reference orbit loop parameters
     const loop = this.refOrbitLoop || { enabled: false };
     paramsU32[17] = loop.enabled ? 1 : 0;
     paramsU32[18] = loop.threshold || 0;
     paramsU32[19] = loop.jumpAmount || 0;
-    paramsU32[20] = 0;  // padding
+    paramsU32[20] = 0;
     paramsF32[21] = pixelSize;
     paramsF32[22] = this.config.aspectRatio;
     paramsF32[23] = loop.deltaR || 0;
@@ -9482,141 +9588,48 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
-    const commandEncoder = this.device.createCommandEncoder(
-      { label: 'Perturbation compute' });
+    const commandEncoder = this.device.createCommandEncoder({ label: 'Perturbation compute' });
     const passEncoder = commandEncoder.beginComputePass({ label: 'Perturbation pass' });
     passEncoder.setPipeline(this.pipeline);
     passEncoder.setBindGroup(0, this.bindGroup);
-    passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);  // 2D dispatch
+    passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
     passEncoder.end();
 
+    // Copy results to current staging buffer (for double-buffering)
+    const writeBuffer = this.buffers.stagingPixels[this.stagingBufferIndex];
+    const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
+    commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, writeBuffer, 0, pixelBufferSize);
+
+    // Start timing from GPU submit (when GPU work begins)
+    const gpuStartTime = performance.now();
     this.device.queue.submit([commandEncoder.finish()]);
 
-    // Step 6: Read back results (unified PixelState buffer)
-    await this.device.queue.onSubmittedWorkDone();
+    // ================================================================
+    // STEP 6: Speculative reference orbit extension while GPU works
+    // ================================================================
+    // Extend orbit speculatively for NEXT batch's needs:
+    // Next batch's this.it = current this.it + iterationsPerBatch (pending results)
+    // Next batch's need = nextIt + iterationsPerBatch + buffer
+    const speculativeTimeLimit = 100;  // ms - optimal based on benchmarking
+    const nextBatchIt = this.it + iterationsPerBatch;  // what this.it will be next batch
+    const nextBatchNeed = nextBatchIt + iterationsPerBatch;  // what next batch will need
+    const speculativeTarget = Math.min(
+      Math.max(nextBatchNeed + 10000, Math.round(nextBatchNeed * 1.1)),
+      THREADING_CAPACITY
+    );
 
-    // Read unified pixel buffer and create overlapping views
-    // PixelState struct: 6 u32 + 8 f32 = 14 x 4-byte values per pixel
-    const pixelBuffer = await this.readBuffer(this.buffers.pixels, Uint32Array);
-    const pixelU32 = pixelBuffer;  // Already Uint32Array for u32 fields
-    const pixelF32 = new Float32Array(pixelBuffer.buffer);  // Overlapping view for f32 fields
-
-    // Update global iteration counter (before processing results, like CPU implementations)
-    this.it += iterationsPerBatch;
-
-    // PixelState struct offsets (14 values per pixel, matching shader struct layout)
-    const INT_ITER = 0, INT_STATUS = 1, INT_PERIOD = 2, INT_REF_ITER = 3;
-    const FLOAT_DZR = 6, FLOAT_DZI = 7;  // f32 fields start at offset 6
-
-    // Step 7: Update board state
-    const pixelsByIteration = new Map();  // Group diverged pixels by their exact iteration
-    const convergedByIteration = new Map();  // Group converged pixels by their exact iteration
-    let hasConverged = false;
-
-    // First pass: check for diverged pixels and count converged
-    let divergedCount = 0;
-    let convergedCount = 0;
-
-    for (let i = 0; i < dimsArea; i++) {
-      const idx14 = i * 14;  // 14 values per pixel in unified struct
-      const status = pixelU32[idx14 + INT_STATUS];
-      const period = pixelU32[idx14 + INT_PERIOD];
-
-      if (this.nn[i] !== 0) continue;  // Already finished
-
-      if (status === 1) {
-        // Newly diverged
-        const iters = pixelU32[idx14 + INT_ITER];
-        divergedCount++;
-        this.nn[i] = iters;
-        this.pp[i] = period;
-
-        if (!pixelsByIteration.has(iters)) {
-          pixelsByIteration.set(iters, []);
-        }
-        pixelsByIteration.get(iters).push(i);
-        this.di++;
-        this.un--;
-
-        // Decrement ch if this pixel was in the spike
-        if (this.inSpike && this.inSpike[i] && this.ch > 0) {
-          this.ch -= 1;
-        }
-      } else if (status === 2) {
-        convergedCount++;
-        hasConverged = true;
-      }
+    while (!this.refOrbitEscaped &&
+           this.refIterations < speculativeTarget &&
+           (performance.now() - gpuStartTime) < speculativeTimeLimit) {
+      this.extendReferenceOrbit();
     }
 
-    // Second pass: process converged pixels (f32 fields already available in pixelF32)
-    if (hasConverged) {
-      for (let i = 0; i < dimsArea; i++) {
-        const idx14 = i * 14;
-        const status = pixelU32[idx14 + INT_STATUS];
-        const period = pixelU32[idx14 + INT_PERIOD];
-
-        if (this.nn[i]) continue;  // Already finished
-
-        if (status === 2) {
-          // Newly converged
-          const iters = pixelU32[idx14 + INT_ITER];
-          this.nn[i] = -iters;
-
-          // period from shader is pp (iteration when first within epsilon2)
-          // Store pp - 1 because fibonacciPeriod() adds 1 in its calculation
-          this.pp[i] = period - 1;
-
-          // Get converged position: refOrbit[refIter+1] + dz
-          // dz corresponds to refIter+1 because we computed new dz but didn't increment ref_iter
-          const refIter = pixelU32[idx14 + INT_REF_ITER];
-          const nextRefIter = refIter + 1;
-          const dzr = pixelF32[idx14 + FLOAT_DZR];
-          const dzi = pixelF32[idx14 + FLOAT_DZI];
-
-          const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
-          // Compute z = ref + dz with proper DD addition
-          const zr = toDDAdd([ref[0], ref[1]], dzr);
-          const zi = toDDAdd([ref[2], ref[3]], dzi);
-          if (!convergedByIteration.has(iters)) {
-            convergedByIteration.set(iters, []);
-          }
-          convergedByIteration.get(iters).push({
-            index: i,
-            z: [zr[0], zr[1], zi[0], zi[1]],  // DDc format
-            p: this.pp[i]  // Raw pp value (UI will call fibonacciPeriod to calculate period)
-          });
-          this.un--;
-
-          // Decrement ch if this pixel was in the spike
-          if (this.inSpike && this.inSpike[i] && this.ch > 0) {
-            this.ch -= 1;
-          }
-        }
-      }
-    }
-
-    // NOTE: When refOrbitEscaped is true, we do NOT mark remaining pixels as diverged.
-    // The GPU shader will continue iterating those pixels individually, and they will
-    // either diverge naturally or continue until maxiter. This matches the behavior
-    // of DDZhuoranBoard which rebases pixels when the reference orbit escapes.
-
-    // Create change objects grouped by iteration
-    const allIterations = new Set([...pixelsByIteration.keys(),
-                                    ...convergedByIteration.keys()]);
-    const sortedIterations = Array.from(allIterations).sort((a, b) => a - b);
-
-    for (const iter of sortedIterations) {
-      const divergedIndices = pixelsByIteration.get(iter) || [];
-      const convergedData = convergedByIteration.get(iter) || [];
-
-      if (divergedIndices.length > 0 || convergedData.length > 0) {
-        this.queueChanges({
-          iter: iter,
-          nn: divergedIndices,
-          vv: convergedData
-        });
-      }
-    }
+    // ================================================================
+    // STEP 7: Mark pending results and swap staging buffer
+    // ================================================================
+    this.pendingIterationsPerBatch = iterationsPerBatch;
+    this.hasPendingResults = true;
+    this.stagingBufferIndex = 1 - this.stagingBufferIndex;
 
     } catch (error) {
       console.error(`GpuZhuoranBoard.compute() ERROR:`, error);
@@ -9625,7 +9638,92 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
     }
   }
 
+  async flushPendingResults() {
+    // Process pending results from the staging buffer without starting a new batch
+    if (!this.hasPendingResults) return;
+
+    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
+    const BYTES_PER_PIXEL = 56;
+    const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
+    const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
+
+    await readBuffer.mapAsync(GPUMapMode.READ);
+    const pixelData = new ArrayBuffer(pixelBufferSize);
+    const srcData = readBuffer.getMappedRange();
+    new Uint8Array(pixelData).set(new Uint8Array(srcData));
+    readBuffer.unmap();
+
+    const pixelU32 = new Uint32Array(pixelData);
+    const pixelF32 = new Float32Array(pixelData);
+
+    // Update global iteration counter
+    // Use _baseIt directly to avoid getter adding pending twice
+    this._baseIt += this.pendingIterationsPerBatch;
+
+    // PixelState struct offsets
+    const INT_ITER = 0, INT_STATUS = 1, INT_PERIOD = 2, INT_REF_ITER = 3;
+    const FLOAT_DZR = 6, FLOAT_DZI = 7;
+
+    // Process results
+    for (let i = 0; i < dimsArea; i++) {
+      const idx14 = i * 14;
+      const status = pixelU32[idx14 + INT_STATUS];
+      const period = pixelU32[idx14 + INT_PERIOD];
+
+      if (this.nn[i] !== 0) continue;
+
+      if (status === 1) {
+        const iters = pixelU32[idx14 + INT_ITER];
+        this.nn[i] = iters;
+        this.pp[i] = period;
+        this.di++;
+        this.un--;
+      } else if (status === 2) {
+        const iters = pixelU32[idx14 + INT_ITER];
+        this.nn[i] = -iters;
+        this.pp[i] = period - 1;
+        this.un--;
+      }
+    }
+
+    this.hasPendingResults = false;
+  }
+
+  async readPixelBuffer() {
+    // Override to handle double-buffered staging array
+    if (!this.isGPUReady || !this.buffers.pixels) {
+      return null;
+    }
+
+    const BYTES_PER_PIXEL = 56;
+    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
+    const bufferSize = dimsArea * BYTES_PER_PIXEL;
+
+    // Use the first staging buffer for serialization reads
+    const stagingBuffer = this.buffers.stagingPixels[0];
+
+    // Copy pixels buffer to staging
+    const commandEncoder = this.device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, stagingBuffer, 0, bufferSize);
+    this.device.queue.submit([commandEncoder.finish()]);
+    await this.device.queue.onSubmittedWorkDone();
+
+    // Read back the data
+    await stagingBuffer.mapAsync(GPUMapMode.READ);
+    const pixelData = new ArrayBuffer(bufferSize);
+    const srcData = stagingBuffer.getMappedRange();
+    new Uint8Array(pixelData).set(new Uint8Array(srcData));
+    stagingBuffer.unmap();
+
+    return pixelData;
+  }
+
   async serialize() {
+    // CRITICAL: Flush pending results before serializing
+    if (this.hasPendingResults) {
+      await this.flushPendingResults();
+    }
+
     // Ensure GPU is ready before reading buffers
     await this.ensureGPUReady();
 
