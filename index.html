@@ -9329,9 +9329,19 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
       iterationsPerBatch = Math.max(17, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
     }
 
-    // Step 1: Extend reference orbit on CPU - only what's needed for this batch
+    // Step 1: Extend reference orbit on CPU as needed
+    // Extend to what pixels need (this.it) plus enough buffer for next batch
     const THREADING_CAPACITY = 1048576;  // 2^20
-    const targetRefIterations = Math.min(this.it + iterationsPerBatch, THREADING_CAPACITY);
+    const currentNeed = this.it + iterationsPerBatch;
+    // Also allow growth for thread-following, but cap to avoid waste
+    // Use proportional buffer (10%) for long periods, or fixed 10k buffer for short periods
+    const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
+    const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
+    // Cap at threading capacity - don't extend beyond this point
+    const targetRefIterations = Math.min(
+      Math.max(currentNeed, threadingBuffer),
+      THREADING_CAPACITY
+    );
     while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
       this.extendReferenceOrbit();
     }
@@ -10490,9 +10500,15 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
       }
 
       // Extend reference orbit on CPU as needed
+      // Use buffer to reduce extension frequency (10k or 10% extra)
       const THREADING_CAPACITY = 1048576;
       const currentNeed = this.it + iterationsPerBatch;
-      const targetRefIterations = Math.min(currentNeed, THREADING_CAPACITY);
+      const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
+      const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
+      const targetRefIterations = Math.min(
+        Math.max(currentNeed, threadingBuffer),
+        THREADING_CAPACITY
+      );
       while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
         this.extendReferenceOrbit();
       }
