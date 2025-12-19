@@ -7966,7 +7966,7 @@ class GpuBoard extends GpuBaseBoard {
 // Uses simple all-pixel loops for readout (like GpuZhuoranBoard)
 // Compacts buffers when dead pixels >= 25% of remaining
 class SparseGpuBoard extends GpuBaseBoard {
-  static BYTES_PER_PIXEL = 28;  // Same as GpuBoard
+  static BYTES_PER_PIXEL = 32;  // 8 fields: orig_index + iter/status/period + zr/zi/base_r/base_i
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
@@ -7977,8 +7977,7 @@ class SparseGpuBoard extends GpuBaseBoard {
     this.epsilon2 = Math.min(1e-5, pix * 10);
     this.checkSpike(size, re, im);
 
-    // Compaction state
-    this.activePixelIndices = null;  // Maps compacted index -> original pixel index
+    // Compaction state (orig_index embedded in each pixel, no separate mapping needed)
     this.activeCount = 0;
     this.deadSinceCompaction = 0;
     this.cumulativeWastedReads = 0;  // Cumulative dead pixels read since last compaction
@@ -8022,6 +8021,7 @@ class SparseGpuBoard extends GpuBaseBoard {
       }
 
       struct PixelState {
+        orig_index: u32,  // Original pixel index (for coordinate computation)
         iter: u32,
         status: u32,
         period: u32,
@@ -8033,7 +8033,6 @@ class SparseGpuBoard extends GpuBaseBoard {
 
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
-      @group(0) @binding(2) var<storage, read> active_pixels: array<u32>;
 
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -8047,7 +8046,7 @@ class SparseGpuBoard extends GpuBaseBoard {
           return;
         }
 
-        let orig_index = active_pixels[active_idx];
+        let orig_index = pixels[active_idx].orig_index;
         let x = orig_index % params.dims_width;
         let y = orig_index / params.dims_width;
 
@@ -8152,7 +8151,7 @@ class SparseGpuBoard extends GpuBaseBoard {
 
   async createBuffers() {
     const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
-    const BYTES_PER_PIXEL = 28;
+    const BYTES_PER_PIXEL = 32;  // 8 fields × 4 bytes
 
     const maxBufferSize = Math.min(
       this.device.limits.maxBufferSize,
@@ -8172,17 +8171,11 @@ class SparseGpuBoard extends GpuBaseBoard {
     });
 
     // Pixel state buffer (compacted - starts at full size)
+    // Each pixel carries its orig_index, so no separate mapping buffer needed
     this.buffers.pixels = this.device.createBuffer({
       size: pixelBufferSize,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'Pixel state buffer'
-    });
-
-    // Active pixel index mapping (compacted index -> original index)
-    this.buffers.activePixels = this.device.createBuffer({
-      size: dimsArea * 4,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      label: 'Active pixels buffer'
     });
 
     // Double-buffered staging (compacted - starts at full size)
@@ -8199,29 +8192,24 @@ class SparseGpuBoard extends GpuBaseBoard {
       })
     ];
 
-    // Initialize all pixels
+    // Initialize all pixels (8 fields per pixel)
     const pixelData = new ArrayBuffer(pixelBufferSize);
     const pixelU32 = new Uint32Array(pixelData);
     const pixelF32 = new Float32Array(pixelData);
 
     for (let i = 0; i < dimsArea; i++) {
-      const idx7 = i * 7;
-      pixelU32[idx7 + 0] = 0;  // iter
-      pixelU32[idx7 + 1] = 0;  // status
-      pixelU32[idx7 + 2] = 0;  // period
-      pixelF32[idx7 + 3] = 0;  // zr
-      pixelF32[idx7 + 4] = 0;  // zi
-      pixelF32[idx7 + 5] = 0;  // base_r
-      pixelF32[idx7 + 6] = 0;  // base_i
+      const idx8 = i * 8;
+      pixelU32[idx8 + 0] = i;  // orig_index (each pixel knows its original position)
+      pixelU32[idx8 + 1] = 0;  // iter
+      pixelU32[idx8 + 2] = 0;  // status
+      pixelU32[idx8 + 3] = 0;  // period
+      pixelF32[idx8 + 4] = 0;  // zr
+      pixelF32[idx8 + 5] = 0;  // zi
+      pixelF32[idx8 + 6] = 0;  // base_r
+      pixelF32[idx8 + 7] = 0;  // base_i
     }
     this.device.queue.writeBuffer(this.buffers.pixels, 0, pixelData);
 
-    // Initialize active pixel indices (all pixels initially)
-    this.activePixelIndices = new Uint32Array(dimsArea);
-    for (let i = 0; i < dimsArea; i++) {
-      this.activePixelIndices[i] = i;
-    }
-    this.device.queue.writeBuffer(this.buffers.activePixels, 0, this.activePixelIndices);
     this.activeCount = dimsArea;
     this.deadSinceCompaction = 0;
   }
@@ -8231,8 +8219,7 @@ class SparseGpuBoard extends GpuBaseBoard {
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.buffers.params } },
-        { binding: 1, resource: { buffer: this.buffers.pixels } },
-        { binding: 2, resource: { buffer: this.buffers.activePixels } }
+        { binding: 1, resource: { buffer: this.buffers.pixels } }
       ],
       label: 'SparseGpu bind group'
     });
@@ -8240,34 +8227,30 @@ class SparseGpuBoard extends GpuBaseBoard {
 
   async compactBuffers(pixelU32) {
     // pixelU32 is already-read data from compute(), avoid double-read
-    const BYTES_PER_PIXEL = 28;
+    const BYTES_PER_PIXEL = 32;  // 8 fields × 4 bytes
 
-    // Build new compacted arrays
-    const newActiveIndices = [];
+    // Build new compacted pixel data
+    // Each pixel carries its orig_index, so no separate mapping needed
     const newPixelData = [];
 
     for (let i = 0; i < this.activeCount; i++) {
-      const idx7 = i * 7;
-      const status = pixelU32[idx7 + 1];
+      const idx8 = i * 8;
+      const status = pixelU32[idx8 + 2];  // status is at offset 2
 
       if (status === 0) {  // Still computing
-        const origIndex = this.activePixelIndices[i];
-        newActiveIndices.push(origIndex);
-        // Copy 7 u32 values for this pixel
-        for (let j = 0; j < 7; j++) {
-          newPixelData.push(pixelU32[idx7 + j]);
+        // Copy all 8 u32 values for this pixel (including orig_index)
+        for (let j = 0; j < 8; j++) {
+          newPixelData.push(pixelU32[idx8 + j]);
         }
       }
     }
 
-    const newActiveCount = newActiveIndices.length;
+    const newActiveCount = newPixelData.length / 8;
     if (newActiveCount === 0) {
       this.activeCount = 0;
       return;
     }
 
-    // Update active pixel indices
-    this.activePixelIndices = new Uint32Array(newActiveIndices);
     this.activeCount = newActiveCount;
     this.deadSinceCompaction = 0;
 
@@ -8302,7 +8285,6 @@ class SparseGpuBoard extends GpuBaseBoard {
     // Upload compacted data
     const compactedPixelData = new Uint32Array(newPixelData);
     this.device.queue.writeBuffer(this.buffers.pixels, 0, compactedPixelData);
-    this.device.queue.writeBuffer(this.buffers.activePixels, 0, this.activePixelIndices);
 
     console.log(`[sparse] Compacted: ${this.activeCount} active pixels`);
   }
@@ -8312,7 +8294,7 @@ class SparseGpuBoard extends GpuBaseBoard {
     this.isComputing = true;
     this.lastBatchCompacted = false;
 
-    const BYTES_PER_PIXEL = 28;
+    const BYTES_PER_PIXEL = 32;  // 8 fields × 4 bytes
     const workgroupSize = 64;
 
     try {
@@ -8338,14 +8320,13 @@ class SparseGpuBoard extends GpuBaseBoard {
         let newDead = 0;
 
         for (let i = 0; i < readActiveCount; i++) {
-          const idx7 = i * 7;
-          const iters = pixelU32[idx7 + 0];
-          const status = pixelU32[idx7 + 1];
-          const period = pixelU32[idx7 + 2];
-          const zr = pixelF32[idx7 + 3];
-          const zi = pixelF32[idx7 + 4];
-
-          const origIndex = this.activePixelIndices[i];
+          const idx8 = i * 8;
+          const origIndex = pixelU32[idx8 + 0];  // Each pixel carries its own orig_index
+          const iters = pixelU32[idx8 + 1];
+          const status = pixelU32[idx8 + 2];
+          const period = pixelU32[idx8 + 3];
+          const zr = pixelF32[idx8 + 4];
+          const zi = pixelF32[idx8 + 5];
 
           if (status === 0) continue;
           if (this.nn[origIndex] !== 0) continue;  // Already processed
@@ -8509,8 +8490,7 @@ class SparseGpuBoard extends GpuBaseBoard {
       effort: this.effort,
       completedIndexes,
       completedNn,
-      // Compaction state
-      activePixelIndices: this.activePixelIndices ? Array.from(this.activePixelIndices) : null,
+      // Compaction state (orig_index is embedded in pixel data, no separate mapping needed)
       activeCount: this.activeCount,
       deadSinceCompaction: this.deadSinceCompaction,
       cumulativeWastedReads: this.cumulativeWastedReads,
@@ -8521,7 +8501,7 @@ class SparseGpuBoard extends GpuBaseBoard {
     // Process pending results from the staging buffer without starting a new batch
     if (!this.hasPendingResults) return;
 
-    const BYTES_PER_PIXEL = 28;
+    const BYTES_PER_PIXEL = 32;  // 8 fields × 4 bytes
     const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
     const readActiveCount = this.pendingActiveCount;
     const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
@@ -8537,14 +8517,11 @@ class SparseGpuBoard extends GpuBaseBoard {
 
     // Process results
     for (let i = 0; i < readActiveCount; i++) {
-      const idx7 = i * 7;
-      const iters = pixelU32[idx7 + 0];
-      const status = pixelU32[idx7 + 1];
-      const period = pixelU32[idx7 + 2];
-      const zr = pixelF32[idx7 + 3];
-      const zi = pixelF32[idx7 + 4];
-
-      const origIndex = this.activePixelIndices[i];
+      const idx8 = i * 8;
+      const origIndex = pixelU32[idx8 + 0];  // Each pixel carries its own orig_index
+      const iters = pixelU32[idx8 + 1];
+      const status = pixelU32[idx8 + 2];
+      const period = pixelU32[idx8 + 3];
 
       if (status === 0) continue;
       if (this.nn[origIndex] !== 0) continue;
@@ -8568,7 +8545,7 @@ class SparseGpuBoard extends GpuBaseBoard {
   async readCompactedPixelBuffer() {
     if (!this.isGPUReady || !this.buffers?.pixels) return null;
 
-    const BYTES_PER_PIXEL = 28;
+    const BYTES_PER_PIXEL = 32;  // 8 fields × 4 bytes
     const bufferSize = this.activeCount * BYTES_PER_PIXEL;
 
     const readBuffer = this.device.createBuffer({
@@ -8602,14 +8579,13 @@ class SparseGpuBoard extends GpuBaseBoard {
     // Schedule async restoration after GPU init
     board.gpuInitPromise = board.gpuInitPromise.then(async () => {
       // Restore compaction state
-      if (serialized.activePixelIndices) {
-        board.activePixelIndices = new Uint32Array(serialized.activePixelIndices);
+      if (serialized.activeCount !== undefined) {
         board.activeCount = serialized.activeCount;
-        board.deadSinceCompaction = serialized.deadSinceCompaction;
-        board.cumulativeWastedReads = serialized.cumulativeWastedReads;
+        board.deadSinceCompaction = serialized.deadSinceCompaction || 0;
+        board.cumulativeWastedReads = serialized.cumulativeWastedReads || 0;
 
         // Recreate buffers at the compacted size
-        const BYTES_PER_PIXEL = 28;
+        const BYTES_PER_PIXEL = 32;  // 8 fields × 4 bytes
         const bufferSize = board.activeCount * BYTES_PER_PIXEL;
 
         board.buffers.pixels?.destroy();
@@ -8619,15 +8595,7 @@ class SparseGpuBoard extends GpuBaseBoard {
           label: 'Pixel state buffer (restored)'
         });
 
-        board.buffers.activePixels?.destroy();
-        board.buffers.activePixels = board.device.createBuffer({
-          size: board.activeCount * 4,
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-          label: 'Active pixel indices (restored)'
-        });
-        board.device.queue.writeBuffer(board.buffers.activePixels, 0, board.activePixelIndices);
-
-        // Restore GPU pixel buffer
+        // Restore GPU pixel buffer (includes orig_index for each pixel)
         if (serialized.gpuPixelData) {
           const pixelData = new Uint8Array(serialized.gpuPixelData).buffer;
           board.device.queue.writeBuffer(board.buffers.pixels, 0, new Uint8Array(pixelData));
@@ -8642,6 +8610,9 @@ class SparseGpuBoard extends GpuBaseBoard {
             label: `Staging pixels buffer ${i} (restored)`
           });
         }
+
+        // Recreate bind group with restored buffer
+        board.createBindGroup();
       }
 
       board.effort = serialized.effort || 5;
