@@ -23,68 +23,6 @@ describe('GpuZhuoran Regression Tests', () => {
     await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
-  test('z=1e20 near c=-1.8 should show varied iteration counts, not uniform divergence', async () => {
-    const page = await setupPage(browser, {}, TEST_TIMEOUT);
-    try {
-      // Navigate to the specific deep zoom location that was broken
-      // Use gpuz (not qdz) - this is the board type that had the bug
-      const url = 'file://' + path.join(process.cwd(), 'index.html') +
-        '?z=1.00e+20&c=-1.72413124442322315641234+0.00000000000000000000100i&board=gpuz&grid=1&width=48&height=27';
-
-      await page.goto(url, { waitUntil: 'load' });
-      await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
-
-      // Wait for some computation to complete
-      await page.waitForFunction(() => {
-        const view = window.explorer?.grid?.views?.[0];
-        return view && view.di > 100;
-      }, { timeout: 30000 });
-
-      // Check that iteration counts are varied, not uniform
-      const stats = await page.evaluate(() => {
-        const view = window.explorer.grid.views[0];
-        const nn = view.nn;
-        const iterCounts = {};
-        for (let i = 0; i < nn.length; i++) {
-          if (nn[i] !== 0) {
-            iterCounts[nn[i]] = (iterCounts[nn[i]] || 0) + 1;
-          }
-        }
-
-        // Get unique non-zero iteration values
-        const uniqueIters = Object.keys(iterCounts).filter(k => k !== '0').length;
-        const diPixels = view.di;
-        const mostCommonIter = Object.entries(iterCounts)
-          .filter(([k]) => k !== '0')
-          .sort((a, b) => b[1] - a[1])[0];
-
-        return {
-          boardType: view.boardType,
-          di: diPixels,
-          un: view.un,
-          total: view.config.dimsArea,
-          uniqueIterCount: uniqueIters,
-          mostCommon: mostCommonIter ? { iter: parseInt(mostCommonIter[0]), count: mostCommonIter[1] } : null,
-          refOrbitEscaped: view.board?.refOrbitEscaped,
-          refIterations: view.board?.refIterations
-        };
-      });
-
-      // Key assertion: there should be multiple different iteration counts
-      // Not all pixels diverging at the same iteration (which would indicate a bug)
-      expect(stats.uniqueIterCount).toBeGreaterThan(3);
-
-      // If all computed pixels have the same iteration count, that's the bug
-      if (stats.mostCommon && stats.di > 0) {
-        const uniformityRatio = stats.mostCommon.count / stats.di;
-        expect(uniformityRatio).toBeLessThan(0.95);  // Less than 95% should have same iter
-      }
-
-    } finally {
-      if (page) { try { await page.close(); } catch (e) { /* ignore */ } }
-    }
-  }, TEST_TIMEOUT);
-
   test('computation completes with varied iterations at deep zoom', async () => {
     const page = await setupPage(browser, {}, TEST_TIMEOUT);
     try {

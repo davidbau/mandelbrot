@@ -6940,36 +6940,39 @@ class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
   }
 
   initPixels() {
+    // Compute delta c directly without precision loss.
+    // At deep zoom, computing cr = center + offset loses precision.
+    // Since the reference point IS the view center, dc is just the pixel offset from center.
     const sizeScalar = this.size;
-    const reDD = qdToDD(this.re);
-    const imDD = qdToDD(this.im);
-    const pixW = sizeScalar / this.config.dimsWidth;
-    const pixH = (sizeScalar / this.config.aspectRatio) / this.config.dimsHeight;
     const dimsWidth = this.config.dimsWidth;
     const dimsHeight = this.config.dimsHeight;
+    const aspectRatio = this.config.aspectRatio;
+
+    // Convert reference point to double for spike detection
     const refRe = this.refC[0] + this.refC[1];
     const refIm = this.refC[2] + this.refC[3];
-    // Convert DD precision arrays to doubles for perturbation deltas
-    const re_double = reDD[0] + reDD[1];
-    const im_double = imDD[0] + imDD[1];
-    // Initialize all pixels as perturbations from the reference point
+
     for (let y = 0; y < dimsHeight; y++) {
       const yFrac = (0.5 - y / dimsHeight);
-      const ci = im_double + yFrac * (sizeScalar / this.config.aspectRatio);
-      const dci = ci - refIm;
+      const dci = yFrac * (sizeScalar / aspectRatio);
+
       for (let x = 0; x < dimsWidth; x++) {
         const xFrac = (x / dimsWidth - 0.5);
-        const cr = re_double + xFrac * sizeScalar;
-        const dcr = cr - refRe;
+        const dcr = xFrac * sizeScalar;
+
         const index = y * dimsWidth + x;
         this.dc[index * 2] = dcr;
         this.dc[index * 2 + 1] = dci;
-        // Start with z = c (skipping trivial first iteration where 0^2+c=c)
-        // At refIter=1 where refOrbit[1] = c_ref, with dz = dc: z = c_ref + dc = c
+        // Start with z = c, so dz = dc
         this.dz[index * 2] = dcr;
         this.dz[index * 2 + 1] = dci;
-        this.refIter[index] = 1;  // Start at iteration 1 (z = c)
+        // Start at iteration 1 (z = c)
+        this.refIter[index] = 1;
         this.pixelIndexes.push(index);
+
+        // Count spike pixels
+        const cr = refRe + dcr;
+        const ci = refIm + dci;
         if (this.inspike(cr, ci)) {
           this.ch += 1;
         }
@@ -10190,9 +10193,10 @@ function selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard) {
   }
 
   // If GPU is not available, select a CPU board
+  // DDZhuoranBoard is ~6x faster than PerturbationBoard at medium zoom
   const CpuBoardClass = (
       (pixelSize > 1e-15) ? CpuBoard :
-      (pixelSize > 1e-30) ? PerturbationBoard :
+      (pixelSize > 1e-30) ? DDZhuoranBoard :
       QDZhuoranBoard);
   return CpuBoardClass;
 }
