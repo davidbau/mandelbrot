@@ -11035,10 +11035,10 @@ class FractalWorker {
       const board = pri[Math.min(p, pri.length) % pri.length];
 
       // Calculate targetIters based on time budget and effort
-      // Work threshold calibrated so effort 100 × 10 iters × 1000 pixels ≈ 100ms
-      // Default: ~100ms per scheduling slot for responsive UI
+      // Work threshold tuned for ~10-20ms CPU batches and ~50-100ms GPU batches
+      // Large batches improve throughput by amortizing per-batch overhead
       const batchTimeMs = this.batchTimeMs || 100;
-      const workThreshold = batchTimeMs * 10000;  // 100ms → 1M work units
+      const workThreshold = batchTimeMs * 5000000;
       let targetIters;
       if (this.stepMode) {
         // Step mode: always 1 iteration per step
@@ -11050,10 +11050,12 @@ class FractalWorker {
           Math.random() * (this.randomBatchMax - this.randomBatchMin + 1)
         );
       } else {
-        // Calculate iterations to fill time budget
+        // Calculate iterations to fill time budget, respecting board limits
         const pixels = Math.max(board.un, 1);
         const effort = Math.max(board.effort, 1);
-        targetIters = Math.max(1, Math.floor(workThreshold / (pixels * effort)));
+        const minIters = board.minBatchIters || 1;
+        const maxIters = board.maxBatchIters || Infinity;
+        targetIters = Math.min(maxIters, Math.max(minIters, Math.floor(workThreshold / (pixels * effort))));
       }
 
       // In step mode, wait for step() to request iterations
