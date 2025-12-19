@@ -4911,6 +4911,7 @@ class Board {
       ['DDZhuoranBoard', DDZhuoranBoard],
       ['QDZhuoranBoard', QDZhuoranBoard],
       ['GpuBoard', GpuBoard],
+      ['SparseGpuBoard', SparseGpuBoard],
       ['GpuZhuoranBoard', GpuZhuoranBoard],
       ['AdaptiveGpuBoard', AdaptiveGpuBoard]
     ]);
@@ -7981,7 +7982,7 @@ class SparseGpuBoard extends GpuBaseBoard {
     this.activeCount = 0;
     this.deadSinceCompaction = 0;
     this.cumulativeWastedReads = 0;  // Cumulative dead pixels read since last compaction
-    this.compactionCostRatio = 1.0;  // Compact when wasted reads >= cost * ratio
+    this.compactionCostRatio = 5.0;  // Compact when wasted reads >= 5× active pixels (matches ~6× compaction overhead)
 
     // Double-buffered staging for overlapping CPU/GPU work
     this.stagingBufferIndex = 0;
@@ -8479,6 +8480,186 @@ class SparseGpuBoard extends GpuBaseBoard {
     } finally {
       this.isComputing = false;
     }
+  }
+
+  async serialize() {
+    // CRITICAL: Flush pending results before serializing
+    // The double-buffered staging has results that haven't been processed yet
+    if (this.hasPendingResults) {
+      await this.flushPendingResults();
+    }
+
+    // Read the compacted GPU pixel buffer
+    await this.ensureGPUReady();
+    const gpuPixelData = await this.readCompactedPixelBuffer();
+
+    // Build sparse nn array for completed pixels
+    const completedIndexes = [];
+    const completedNn = [];
+    for (let i = 0; i < this.nn.length; i++) {
+      if (this.nn[i] !== 0) {
+        completedIndexes.push(i);
+        completedNn.push(this.nn[i]);
+      }
+    }
+
+    return {
+      ...(await super.serialize()),
+      gpuPixelData: gpuPixelData ? Array.from(new Uint8Array(gpuPixelData)) : null,
+      effort: this.effort,
+      completedIndexes,
+      completedNn,
+      // Compaction state
+      activePixelIndices: this.activePixelIndices ? Array.from(this.activePixelIndices) : null,
+      activeCount: this.activeCount,
+      deadSinceCompaction: this.deadSinceCompaction,
+      cumulativeWastedReads: this.cumulativeWastedReads,
+    };
+  }
+
+  async flushPendingResults() {
+    // Process pending results from the staging buffer without starting a new batch
+    if (!this.hasPendingResults) return;
+
+    const BYTES_PER_PIXEL = 28;
+    const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
+    const readActiveCount = this.pendingActiveCount;
+    const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
+
+    await readBuffer.mapAsync(GPUMapMode.READ);
+    const pixelData = new ArrayBuffer(readBufferSize);
+    const srcData = readBuffer.getMappedRange();
+    new Uint8Array(pixelData).set(new Uint8Array(srcData));
+    readBuffer.unmap();
+
+    const pixelU32 = new Uint32Array(pixelData);
+    const pixelF32 = new Float32Array(pixelData);
+
+    // Process results
+    for (let i = 0; i < readActiveCount; i++) {
+      const idx7 = i * 7;
+      const iters = pixelU32[idx7 + 0];
+      const status = pixelU32[idx7 + 1];
+      const period = pixelU32[idx7 + 2];
+      const zr = pixelF32[idx7 + 3];
+      const zi = pixelF32[idx7 + 4];
+
+      const origIndex = this.activePixelIndices[i];
+
+      if (status === 0) continue;
+      if (this.nn[origIndex] !== 0) continue;
+
+      this.deadSinceCompaction++;
+
+      if (status === 1) {
+        this.nn[origIndex] = iters;
+        this.pp[origIndex] = 1;
+        this.di++;
+      } else if (status === 2) {
+        this.nn[origIndex] = -iters;
+        this.pp[origIndex] = period + 1;
+      }
+    }
+
+    this.un = this.activeCount - this.deadSinceCompaction;
+    this.hasPendingResults = false;
+  }
+
+  async readCompactedPixelBuffer() {
+    if (!this.isGPUReady || !this.buffers?.pixels) return null;
+
+    const BYTES_PER_PIXEL = 28;
+    const bufferSize = this.activeCount * BYTES_PER_PIXEL;
+
+    const readBuffer = this.device.createBuffer({
+      size: bufferSize,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+    });
+
+    const commandEncoder = this.device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, readBuffer, 0, bufferSize);
+    this.device.queue.submit([commandEncoder.finish()]);
+
+    await readBuffer.mapAsync(GPUMapMode.READ);
+    const data = new ArrayBuffer(bufferSize);
+    new Uint8Array(data).set(new Uint8Array(readBuffer.getMappedRange()));
+    readBuffer.unmap();
+    readBuffer.destroy();
+
+    return data;
+  }
+
+  static fromSerialized(serialized) {
+    const board = new SparseGpuBoard(
+      serialized.k,
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
+      serialized.config,
+      serialized.id
+    );
+
+    // Schedule async restoration after GPU init
+    board.gpuInitPromise = board.gpuInitPromise.then(async () => {
+      // Restore compaction state
+      if (serialized.activePixelIndices) {
+        board.activePixelIndices = new Uint32Array(serialized.activePixelIndices);
+        board.activeCount = serialized.activeCount;
+        board.deadSinceCompaction = serialized.deadSinceCompaction;
+        board.cumulativeWastedReads = serialized.cumulativeWastedReads;
+
+        // Recreate buffers at the compacted size
+        const BYTES_PER_PIXEL = 28;
+        const bufferSize = board.activeCount * BYTES_PER_PIXEL;
+
+        board.buffers.pixels?.destroy();
+        board.buffers.pixels = board.device.createBuffer({
+          size: bufferSize,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+          label: 'Pixel state buffer (restored)'
+        });
+
+        board.buffers.activePixels?.destroy();
+        board.buffers.activePixels = board.device.createBuffer({
+          size: board.activeCount * 4,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+          label: 'Active pixel indices (restored)'
+        });
+        board.device.queue.writeBuffer(board.buffers.activePixels, 0, board.activePixelIndices);
+
+        // Restore GPU pixel buffer
+        if (serialized.gpuPixelData) {
+          const pixelData = new Uint8Array(serialized.gpuPixelData).buffer;
+          board.device.queue.writeBuffer(board.buffers.pixels, 0, new Uint8Array(pixelData));
+        }
+
+        // Recreate staging buffers at compacted size
+        for (let i = 0; i < 2; i++) {
+          board.buffers.stagingPixels[i]?.destroy();
+          board.buffers.stagingPixels[i] = board.device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+            label: `Staging pixels buffer ${i} (restored)`
+          });
+        }
+      }
+
+      board.effort = serialized.effort || 5;
+      board.it = serialized.it;
+      board.un = serialized.un;
+      board.di = serialized.di;
+      board.ch = serialized.ch || 0;
+
+      // Restore nn array
+      board.nn = new Array(serialized.config.dimsArea).fill(0);
+      if (serialized.completedIndexes) {
+        for (let i = 0; i < serialized.completedIndexes.length; i++) {
+          board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+        }
+      }
+    });
+
+    return board;
   }
 }
 
