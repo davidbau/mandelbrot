@@ -4848,7 +4848,7 @@ class Board {
     this.un = config.dimsArea; // Unfinished pixels
     this.di = 0;            // Diverged pixels
     this.ch = 0;            // Chaotic pixels
-    this.effort = 100;      // Work per pixel (normalized: CpuBoard=100, ~8μs/pixel-iter)
+    this.effort = 100;      // Benchmarked: 4.4 ns/px-iter (baseline)
 
     this.pix = this.pixelSize;
     this.epsilon = Math.min(1e-12, this.pix / 10);
@@ -5026,82 +5026,85 @@ class CpuBoard extends Board {
     }
   }
 
-  iterate() {
-    let changes = null;
-    const results = [0, 0, 0];
-    let s = this.ss;    // speedy list of active pixel indices to compute
-    // Update checkpoints at fibonacciPeriod intervals (returns 1 at Fibonacci points)
-    if (fibonacciPeriod(this.it) == 1) {
+  iterate(targetIters = 1) {
+    // Batch multiple iterations internally
+    for (let batch = 0; batch < targetIters && this.un > 0; batch++) {
+      let changes = null;
+      const results = [0, 0, 0];
+      let s = this.ss;    // speedy list of active pixel indices to compute
+      // Update checkpoints at fibonacciPeriod intervals (returns 1 at Fibonacci points)
+      if (fibonacciPeriod(this.it) == 1) {
+        for (let t = 0; t < s.length; ++t) {
+          let m = s[t];
+          if (this.nn[m]) continue;
+          this.bb[m * 2] = this.zz[m * 2];      // bb = checkpoint z position
+          this.bb[m * 2 + 1] = this.zz[m * 2 + 1];
+          this.pp[m] = 0;  // Reset pp (period = iter when convergence first detected)
+        }
+      }
       for (let t = 0; t < s.length; ++t) {
-        let m = s[t];
-        if (this.nn[m]) continue;
-        this.bb[m * 2] = this.zz[m * 2];      // bb = checkpoint z position
-        this.bb[m * 2 + 1] = this.zz[m * 2 + 1];
-        this.pp[m] = 0;  // Reset pp (period = iter when convergence first detected)
-      }
-    }
-    for (let t = 0; t < s.length; ++t) {
-      const index = s[t];
-      const computeResult = this.compute(index);
-      if (computeResult !== 0) {
-        if (!changes) {
-          changes = { iter: this.it, nn: [], vv: [] };
-        }
-        if (computeResult < 0) {
-          changes.vv.push({
-            index: index,
-            z: [this.zz[index * 2], this.zz[index * 2 + 1]],  // float64 pair
-            p: this.pp[index]  // period
-          });
-        } else {
-          changes.nn.push(index);
-        }
-      }
-    }
-    if (changes) {
-      this.un -= changes.nn.length + changes.vv.length; // newly finished
-      this.di += changes.nn.length; // diverged
-    }
-    if (s.length > this.un * 1.25) {
-      this.compact();
-      if (this.ss.length > this.un + this.ch) {
-        // Debug: Check for overlap between ss and changes
-        if (changes) {
-          const ssSet = new Set(this.ss);
-          const changedIndexes = new Set([...changes.nn, ...changes.vv.map(v => v.index)]);
-          const overlap = [...ssSet].filter(x => changedIndexes.has(x));
-          if (overlap.length > 0) {
-            console.warn(`Overlap detected between ss and changes: ${overlap.length} items`);
-            console.warn(`Overlap indexes: ${overlap}`);
-            console.warn(`ss length: ${this.ss.length}, un: ${this.un}`);
-            console.warn(`changes: nn ${changes.nn.length}, vv ${changes.vv.length}`);
+        const index = s[t];
+        const computeResult = this.compute(index);
+        if (computeResult !== 0) {
+          if (!changes) {
+            changes = { iter: this.it, nn: [], vv: [] };
+          }
+          if (computeResult < 0) {
+            changes.vv.push({
+              index: index,
+              z: [this.zz[index * 2], this.zz[index * 2 + 1]],  // float64 pair
+              p: this.pp[index]  // period
+            });
+          } else {
+            changes.nn.push(index);
           }
         }
-
-        // Additional checks
-        const uniqueSS = new Set(this.ss);
-        if (uniqueSS.size !== this.ss.length) {
-          console.warn(
-            `Duplicate entries in ss detected. ss length: ${this.ss.length}, ` +
-            `unique entries: ${uniqueSS.size}`);
-        }
-
-        const invalidIndexes = this.ss.filter(i => this.nn[i]);
-        if (invalidIndexes.length > 0) {
-          console.warn(
-            `Found ${invalidIndexes.length} indexes in ss that are ` +
-            `already marked as finished in nn`);
-        }
-
-        if (this.ss.length !== this.un + this.ch) {
-          console.warn(`Mismatch between ss length (${this.ss.length}) and un (${this.un})`);
-        }
-        throw new Error(`excess ss ${s.length}, ${this.ss.length}, ${this.un}`);
       }
-    }
+      if (changes) {
+        this.un -= changes.nn.length + changes.vv.length; // newly finished
+        this.di += changes.nn.length; // diverged
+      }
+      if (s.length > this.un * 1.25) {
+        this.compact();
+        if (this.ss.length > this.un + this.ch) {
+          // Debug: Check for overlap between ss and changes
+          if (changes) {
+            const ssSet = new Set(this.ss);
+            const changedIndexes = new Set([...changes.nn, ...changes.vv.map(v => v.index)]);
+            const overlap = [...ssSet].filter(x => changedIndexes.has(x));
+            if (overlap.length > 0) {
+              console.warn(`Overlap detected between ss and changes: ${overlap.length} items`);
+              console.warn(`Overlap indexes: ${overlap}`);
+              console.warn(`ss length: ${this.ss.length}, un: ${this.un}`);
+              console.warn(`changes: nn ${changes.nn.length}, vv ${changes.vv.length}`);
+            }
+          }
 
-    this.it++;
-    this.queueChanges(changes);
+          // Additional checks
+          const uniqueSS = new Set(this.ss);
+          if (uniqueSS.size !== this.ss.length) {
+            console.warn(
+              `Duplicate entries in ss detected. ss length: ${this.ss.length}, ` +
+              `unique entries: ${uniqueSS.size}`);
+          }
+
+          const invalidIndexes = this.ss.filter(i => this.nn[i]);
+          if (invalidIndexes.length > 0) {
+            console.warn(
+              `Found ${invalidIndexes.length} indexes in ss that are ` +
+              `already marked as finished in nn`);
+          }
+
+          if (this.ss.length !== this.un + this.ch) {
+            console.warn(`Mismatch between ss length (${this.ss.length}) and un (${this.un})`);
+          }
+          throw new Error(`excess ss ${s.length}, ${this.ss.length}, ${this.un}`);
+        }
+      }
+
+      this.it++;
+      this.queueChanges(changes);
+    }
   }
 
   compact() {
@@ -5162,7 +5165,7 @@ class QDCpuBoard extends Board {
     // we need thresholds much smaller than pixel size.
     this.epsilon = this.pix * 1e-20;   // Final convergence threshold
     this.epsilon2 = this.pix * 1e-15;  // Getting close threshold
-    this.effort = 117;  // Benchmarked: ~9.3 μs/pixel-iter, ~17% slower than CpuBoard
+    this.effort = 11200;  // Benchmarked: 493 ns/px-iter, 112× slower than CPU
     // Use QD-precision values from getters
     // IMPORTANT: At deep zoom (z > 1e30), double precision cannot represent
     // the pixel size or offset accurately. Must use QD precision throughout.
@@ -5267,52 +5270,55 @@ class QDCpuBoard extends Board {
     }
   }
 
-  iterate() {
-    let changes = null;
-    let s = this.ss;    // speedy list of active pixel indices to compute
-    // Update checkpoints at fibonacciPeriod intervals (returns 1 at Fibonacci points)
-    if (fibonacciPeriod(this.it) == 1) {
+  iterate(targetIters = 1) {
+    // Batch multiple iterations internally
+    for (let batch = 0; batch < targetIters && this.un > 0; batch++) {
+      let changes = null;
+      let s = this.ss;    // speedy list of active pixel indices to compute
+      // Update checkpoints at fibonacciPeriod intervals (returns 1 at Fibonacci points)
+      if (fibonacciPeriod(this.it) == 1) {
+        for (let t = 0; t < s.length; ++t) {
+          let m = s[t];
+          if (this.nn[m]) continue;
+          const m8 = m * 8;
+          for (let i = 0; i < 8; i++) {
+            this.bb[m8 + i] = this.zz[m8 + i];
+          }
+          this.pp[m] = 0;  // Reset pp (period = iter when convergence first detected)
+        }
+      }
       for (let t = 0; t < s.length; ++t) {
-        let m = s[t];
-        if (this.nn[m]) continue;
-        const m8 = m * 8;
-        for (let i = 0; i < 8; i++) {
-          this.bb[m8 + i] = this.zz[m8 + i];
-        }
-        this.pp[m] = 0;  // Reset pp (period = iter when convergence first detected)
-      }
-    }
-    for (let t = 0; t < s.length; ++t) {
-      const index = s[t];
-      const computeResult = this.compute(index);
-      if (computeResult !== 0) {
-        if (!changes) {
-          changes = { iter: this.it, nn: [], vv: [] };
-        }
-        if (computeResult < 0) {
-          const m8 = index * 8;
-          // Preserve full QD precision (8 elements: 4 real + 4 imag)
-          changes.vv.push({
-            index: index,
-            z: [this.zz[m8], this.zz[m8+1], this.zz[m8+2], this.zz[m8+3],
-                this.zz[m8+4], this.zz[m8+5], this.zz[m8+6], this.zz[m8+7]],
-            p: this.pp[index]  // period
-          });
-        } else {
-          changes.nn.push(index);
+        const index = s[t];
+        const computeResult = this.compute(index);
+        if (computeResult !== 0) {
+          if (!changes) {
+            changes = { iter: this.it, nn: [], vv: [] };
+          }
+          if (computeResult < 0) {
+            const m8 = index * 8;
+            // Preserve full QD precision (8 elements: 4 real + 4 imag)
+            changes.vv.push({
+              index: index,
+              z: [this.zz[m8], this.zz[m8+1], this.zz[m8+2], this.zz[m8+3],
+                  this.zz[m8+4], this.zz[m8+5], this.zz[m8+6], this.zz[m8+7]],
+              p: this.pp[index]  // period
+            });
+          } else {
+            changes.nn.push(index);
+          }
         }
       }
-    }
-    if (changes) {
-      this.un -= changes.nn.length + changes.vv.length; // newly finished
-      this.di += changes.nn.length; // diverged
-    }
-    if (s.length > this.un * 1.25) {
-      this.compact();
-    }
+      if (changes) {
+        this.un -= changes.nn.length + changes.vv.length; // newly finished
+        this.di += changes.nn.length; // diverged
+      }
+      if (s.length > this.un * 1.25) {
+        this.compact();
+      }
 
-    this.it++;
-    this.queueChanges(changes);
+      this.it++;
+      this.queueChanges(changes);
+    }
   }
 
   compact() {
@@ -5398,7 +5404,7 @@ class PerturbationBoard extends Board {
     this.pertIndexes = [];   // Pixels computed as perturbations from DD points
     this.tt = [];            // Working array for DD precision operations
     this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dimsWidth)));
-    this.effort = 100;  // Benchmarked: ~8 μs/pixel-iter, same as CpuBoard
+    this.effort = 2300;  // ~100 ns/px-iter estimate (model fit is poor for pert boards)
     this.initPerturbationBoard(size, re, im);
   }
 
@@ -5550,43 +5556,21 @@ class PerturbationBoard extends Board {
     };
   }
 
-  iterate() {
-    let changes = null;
-    let results = [0, 0, 0];
-    // Precompute DD precision point escape without updating z
-    // Update checkpoints at Fibonacci intervals
-    const isCheckpoint = fibonacciPeriod(this.it) === 1;
-    for (const index of this.ddIndexes) {
-      if (isCheckpoint && !this.nn[index]) {
-        ArddcCopy(this.bb, index*4, this.zz, index*4);  // bb = checkpoint z
-        this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
-      }
-      let r = this.precomputeDD(index);
-      results[r + 1] += 1;
-      if (r !== 0) {
-        if (!changes) {
-          changes = { iter: this.it, nn: [], vv: [] };
+  iterate(targetIters = 1) {
+    // Batch multiple iterations internally
+    for (let batch = 0; batch < targetIters && this.un > 0; batch++) {
+      let changes = null;
+      let results = [0, 0, 0];
+      // Precompute DD precision point escape without updating z
+      // Update checkpoints at Fibonacci intervals
+      const isCheckpoint = fibonacciPeriod(this.it) === 1;
+      for (const index of this.ddIndexes) {
+        if (isCheckpoint && !this.nn[index]) {
+          ArddcCopy(this.bb, index*4, this.zz, index*4);  // bb = checkpoint z
+          this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
         }
-        if (r < 0) {
-          changes.vv.push({
-            index: index,
-            z: ArddcGet(this.nz, index*4),  // DDc format
-            p: this.pp[index]  // period
-          });
-        } else {
-          changes.nn.push(index);
-        }
-      }
-    }
-    // Iterate perturbation points that use the old z
-    const newDDIndexes = [];
-    let cache = { refIndex: null, binZpow: [] };
-    for (const index of this.pertIndexes) {
-      if (!this.computePerturbation(index, cache)) {
-        this.convertToDDPrecision(index);
         let r = this.precomputeDD(index);
         results[r + 1] += 1;
-        newDDIndexes.push(index);
         if (r !== 0) {
           if (!changes) {
             changes = { iter: this.it, nn: [], vv: [] };
@@ -5602,44 +5586,69 @@ class PerturbationBoard extends Board {
           }
         }
       }
-    }
-    // Update index arrays
-    if (newDDIndexes.length > 0) {
-      const newPertIndexes = [];
-      let qi = 0;
+      // Iterate perturbation points that use the old z
+      const newDDIndexes = [];
+      let cache = { refIndex: null, binZpow: [] };
       for (const index of this.pertIndexes) {
-        if (newDDIndexes[qi] == index) {
-          qi += 1;
-        } else {
-          newPertIndexes.push(index);
-        }
-      }
-      this.ddIndexes = this.ddIndexes.concat(newDDIndexes);
-      this.pertIndexes = newPertIndexes;
-    }
-    // Finally update DD precision z with precomputed values
-    for (const index of this.ddIndexes) {
-      ArddcCopy(this.zz, index*4, this.nz, index*4);
-    }
-    // Tally progress
-    let diverged = results[2];
-    let count = results[0] + diverged;
-    this.un -= count;
-    this.di += diverged;
-    // Trim finished pixels from array.
-    if (this.pertIndexes.length + this.ddIndexes.length > this.un * 1.25) {
-      this.compact();
-      // Switch to full DD when perturbations are a small fraction of the work
-      if (this.pertIndexes.length < this.ddIndexes.length * 0.5) {
-        for (const index of this.pertIndexes) {
+        if (!this.computePerturbation(index, cache)) {
           this.convertToDDPrecision(index);
-          this.ddIndexes.push(index);
+          let r = this.precomputeDD(index);
+          results[r + 1] += 1;
+          newDDIndexes.push(index);
+          if (r !== 0) {
+            if (!changes) {
+              changes = { iter: this.it, nn: [], vv: [] };
+            }
+            if (r < 0) {
+              changes.vv.push({
+                index: index,
+                z: ArddcGet(this.nz, index*4),  // DDc format
+                p: this.pp[index]  // period
+              });
+            } else {
+              changes.nn.push(index);
+            }
+          }
         }
-        this.pertIndexes = [];
       }
+      // Update index arrays
+      if (newDDIndexes.length > 0) {
+        const newPertIndexes = [];
+        let qi = 0;
+        for (const index of this.pertIndexes) {
+          if (newDDIndexes[qi] == index) {
+            qi += 1;
+          } else {
+            newPertIndexes.push(index);
+          }
+        }
+        this.ddIndexes = this.ddIndexes.concat(newDDIndexes);
+        this.pertIndexes = newPertIndexes;
+      }
+      // Finally update DD precision z with precomputed values
+      for (const index of this.ddIndexes) {
+        ArddcCopy(this.zz, index*4, this.nz, index*4);
+      }
+      // Tally progress
+      let diverged = results[2];
+      let count = results[0] + diverged;
+      this.un -= count;
+      this.di += diverged;
+      // Trim finished pixels from array.
+      if (this.pertIndexes.length + this.ddIndexes.length > this.un * 1.25) {
+        this.compact();
+        // Switch to full DD when perturbations are a small fraction of the work
+        if (this.pertIndexes.length < this.ddIndexes.length * 0.5) {
+          for (const index of this.pertIndexes) {
+            this.convertToDDPrecision(index);
+            this.ddIndexes.push(index);
+          }
+          this.pertIndexes = [];
+        }
+      }
+      this.it++;
+      this.queueChanges(changes);
     }
-    this.it++;
-    this.queueChanges(changes);
   }
 
   compact() {
@@ -5815,7 +5824,7 @@ class QDPerturbationBoard extends Board {
     super(k, size, re, im, config, id);
     this.qdIndexes = [];   // Pixels computed in QD precision
     this.tt = new Array(32).fill(0);           // Working array for QD operations
-    this.effort = 112;  // Benchmarked: ~9 μs/pixel-iter, ~12% slower than CpuBoard
+    this.effort = 11400;  // ~500 ns/px-iter estimate (model fit is poor for pert boards)
     this.initQDBoard(size, re, im);
   }
 
@@ -5928,48 +5937,51 @@ class QDPerturbationBoard extends Board {
     }
   }
 
-  iterate() {
-    let changes = null;
-    const s = this.ss;
-    const isCheckpoint = fibonacciPeriod(this.it) === 1;
-    if (isCheckpoint) {
+  iterate(targetIters = 1) {
+    // Batch multiple iterations internally
+    for (let batch = 0; batch < targetIters && this.un > 0; batch++) {
+      let changes = null;
+      const s = this.ss;
+      const isCheckpoint = fibonacciPeriod(this.it) === 1;
+      if (isCheckpoint) {
+        for (let t = 0; t < s.length; ++t) {
+          const m = s[t];
+          if (this.nn[m]) continue;
+          ArqdcCopy(this.bb, m*8, this.zz, m*8);  // bb = checkpoint z position
+          this.pp[m] = 0;  // Reset pp
+        }
+      }
       for (let t = 0; t < s.length; ++t) {
-        const m = s[t];
-        if (this.nn[m]) continue;
-        ArqdcCopy(this.bb, m*8, this.zz, m*8);  // bb = checkpoint z position
-        this.pp[m] = 0;  // Reset pp
-      }
-    }
-    for (let t = 0; t < s.length; ++t) {
-      const index = s[t];
-      const result = this.compute(index);
-      if (result !== 0) {
-        if (!changes) {
-          changes = { iter: this.it, nn: [], vv: [] };
-        }
-        if (result < 0) {
-          changes.vv.push({
-            index: index,
-            z: ArqdcGet(this.zz, index*8),
-            p: this.pp[index]  // period
-          });
-        } else {
-          changes.nn.push(index);
+        const index = s[t];
+        const result = this.compute(index);
+        if (result !== 0) {
+          if (!changes) {
+            changes = { iter: this.it, nn: [], vv: [] };
+          }
+          if (result < 0) {
+            changes.vv.push({
+              index: index,
+              z: ArqdcGet(this.zz, index*8),
+              p: this.pp[index]  // period
+            });
+          } else {
+            changes.nn.push(index);
+          }
         }
       }
-    }
-    if (changes) {
-      this.un -= changes.nn.length + changes.vv.length; // newly finished
-      this.di += changes.nn.length; // diverged
-    }
-    if (s.length > this.un * 1.25) {
-      this.compact();
-      if (this.ss.length > this.un + this.ch) {
-        throw new Error(`excess ss ${s.length}, ${this.ss.length}, ${this.un}`);
+      if (changes) {
+        this.un -= changes.nn.length + changes.vv.length; // newly finished
+        this.di += changes.nn.length; // diverged
       }
+      if (s.length > this.un * 1.25) {
+        this.compact();
+        if (this.ss.length > this.un + this.ch) {
+          throw new Error(`excess ss ${s.length}, ${this.ss.length}, ${this.un}`);
+        }
+      }
+      this.it++;
+      this.queueChanges(changes);
     }
-    this.it++;
-    this.queueChanges(changes);
   }
 
   compact() {
@@ -6569,7 +6581,7 @@ class CpuZhuoranBaseBoard extends Board {
     this.pixelIndexes = [];  // Active pixel indices
     this.maxRefIter = 1;  // Track maximum refIter to avoid scanning all pixels
 
-    this.effort = 100;  // Benchmarked: ~8 μs/pixel-iter, same as CpuBoard
+    this.effort = 100;  // Default for CPU Zhuoran boards, overridden by subclasses
   }
 
   // Abstract methods - subclasses must implement these
@@ -6599,60 +6611,64 @@ class CpuZhuoranBaseBoard extends Board {
   initPixels() { throw new Error('Abstract method'); }
 
   // Shared iterate() method - works for both DD and QD
-  iterate() {
-    let changes = null;
-    // Step 1: Extend reference orbit if needed and not escaped
-    const targetRefIterations = Math.max(this.it + 100, this.maxRefIter + 100);
+  iterate(targetIters = 1) {
+    // Step 1: Extend reference orbit for entire batch upfront (not ahead)
+    const targetRefIterations = Math.max(this.it + targetIters, this.maxRefIter + targetIters);
     while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
       this.extendReferenceOrbit();
     }
-    // Step 2: Iterate all active pixels using perturbation
-    const newPixelIndexes = [];
-    for (const index of this.pixelIndexes) {
-      if (this.nn[index]) continue;  // Skip finished pixels
-      const result = this.iteratePixel(index);
-      if (result !== 0) {
-        if (!changes) {
-          changes = { iter: this.it, nn: [], vv: [] };
-        }
-        if (result > 0) {
-          // Diverged
-          changes.nn.push(index);
-          this.nn[index] = this.it;
-          this.di += 1;
-          this.un -= 1;
-        } else {
-          // Converged
-          const index2 = index * 2;
-          const nextRefIter = this.refIter[index] + 1;
-          const ref = this.getRefOrbit(Math.min(nextRefIter, this.getRefOrbitLength() - 1));
-          const dzr = this.dz[index2];
-          const dzi = this.dz[index2 + 1];
-          changes.vv.push({
-            index: index,
-            z: this.refDzNative(ref, dzr, dzi),  // Native format (DDc or QDc)
-            p: this.pp[index]
-          });
-          this.nn[index] = -this.it;
-          this.un -= 1;
-          if (this.inspike(
-            this.dc[index2] + this.getRefCReal(),
-            this.dc[index2 + 1] + this.getRefCImag()
-          ) && this.ch > 0) {
-            this.ch -= 1;
+
+    // Batch multiple iterations internally
+    for (let batch = 0; batch < targetIters && this.un > 0; batch++) {
+      let changes = null;
+      // Step 2: Iterate all active pixels using perturbation
+      const newPixelIndexes = [];
+      for (const index of this.pixelIndexes) {
+        if (this.nn[index]) continue;  // Skip finished pixels
+        const result = this.iteratePixel(index);
+        if (result !== 0) {
+          if (!changes) {
+            changes = { iter: this.it, nn: [], vv: [] };
           }
+          if (result > 0) {
+            // Diverged
+            changes.nn.push(index);
+            this.nn[index] = this.it;
+            this.di += 1;
+            this.un -= 1;
+          } else {
+            // Converged
+            const index2 = index * 2;
+            const nextRefIter = this.refIter[index] + 1;
+            const ref = this.getRefOrbit(Math.min(nextRefIter, this.getRefOrbitLength() - 1));
+            const dzr = this.dz[index2];
+            const dzi = this.dz[index2 + 1];
+            changes.vv.push({
+              index: index,
+              z: this.refDzNative(ref, dzr, dzi),  // Native format (DDc or QDc)
+              p: this.pp[index]
+            });
+            this.nn[index] = -this.it;
+            this.un -= 1;
+            if (this.inspike(
+              this.dc[index2] + this.getRefCReal(),
+              this.dc[index2 + 1] + this.getRefCImag()
+            ) && this.ch > 0) {
+              this.ch -= 1;
+            }
+          }
+        } else {
+          newPixelIndexes.push(index);
         }
-      } else {
-        newPixelIndexes.push(index);
       }
+      this.pixelIndexes = newPixelIndexes;
+      // Compact if needed
+      if (this.pixelIndexes.length > this.un * 1.25) {
+        this.pixelIndexes = this.pixelIndexes.filter(i => !this.nn[i]);
+      }
+      this.it++;
+      this.queueChanges(changes);
     }
-    this.pixelIndexes = newPixelIndexes;
-    // Compact if needed
-    if (this.pixelIndexes.length > this.un * 1.25) {
-      this.pixelIndexes = this.pixelIndexes.filter(i => !this.nn[i]);
-    }
-    this.it++;
-    this.queueChanges(changes);
   }
 
   // Shared iteratePixel() method - works for both DD and QD
@@ -6913,6 +6929,7 @@ class CpuZhuoranBaseBoard extends Board {
 class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
+    this.effort = 450;  // Benchmarked: 19.6 ns/px-iter, 4.5× slower than CPU
 
     // Initialize DD reference orbit (refC, refOrbit, threading, etc.)
     const refRe = qdToDD(this.re);
@@ -7006,6 +7023,7 @@ class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
 class QDZhuoranBoard extends QDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
+    this.effort = 480;  // Benchmarked: 21.0 ns/px-iter, 4.8× slower than CPU
 
     // Initialize QD reference orbit (refC_qd, qdRefOrbit, threading, etc.)
     const refReQD = this.re.slice();
@@ -7111,8 +7129,7 @@ class GpuBaseBoard extends Board {
     this.lastReportedIters = null;
     this.cpuStatus = null;
     this._readPixelBufferPromise = null;  // Lock for readPixelBuffer
-    this.selfBatching = true;  // GPU boards handle batching internally
-    this.effort = 12;  // Default for GPU boards (8× faster than CPU), overridden by subclasses
+    this.effort = 10;  // Default for GPU boards (~10× faster than CPU), overridden by subclasses
   }
 
   checkSpike(size, re, im) {
@@ -7209,7 +7226,7 @@ class GpuBaseBoard extends Board {
     return this.isGPUReady;
   }
 
-  async iterate() {
+  async iterate(targetIters = null) {
     if (!this.isGPUReady) {
       return;
     }
@@ -7218,7 +7235,7 @@ class GpuBaseBoard extends Board {
       await this.computePromise;
       return;
     }
-    this.computePromise = this.compute();
+    this.computePromise = this.compute(targetIters);
     try {
       await this.computePromise;
     } finally {
@@ -7374,7 +7391,7 @@ class GpuBoard extends GpuBaseBoard {
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    this.effort = 7;  // Benchmarked: ~0.6 μs/pixel-iter, 14× faster than CPU
+    this.effort = 5;  // Benchmarked: 0.2 ns/px-iter, 22× faster than CPU
     // Epsilon values for convergence detection scale with pixel size
     const pix = this.pixelSize;
     // GPU uses float32 precision, so thresholds must be larger than CPU's float64
@@ -7639,7 +7656,7 @@ class GpuBoard extends GpuBaseBoard {
     });
   }
 
-  async compute() {
+  async compute(targetIters = null) {
     // Prevent concurrent compute() calls
     if (this.isComputing) {
       return;
@@ -7675,17 +7692,15 @@ class GpuBoard extends GpuBaseBoard {
       return;
     }
 
-    // Dynamic batch sizing: scale iterations inversely with active pixels
-    const targetWork = 333337;  // Prime, reduced for better responsiveness
-    // Check for step mode debug flag 's'
-    const stepMode = hasDebugFlag(this.config, 's');
-    let iterationsPerBatch = stepMode ? 1 : Math.floor(targetWork / Math.max(activeCount, 1));
-    // Clamp to reasonable bounds (min 17) unless in step mode
-    if (!stepMode) {
-      iterationsPerBatch = Math.max(17, iterationsPerBatch);
+    // Use passed targetIters, or calculate dynamically based on pixels
+    let iterationsPerBatch;
+    if (targetIters !== null) {
+      iterationsPerBatch = targetIters;
+    } else {
+      // Default: scale iterations inversely with active pixels
+      const targetWork = 333337;
+      iterationsPerBatch = Math.max(17, Math.floor(targetWork / Math.max(activeCount, 1)));
     }
-    // Note: effort is set in constructor (12 = 8× faster than CPU)
-    // iterationsPerBatch is used for GPU dispatch, not scheduling
 
     // Upload active pixel list to GPU
     const activePixelsData = new Uint32Array(activePixels);
@@ -8010,7 +8025,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    this.effort = 11;  // Benchmarked: ~0.9-1.0 μs/pixel-iter, ~9× faster than CPU
+    this.effort = 9;  // Benchmarked: 0.4 ns/px-iter, 11× faster than CPU
 
     // Initialize DD reference orbit (refC, refOrbit, threading, etc.)
     const refRe = Array.isArray(re) ? re : toDD(re);
@@ -8679,7 +8694,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
     });
   }
 
-  async compute() {
+  async compute(targetIters = null) {
     // Prevent concurrent compute() calls
     if (this.isComputing) {
       return;
@@ -8688,27 +8703,18 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
     const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
 
     try {
-    // Calculate batch size first (needed to determine reference orbit buffer)
+    // Calculate batch size - use passed targetIters or calculate based on pixels
     const pixelsToIterate = this.un + this.ch;
-    // Check for step mode debug flag 's'
-    const stepMode = hasDebugFlag(this.config, 's');
-    const iterationsPerBatch = stepMode ? 1 : Math.max(17,
-      Math.floor(333337 / Math.max(pixelsToIterate, 1)));
-    // Note: effort is set in constructor (12 = 8× faster than CPU)
+    let iterationsPerBatch;
+    if (targetIters !== null) {
+      iterationsPerBatch = targetIters;
+    } else {
+      iterationsPerBatch = Math.max(17, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
+    }
 
-    // Step 1: Extend reference orbit on CPU as needed
-    // Extend to what pixels need (this.it) plus enough buffer for next batch
+    // Step 1: Extend reference orbit on CPU - only what's needed for this batch
     const THREADING_CAPACITY = 1048576;  // 2^20
-    const currentNeed = this.it + iterationsPerBatch;
-    // Also allow growth for thread-following, but cap to avoid waste
-    // Use proportional buffer (10%) for long periods, or fixed 10k buffer for short periods
-    const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
-    const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
-    // Cap at threading capacity - don't extend beyond this point
-    const targetRefIterations = Math.min(
-      Math.max(currentNeed, threadingBuffer),
-      THREADING_CAPACITY
-    );
+    const targetRefIterations = Math.min(this.it + iterationsPerBatch, THREADING_CAPACITY);
     while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
       this.extendReferenceOrbit();
     }
@@ -9100,7 +9106,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    this.effort = 11;  // Benchmarked: ~0.9 μs/pixel-iter, 9× faster than CPU
+    this.effort = 10;  // Benchmarked: 0.4 ns/px-iter, 10× faster than CPU
 
     // Initialize QD reference orbit (refC_qd, qdRefOrbit, threading, etc.)
     const refReQD = toQD(re);
@@ -9839,7 +9845,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
     });
   }
 
-  async compute() {
+  async compute(targetIters = null) {
     // Prevent concurrent compute() calls
     if (this.isComputing) return;
     this.isComputing = true;
@@ -9857,13 +9863,14 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
     try {
       const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
 
-      // Calculate batch size
+      // Calculate batch size - use passed targetIters or calculate based on pixels
       const pixelsToIterate = this.un + this.ch;
-      // Check for step mode debug flag 's'
-      const stepMode = hasDebugFlag(this.config, 's');
-      const iterationsPerBatch = stepMode ? 1 : Math.max(17,
-        Math.floor(333337 / Math.max(pixelsToIterate, 1)));
-      // Note: effort is set in constructor (12 = 8× faster than CPU)
+      let iterationsPerBatch;
+      if (targetIters !== null) {
+        iterationsPerBatch = targetIters;
+      } else {
+        iterationsPerBatch = Math.max(17, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
+      }
 
       // Extend reference orbit on CPU as needed
       const THREADING_CAPACITY = 1048576;
@@ -10207,6 +10214,49 @@ class FractalWorker {
     this.endTime = -1;
     this.timer = null;
     this.gpuMaxBufferSize = null;
+    // Batch timing collection for benchmarking (debug=b)
+    // Maps board.k -> array of {pixels, iters, timeMs}
+    this.batchTimings = new Map();
+    this.collectBatchTimings = false;
+    // Console.log timing output (debug=t)
+    this.logTimings = false;
+    // Random batch sizes for benchmarking (debug=r)
+    this.randomBatching = false;
+    this.randomBatchMin = 1;
+    this.randomBatchMax = 16;
+    // Target time per batch in milliseconds (configurable)
+    this.batchTimeMs = 100;
+  }
+
+  // Record a batch timing sample for benchmarking
+  // startPixels should be board.un captured BEFORE iterate()
+  recordBatchTiming(board, startTime, startIter, startPixels) {
+    if (!this.collectBatchTimings) return;
+    const timeMs = performance.now() - startTime;
+    const iters = board.it - startIter;
+    // Use the pixel count from before the batch (some may have diverged during)
+    const pixels = startPixels;
+
+    if (iters > 0 && pixels > 0 && timeMs > 0) {
+      if (!this.batchTimings.has(board.k)) {
+        this.batchTimings.set(board.k, []);
+      }
+      this.batchTimings.get(board.k).push({ pixels, iters, timeMs });
+    }
+  }
+
+  // Get batch timings for regression analysis
+  getBatchTimings(k) {
+    return this.batchTimings.get(k) || [];
+  }
+
+  // Clear batch timings
+  clearBatchTimings(k) {
+    if (k !== undefined) {
+      this.batchTimings.delete(k);
+    } else {
+      this.batchTimings.clear();
+    }
   }
 
   async handleMessage(type, data) {
@@ -10231,6 +10281,20 @@ class FractalWorker {
         // Construct the board instance
         let board = new BoardClass(data.k, size, data.reQD, data.imQD, data.config, data.id);
         this.boards.set(data.k, board);
+
+        // Enable batch timing collection if debug=b is set
+        if (hasDebugFlag(data.config, 'b')) {
+          this.collectBatchTimings = true;
+        }
+        // Enable console.log timing output if debug=t is set
+        if (hasDebugFlag(data.config, 't')) {
+          this.logTimings = true;
+        }
+        // Enable random batch sizes for benchmarking if debug=r is set
+        if (hasDebugFlag(data.config, 'r')) {
+          this.randomBatching = true;
+          this.logTimings = true;  // Also enable timing output
+        }
 
       // Store QD-precision coordinates
       board.sizesQD = [size, data.reQD, data.imQD];
@@ -10351,29 +10415,56 @@ class FractalWorker {
       while (shift & (1 << p)) { p += 1; }
       const board = pri[Math.min(p, pri.length) % pri.length];
 
-      // In step mode, handle stepping behavior
+      // Calculate targetIters based on time budget and effort
+      // Work threshold calibrated so effort 100 × 10 iters × 1000 pixels ≈ 100ms
+      // Default: ~100ms per scheduling slot for responsive UI
+      const batchTimeMs = this.batchTimeMs || 100;
+      const workThreshold = batchTimeMs * 10000;  // 100ms → 1M work units
+      let targetIters;
       if (this.stepMode) {
-        if (this.stepsRequested > 0) {
-          await board.iterate();
-          this.stepsRequested--; // Consume one step
+        // Step mode: always 1 iteration per step
+        targetIters = 1;
+      } else if (this.randomBatching) {
+        // Random batch sizes for benchmarking (debug=r)
+        // Produces varied iteration counts for regression analysis
+        targetIters = this.randomBatchMin + Math.floor(
+          Math.random() * (this.randomBatchMax - this.randomBatchMin + 1)
+        );
+      } else {
+        // Calculate iterations to fill time budget
+        const pixels = Math.max(board.un, 1);
+        const effort = Math.max(board.effort, 1);
+        targetIters = Math.max(1, Math.floor(workThreshold / (pixels * effort)));
+      }
 
+      // In step mode, wait for step() to request iterations
+      if (this.stepMode && this.stepsRequested <= 0) {
+        // If stepsRequested is 0, don't do anything (wait for step() call)
+      } else {
+        const shouldTime = this.collectBatchTimings || this.logTimings;
+        const startTime = shouldTime ? performance.now() : 0;
+        const startIter = board.it;
+        const startPixels = board.un;
+        await board.iterate(targetIters);
+        if (shouldTime) {
+          const elapsedMs = performance.now() - startTime;
+          const actualIters = board.it - startIter;
+          if (this.collectBatchTimings) {
+            this.recordBatchTiming(board, startTime, startIter, startPixels);
+          }
+          if (this.logTimings && actualIters > 0) {
+            const boardType = board.constructor.name;
+            const elapsedUs = elapsedMs * 1000;  // Convert to microseconds
+            const usPerPixelIter = elapsedUs / (startPixels * actualIters);
+            console.log(`[timing] ${boardType} k=${board.k}: ${startPixels} px × ${actualIters} iters = ${elapsedUs.toFixed(1)}μs (${usPerPixelIter.toFixed(4)} μs/px-iter)`);
+          }
+        }
+
+        if (this.stepMode) {
+          this.stepsRequested--; // Consume one step
           // Call step callback if set
           if (this.stepCallback) {
             await this.stepCallback();
-          }
-        }
-        // If stepsRequested is 0, don't do anything (wait for step() call)
-      } else {
-        // Normal mode - loop until workDone threshold
-        // GPU boards handle batching internally, so only call iterate() once
-        if (board.selfBatching) {
-          await board.iterate();
-        } else {
-          // Work threshold: ~30 iterations × 576 pixels × effort(100) ≈ 1.7M
-          // This gives ~80-140ms per scheduling slot for responsive UI
-          for (let workDone = 0; workDone < 1737700 && board.unfinished(); ) {
-            workDone += board.un * board.effort;
-            await board.iterate();
           }
         }
       }
@@ -10612,7 +10703,84 @@ if (location.search.includes('debug=')) {
         return info;
       };
 
+      // Analyze batch timings collected with debug=b
+      // In step mode, each batch does 1 iteration, so we can only measure:
+      //   time = overhead + perPixel × pixels
+      // For multi-iteration batches (non-step mode), we could separate:
+      //   time = perBatch + perIter × iters + perPixelIter × pixels × iters
+      window.analyzeBatchTimings = function(k = 0) {
+        const worker = window.worker0;
+        if (!worker) {
+          console.log('No worker available');
+          return null;
+        }
+
+        const timings = worker.getBatchTimings(k);
+        if (timings.length < 4) {
+          console.log(`Not enough timing data (${timings.length} samples). Run more iterations with debug=b,w,s`);
+          return null;
+        }
+
+        const board = worker.boards.get(k);
+        const boardName = board?.constructor.name || 'Unknown';
+        const n = timings.length;
+
+        // Check if we have iteration variation
+        const uniqueIters = [...new Set(timings.map(t => t.iters))];
+        const hasIterVariation = uniqueIters.length > 1;
+
+        // Simple linear regression: time = overhead + perPixel × pixels
+        let sum_p = 0, sum_y = 0, sum_pp = 0, sum_py = 0;
+        for (const t of timings) {
+          const p = t.pixels;
+          const y = t.timeMs * 1000; // μs
+          sum_p += p; sum_y += y; sum_pp += p*p; sum_py += p*y;
+        }
+
+        const det = n * sum_pp - sum_p * sum_p;
+        const perPixelUs = det !== 0 ? (n * sum_py - sum_p * sum_y) / det : 0;
+        const overheadUs = (sum_y - perPixelUs * sum_p) / n;
+
+        // Pixel count range
+        const minPixels = Math.min(...timings.map(t => t.pixels));
+        const maxPixels = Math.max(...timings.map(t => t.pixels));
+
+        console.log(`\nBatch Timing Analysis for Board ${k} (${boardName}):`);
+        console.log(`  Samples: ${n}`);
+        console.log(`  Pixel range: ${minPixels} - ${maxPixels}`);
+        console.log(`  Model: time = ${overheadUs.toFixed(1)} μs + ${perPixelUs.toFixed(4)} μs × pixels`);
+        console.log(`  Per-pixel cost: ${Math.max(0, perPixelUs).toFixed(4)} μs/pixel`);
+        console.log(`  Overhead: ${Math.max(0, overheadUs).toFixed(1)} μs/batch`);
+
+        if (!hasIterVariation) {
+          console.log(`\n  Note: In step mode, each batch does 1 iteration.`);
+          console.log(`  The per-pixel cost is actually per-pixel-iteration.`);
+        }
+
+        // Show sample data
+        console.log(`\n  Sample data (first 10):`);
+        console.table(timings.slice(0, 10).map(t => ({
+          pixels: t.pixels,
+          iters: t.iters,
+          timeMs: t.timeMs.toFixed(2),
+          'μs/pixel': (t.timeMs * 1000 / t.pixels).toFixed(3)
+        })));
+
+        return { perPixelUs: Math.max(0, perPixelUs), overheadUs: Math.max(0, overheadUs), samples: n };
+      };
+
+      window.clearBatchTimings = function(k) {
+        const worker = window.worker0;
+        if (worker) {
+          worker.clearBatchTimings(k);
+          console.log(k !== undefined ? `Cleared timings for board ${k}` : 'Cleared all timings');
+        }
+      };
+
       console.log('Step mode enabled. Use step(), step(n), pause(), stepAll(), inspectBoard(k), tracePixel(k, pixelIndex)');
+      if (window.worker0?.collectBatchTimings) {
+        console.log('Batch timing enabled (debug=b). Use analyzeBatchTimings(k), clearBatchTimings(k)');
+      }
     }
   }
 }
