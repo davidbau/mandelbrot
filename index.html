@@ -8285,8 +8285,6 @@ class SparseGpuBoard extends GpuBaseBoard {
     // Upload compacted data
     const compactedPixelData = new Uint32Array(newPixelData);
     this.device.queue.writeBuffer(this.buffers.pixels, 0, compactedPixelData);
-
-    console.log(`[sparse] Compacted: ${this.activeCount} active pixels`);
   }
 
   async compute(targetIters = null) {
@@ -8369,13 +8367,13 @@ class SparseGpuBoard extends GpuBaseBoard {
           const divergedIndices = pixelsByIteration.get(iter) || [];
           const convergedData = convergedByIteration.get(iter) || [];
           this.changeList.push({ iter, nn: divergedIndices, vv: convergedData });
+          this.updateSize += divergedIndices.length + convergedData.length;
         }
 
         // Check compaction: wasted reads >= compaction cost
         // Compaction cost = activeRemaining pixels to write
         const activeRemaining = this.activeCount - this.deadSinceCompaction;
         if (activeRemaining > 0 && this.cumulativeWastedReads >= activeRemaining * this.compactionCostRatio) {
-          console.log(`[sparse] Compacting: wasted ${this.cumulativeWastedReads} reads >= ${activeRemaining} cost`);
           await this.compactBuffers(pixelU32);
           this.cumulativeWastedReads = 0;
           this.hasPendingResults = false;  // Buffers recreated, no pending results
@@ -11009,7 +11007,7 @@ class FractalWorker {
       return;
     }
     let pri = Array.from(this.boards.values())
-          .filter(board => (board.unfinished() || board.updateSize))
+          .filter(board => (board.unfinished() || board.updateSize || board.hasPendingResults))
           .filter(board => !this.hiddenBoards.has(board.k));
     if (pri.length) {
       // Start timer if it is not already running.
