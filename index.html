@@ -2781,7 +2781,7 @@ class URLHandler {
         parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
           const validTypes = [
-            'cpu', 'ddz', 'qdz', 'pert', 'qdpert', 'gpu', 'gpuz',
+            'cpu', 'ddz', 'qdz', 'pert', 'qdpert', 'gpu', 'sparse', 'gpuz',
             'adaptive', 'qdcpu'
           ];
           if (validTypes.includes(boardType)) {
@@ -7407,7 +7407,8 @@ class GpuBoard extends GpuBaseBoard {
 
   async createComputePipeline() {
     // Mandelbrot shader with period detection for convergence
-    // Consolidated 3-binding layout: params, pixels (PixelState struct), active_pixels
+    // 2-binding layout: params, pixels (PixelState struct)
+    // Processes all pixels, skips finished ones with status check
     const shaderCode = `
       struct Params {
         center_re: f32,
@@ -7417,7 +7418,7 @@ class GpuBoard extends GpuBaseBoard {
         dims_width: u32,
         dims_height: u32,
         iterations_per_batch: u32,
-        active_count: u32,
+        pixel_count: u32,
         epsilon: f32,
         epsilon2: f32,
         exponent: u32,
@@ -7455,16 +7456,18 @@ class GpuBoard extends GpuBaseBoard {
 
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
-      @group(0) @binding(2) var<storage, read> active_pixels: array<u32>;
 
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // 2D dispatch: calculate linear index from 2D coordinates
-        let active_idx = global_id.y * params.workgroups_x + global_id.x;
-        if (active_idx >= params.active_count) {
+        let index = global_id.y * params.workgroups_x + global_id.x;
+        if (index >= params.pixel_count) {
           return;
         }
-        let index = active_pixels[active_idx];
+        // Skip already-finished pixels
+        if (pixels[index].status != 0u) {
+          return;
+        }
         let x = index % params.dims_width;
         let y = index / params.dims_width;
         // Compute c for this pixel
@@ -7603,13 +7606,6 @@ class GpuBoard extends GpuBaseBoard {
       label: 'Pixel state buffer'
     });
 
-    // Storage buffer for active pixel indices (sparse list, max size = dimsArea)
-    this.buffers.activePixels = this.device.createBuffer({
-      size: dimsArea * 4,  // 4 bytes per u32
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      label: 'Active pixels buffer'
-    });
-
     // Staging buffer for reading pixel state back to CPU
     this.buffers.stagingPixels = this.device.createBuffer({
       size: pixelBufferSize,
@@ -7637,23 +7633,15 @@ class GpuBoard extends GpuBaseBoard {
       pixelF32[idx7 + 6] = 0;  // base_i
     }
     this.device.queue.writeBuffer(this.buffers.pixels, 0, pixelData);
-
-    // Initialize active pixels list (all pixels start active)
-    const activePixels = new Uint32Array(dimsArea);
-    for (let i = 0; i < dimsArea; i++) {
-      activePixels[i] = i;
-    }
-    this.device.queue.writeBuffer(this.buffers.activePixels, 0, activePixels);
   }
 
   createBindGroup() {
-    // Consolidated 3-binding layout
+    // 2-binding layout: params, pixels
     this.bindGroup = this.device.createBindGroup({
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.buffers.params } },
-        { binding: 1, resource: { buffer: this.buffers.pixels } },
-        { binding: 2, resource: { buffer: this.buffers.activePixels } }
+        { binding: 1, resource: { buffer: this.buffers.pixels } }
       ],
       label: 'Mandelbrot bind group'
     });
@@ -7675,42 +7663,23 @@ class GpuBoard extends GpuBaseBoard {
     const im_double = qdToNumber(this.im);
     const pixel_size = this.size;
 
-    // Initialize CPU-side status tracking if needed
-    if (!this.cpuStatus) {
-      this.cpuStatus = new Uint32Array(dimsArea).fill(0);  // 0 = computing
-    }
-
-    // Build sparse active pixel list (only pixels still computing)
-    const activePixels = [];
-    for (let i = 0; i < dimsArea; i++) {
-      if (this.cpuStatus[i] === 0) {
-        activePixels.push(i);
-      }
-    }
-
-    const activeCount = activePixels.length;
-
-    if (activeCount === 0) {
-      this.un = 0;
+    // Check if all done
+    if (this.un === 0) {
       return;
     }
 
-    // Use passed targetIters, or calculate dynamically based on pixels
+    // Use passed targetIters, or calculate dynamically based on remaining pixels
     let iterationsPerBatch;
     if (targetIters !== null) {
       iterationsPerBatch = targetIters;
     } else {
-      // Default: scale iterations inversely with active pixels
+      // Default: scale iterations inversely with remaining pixels
       const targetWork = 333337;
-      iterationsPerBatch = Math.max(17, Math.floor(targetWork / Math.max(activeCount, 1)));
+      iterationsPerBatch = Math.max(17, Math.floor(targetWork / Math.max(this.un, 1)));
     }
 
-    // Upload active pixel list to GPU
-    const activePixelsData = new Uint32Array(activePixels);
-    this.device.queue.writeBuffer(this.buffers.activePixels, 0, activePixelsData);
-
-    // 2D workgroup dispatch
-    const numWorkgroups = Math.ceil(activeCount / workgroupSize);
+    // 2D workgroup dispatch - process all pixels
+    const numWorkgroups = Math.ceil(dimsArea / workgroupSize);
     const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
     const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
 
@@ -7737,7 +7706,7 @@ class GpuBoard extends GpuBaseBoard {
     paramsU32[4] = this.config.dimsWidth;
     paramsU32[5] = this.config.dimsHeight;
     paramsU32[6] = iterationsPerBatch;
-    paramsU32[7] = activeCount;
+    paramsU32[7] = dimsArea;  // Total pixel count
     paramsF32[8] = this.epsilon;
     paramsF32[9] = this.epsilon2;
     paramsU32[10] = this.config.exponent;
@@ -7789,80 +7758,69 @@ class GpuBoard extends GpuBaseBoard {
     const pixelU32 = new Uint32Array(pixelData);
     const pixelF32 = new Float32Array(pixelData);
 
-    // Initialize lastReportedIters if needed
-    if (!this.lastReportedIters) {
-      this.lastReportedIters = new Uint32Array(dimsArea).fill(0);
-    }
-
     // Find pixels that NEWLY diverged or converged this batch
+    // Simple loop over all pixels, skip already-finished ones
     const pixelsByIteration = new Map(); // For diverged: iter -> [indices]
     const convergedByIteration = new Map(); // For converged: iter -> [{index, z, p}]
+    let totalDiverged = 0;
+    let stillComputing = 0;
 
-    for (const i of activePixels) {
+    for (let i = 0; i < dimsArea; i++) {
+      // Skip already-finished pixels
+      if (this.nn[i] !== 0) {
+        if (this.nn[i] > 0) totalDiverged++;
+        continue;
+      }
+
       const idx7 = i * 7;
       const iters = pixelU32[idx7 + 0];   // iter
       const status = pixelU32[idx7 + 1];  // status
       const period = pixelU32[idx7 + 2];  // period
       const zr = pixelF32[idx7 + 3];      // zr
       const zi = pixelF32[idx7 + 4];      // zi
-      const lastIters = this.lastReportedIters[i];
 
-      // Update CPU-side status tracking
-      this.cpuStatus[i] = status;
+      if (status === 0) {
+        stillComputing++;
+        continue;
+      }
 
       if (status === 1) {
-        // Diverged - newly diverged in this batch?
-        if (lastIters === 0 || iters !== lastIters) {
-          this.nn[i] = iters;
-          this.pp[i] = 1;
+        // Newly diverged
+        this.nn[i] = iters;
+        this.pp[i] = 1;
+        totalDiverged++;
 
-          if (!pixelsByIteration.has(iters)) {
-            pixelsByIteration.set(iters, []);
-          }
-          pixelsByIteration.get(iters).push(i);
-          this.lastReportedIters[i] = iters;
+        if (!pixelsByIteration.has(iters)) {
+          pixelsByIteration.set(iters, []);
+        }
+        pixelsByIteration.get(iters).push(i);
 
-          // Decrement ch if this pixel was in the spike
-          if (this.inSpike && this.inSpike[i] && this.ch > 0) {
-            this.ch -= 1;
-          }
+        // Decrement ch if this pixel was in the spike
+        if (this.inSpike && this.inSpike[i] && this.ch > 0) {
+          this.ch -= 1;
         }
       } else if (status === 2) {
-        // Converged - newly converged in this batch?
-        if (lastIters === 0 || iters !== lastIters) {
-          this.nn[i] = -iters;  // Negative iteration for converged pixels
+        // Newly converged
+        this.nn[i] = -iters;  // Negative iteration for converged pixels
 
-          // Add 1 because GPU shader increments iter before setting checkpoint,
-          // so period value is 1 less than what CPU board would store
-          this.pp[i] = period + 1;
+        // Add 1 because GPU shader increments iter before setting checkpoint,
+        // so period value is 1 less than what CPU board would store
+        this.pp[i] = period + 1;
 
-          if (!convergedByIteration.has(iters)) {
-            convergedByIteration.set(iters, []);
-          }
-          convergedByIteration.get(iters).push({
-            index: i,
-            z: [zr, zi],  // float64 pair
-            p: this.pp[i]
-          });
-          this.lastReportedIters[i] = iters;
+        if (!convergedByIteration.has(iters)) {
+          convergedByIteration.set(iters, []);
+        }
+        convergedByIteration.get(iters).push({
+          index: i,
+          z: [zr, zi],  // float64 pair
+          p: this.pp[i]
+        });
 
-          // Decrement ch if this pixel was in the spike
-          if (this.inSpike && this.inSpike[i] && this.ch > 0) {
-            this.ch -= 1;
-          }
+        // Decrement ch if this pixel was in the spike
+        if (this.inSpike && this.inSpike[i] && this.ch > 0) {
+          this.ch -= 1;
         }
       }
-    }
-
-    // Count total finished pixels across entire grid (for statistics)
-    let totalDiverged = 0;
-    let totalConverged = 0;
-    let stillComputing = 0;
-    for (let i = 0; i < dimsArea; i++) {
-      const status = this.cpuStatus[i];
-      if (status === 1) totalDiverged++;
-      else if (status === 2) totalConverged++;
-      else stillComputing++;
     }
 
     // Create change objects for newly diverged and converged pixels
@@ -7916,9 +7874,6 @@ class GpuBoard extends GpuBaseBoard {
       ...(await super.serialize()),
       // GPU pixel buffer as array (for JSON serialization)
       gpuPixelData: gpuPixelData ? Array.from(new Uint8Array(gpuPixelData)) : null,
-      // CPU-side state
-      cpuStatus: this.cpuStatus ? Array.from(this.cpuStatus) : null,
-      lastReportedIters: this.lastReportedIters ? Array.from(this.lastReportedIters) : null,
       effort: this.effort,
       // Completed pixels (sparse format)
       completedIndexes,
@@ -7945,13 +7900,6 @@ class GpuBoard extends GpuBaseBoard {
       await board.writePixelBuffer(pixelData);
     }
 
-    // Restore CPU-side state
-    if (serialized.cpuStatus) {
-      board.cpuStatus = new Uint32Array(serialized.cpuStatus);
-    }
-    if (serialized.lastReportedIters) {
-      board.lastReportedIters = new Uint32Array(serialized.lastReportedIters);
-    }
     board.effort = serialized.effort || 1;
 
     // Restore Board state
@@ -7992,13 +7940,6 @@ class GpuBoard extends GpuBaseBoard {
         await board.writePixelBuffer(pixelData);
       }
 
-      // Restore CPU-side state
-      if (serialized.cpuStatus) {
-        board.cpuStatus = new Uint32Array(serialized.cpuStatus);
-      }
-      if (serialized.lastReportedIters) {
-        board.lastReportedIters = new Uint32Array(serialized.lastReportedIters);
-      }
       board.effort = serialized.effort || 1;
 
       // Restore Board state
@@ -8017,6 +7958,527 @@ class GpuBoard extends GpuBaseBoard {
     });
 
     return board;
+  }
+}
+
+// Sparse GPU board with periodic buffer compaction
+// Uses simple all-pixel loops for readout (like GpuZhuoranBoard)
+// Compacts buffers when dead pixels >= 25% of remaining
+class SparseGpuBoard extends GpuBaseBoard {
+  static BYTES_PER_PIXEL = 28;  // Same as GpuBoard
+
+  constructor(k, size, re, im, config, id) {
+    super(k, size, re, im, config, id);
+    this.effort = 5;  // Same as GpuBoard
+
+    const pix = this.pixelSize;
+    this.epsilon = Math.min(1e-7, pix / 10);
+    this.epsilon2 = Math.min(1e-5, pix * 10);
+    this.checkSpike(size, re, im);
+
+    // Compaction state
+    this.activePixelIndices = null;  // Maps compacted index -> original pixel index
+    this.activeCount = 0;
+    this.deadSinceCompaction = 0;
+    this.cumulativeWastedReads = 0;  // Cumulative dead pixels read since last compaction
+    this.compactionCostRatio = 1.0;  // Compact when wasted reads >= cost * ratio
+
+    // Double-buffered staging for overlapping CPU/GPU work
+    this.stagingBufferIndex = 0;
+    this.hasPendingResults = false;
+    this.pendingActiveCount = 0;
+    this.lastBatchCompacted = false;  // For timing analysis
+
+    this.gpuInitPromise = this.initGPU();
+  }
+
+  async createComputePipeline() {
+    // Same shader as GpuBoard but adapted for compacted buffers
+    const shaderCode = `
+      struct Params {
+        center_re: f32,
+        center_im: f32,
+        pixel_size: f32,
+        aspect_ratio: f32,
+        dims_width: u32,
+        dims_height: u32,
+        iterations_per_batch: u32,
+        active_count: u32,
+        epsilon: f32,
+        epsilon2: f32,
+        exponent: u32,
+        workgroups_x: u32,
+        start_iter: u32,
+        checkpoint_count: u32,
+        ckpt0: u32,
+        ckpt1: u32,
+        ckpt2: u32,
+        ckpt3: u32,
+        ckpt4: u32,
+        ckpt5: u32,
+        ckpt6: u32,
+        ckpt7: u32,
+      }
+
+      struct PixelState {
+        iter: u32,
+        status: u32,
+        period: u32,
+        zr: f32,
+        zi: f32,
+        base_r: f32,
+        base_i: f32,
+      }
+
+      @group(0) @binding(0) var<uniform> params: Params;
+      @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
+      @group(0) @binding(2) var<storage, read> active_pixels: array<u32>;
+
+      @compute @workgroup_size(64)
+      fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+        let active_idx = global_id.y * params.workgroups_x + global_id.x;
+        if (active_idx >= params.active_count) {
+          return;
+        }
+
+        // Skip already-finished pixels (simple check in compacted buffer)
+        if (pixels[active_idx].status != 0u) {
+          return;
+        }
+
+        let orig_index = active_pixels[active_idx];
+        let x = orig_index % params.dims_width;
+        let y = orig_index / params.dims_width;
+
+        let xFrac = f32(i32(x) - i32(params.dims_width / 2u)) / f32(params.dims_width);
+        let yFrac = f32(i32(params.dims_height / 2u) - i32(y)) / f32(params.dims_height);
+        let cr = params.center_re + xFrac * params.pixel_size;
+        let ci = params.center_im + yFrac * (params.pixel_size / params.aspect_ratio);
+
+        var zr = pixels[active_idx].zr;
+        var zi = pixels[active_idx].zi;
+        var iter = pixels[active_idx].iter;
+        var base_r = pixels[active_idx].base_r;
+        var base_i = pixels[active_idx].base_i;
+        var p = pixels[active_idx].period;
+
+        if (iter == 0u && base_r == 0.0 && base_i == 0.0) {
+          base_r = zr;
+          base_i = zi;
+        }
+
+        var next_checkpoint_idx = 0u;
+
+        for (var i = 0u; i < params.iterations_per_batch; i++) {
+          if (next_checkpoint_idx < params.checkpoint_count) {
+            var checkpoint_offset = 0u;
+            switch (next_checkpoint_idx) {
+              case 0u: { checkpoint_offset = params.ckpt0; }
+              case 1u: { checkpoint_offset = params.ckpt1; }
+              case 2u: { checkpoint_offset = params.ckpt2; }
+              case 3u: { checkpoint_offset = params.ckpt3; }
+              case 4u: { checkpoint_offset = params.ckpt4; }
+              case 5u: { checkpoint_offset = params.ckpt5; }
+              case 6u: { checkpoint_offset = params.ckpt6; }
+              case 7u: { checkpoint_offset = params.ckpt7; }
+              default: {}
+            }
+            if (i == checkpoint_offset) {
+              base_r = zr;
+              base_i = zi;
+              p = 0u;
+              next_checkpoint_idx++;
+            }
+          }
+
+          let zr2 = zr * zr;
+          let zi2 = zi * zi;
+          let mag_sq = zr2 + zi2;
+
+          if (mag_sq > 4.0 || !(mag_sq <= 1e38)) {
+            pixels[active_idx].status = 1u;
+            break;
+          }
+
+          var ra = zr2 - zi2;
+          var ja = 2.0 * zr * zi;
+          for (var ord = 2u; ord < params.exponent; ord++) {
+            let rt = zr * ra - zi * ja;
+            ja = zr * ja + zi * ra;
+            ra = rt;
+          }
+          zr = ra + cr;
+          zi = ja + ci;
+
+          let dr = zr - base_r;
+          let di = zi - base_i;
+          let db = abs(dr) + abs(di);
+          if (db <= params.epsilon2) {
+            if (p == 0u) {
+              p = iter;
+            }
+            if (db <= params.epsilon) {
+              pixels[active_idx].status = 2u;
+              break;
+            }
+          }
+          iter++;
+        }
+
+        pixels[active_idx].zr = zr;
+        pixels[active_idx].zi = zi;
+        pixels[active_idx].base_r = base_r;
+        pixels[active_idx].base_i = base_i;
+        pixels[active_idx].iter = iter;
+        pixels[active_idx].period = p;
+      }
+    `;
+
+    const shaderModule = this.device.createShaderModule({
+      code: shaderCode,
+      label: 'SparseGpu compute shader'
+    });
+
+    this.pipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: {
+        module: shaderModule,
+        entryPoint: 'main'
+      },
+      label: 'SparseGpu compute pipeline'
+    });
+  }
+
+  async createBuffers() {
+    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
+    const BYTES_PER_PIXEL = 28;
+
+    const maxBufferSize = Math.min(
+      this.device.limits.maxBufferSize,
+      this.device.limits.maxStorageBufferBindingSize
+    );
+    const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
+
+    if (pixelBufferSize > maxBufferSize) {
+      throw new Error(`Buffer size exceeds WebGPU limit`);
+    }
+
+    // Uniform buffer for parameters
+    this.buffers.params = this.device.createBuffer({
+      size: 128,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      label: 'Parameters buffer'
+    });
+
+    // Pixel state buffer (compacted - starts at full size)
+    this.buffers.pixels = this.device.createBuffer({
+      size: pixelBufferSize,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      label: 'Pixel state buffer'
+    });
+
+    // Active pixel index mapping (compacted index -> original index)
+    this.buffers.activePixels = this.device.createBuffer({
+      size: dimsArea * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      label: 'Active pixels buffer'
+    });
+
+    // Double-buffered staging (compacted - starts at full size)
+    this.buffers.stagingPixels = [
+      this.device.createBuffer({
+        size: pixelBufferSize,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Staging pixels buffer 0'
+      }),
+      this.device.createBuffer({
+        size: pixelBufferSize,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Staging pixels buffer 1'
+      })
+    ];
+
+    // Initialize all pixels
+    const pixelData = new ArrayBuffer(pixelBufferSize);
+    const pixelU32 = new Uint32Array(pixelData);
+    const pixelF32 = new Float32Array(pixelData);
+
+    for (let i = 0; i < dimsArea; i++) {
+      const idx7 = i * 7;
+      pixelU32[idx7 + 0] = 0;  // iter
+      pixelU32[idx7 + 1] = 0;  // status
+      pixelU32[idx7 + 2] = 0;  // period
+      pixelF32[idx7 + 3] = 0;  // zr
+      pixelF32[idx7 + 4] = 0;  // zi
+      pixelF32[idx7 + 5] = 0;  // base_r
+      pixelF32[idx7 + 6] = 0;  // base_i
+    }
+    this.device.queue.writeBuffer(this.buffers.pixels, 0, pixelData);
+
+    // Initialize active pixel indices (all pixels initially)
+    this.activePixelIndices = new Uint32Array(dimsArea);
+    for (let i = 0; i < dimsArea; i++) {
+      this.activePixelIndices[i] = i;
+    }
+    this.device.queue.writeBuffer(this.buffers.activePixels, 0, this.activePixelIndices);
+    this.activeCount = dimsArea;
+    this.deadSinceCompaction = 0;
+  }
+
+  createBindGroup() {
+    this.bindGroup = this.device.createBindGroup({
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.buffers.params } },
+        { binding: 1, resource: { buffer: this.buffers.pixels } },
+        { binding: 2, resource: { buffer: this.buffers.activePixels } }
+      ],
+      label: 'SparseGpu bind group'
+    });
+  }
+
+  async compactBuffers(pixelU32) {
+    // pixelU32 is already-read data from compute(), avoid double-read
+    const BYTES_PER_PIXEL = 28;
+
+    // Build new compacted arrays
+    const newActiveIndices = [];
+    const newPixelData = [];
+
+    for (let i = 0; i < this.activeCount; i++) {
+      const idx7 = i * 7;
+      const status = pixelU32[idx7 + 1];
+
+      if (status === 0) {  // Still computing
+        const origIndex = this.activePixelIndices[i];
+        newActiveIndices.push(origIndex);
+        // Copy 7 u32 values for this pixel
+        for (let j = 0; j < 7; j++) {
+          newPixelData.push(pixelU32[idx7 + j]);
+        }
+      }
+    }
+
+    const newActiveCount = newActiveIndices.length;
+    if (newActiveCount === 0) {
+      this.activeCount = 0;
+      return;
+    }
+
+    // Update active pixel indices
+    this.activePixelIndices = new Uint32Array(newActiveIndices);
+    this.activeCount = newActiveCount;
+    this.deadSinceCompaction = 0;
+
+    const newPixelBufferSize = newActiveCount * BYTES_PER_PIXEL;
+
+    // Shrink all buffers to save VRAM
+    this.buffers.stagingPixels[0].destroy();
+    this.buffers.stagingPixels[1].destroy();
+    this.buffers.stagingPixels = [
+      this.device.createBuffer({
+        size: newPixelBufferSize,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Staging pixels buffer 0 (compacted)'
+      }),
+      this.device.createBuffer({
+        size: newPixelBufferSize,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Staging pixels buffer 1 (compacted)'
+      })
+    ];
+
+    this.buffers.pixels.destroy();
+    this.buffers.pixels = this.device.createBuffer({
+      size: newPixelBufferSize,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      label: 'Pixel state buffer (compacted)'
+    });
+
+    // Recreate bind group with new buffer
+    this.createBindGroup();
+
+    // Upload compacted data
+    const compactedPixelData = new Uint32Array(newPixelData);
+    this.device.queue.writeBuffer(this.buffers.pixels, 0, compactedPixelData);
+    this.device.queue.writeBuffer(this.buffers.activePixels, 0, this.activePixelIndices);
+
+    console.log(`[sparse] Compacted: ${this.activeCount} active pixels`);
+  }
+
+  async compute(targetIters = null) {
+    if (this.isComputing) return;
+    this.isComputing = true;
+    this.lastBatchCompacted = false;
+
+    const BYTES_PER_PIXEL = 28;
+    const workgroupSize = 64;
+
+    try {
+      // STEP 1: Process pending results from PREVIOUS batch (overlaps with GPU work)
+      let pixelU32ForCompaction = null;
+      if (this.hasPendingResults) {
+        const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
+        const readActiveCount = this.pendingActiveCount;
+        const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
+
+        await readBuffer.mapAsync(GPUMapMode.READ);
+        const pixelData = new ArrayBuffer(readBufferSize);
+        const srcData = readBuffer.getMappedRange();
+        new Uint8Array(pixelData).set(new Uint8Array(srcData));
+        readBuffer.unmap();
+
+        const pixelU32 = new Uint32Array(pixelData);
+        const pixelF32 = new Float32Array(pixelData);
+
+        // Process results
+        const pixelsByIteration = new Map();
+        const convergedByIteration = new Map();
+        let newDead = 0;
+
+        for (let i = 0; i < readActiveCount; i++) {
+          const idx7 = i * 7;
+          const iters = pixelU32[idx7 + 0];
+          const status = pixelU32[idx7 + 1];
+          const period = pixelU32[idx7 + 2];
+          const zr = pixelF32[idx7 + 3];
+          const zi = pixelF32[idx7 + 4];
+
+          const origIndex = this.activePixelIndices[i];
+
+          if (status === 0) continue;
+          if (this.nn[origIndex] !== 0) continue;  // Already processed
+
+          newDead++;
+
+          if (status === 1) {
+            this.nn[origIndex] = iters;
+            this.pp[origIndex] = 1;
+            this.di++;
+
+            if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
+            pixelsByIteration.get(iters).push(origIndex);
+
+            if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
+          } else if (status === 2) {
+            this.nn[origIndex] = -iters;
+            this.pp[origIndex] = period + 1;
+
+            if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
+            convergedByIteration.get(iters).push({
+              index: origIndex,
+              z: [zr, zi],
+              p: this.pp[origIndex]
+            });
+
+            if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
+          }
+        }
+
+        this.deadSinceCompaction += newDead;
+        this.un = this.activeCount - this.deadSinceCompaction;
+
+        // Accumulate wasted bandwidth: dead pixels read this batch
+        this.cumulativeWastedReads += this.deadSinceCompaction;
+
+        // Create change objects
+        const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+        for (const iter of Array.from(allIterations).sort((a, b) => a - b)) {
+          const divergedIndices = pixelsByIteration.get(iter) || [];
+          const convergedData = convergedByIteration.get(iter) || [];
+          this.changeList.push({ iter, nn: divergedIndices, vv: convergedData });
+        }
+
+        // Check compaction: wasted reads >= compaction cost
+        // Compaction cost = activeRemaining pixels to write
+        const activeRemaining = this.activeCount - this.deadSinceCompaction;
+        if (activeRemaining > 0 && this.cumulativeWastedReads >= activeRemaining * this.compactionCostRatio) {
+          console.log(`[sparse] Compacting: wasted ${this.cumulativeWastedReads} reads >= ${activeRemaining} cost`);
+          await this.compactBuffers(pixelU32);
+          this.cumulativeWastedReads = 0;
+          this.hasPendingResults = false;  // Buffers recreated, no pending results
+          this.lastBatchCompacted = true;
+        }
+      }
+
+      // STEP 2: Check if done
+      if (this.activeCount === 0 || this.un === 0) {
+        this.un = 0;
+        return;
+      }
+
+      // STEP 3: Submit new GPU batch
+      const re_double = qdToNumber(this.re);
+      const im_double = qdToNumber(this.im);
+      const pixel_size = this.size;
+
+      let iterationsPerBatch;
+      if (targetIters !== null) {
+        iterationsPerBatch = targetIters;
+      } else {
+        const targetWork = 333337;
+        iterationsPerBatch = Math.max(17, Math.floor(targetWork / Math.max(this.un, 1)));
+      }
+
+      const numWorkgroups = Math.ceil(this.activeCount / workgroupSize);
+      const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
+      const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
+
+      const checkpointOffsets = [];
+      const bufferIter = this.it;
+      for (let i = 0; i < iterationsPerBatch; i++) {
+        if (fibonacciPeriod(bufferIter + i) === 1) checkpointOffsets.push(i);
+      }
+      const checkpointCount = Math.min(checkpointOffsets.length, 8);
+
+      const paramsBuffer = new ArrayBuffer(128);
+      const paramsF32 = new Float32Array(paramsBuffer);
+      const paramsU32 = new Uint32Array(paramsBuffer);
+
+      paramsF32[0] = re_double;
+      paramsF32[1] = im_double;
+      paramsF32[2] = pixel_size;
+      paramsF32[3] = this.config.aspectRatio;
+      paramsU32[4] = this.config.dimsWidth;
+      paramsU32[5] = this.config.dimsHeight;
+      paramsU32[6] = iterationsPerBatch;
+      paramsU32[7] = this.activeCount;
+      paramsF32[8] = this.epsilon;
+      paramsF32[9] = this.epsilon2;
+      paramsU32[10] = this.config.exponent;
+      paramsU32[11] = workgroupsX * workgroupSize;
+      paramsU32[12] = bufferIter;
+      paramsU32[13] = checkpointCount;
+      for (let i = 0; i < 8; i++) {
+        paramsU32[14 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
+      }
+
+      this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
+
+      const commandEncoder = this.device.createCommandEncoder({ label: 'SparseGpu compute' });
+      const passEncoder = commandEncoder.beginComputePass({ label: 'SparseGpu pass' });
+      passEncoder.setPipeline(this.pipeline);
+      passEncoder.setBindGroup(0, this.bindGroup);
+      passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
+      passEncoder.end();
+
+      // Copy to current staging buffer
+      const writeBuffer = this.buffers.stagingPixels[this.stagingBufferIndex];
+      const activeBufferSize = this.activeCount * BYTES_PER_PIXEL;
+      commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, writeBuffer, 0, activeBufferSize);
+
+      this.device.queue.submit([commandEncoder.finish()]);
+
+      this.it += iterationsPerBatch;
+      this.pendingActiveCount = this.activeCount;
+      this.hasPendingResults = true;
+      this.stagingBufferIndex = 1 - this.stagingBufferIndex;  // Swap for next batch
+
+    } catch (error) {
+      console.error(`SparseGpuBoard.compute() ERROR:`, error);
+    } finally {
+      this.isComputing = false;
+    }
   }
 }
 
@@ -10153,6 +10615,7 @@ const forcedBoardTypes = {
     'pert': PerturbationBoard,
     'qdpert': QDPerturbationBoard,
     'gpu': GpuBoard,
+    'sparse': SparseGpuBoard,
     'gpuz': GpuZhuoranBoard,
     'adaptive': AdaptiveGpuBoard,
     'qdcpu': QDCpuBoard
@@ -10460,7 +10923,8 @@ class FractalWorker {
             const boardType = board.constructor.name;
             const elapsedUs = elapsedMs * 1000;  // Convert to microseconds
             const usPerPixelIter = elapsedUs / (startPixels * actualIters);
-            console.log(`[timing] ${boardType} k=${board.k}: ${startPixels} px × ${actualIters} iters = ${elapsedUs.toFixed(1)}μs (${usPerPixelIter.toFixed(4)} μs/px-iter)`);
+            const compactedFlag = board.lastBatchCompacted ? ' C' : '';
+            console.log(`[timing] ${boardType} k=${board.k}: ${startPixels} px × ${actualIters} iters = ${elapsedUs.toFixed(1)}μs${compactedFlag}`);
           }
         }
 
