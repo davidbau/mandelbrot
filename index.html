@@ -7134,6 +7134,8 @@ class GpuBaseBoard extends Board {
     this.cpuStatus = null;
     this._readPixelBufferPromise = null;  // Lock for readPixelBuffer
     this.effort = 10;  // Default for GPU boards (~10× faster than CPU), overridden by subclasses
+    this.minBatchIters = 17;  // GPU boards need minimum iterations per batch to amortize overhead
+    this.maxBatchIters = 99991;  // Cap to avoid very long batches with few pixels
   }
 
   checkSpike(size, re, im) {
