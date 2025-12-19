@@ -393,8 +393,8 @@ class MandelbrotExplorer {
   checkAllViewsComplete() {
     if (this.allViewsCompleted) return;
 
-    // Check if all views are done
-    const allDone = this.grid.views.every(view => view && view.un === 0);
+    // Check if all views are done (use unfinished() to account for chaotic pixels after 100k)
+    const allDone = this.grid.views.every(view => view && view.unfinished() === 0);
 
     if (allDone && this.grid.views.length > 0) {
       this.allViewsCompleted = true;
@@ -1197,8 +1197,8 @@ class View {
     if (boardType) {
       this.boardType = boardType;
     }
-    // Freeze stats timing when board completes (un === 0 means 100%)
-    if (this.un === 0 && !this.boardEndTime) {
+    // Freeze stats timing when board completes (unfinished() === 0 means done)
+    if (this.unfinished() === 0 && !this.boardEndTime) {
       this.boardEndTime = Date.now();
     }
 
@@ -1471,7 +1471,7 @@ class View {
 
   uninteresting() {
     // Boring: nothing computed, or done with less than 5 colors
-    return this.di <= 0 || (this.un === 0 && this.hi.length <= 5);
+    return this.di <= 0 || (this.unfinished() === 0 && this.hi.length <= 5);
   }
 
   unfinished() {
