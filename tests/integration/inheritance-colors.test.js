@@ -208,4 +208,100 @@ describe('Inheritance color behavior', () => {
 
     await page.close();
   }, TEST_TIMEOUT);
+
+  test('precomputed should flush even with no GPU results (deep interior)', async () => {
+    // When zooming into deep interior (all pixels converge slowly),
+    // GPU may not report any results for many batches. Precomputed
+    // pixels from the parent should still be flushed.
+    const page = await browser.newPage();
+    await page.setViewport({ width: 800, height: 600 });
+
+    // This URL has view 2 in deep interior
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095735+0.655091i,-0.0944515+0.6555326i&board=gpu&inherit=1&grid=2&dims=50x50`, {
+      waitUntil: 'domcontentloaded'
+    });
+
+    // Wait for view 2 to show some converged pixels
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views[2];
+      if (!view) return false;
+      let conv = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] < 0) conv++;
+      }
+      return conv > 0;
+    }, { timeout: 30000 });
+
+    // Check that histogram has entries
+    const state = await page.evaluate(() => {
+      const view = window.explorer.grid.views[2];
+      let conv = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] < 0) conv++;
+      }
+      return { conv, hi: view.hi.length };
+    });
+
+    console.log('Deep interior state:', state);
+
+    // Should have converged pixels and histogram entries
+    expect(state.conv).toBeGreaterThan(0);
+    expect(state.hi).toBeGreaterThan(0);
+
+    await page.close();
+  }, TEST_TIMEOUT);
+
+  test('histogram should not have duplicate iterations (stripe detection)', async () => {
+    // Stripes are caused by duplicate histogram entries at the same iteration
+    // with different fracK values. This test verifies no duplicates exist.
+    const page = await browser.newPage();
+    await page.setViewport({ width: 800, height: 600 });
+
+    // Use the 4-view URL pattern that was problematic
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095804+0.654167i,-0.0938695+0.6547999i,-0.0934511+0.6550458i&board=gpu&inherit=1&grid=2&dims=100x100`, {
+      waitUntil: 'domcontentloaded'
+    });
+
+    // Wait for view 3 (4th view) to reach at least 50%
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views[3];
+      if (!view) return false;
+      let done = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] !== 0) done++;
+      }
+      return done / view.nn.length >= 0.5;
+    }, { timeout: 120000 });
+
+    // Check histogram for duplicate iterations
+    const histAnalysis = await page.evaluate(() => {
+      const view = window.explorer.grid.views[3];
+      const iterCounts = new Map();
+
+      for (const entry of view.hi) {
+        const iter = entry[0];
+        iterCounts.set(iter, (iterCounts.get(iter) || 0) + 1);
+      }
+
+      const duplicates = [];
+      for (const [iter, count] of iterCounts) {
+        if (count > 1) {
+          duplicates.push({ iter, count });
+        }
+      }
+
+      return {
+        totalEntries: view.hi.length,
+        uniqueIterations: iterCounts.size,
+        duplicates
+      };
+    });
+
+    console.log('Histogram analysis:', histAnalysis);
+
+    // No iteration should appear more than once in the histogram
+    expect(histAnalysis.duplicates.length).toBe(0);
+
+    await page.close();
+  }, 180000);
 });

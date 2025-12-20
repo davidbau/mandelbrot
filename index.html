@@ -5072,6 +5072,25 @@ class PrecomputedPoints {
       .sort((a, b) => a - b);
   }
 
+  // Extract and remove ALL pending reports below maxIter.
+  // Returns combined {diverged: [...], converged: [...]} or null if none.
+  // Used to merge all low-iteration precomputed into the first GPU batch.
+  extractBelowIteration(maxIter) {
+    const iters = this.getPendingIterations(maxIter);
+    if (iters.length === 0) return null;
+
+    const combined = { diverged: [], converged: [] };
+    for (const iter of iters) {
+      const pending = this.pendingReports.get(iter);
+      if (pending) {
+        combined.diverged.push(...pending.diverged);
+        combined.converged.push(...pending.converged);
+        this.pendingReports.delete(iter);
+      }
+    }
+    return combined.diverged.length > 0 || combined.converged.length > 0 ? combined : null;
+  }
+
   // Flush all pending reports up to and including maxIter.
   // Used by GPU boards that compute in batches.
   flushUpToIteration(maxIter, board) {
@@ -7679,22 +7698,46 @@ class GpuBoard extends GpuBaseBoard {
         this.cumulativeWastedReads += this.deadSinceCompaction;
 
         // Create change objects, merging precomputed points with GPU results
-        // ONLY use iterations from GPU results - don't add precomputed-only iterations
-        // This ensures precomputed pixels are merged with GPU pixels at the same iteration,
-        // avoiding duplicate histogram entries due to double buffering
-        const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+        // Only iterate over GPU iterations - precomputed are merged INTO GPU batches
+        const gpuIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+        const sortedGpuIters = Array.from(gpuIterations).sort((a, b) => a - b);
+        const minGpuIter = sortedGpuIters.length > 0 ? sortedGpuIters[0] : null;
 
-        for (const iter of Array.from(allIterations).sort((a, b) => a - b)) {
+        for (const iter of sortedGpuIters) {
           // Make copies so we don't modify the original Maps
           const divergedIndices = [...(pixelsByIteration.get(iter) || [])];
           const convergedData = [...(convergedByIteration.get(iter) || [])];
 
-          // Only merge precomputed pixels at iterations where GPU has results
-          // This ensures they're in the same histogram entry
+          // Merge precomputed pixels into GPU batches to avoid separate histogram entries
           if (this.precomputed) {
+            // At the first GPU iteration, also merge ALL precomputed below this iteration
+            // This prevents stripes from separate histogram entries at low iterations
+            if (iter === minGpuIter) {
+              const lowPrecomputed = this.precomputed.extractBelowIteration(iter);
+              if (lowPrecomputed) {
+                for (const idx of lowPrecomputed.diverged) {
+                  this.nn[idx] = iter;  // Report at minGpuIter, not original iter
+                  this.pp[idx] = 1;
+                  this.di++;
+                  this.un--;
+                  divergedIndices.push(idx);
+                }
+                for (const c of lowPrecomputed.converged) {
+                  this.nn[c.index] = -iter;  // Report at minGpuIter
+                  this.pp[c.index] = c.p;
+                  this.un--;
+                  convergedData.push({
+                    index: c.index,
+                    z: c.z,
+                    p: c.p
+                  });
+                }
+              }
+            }
+
+            // Merge precomputed at THIS iteration
             const precomputed = this.precomputed.extractAtIteration(iter);
             if (precomputed) {
-              // Apply precomputed results to board state and add to nn/vv
               for (const idx of precomputed.diverged) {
                 this.nn[idx] = iter;
                 this.pp[idx] = 1;
@@ -7730,9 +7773,39 @@ class GpuBoard extends GpuBaseBoard {
           }
         }
 
-        // Check compaction: wasted reads >= compaction cost
-        // Compaction cost = activeRemaining pixels to write
+        // After GPU batch: if all GPU pixels are done but precomputed remain, flush them
+        // This handles precomputed at iterations HIGHER than the last GPU result
         const activeRemaining = this.activeCount - this.deadSinceCompaction;
+        if (activeRemaining === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
+          const remainingIters = Array.from(this.precomputed.pendingReports.keys()).sort((a, b) => a - b);
+          for (const iter of remainingIters) {
+            const pending = this.precomputed.extractAtIteration(iter);
+            if (pending) {
+              const divergedIndices = [];
+              const convergedData = [];
+              for (const idx of pending.diverged) {
+                this.nn[idx] = iter;
+                this.pp[idx] = 1;
+                this.di++;
+                this.un--;
+                divergedIndices.push(idx);
+              }
+              for (const c of pending.converged) {
+                this.nn[c.index] = -iter;
+                this.pp[c.index] = c.p;
+                this.un--;
+                convergedData.push({ index: c.index, z: c.z, p: c.p });
+              }
+              if (divergedIndices.length > 0 || convergedData.length > 0) {
+                this.changeList.push({ iter, nn: divergedIndices, vv: convergedData });
+                this.updateSize += divergedIndices.length + convergedData.length;
+              }
+            }
+          }
+        }
+
+        // Check compaction: wasted reads >= compaction cost
+        // Compaction cost = activeRemaining pixels to write (reuse activeRemaining from above)
         if (activeRemaining > 0 && this.cumulativeWastedReads >= activeRemaining * this.compactionCostRatio) {
           // Need to wait for current GPU batch to finish before compaction
           await this.device.queue.onSubmittedWorkDone();
