@@ -8654,11 +8654,113 @@ class SparseGpuBoard extends GpuBaseBoard {
   }
 }
 
+// Base class for double-buffered GPU perturbation boards (GpuZhuoranBoard, AdaptiveGpuBoard)
+// Provides shared double-buffering infrastructure and result processing
+class GpuZhuoranBaseBoard extends GpuBaseBoard {
+  // Subclasses must define: static BYTES_PER_PIXEL, static STRIDE
+
+  // Initialize double-buffering state (call from subclass constructor)
+  initDoubleBuffering() {
+    this.stagingBufferIndex = 0;
+    this.hasPendingResults = false;
+    this.pendingIterationsPerBatch = 0;
+    this._baseIt = 1;  // Committed iteration count
+  }
+
+  // Return iteration count including pending (for accurate reporting)
+  get it() {
+    return this._baseIt + (this.hasPendingResults ? this.pendingIterationsPerBatch : 0);
+  }
+
+  set it(value) {
+    this._baseIt = value;
+  }
+
+  async flushPendingResults() {
+    // Process pending results from the staging buffer without starting a new batch
+    if (!this.hasPendingResults) return;
+
+    const dimsArea = this.config.dimsArea;
+    const BYTES_PER_PIXEL = this.constructor.BYTES_PER_PIXEL;
+    const STRIDE = this.constructor.STRIDE;
+    const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
+    const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
+
+    await readBuffer.mapAsync(GPUMapMode.READ);
+    const pixelData = new ArrayBuffer(pixelBufferSize);
+    const srcData = readBuffer.getMappedRange();
+    new Uint8Array(pixelData).set(new Uint8Array(srcData));
+    readBuffer.unmap();
+
+    const pixelsI32 = new Int32Array(pixelData);
+
+    // Update global iteration counter using _baseIt directly
+    this._baseIt += this.pendingIterationsPerBatch;
+
+    // PixelState field indices (same layout for first 14 fields)
+    const P_ITER = 0, P_STATUS = 1, P_PERIOD = 2;
+
+    // Process results
+    for (let i = 0; i < dimsArea; i++) {
+      const idx = i * STRIDE;
+      const status = pixelsI32[idx + P_STATUS];
+      const period = pixelsI32[idx + P_PERIOD];
+
+      if (this.nn[i] !== 0) continue;
+
+      if (status === 1) {
+        const iters = pixelsI32[idx + P_ITER];
+        this.nn[i] = iters;
+        this.pp[i] = period;
+        this.di++;
+        this.un--;
+      } else if (status === 2) {
+        const iters = pixelsI32[idx + P_ITER];
+        this.nn[i] = -iters;
+        this.pp[i] = period - 1;
+        this.un--;
+      }
+    }
+
+    this.hasPendingResults = false;
+  }
+
+  async readPixelBuffer() {
+    // Handle double-buffered staging array for serialization
+    if (!this.isGPUReady || !this.buffers.pixels) {
+      return null;
+    }
+
+    const BYTES_PER_PIXEL = this.constructor.BYTES_PER_PIXEL;
+    const dimsArea = this.config.dimsArea;
+    const bufferSize = dimsArea * BYTES_PER_PIXEL;
+
+    // Use the first staging buffer for serialization reads
+    const stagingBuffer = this.buffers.stagingPixels[0];
+
+    // Copy pixels buffer to staging
+    const commandEncoder = this.device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, stagingBuffer, 0, bufferSize);
+    this.device.queue.submit([commandEncoder.finish()]);
+    await this.device.queue.onSubmittedWorkDone();
+
+    // Read back the data
+    await stagingBuffer.mapAsync(GPUMapMode.READ);
+    const pixelData = new ArrayBuffer(bufferSize);
+    const srcData = stagingBuffer.getMappedRange();
+    new Uint8Array(pixelData).set(new Uint8Array(srcData));
+    stagingBuffer.unmap();
+
+    return pixelData;
+  }
+}
+
 // WebGPU-accelerated perturbation board using Zhuoran's approach
 // Computes high-precision reference orbit on CPU, perturbations on GPU
 // Uses DDReferenceOrbitMixin for reference orbit computation
-class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
+class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
   static BYTES_PER_PIXEL = 56;  // 6 u32 + 8 f32 (unified PixelState struct)
+  static STRIDE = 14;           // 14 fields per pixel
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
@@ -8672,23 +8774,11 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
     // Initialize per-pixel perturbation data
     this.initPixels(size, re, im);
 
-    // Double-buffered staging for overlapping CPU/GPU work
-    this.stagingBufferIndex = 0;
-    this.hasPendingResults = false;
-    this.pendingIterationsPerBatch = 0;
-    this._baseIt = 1;  // Committed iteration count (BoardBase initializes this.it = 1)
+    // Initialize double-buffering (from GpuZhuoranBaseBoard)
+    this.initDoubleBuffering();
 
     // Start GPU initialization (async)
     this.gpuInitPromise = this.initGPU();
-  }
-
-  // Return iteration count including pending (for accurate reporting)
-  get it() {
-    return this._baseIt + (this.hasPendingResults ? this.pendingIterationsPerBatch : 0);
-  }
-
-  set it(value) {
-    this._baseIt = value;
   }
 
   initPixels(size, re, im) {
@@ -9662,85 +9752,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
     }
   }
 
-  async flushPendingResults() {
-    // Process pending results from the staging buffer without starting a new batch
-    if (!this.hasPendingResults) return;
-
-    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
-    const BYTES_PER_PIXEL = 56;
-    const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
-    const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
-
-    await readBuffer.mapAsync(GPUMapMode.READ);
-    const pixelData = new ArrayBuffer(pixelBufferSize);
-    const srcData = readBuffer.getMappedRange();
-    new Uint8Array(pixelData).set(new Uint8Array(srcData));
-    readBuffer.unmap();
-
-    const pixelU32 = new Uint32Array(pixelData);
-    const pixelF32 = new Float32Array(pixelData);
-
-    // Update global iteration counter
-    // Use _baseIt directly to avoid getter adding pending twice
-    this._baseIt += this.pendingIterationsPerBatch;
-
-    // PixelState struct offsets
-    const INT_ITER = 0, INT_STATUS = 1, INT_PERIOD = 2, INT_REF_ITER = 3;
-    const FLOAT_DZR = 6, FLOAT_DZI = 7;
-
-    // Process results
-    for (let i = 0; i < dimsArea; i++) {
-      const idx14 = i * 14;
-      const status = pixelU32[idx14 + INT_STATUS];
-      const period = pixelU32[idx14 + INT_PERIOD];
-
-      if (this.nn[i] !== 0) continue;
-
-      if (status === 1) {
-        const iters = pixelU32[idx14 + INT_ITER];
-        this.nn[i] = iters;
-        this.pp[i] = period;
-        this.di++;
-        this.un--;
-      } else if (status === 2) {
-        const iters = pixelU32[idx14 + INT_ITER];
-        this.nn[i] = -iters;
-        this.pp[i] = period - 1;
-        this.un--;
-      }
-    }
-
-    this.hasPendingResults = false;
-  }
-
-  async readPixelBuffer() {
-    // Override to handle double-buffered staging array
-    if (!this.isGPUReady || !this.buffers.pixels) {
-      return null;
-    }
-
-    const BYTES_PER_PIXEL = 56;
-    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
-    const bufferSize = dimsArea * BYTES_PER_PIXEL;
-
-    // Use the first staging buffer for serialization reads
-    const stagingBuffer = this.buffers.stagingPixels[0];
-
-    // Copy pixels buffer to staging
-    const commandEncoder = this.device.createCommandEncoder();
-    commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, stagingBuffer, 0, bufferSize);
-    this.device.queue.submit([commandEncoder.finish()]);
-    await this.device.queue.onSubmittedWorkDone();
-
-    // Read back the data
-    await stagingBuffer.mapAsync(GPUMapMode.READ);
-    const pixelData = new ArrayBuffer(bufferSize);
-    const srcData = stagingBuffer.getMappedRange();
-    new Uint8Array(pixelData).set(new Uint8Array(srcData));
-    stagingBuffer.unmap();
-
-    return pixelData;
-  }
+  // flushPendingResults() and readPixelBuffer() inherited from GpuZhuoranBaseBoard
 
   async serialize() {
     // CRITICAL: Flush pending results before serializing
@@ -9850,8 +9862,9 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
  * See docs/ADAPTIVE-SCALING.md for full mathematical derivation.
  */
 // Uses QDReferenceOrbitMixin for reference orbit computation
-class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
-  static BYTES_PER_PIXEL = 60;  // 15 × 4 bytes (7 i32 + 8 f32)
+class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
+  static BYTES_PER_PIXEL = 60;  // 15 × 4 bytes (6 i32 + 8 f32 + 1 i32)
+  static STRIDE = 15;           // 15 fields per pixel
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
@@ -9865,25 +9878,14 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
     // Initialize per-pixel perturbation data (sets initialScale and pixelScale)
     this.initPixels(size, re, im);
 
-    // Double-buffered staging for overlapping CPU/GPU work
-    this.stagingBufferIndex = 0;
-    this.hasPendingResults = false;
-    this.pendingIterationsPerBatch = 0;
-    this._baseIt = 1;  // Committed iteration count (BoardBase initializes this.it = 1)
+    // Initialize double-buffering (from GpuZhuoranBaseBoard)
+    this.initDoubleBuffering();
 
     // Start GPU initialization (async)
     this.gpuInitPromise = this.initGPU();
   }
 
-  // Return iteration count including pending (for accurate reporting)
-  get it() {
-    return this._baseIt + (this.hasPendingResults ? this.pendingIterationsPerBatch : 0);
-  }
-
-  set it(value) {
-    this._baseIt = value;
-  }
-
+  // get it(), set it() inherited from GpuZhuoranBaseBoard
   // extendReferenceOrbit() inherited from QDReferenceOrbitMixin
 
   // Setup reference orbit loop for very long orbits
@@ -10863,86 +10865,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
     }
   }
 
-  async flushPendingResults() {
-    // Process pending results from the staging buffer without starting a new batch
-    if (!this.hasPendingResults) return;
-
-    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
-    const BYTES_PER_PIXEL = 60;  // 15 fields × 4 bytes
-    const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
-    const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
-
-    await readBuffer.mapAsync(GPUMapMode.READ);
-    const pixelData = new ArrayBuffer(pixelBufferSize);
-    const srcData = readBuffer.getMappedRange();
-    new Uint8Array(pixelData).set(new Uint8Array(srcData));
-    readBuffer.unmap();
-
-    const pixelsI32 = new Int32Array(pixelData);
-    const pixelsF32 = new Float32Array(pixelData);
-
-    // Update global iteration counter using _baseIt directly
-    this._baseIt += this.pendingIterationsPerBatch;
-
-    // PixelState struct offsets (15 fields per pixel)
-    const STRIDE = 15;
-    // Field indices match GpuZhuoranBoard for first 14 fields (scale at end)
-    const P_ITER = 0, P_STATUS = 1, P_PERIOD = 2, P_REF_ITER = 3;
-    const P_DZR = 6, P_DZI = 7, P_SCALE = 14;
-
-    // Process results
-    for (let i = 0; i < dimsArea; i++) {
-      const idx = i * STRIDE;
-      const status = pixelsI32[idx + P_STATUS];
-      const period = pixelsI32[idx + P_PERIOD];
-
-      if (this.nn[i] !== 0) continue;
-
-      if (status === 1) {
-        const iters = pixelsI32[idx + P_ITER];
-        this.nn[i] = iters;
-        this.pp[i] = period;
-        this.di++;
-        this.un--;
-      } else if (status === 2) {
-        const iters = pixelsI32[idx + P_ITER];
-        this.nn[i] = -iters;
-        this.pp[i] = period - 1;
-        this.un--;
-      }
-    }
-
-    this.hasPendingResults = false;
-  }
-
-  async readPixelBuffer() {
-    // Override to handle double-buffered staging array
-    if (!this.isGPUReady || !this.buffers.pixels) {
-      return null;
-    }
-
-    const BYTES_PER_PIXEL = 60;  // 15 fields × 4 bytes
-    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
-    const bufferSize = dimsArea * BYTES_PER_PIXEL;
-
-    // Use the first staging buffer for serialization reads
-    const stagingBuffer = this.buffers.stagingPixels[0];
-
-    // Copy pixels buffer to staging
-    const commandEncoder = this.device.createCommandEncoder();
-    commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, stagingBuffer, 0, bufferSize);
-    this.device.queue.submit([commandEncoder.finish()]);
-    await this.device.queue.onSubmittedWorkDone();
-
-    // Read back the data
-    await stagingBuffer.mapAsync(GPUMapMode.READ);
-    const pixelData = new ArrayBuffer(bufferSize);
-    const srcData = stagingBuffer.getMappedRange();
-    new Uint8Array(pixelData).set(new Uint8Array(srcData));
-    stagingBuffer.unmap();
-
-    return pixelData;
-  }
+  // flushPendingResults() and readPixelBuffer() inherited from GpuZhuoranBaseBoard
 
   async serialize() {
     // CRITICAL: Flush pending results before serializing
