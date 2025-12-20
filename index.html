@@ -4930,12 +4930,6 @@ class Board {
             this.config.exponent == 2);
   }
 
-  inspikeDDA(re1, re2, im1, im2) {
-    // We do not iterate infinitely for chaotic points in the spike.
-    // -1.401155 is the Feigenbaum point boundary
-    return (im1 + im2 == 0.0 && re1 >= -2.0 && re1 < -1.401155 &&
-            this.config.exponent == 2);
-  }
 
   unfinished() {
     // Chaotic points in the spike counted as finished after max iterations.
@@ -10008,12 +10002,6 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
   }
 }
 
-function workerLog(message) {
-  self.postMessage({
-    type: 'log',
-    data: message
-  });
-}
 
 const forcedBoardTypes = {
     'cpu': CpuBoard,
