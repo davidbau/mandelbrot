@@ -717,133 +717,6 @@ describe('Mandelbrot Board Computations', () => {
     }, TEST_TIMEOUT);
   });
 
-  // PerturbationBoard tests - grid of quad-double reference points
-  describe('PerturbationBoard tests', () => {
-    /**
-     * Helper to compute a region using PerturbationBoard
-     */
-    async function computePerturbationRegion(location) {
-      return await page.evaluate(async (loc, dims, maxIter) => {
-        // Create a minimal config for testing
-        const config = {
-          dimsWidth: dims.width,
-          dimsHeight: dims.height,
-          dimsArea: dims.width * dims.height,
-          aspectRatio: dims.width / dims.height,
-          exponent: 2,
-          enableGPU: false
-        };
-
-        // Parse center coordinates
-        const center_re = typeof loc.center[0] === 'number'
-          ? [loc.center[0], 0]
-          : loc.center[0];
-        const center_im = typeof loc.center[1] === 'number'
-          ? [loc.center[1], 0]
-          : loc.center[1];
-
-        // Check if PerturbationBoard class exists
-        if (typeof PerturbationBoard === 'undefined') {
-          return { error: 'PerturbationBoard not defined' };
-        }
-
-        let board;
-        try {
-          board = new PerturbationBoard(0, loc.size, center_re, center_im, config);
-        } catch (e) {
-          return { error: `Failed to create board: ${e.message}` };
-        }
-
-        // Run iterations until complete or max iterations reached
-        let iterCount = 0;
-        const startTime = Date.now();
-        const timeLimit = 10000; // 10 second time limit
-
-        while (board.un > 0 && iterCount < maxIter && (Date.now() - startTime) < timeLimit) {
-          try {
-            board.iterate();
-            iterCount++;
-          } catch (e) {
-            return { error: `Iteration failed: ${e.message}` };
-          }
-        }
-
-        // Count converged pixels (those with negative nn values)
-        let converged = 0;
-        for (let i = 0; i < config.dimsArea; i++) {
-          if (board.nn[i] < 0) converged++;
-        }
-
-        // Gather results
-        return {
-          boardType: board.constructor.name,
-          unfinished: board.un,
-          diverged: board.di,
-          converged: converged,
-          chaotic: board.ch || 0,
-          iterations: board.it,
-          totalPixels: config.dimsArea,
-          timedOut: board.un > 0,
-          iterCount: iterCount,
-          ddIndexesCount: board.ddIndexes ? board.ddIndexes.length : 0,
-          pertIndexesCount: board.pertIndexes ? board.pertIndexes.length : 0
-        };
-      }, location, SMALL_GRID, MAX_ITERATIONS);
-    }
-
-    test('should correctly compute origin area', async () => {
-      const result = await computePerturbationRegion(TEST_LOCATIONS.origin);
-
-      if (result.error) {
-        console.log('PerturbationBoard test error:', result.error);
-      }
-
-      expect(result.error).toBeUndefined();
-      expect(result.boardType).toBe('PerturbationBoard');
-      // Most pixels should diverge
-      expect(result.diverged).toBeGreaterThanOrEqual(TEST_LOCATIONS.origin.expectedDivergedMin);
-      // Should complete or nearly complete
-      expect(result.unfinished).toBeLessThanOrEqual(3);
-    }, TEST_TIMEOUT);
-
-    test('should correctly compute main cardioid', async () => {
-      const result = await computePerturbationRegion(TEST_LOCATIONS.mainCardioid);
-
-      if (result.error) {
-        console.log('PerturbationBoard test error:', result.error);
-      }
-
-      expect(result.error).toBeUndefined();
-      expect(result.boardType).toBe('PerturbationBoard');
-      // Most/all should converge in the main cardioid
-      expect(result.converged).toBeGreaterThan(10);
-      expect(result.unfinished).toBe(0);
-    }, TEST_TIMEOUT);
-
-    test('should handle all-diverging region', async () => {
-      const result = await computePerturbationRegion(TEST_LOCATIONS.outsideSet);
-
-      if (result.error) {
-        console.log('PerturbationBoard test error:', result.error);
-      }
-
-      expect(result.error).toBeUndefined();
-      expect(result.boardType).toBe('PerturbationBoard');
-      // All pixels around c=2 should diverge quickly
-      expect(result.diverged).toBe(result.totalPixels);
-      expect(result.unfinished).toBe(0);
-    }, TEST_TIMEOUT);
-
-    // Skip: With pixel-scaled epsilon, DD points finish quickly and get trimmed
-    test.skip('should use DD reference points', async () => {
-      const result = await computePerturbationRegion(TEST_LOCATIONS.origin);
-
-      expect(result.error).toBeUndefined();
-      // PerturbationBoard should have double-double reference points
-      expect(result.ddIndexesCount).toBeGreaterThan(0);
-    }, TEST_TIMEOUT);
-  });
-
   describe('Board consistency tests', () => {
     /**
      * Helper to compute a region and return pixel-by-pixel results
@@ -873,9 +746,6 @@ describe('Mandelbrot Board Computations', () => {
         }
         if (typeof DDZhuoranBoard === 'undefined') {
           return { error: 'DDZhuoranBoard not defined' };
-        }
-        if (typeof PerturbationBoard === 'undefined') {
-          return { error: 'PerturbationBoard not defined' };
         }
 
         function runBoard(BoardClass, name) {
@@ -921,8 +791,7 @@ describe('Mandelbrot Board Computations', () => {
 
         return {
           cpu: runBoard(CpuBoard, 'CpuBoard'),
-          zhuoran: runBoard(DDZhuoranBoard, 'DDZhuoranBoard'),
-          perturbation: runBoard(PerturbationBoard, 'PerturbationBoard')
+          zhuoran: runBoard(DDZhuoranBoard, 'DDZhuoranBoard')
         };
       }, location, SMALL_GRID, MAX_ITERATIONS);
     }
@@ -961,37 +830,6 @@ describe('Mandelbrot Board Computations', () => {
       }
     }, TEST_TIMEOUT);
 
-    test('CpuBoard and PerturbationBoard should agree on divergence/convergence and iteration counts', async () => {
-      const location = TEST_LOCATIONS.outsideSet; // All diverge - clear case
-      const results = await computeAllBoards(location);
-
-      expect(results.error).toBeUndefined();
-
-      const cpuResult = results.cpu;
-      const pertResult = results.perturbation;
-
-      expect(cpuResult.error).toBeUndefined();
-      expect(pertResult.error).toBeUndefined();
-
-      // Both should complete
-      expect(cpuResult.unfinished).toBe(0);
-      expect(pertResult.unfinished).toBe(0);
-
-      // Both should have same diverged count
-      expect(cpuResult.diverged).toBe(pertResult.diverged);
-      expect(cpuResult.converged).toBe(pertResult.converged);
-
-      // Each pixel should agree on diverged vs converged and iteration counts
-      for (let i = 0; i < cpuResult.totalPixels; i++) {
-        expect(cpuResult.pixelResults[i].diverged).toBe(pertResult.pixelResults[i].diverged);
-        expect(cpuResult.pixelResults[i].converged).toBe(pertResult.pixelResults[i].converged);
-        // Iteration counts should match for diverged pixels
-        if (cpuResult.pixelResults[i].diverged) {
-          expect(cpuResult.pixelResults[i].nn).toBe(pertResult.pixelResults[i].nn);
-        }
-      }
-    }, TEST_TIMEOUT);
-
     test('All CPU boards should agree on main cardioid convergence', async () => {
       const location = TEST_LOCATIONS.mainCardioid;
       const results = await computeAllBoards(location);
@@ -1000,25 +838,20 @@ describe('Mandelbrot Board Computations', () => {
 
       const cpuResult = results.cpu;
       const zhuoranResult = results.zhuoran;
-      const pertResult = results.perturbation;
 
       expect(cpuResult.error).toBeUndefined();
       expect(zhuoranResult.error).toBeUndefined();
-      expect(pertResult.error).toBeUndefined();
 
       // All should complete
       expect(cpuResult.unfinished).toBe(0);
       expect(zhuoranResult.unfinished).toBe(0);
-      expect(pertResult.unfinished).toBe(0);
 
       // All should agree on converged count
       expect(cpuResult.converged).toBe(zhuoranResult.converged);
-      expect(cpuResult.converged).toBe(pertResult.converged);
 
       // Each pixel should agree
       for (let i = 0; i < cpuResult.totalPixels; i++) {
         expect(cpuResult.pixelResults[i].converged).toBe(zhuoranResult.pixelResults[i].converged);
-        expect(cpuResult.pixelResults[i].converged).toBe(pertResult.pixelResults[i].converged);
       }
     }, TEST_TIMEOUT);
 

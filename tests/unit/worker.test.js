@@ -11,7 +11,7 @@ global.self = global;
 const workerExports = loadWorkerBlob();
 Object.assign(global, workerExports);
 
-const { CpuBoard, PerturbationBoard, DDZhuoranBoard, GpuBoard, GpuZhuoranBoard } = workerExports;
+const { CpuBoard, DDZhuoranBoard, GpuBoard, GpuZhuoranBoard } = workerExports;
 
 // Mock WebGPU environment
 global.GPUBufferUsage = { STORAGE: 1, COPY_DST: 2, COPY_SRC: 4, MAP_READ: 8, UNIFORM: 16 };
@@ -164,25 +164,6 @@ describe('Worker Board Computations (Unit)', () => {
       expect(board.di).toBe(16);
      });
   });
-
-  describe('PerturbationBoard', () => {
-    test('should initialize and compute', () => {
-      const config = createConfig();
-      config.enableGPU = false;
-      const loc = TEST_LOCATIONS.outside;
-      const board = new PerturbationBoard(0, loc.size, [loc.center[0], 0], [loc.center[1], 0], config, 'test-id');
-      
-      // PerturbationBoard requires initialization of perturbation board (which happens in constructor)
-      
-      let maxIter = 100;
-      while (board.un > 0 && maxIter-- > 0) {
-        board.iterate();
-      }
-      
-      expect(board.un).toBe(0);
-      expect(board.di).toBe(16);
-    });
- });
 
  describe('GpuBoard', () => {
     test('should initialize and prepare GPU', async () => {

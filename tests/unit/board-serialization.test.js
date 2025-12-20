@@ -34,8 +34,6 @@ const TEST_LOCATION = {
 const CPU_BOARD_TYPES = [
   'CpuBoard',
   'QDCpuBoard',
-  'PerturbationBoard',
-  'QDPerturbationBoard',
   'DDZhuoranBoard',
   'QDZhuoranBoard',
 ];
@@ -136,8 +134,6 @@ describe('Board Serialization', () => {
       const boardClasses = {
         'CpuBoard': typeof CpuBoard !== 'undefined' ? CpuBoard : null,
         'QDCpuBoard': typeof QDCpuBoard !== 'undefined' ? QDCpuBoard : null,
-        'PerturbationBoard': typeof PerturbationBoard !== 'undefined' ? PerturbationBoard : null,
-        'QDPerturbationBoard': typeof QDPerturbationBoard !== 'undefined' ? QDPerturbationBoard : null,
         'DDZhuoranBoard': typeof DDZhuoranBoard !== 'undefined' ? DDZhuoranBoard : null,
         'QDZhuoranBoard': typeof QDZhuoranBoard !== 'undefined' ? QDZhuoranBoard : null,
       };
@@ -445,48 +441,6 @@ describe('Board Serialization', () => {
       expect(result.type).toBe('QDZhuoranBoard');
     }, TEST_TIMEOUT);
 
-    test('PerturbationBoard serialized data contains dual indexes', async () => {
-      const result = await page.evaluate(async (loc, dims) => {
-        const config = {
-          dimsWidth: dims.width,
-          dimsHeight: dims.height,
-          dimsArea: dims.width * dims.height,
-          aspectRatio: dims.width / dims.height,
-          exponent: 2,
-          enableGPU: false
-        };
-
-        const center_re = [loc.center[0], 0, 0, 0];
-        const center_im = [loc.center[1], 0, 0, 0];
-
-        if (typeof PerturbationBoard === 'undefined') {
-          return { error: 'PerturbationBoard not defined' };
-        }
-
-        const board = new PerturbationBoard(0, loc.size, center_re, center_im, config);
-
-        // Run a few iterations
-        for (let i = 0; i < 20 && board.un > 0; i++) {
-          board.iterate();
-        }
-
-        const serialized = await board.serialize();
-
-        return {
-          hasDdIndexes: 'ddIndexes' in serialized,
-          hasPertIndexes: 'pertIndexes' in serialized,
-          hasPertZZ: 'pertZZ' in serialized,
-          type: serialized.type,
-          ddIndexesLength: serialized.ddIndexes?.length,
-          pertIndexesLength: serialized.pertIndexes?.length,
-        };
-      }, TEST_LOCATION, SMALL_GRID);
-
-      expect(result.error).toBeUndefined();
-      expect(result.hasDdIndexes).toBe(true);
-      expect(result.hasPertIndexes).toBe(true);
-      expect(result.type).toBe('PerturbationBoard');
-    }, TEST_TIMEOUT);
   });
 
   describe('Edge cases', () => {

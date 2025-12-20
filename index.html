@@ -253,11 +253,12 @@ href="#github-icon"/></svg></a></p>
 //    - Manages multi-resolution compositing
 //
 // 6. Board subclasses - Fractal computation engines (run in worker threads)
-//    - CpuBoard: Basic CPU computation
-//    - PerturbationBoard: DD precision deep zoom (CPU)
-//    - DDZhuoranBoard: Period detection for convergence (CPU)
-//    - GpuBoard: WebGPU parallel computation
-//    - GpuZhuoranBoard: WebGPU with period detection and perturbation
+//    - CpuBoard: Basic CPU computation (shallow zoom)
+//    - DDZhuoranBoard: DD precision with perturbation theory (CPU, medium zoom)
+//    - QDZhuoranBoard: QD precision with perturbation theory (CPU, deep zoom)
+//    - GpuBoard: WebGPU with sparse compaction (shallow zoom)
+//    - GpuZhuoranBoard: WebGPU with DD perturbation (medium zoom)
+//    - AdaptiveGpuBoard: WebGPU with QD perturbation (deep zoom)
 //
 // UPDATE CYCLE EXAMPLE:
 //
@@ -4922,12 +4923,9 @@ class Board {
     const subclasses = new Map([
       ['CpuBoard', CpuBoard],
       ['QDCpuBoard', QDCpuBoard],
-      ['PerturbationBoard', PerturbationBoard],
-      ['QDPerturbationBoard', QDPerturbationBoard],
       ['DDZhuoranBoard', DDZhuoranBoard],
       ['QDZhuoranBoard', QDZhuoranBoard],
       ['GpuBoard', GpuBoard],
-      ['SparseGpuBoard', SparseGpuBoard],
       ['GpuZhuoranBoard', GpuZhuoranBoard],
       ['AdaptiveGpuBoard', AdaptiveGpuBoard]
     ]);
@@ -5412,663 +5410,6 @@ class QDCpuBoard extends Board {
       }
     }
     return 0;  // Continue iterating
-  }
-}
-
-// CPU board using perturbation theory with sparse DD precision anchors.
-class PerturbationBoard extends Board {
-  constructor(k, size, re, im, config, id) {
-    super(k, size, re, im, config, id);
-    this.ddIndexes = [];     // Pixels computed in DD precision
-    this.pertIndexes = [];   // Pixels computed as perturbations from DD points
-    this.tt = [];            // Working array for DD precision operations
-    this.perturbationThreshold = Math.min(0.1, Math.sqrt(1e15 * (size / config.dimsWidth)));
-    this.effort = 2300;  // ~100 ns/px-iter estimate (model fit is poor for pert boards)
-    this.initPerturbationBoard(size, re, im);
-  }
-
-  initPerturbationBoard(size, re, im) {
-    this.cc = new Array(this.config.dimsArea * 4).fill(NaN);
-    // Odd grid ensures that center point corresponds to a DD precision pixel
-    const gridSizeX = Math.floor(this.config.dimsWidth / 17 / 2) * 2 + 1;
-    const gridSizeY = Math.floor(this.config.dimsHeight / 17 / 2) * 2 + 1;
-    const stepX = this.config.dimsWidth / gridSizeX;
-    const stepY = this.config.dimsHeight / gridSizeY;
-    const offsetX = stepX / 2;
-    const offsetY = stepY / 2;
-    const pixW = size / this.config.dimsWidth;
-    const pixH = (size / this.config.aspectRatio) / this.config.dimsHeight;
-    const cc = this.cc;
-    re = toDD(re);
-    im = toDD(im);
-
-    // Initialize reference points and perturbations
-    for (let gy = 0; gy < gridSizeY; gy++) {
-      const ry = Math.round(gy * stepY + offsetY);
-      const jFrac = (0.5 - (ry / this.config.dimsHeight));
-      const cj = ddAdd(im, ddScale(toDD(jFrac), size / this.config.aspectRatio))
-      for (let gx = 0; gx < gridSizeX; gx++) {
-        const rx = Math.round(gx * stepX + offsetX);
-        const rFrac = ((rx / this.config.dimsWidth) - 0.5);
-        const refIndex = (ry * this.config.dimsWidth + rx);
-        const ri = refIndex * 4;
-        const cr = ddAdd(re, ddScale(toDD(rFrac), size));
-
-        // Initialize reference point
-        cc[ri] = cr[0];
-        cc[ri+1] = cr[1];
-        cc[ri+2] = cj[0];
-        cc[ri+3] = cj[1];
-        this.ddIndexes.push(refIndex);
-        let refspike = this.inspikeDDA(cr[0], cr[1], cj[0], cj[1]);
-        if (refspike) {
-          this.ch += 1;
-        }
-
-        // Initialize perturbations around this reference point
-        const minY = Math.max(0, Math.floor(ry - offsetY));
-        const maxY = Math.min(this.config.dimsHeight - 1, Math.ceil(ry + offsetY));
-        const minX = Math.max(0, Math.floor(rx - offsetX));
-        const maxX = Math.min(this.config.dimsWidth - 1, Math.ceil(rx + offsetX));
-        for (let py = minY; py <= maxY; py++) {
-          const dci = (ry - py) * pixH;
-          for (let px = minX; px <= maxX; px++) {
-            const dcr = (px - rx) * pixW;
-            const pertIndex = (py * this.config.dimsWidth + px);
-            const pi = pertIndex * 4;
-            if (isNaN(cc[pi+3])) {  // Avoid double-initialization
-              cc[pi] = dcr;
-              cc[pi+1] = dci;
-              cc[pi+2] = refIndex;
-              cc[pi+3] = Infinity;
-              this.pertIndexes.push(pertIndex);
-              if (refspike && py == ry) {
-                this.ch += 1;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    this.zz = this.cc.slice();
-    this.bb = [];
-    this.nz = [];
-  }
-
-  static fromSerialized(serialized) {
-    const board = new PerturbationBoard(
-      serialized.k,
-      serialized.sizesQD[0],
-      serialized.sizesQD[1],
-      serialized.sizesQD[2],
-      serialized.config,
-      serialized.id
-    );
-    const cc = board.cc;
-
-    // Override initialized values with serialized data
-    Object.assign(board, serialized);
-    delete board.pertZZ;
-
-    // Restore nn values for completed pixels
-    board.nn = new Array(serialized.config.dimsArea).fill(0);
-    if (serialized.completedIndexes) {
-      for (let i = 0; i < serialized.completedIndexes.length; i++) {
-        board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
-      }
-    }
-
-    // Reconstruct arrays from serialized data, leaving empty spots
-    board.cc = [];
-    board.zz = [];
-    board.nz = [];
-    board.bb = [];
-    board.pp = [];
-    const ddIdx = serialized.ddIndexes || [];
-    for (let i = 0; i < ddIdx.length; i++) {
-      const index = ddIdx[i];
-      for (let j = 0; j < 4; j++) {
-        board.zz[index * 4 + j] = board.nz[index * 4 + j] = serialized.zz[i * 4 + j];
-        board.bb[index * 4 + j] = serialized.bb[i * 4 + j];
-        board.cc[index * 4 + j] = cc[index * 4 + j];
-      }
-      if (!isFinite(cc[index * 4 + 3])) {
-        board.initAsDDPrecision(index, cc);
-      }
-      board.pp[index] = serialized.pp[i];
-    }
-    for (let i = 0; i < serialized.pertIndexes.length; i++) {
-      const index = serialized.pertIndexes[i];
-      for (let j = 0; j < 3; j++) {
-        board.zz[index * 4 + j] = serialized.pertZZ[i * 3 + j];
-        board.cc[index * 4 + j] = cc[index * 4 + j];
-      }
-      board.zz[index * 4 + 3] = board.cc[index * 4 + 3] = Infinity;
-      board.pp[index] = 0;
-    }
-    return board;
-  }
-
-  async serialize() {
-    // Build sparse nn array for completed pixels (non-zero nn values)
-    const completedIndexes = [];
-    const completedNn = [];
-    for (let i = 0; i < this.nn.length; i++) {
-      if (this.nn[i] !== 0) {
-        completedIndexes.push(i);
-        completedNn.push(this.nn[i]);
-      }
-    }
-    return {
-      ...(await super.serialize()),
-      ddIndexes: this.ddIndexes,
-      pertIndexes: this.pertIndexes,
-      zz: this.ddIndexes.flatMap(i =>
-        [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2], this.zz[i*4+3]]),
-      bb: this.ddIndexes.flatMap(i =>
-        [this.bb[i*4], this.bb[i*4+1], this.bb[i*4+2], this.bb[i*4+3]]),
-      pp: this.ddIndexes.map(index => this.pp[index]),
-      pertZZ: this.pertIndexes.flatMap(i => [this.zz[i*4], this.zz[i*4+1], this.zz[i*4+2]]),
-      completedIndexes,
-      completedNn,
-    };
-  }
-
-  iterate(targetIters = 1) {
-    // Batch multiple iterations internally
-    for (let batch = 0; batch < targetIters && this.un > 0; batch++) {
-      let changes = null;
-      let results = [0, 0, 0];
-      // Precompute DD precision point escape without updating z
-      // Update checkpoints at Fibonacci intervals
-      const isCheckpoint = fibonacciPeriod(this.it) === 1;
-      for (const index of this.ddIndexes) {
-        if (isCheckpoint && !this.nn[index]) {
-          ArddcCopy(this.bb, index*4, this.zz, index*4);  // bb = checkpoint z
-          this.pp[index] = 0;  // Reset pp (period = iter when convergence first detected)
-        }
-        let r = this.precomputeDD(index);
-        results[r + 1] += 1;
-        if (r !== 0) {
-          if (!changes) {
-            changes = { iter: this.it, nn: [], vv: [] };
-          }
-          if (r < 0) {
-            changes.vv.push({
-              index: index,
-              z: ArddcGet(this.nz, index*4),  // DDc format
-              p: this.pp[index]  // period
-            });
-          } else {
-            changes.nn.push(index);
-          }
-        }
-      }
-      // Iterate perturbation points that use the old z
-      const newDDIndexes = [];
-      let cache = { refIndex: null, binZpow: [] };
-      for (const index of this.pertIndexes) {
-        if (!this.computePerturbation(index, cache)) {
-          this.convertToDDPrecision(index);
-          let r = this.precomputeDD(index);
-          results[r + 1] += 1;
-          newDDIndexes.push(index);
-          if (r !== 0) {
-            if (!changes) {
-              changes = { iter: this.it, nn: [], vv: [] };
-            }
-            if (r < 0) {
-              changes.vv.push({
-                index: index,
-                z: ArddcGet(this.nz, index*4),  // DDc format
-                p: this.pp[index]  // period
-              });
-            } else {
-              changes.nn.push(index);
-            }
-          }
-        }
-      }
-      // Update index arrays
-      if (newDDIndexes.length > 0) {
-        const newPertIndexes = [];
-        let qi = 0;
-        for (const index of this.pertIndexes) {
-          if (newDDIndexes[qi] == index) {
-            qi += 1;
-          } else {
-            newPertIndexes.push(index);
-          }
-        }
-        this.ddIndexes = this.ddIndexes.concat(newDDIndexes);
-        this.pertIndexes = newPertIndexes;
-      }
-      // Finally update DD precision z with precomputed values
-      for (const index of this.ddIndexes) {
-        ArddcCopy(this.zz, index*4, this.nz, index*4);
-      }
-      // Tally progress
-      let diverged = results[2];
-      let count = results[0] + diverged;
-      this.un -= count;
-      this.di += diverged;
-      // Trim finished pixels from array.
-      if (this.pertIndexes.length + this.ddIndexes.length > this.un * 1.25) {
-        this.compact();
-        // Switch to full DD when perturbations are a small fraction of the work
-        if (this.pertIndexes.length < this.ddIndexes.length * 0.5) {
-          for (const index of this.pertIndexes) {
-            this.convertToDDPrecision(index);
-            this.ddIndexes.push(index);
-          }
-          this.pertIndexes = [];
-        }
-      }
-      this.it++;
-      this.queueChanges(changes);
-    }
-  }
-
-  compact() {
-    const trimmedDDIndexes = this.ddIndexes.filter(i => !this.nn[i]);
-    this.ddIndexes = trimmedDDIndexes;
-  }
-
-  precomputeDD(m) {
-    // DD precision Mandelbrot iteration with convergence detection
-    if (this.nn[m]) return 0;
-    const m4 = m * 4;
-    const tt = this.tt;
-    const nz = this.nz;
-    const r1 = this.zz[m4];
-    const r2 = this.zz[m4+1];
-    const j1 = this.zz[m4+2];
-    const j2 = this.zz[m4+3];
-    const cr1 = this.cc[m4];
-    const cr2 = this.cc[m4+1];
-    const cj1 = this.cc[m4+2];
-    const cj2 = this.cc[m4+3];
-    const br1 = this.bb[m4];  // bb = checkpoint z (DD precision)
-    const br2 = this.bb[m4+1];
-    const bj1 = this.bb[m4+2];
-    const bj2 = this.bb[m4+3];
-    ArddSquare(tt, 0, r1, r2);                    // 0: rsq = r**2
-    ArddSquare(tt, 2, j1, j2);                    // 2: jsq = j**2
-    ArddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // 4: d = rsq+jsq
-    if (tt[4] > 4) {  // Check divergence: |z|² > 4
-      this.nn[m] = this.it;
-      ArddcCopy(nz, m4, this.zz, m4);
-      return 1;  // Diverged
-    }
-    ArddMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // 6: ja = 2*r*j
-    ArddAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // 8: ra = rsq-jsq
-    for (let ord = 2; ord < this.config.exponent; ord++) {
-      ArddMul(tt, 0, j1, j2, tt[6], tt[7]);         // 0: j * ja
-      ArddMul(tt, 2, r1, r2, tt[8], tt[9]);         // 2: r * ra
-      ArddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // 4: rt = r*ra - j*ja
-      ArddMul(tt, 0, r1, r2, tt[6], tt[7]);         // 0: r * ja
-      ArddMul(tt, 2, j1, j2, tt[8], tt[9]);         // 2: j * ra
-      ArddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // 6: ja = r*ja + j*ra
-      ArddSet(tt, 8, tt[4], tt[5]);                 // 8: ra = rt
-    }
-    ArddAdd(nz, m4, tt[8], tt[9], cr1, cr2);        // nz: nzr = ra + cr
-    ArddAdd(nz, m4+2, tt[6], tt[7], cj1, cj2);      // nz+2: nzj = ja + cj
-    // Check convergence: compare new z to checkpoint
-    ArddAbsSub(tt, 0, br1, br2, nz[m4], nz[m4+1]);  // 0: abs(nzr - br)
-    ArddAbsSub(tt, 2, bj1, bj2, nz[m4+2], nz[m4+3]);// 2: abs(nzj - bj)
-    ArddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);     // 4: db = abs(nzr-br)+abs(nzj-bj)
-    const db = tt[4] + tt[5]  // distance from checkpoint
-    const { epsilon, epsilon2 } = this.getEscalatedEpsilon(this.it);
-    if (db <= epsilon2) {
-      if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
-      if (db <= epsilon) {
-        this.nn[m] = -this.it;
-        if (this.inspikeDDA(cr1, cr2, cj1, cj2) && this.ch > 0) {
-          this.ch -= 1;
-        }
-        return -1;  // Converged
-      }
-    }
-    return 0;  // Continue iterating
-  }
-
-  computePerturbation(index, cache) {
-    const m4 = index * 4;
-    const cr = this.cc[m4]
-    const ci = this.cc[m4+1]
-    const refIndex = this.cc[m4+2]
-    const ri4 = refIndex * 4;
-    const dr = this.zz[m4];
-    const di = this.zz[m4+1];
-
-    // Switch to quad when approaching convergence.
-    if (this.nn[refIndex] || this.pp[refIndex]) return false;
-
-    // Compute binomial powers of z
-    if (cache.refIndex !== refIndex) {
-      cache.refIndex = refIndex;
-      const ri4 = refIndex * 4;
-      const zr = this.zz[ri4];
-      const zi = this.zz[ri4+2];
-      this.fillBinZpow(cache.binZpow, zr, zi);
-    }
-    const binZpow = cache.binZpow;
-
-    // Compute in (z+d)^n - z^n = nz^(n-1) d + (n(n-1)/2)z^(n-2) d^2...
-    let r = dr;
-    let i = di;
-    for (let ord = 0; ord < binZpow.length; ord += 2) {
-      r += binZpow[ord];
-      i += binZpow[ord+1];
-      const rNew = r * dr - i * di;
-      i = r * di + i * dr;
-      r = rNew;
-    }
-
-    // Add perturbation in c
-    r += cr;
-    i += ci;
-
-    if (this.isThresholdExceeded(r, i, refIndex)) {
-      return false;
-    }
-
-    this.zz[m4] = r;
-    this.zz[m4+1] = i;
-    return true;
-  }
-
-  fillBinZpow(binZpow, zr, zi) {
-    let zrCurrent = zr, ziCurrent = zi;
-    let coeff = this.config.exponent;
-
-    for (let k = 1; k < this.config.exponent - 1; k++) {
-      binZpow[k*2-2] = coeff * zrCurrent;
-      binZpow[k*2-1] = coeff * ziCurrent;
-
-      // Update z power
-      const zrNew = zrCurrent * zr - ziCurrent * zi;
-      ziCurrent = zrCurrent * zi + ziCurrent * zr;
-      zrCurrent = zrNew;
-
-      // Update coefficient for next iteration
-      coeff *= (this.config.exponent - k) / (k + 1);
-    }
-
-    // Add the last element without computing the next z power or coefficient
-    if (this.config.exponent > 1) {
-      binZpow[this.config.exponent*2 - 4] = coeff * zrCurrent;
-      binZpow[this.config.exponent*2 - 3] = coeff * ziCurrent;
-    }
-  }
-
-  isThresholdExceeded(dr, di, refIndex) {
-    const mag = Math.max(Math.abs(dr), Math.abs(di));
-    if (mag > this.perturbationThreshold) return true;
-    // If orbit is getting large, then be more careful.
-    if (mag * 10 < this.perturbationThreshold) return false;
-    const zr = this.zz[refIndex * 4];
-    const zi = this.zz[refIndex * 4 + 2];
-    return ((dr + zr) ** 2 + (di + zi) ** 2 > 3);
-  }
-
-  convertToDDPrecision(index) {
-    const m4 = index * 4;
-    const dr = this.zz[m4];
-    const di = this.zz[m4+1];
-    const cr = this.cc[m4];
-    const ci = this.cc[m4+1];
-    const refIndex = this.cc[m4+2];
-    const ri4 = refIndex * 4;
-    ArddAdd(this.zz, m4, dr, 0, this.zz[ri4], this.zz[ri4+1])
-    ArddAdd(this.zz, m4+2, di, 0, this.zz[ri4+2], this.zz[ri4+3])
-    ArddAdd(this.cc, m4, cr, 0, this.cc[ri4], this.cc[ri4+1])
-    ArddAdd(this.cc, m4+2, ci, 0, this.cc[ri4+2], this.cc[ri4+3])
-  }
-
-  initAsDDPrecision(index, refcc) {
-    const m4 = index * 4;
-    const cr = this.cc[m4];
-    const ci = this.cc[m4+1];
-    const refIndex = this.cc[m4+2];
-    const ri4 = refIndex * 4;
-    ArddAdd(this.cc, m4, cr, 0, refcc[ri4], refcc[ri4+1])
-    ArddAdd(this.cc, m4+2, ci, 0, refcc[ri4+2], refcc[ri4+3])
-  }
-}
-
-// QD-precision CPU board using perturbation theory (quad-double anchors)
-class QDPerturbationBoard extends Board {
-  constructor(k, size, re, im, config, id) {
-    super(k, size, re, im, config, id);
-    this.qdIndexes = [];   // Pixels computed in QD precision
-    this.tt = new Array(32).fill(0);           // Working array for QD operations
-    this.effort = 11400;  // ~500 ns/px-iter estimate (model fit is poor for pert boards)
-    this.initQDBoard(size, re, im);
-  }
-
-  initQDBoard(size, re, im) {
-    const dimsArea = this.config.dimsArea;
-    this.cc = new Array(dimsArea * 8).fill(0);
-    this.zz = new Array(dimsArea * 8).fill(0);
-    this.bb = new Array(dimsArea * 8).fill(0);
-    this.ss = Array.from({length: dimsArea}, (_, i) => i);
-    this.nn = new Array(dimsArea).fill(0);
-    this.pp = new Array(dimsArea).fill(0);
-    this.un = dimsArea;
-    this.di = 0;
-    const re_o = Array.isArray(re) && re.length === 4 ? re : [re, 0, 0, 0];
-    const im_o = Array.isArray(im) && im.length === 4 ? im : [im, 0, 0, 0];
-    for (let y = 0; y < this.config.dimsHeight; y++) {
-      const jFrac = (0.5 - (y / this.config.dimsHeight));
-      const cj = toQDAdd(im_o, toQDScale(toQD(jFrac), size / this.config.aspectRatio));
-      for (let x = 0; x < this.config.dimsWidth; x++) {
-        const rFrac = ((x / this.config.dimsWidth) - 0.5);
-        const cr = toQDAdd(re_o, toQDScale(toQD(rFrac), size));
-        const idx = y * this.config.dimsWidth + x;
-        const m8 = idx * 8;
-        this.cc[m8] = cr[0]; this.cc[m8+1] = cr[1];
-        this.cc[m8+2] = cr[2]; this.cc[m8+3] = cr[3];
-        this.cc[m8+4] = cj[0]; this.cc[m8+5] = cj[1];
-        this.cc[m8+6] = cj[2]; this.cc[m8+7] = cj[3];
-        this.zz[m8] = cr[0]; this.zz[m8+1] = cr[1];
-        this.zz[m8+2] = cr[2]; this.zz[m8+3] = cr[3];
-        this.zz[m8+4] = cj[0]; this.zz[m8+5] = cj[1];
-        this.zz[m8+6] = cj[2]; this.zz[m8+7] = cj[3];
-        this.bb[m8] = cr[0]; this.bb[m8+1] = cr[1];
-        this.bb[m8+2] = cr[2]; this.bb[m8+3] = cr[3];
-        this.bb[m8+4] = cj[0]; this.bb[m8+5] = cj[1];
-        this.bb[m8+6] = cj[2]; this.bb[m8+7] = cj[3];
-        this.qdIndexes.push(idx);
-        if (this.inspikeDDA(cr[0], cr[1], cj[0], cj[1])) {
-          this.ch += 1;
-        }
-      }
-    }
-  }
-
-  static fromSerialized(serialized) {
-    const board = new QDPerturbationBoard(
-      serialized.k,
-      serialized.sizesQD[0],
-      serialized.sizesQD[1],
-      serialized.sizesQD[2],
-      serialized.config,
-      serialized.id
-    );
-    const cc = board.cc;
-
-    // Override initialized values with serialized data
-    Object.assign(board, serialized);
-
-    // Restore nn values for completed pixels
-    board.nn = new Array(serialized.config.dimsArea).fill(0);
-    if (serialized.completedIndexes) {
-      for (let i = 0; i < serialized.completedIndexes.length; i++) {
-        board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
-      }
-    }
-
-    // Reconstruct arrays from serialized data (8 floats per pixel for QD)
-    board.cc = [];
-    board.zz = [];
-    board.bb = [];
-    board.pp = [];
-    const qdIdx = serialized.qdIndexes || [];
-    for (let i = 0; i < qdIdx.length; i++) {
-      const index = qdIdx[i];
-      for (let j = 0; j < 8; j++) {
-        board.zz[index * 8 + j] = serialized.zz[i * 8 + j];
-        board.bb[index * 8 + j] = serialized.bb[i * 8 + j];
-        board.cc[index * 8 + j] = cc[index * 8 + j];
-      }
-      board.pp[index] = serialized.pp[i];
-    }
-    return board;
-  }
-
-  async serialize() {
-    // Build sparse nn array for completed pixels (non-zero nn values)
-    const completedIndexes = [];
-    const completedNn = [];
-    for (let i = 0; i < this.nn.length; i++) {
-      if (this.nn[i] !== 0) {
-        completedIndexes.push(i);
-        completedNn.push(this.nn[i]);
-      }
-    }
-    return {
-      ...(await super.serialize()),
-      qdIndexes: this.qdIndexes,
-      zz: this.qdIndexes.flatMap(i => this.zz.slice(i*8, i*8+8)),
-      bb: this.qdIndexes.flatMap(i => this.bb.slice(i*8, i*8+8)),
-      pp: this.qdIndexes.map(index => this.pp[index]),
-      completedIndexes,
-      completedNn,
-    };
-  }
-
-  initAsQDPrecision(index, refcc) {
-    const m8 = index * 8;
-    for (let j = 0; j < 4; j++) {
-      this.cc[m8 + j] = refcc[m8 + j];
-      this.cc[m8 + 4 + j] = refcc[m8 + 4 + j];
-    }
-  }
-
-  iterate(targetIters = 1) {
-    // Batch multiple iterations internally
-    for (let batch = 0; batch < targetIters && this.un > 0; batch++) {
-      let changes = null;
-      const s = this.ss;
-      const isCheckpoint = fibonacciPeriod(this.it) === 1;
-      if (isCheckpoint) {
-        for (let t = 0; t < s.length; ++t) {
-          const m = s[t];
-          if (this.nn[m]) continue;
-          ArqdcCopy(this.bb, m*8, this.zz, m*8);  // bb = checkpoint z position
-          this.pp[m] = 0;  // Reset pp
-        }
-      }
-      for (let t = 0; t < s.length; ++t) {
-        const index = s[t];
-        const result = this.compute(index);
-        if (result !== 0) {
-          if (!changes) {
-            changes = { iter: this.it, nn: [], vv: [] };
-          }
-          if (result < 0) {
-            changes.vv.push({
-              index: index,
-              z: ArqdcGet(this.zz, index*8),
-              p: this.pp[index]  // period
-            });
-          } else {
-            changes.nn.push(index);
-          }
-        }
-      }
-      if (changes) {
-        this.un -= changes.nn.length + changes.vv.length; // newly finished
-        this.di += changes.nn.length; // diverged
-      }
-      if (s.length > this.un * 1.25) {
-        this.compact();
-        if (this.ss.length > this.un + this.ch) {
-          throw new Error(`excess ss ${s.length}, ${this.ss.length}, ${this.un}`);
-        }
-      }
-      this.it++;
-      this.queueChanges(changes);
-    }
-  }
-
-  compact() {
-    this.ss = this.ss.filter(i => !this.nn[i]);
-  }
-
-  compute(m) {
-    if (this.nn[m]) return 0;
-    const m8 = m * 8;
-    const tt = this.tt;
-    const r1 = this.zz[m8];
-    const r2 = this.zz[m8+1];
-    const r3 = this.zz[m8+2];
-    const r4 = this.zz[m8+3];
-    const j1 = this.zz[m8+4];
-    const j2 = this.zz[m8+5];
-    const j3 = this.zz[m8+6];
-    const j4 = this.zz[m8+7];
-    const cr1 = this.cc[m8];
-    const cr2 = this.cc[m8+1];
-    const cr3 = this.cc[m8+2];
-    const cr4 = this.cc[m8+3];
-    const cj1 = this.cc[m8+4];
-    const cj2 = this.cc[m8+5];
-    const cj3 = this.cc[m8+6];
-    const cj4 = this.cc[m8+7];
-    ArqdSquare(tt, 0, r1, r2, r3, r4);
-    ArqdSquare(tt, 4, j1, j2, j3, j4);
-    ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
-    if (tt[8] > 4) {
-      this.nn[m] = this.it;
-      return 1;  // Diverged
-    }
-    ArqdMul(tt, 12, 2 * r1, 2 * r2, 2 * r3, 2 * r4, j1, j2, j3, j4);
-    ArqdAdd(tt, 20, tt[0], tt[1], tt[2], tt[3], -tt[4], -tt[5], -tt[6], -tt[7]);
-    for (let ord = 2; ord < this.config.exponent; ord++) {
-      ArqdMul(tt, 0, j1, j2, j3, j4, tt[12], tt[13], tt[14], tt[15]);
-      ArqdMul(tt, 4, r1, r2, r3, r4, tt[20], tt[21], tt[22], tt[23]);
-      ArqdAdd(tt, 8, -tt[0], -tt[1], -tt[2], -tt[3], tt[4], tt[5], tt[6], tt[7]);
-      ArqdMul(tt, 0, r1, r2, r3, r4, tt[12], tt[13], tt[14], tt[15]);
-      ArqdMul(tt, 4, j1, j2, j3, j4, tt[20], tt[21], tt[22], tt[23]);
-      ArqdAdd(tt, 12, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
-      ArqdSet(tt, 20, tt[8], tt[9], tt[10], tt[11]);
-    }
-    ArqdAdd(this.zz, m8, tt[20], tt[21], tt[22], tt[23], cr1, cr2, cr3, cr4);
-    ArqdAdd(this.zz, m8+4, tt[12], tt[13], tt[14], tt[15], cj1, cj2, cj3, cj4);
-    // Check convergence: compare current z to checkpoint
-    const br1 = this.bb[m8];
-    const br2 = this.bb[m8+1];
-    const bj1 = this.bb[m8+4];
-    const bj2 = this.bb[m8+5];
-    ArqdAbsSub(tt, 0, br1, br2, this.zz[m8], this.zz[m8+1]);
-    ArqdAbsSub(tt, 4, bj1, bj2, this.zz[m8+4], this.zz[m8+5]);
-    ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
-    const db = tt[8] + tt[9];
-    const { epsilon, epsilon2 } = this.getEscalatedEpsilon(this.it);
-    if (db <= epsilon2) {
-      if (!this.pp[m]) { this.pp[m] = this.it; }
-      if (db <= epsilon) {
-        this.nn[m] = -this.it;
-        if (this.inspikeDDA(cr1, cr2, cj1, cj2) && this.ch > 0) {
-          this.ch -= 1;
-        }
-        return -1;  // Converged
-      }
-    }
-    return 0;
   }
 }
 
@@ -7413,587 +6754,13 @@ class GpuBaseBoard extends Board {
 }
 
 // WebGPU board using float32 arithmetic for shallow zoom depths.
+// Uses sparse buffer compaction to improve performance as pixels complete.
 class GpuBoard extends GpuBaseBoard {
-  static BYTES_PER_PIXEL = 28;  // 3 u32 + 4 f32 (consolidated PixelState struct)
-
-  constructor(k, size, re, im, config, id) {
-    super(k, size, re, im, config, id);
-    this.effort = 5;  // Benchmarked: 0.2 ns/px-iter, 22× faster than CPU
-    // Epsilon values for convergence detection scale with pixel size
-    const pix = this.pixelSize;
-    // GPU uses float32 precision, so thresholds must be larger than CPU's float64
-    this.epsilon = pix / 10;   // Final convergence threshold
-    this.epsilon2 = pix * 10;  // Getting close threshold
-    this.checkSpike(size, re, im);
-    // Start GPU initialization (async)
-    this.gpuInitPromise = this.initGPU();
-  }
-
-  async createComputePipeline() {
-    // Mandelbrot shader with period detection for convergence
-    // 2-binding layout: params, pixels (PixelState struct)
-    // Processes all pixels, skips finished ones with status check
-    const shaderCode = `
-      struct Params {
-        center_re: f32,
-        center_im: f32,
-        pixel_size: f32,
-        aspect_ratio: f32,
-        dims_width: u32,
-        dims_height: u32,
-        iterations_per_batch: u32,
-        pixel_count: u32,
-        epsilon: f32,
-        epsilon2: f32,
-        exponent: u32,
-        workgroups_x: u32,
-        start_iter: u32,
-        checkpoint_count: u32,
-        ckpt0: u32,
-        ckpt1: u32,
-        ckpt2: u32,
-        ckpt3: u32,
-        ckpt4: u32,
-        ckpt5: u32,
-        ckpt6: u32,
-        ckpt7: u32,
-      }
-
-      // Per-pixel state: 3 u32 + 4 f32 = 28 bytes
-      // Layout (u32 view):
-      //   [0] iter: u32
-      //   [1] status: u32
-      //   [2] period: u32
-      //   [3] zr: f32
-      //   [4] zi: f32
-      //   [5] base_r: f32
-      //   [6] base_i: f32
-      struct PixelState {
-        iter: u32,
-        status: u32,
-        period: u32,
-        zr: f32,
-        zi: f32,
-        base_r: f32,
-        base_i: f32,
-      }
-
-      @group(0) @binding(0) var<uniform> params: Params;
-      @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
-
-      @compute @workgroup_size(64)
-      fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-        // 2D dispatch: calculate linear index from 2D coordinates
-        let index = global_id.y * params.workgroups_x + global_id.x;
-        if (index >= params.pixel_count) {
-          return;
-        }
-        // Skip already-finished pixels
-        if (pixels[index].status != 0u) {
-          return;
-        }
-        let x = index % params.dims_width;
-        let y = index / params.dims_width;
-        // Compute c for this pixel
-        // Use integer arithmetic to avoid float32 rounding: (coord - dims/2) / dims
-        let xFrac = f32(i32(x) - i32(params.dims_width / 2u)) / f32(params.dims_width);
-        let yFrac = f32(i32(params.dims_height / 2u) - i32(y)) / f32(params.dims_height);
-        let cr = params.center_re + xFrac * params.pixel_size;
-        let ci = params.center_im + yFrac * (params.pixel_size / params.aspect_ratio);
-        // Load pixel state
-        var zr = pixels[index].zr;
-        var zi = pixels[index].zi;
-        var iter = pixels[index].iter;
-        var base_r = pixels[index].base_r;
-        var base_i = pixels[index].base_i;
-        var p = pixels[index].period;
-        // If this is the first batch and base is still zero, initialize it
-        if (iter == 0u && base_r == 0.0 && base_i == 0.0) {
-          base_r = zr;  // Initialize to starting z (which is 0,0)
-          base_i = zi;
-        }
-        // Track next checkpoint using O(1) counter for adaptive Fibonacci checkpoints
-        var next_checkpoint_idx = 0u;
-        // Iterate for this batch
-        for (var i = 0u; i < params.iterations_per_batch; i++) {
-          // Check if this iteration is a Fibonacci checkpoint
-          if (next_checkpoint_idx < params.checkpoint_count) {
-            var checkpoint_offset = 0u;
-            switch (next_checkpoint_idx) {
-              case 0u: { checkpoint_offset = params.ckpt0; }
-              case 1u: { checkpoint_offset = params.ckpt1; }
-              case 2u: { checkpoint_offset = params.ckpt2; }
-              case 3u: { checkpoint_offset = params.ckpt3; }
-              case 4u: { checkpoint_offset = params.ckpt4; }
-              case 5u: { checkpoint_offset = params.ckpt5; }
-              case 6u: { checkpoint_offset = params.ckpt6; }
-              case 7u: { checkpoint_offset = params.ckpt7; }
-              default: {}
-            }
-            if (i == checkpoint_offset) {
-              base_r = zr;
-              base_i = zi;
-              p = 0u;  // Reset p (period = iter when convergence first detected)
-              next_checkpoint_idx++;
-            }
-          }
-          let zr2 = zr * zr;
-          let zi2 = zi * zi;
-          let mag_sq = zr2 + zi2;
-          // Check divergence (escape radius 2, or NaN/Infinity from numerical errors)
-          if (mag_sq > 4.0 || !(mag_sq <= 1e38)) {  // NaN/Inf check: !(x <= large) catches both
-            pixels[index].status = 1u;  // Diverged
-            break;
-          }
-          // z = z^exponent + c (generalized Mandelbrot)
-          var ra = zr2 - zi2;
-          var ja = 2.0 * zr * zi;
-          for (var ord = 2u; ord < params.exponent; ord++) {
-            let rt = zr * ra - zi * ja;
-            ja = zr * ja + zi * ra;
-            ra = rt;
-          }
-          zr = ra + cr;
-          zi = ja + ci;
-          // Check convergence: compare new z to checkpoint
-          let dr = zr - base_r;
-          let di = zi - base_i;
-          let db = abs(dr) + abs(di);  // distance from checkpoint
-          if (db <= params.epsilon2) {
-            if (p == 0u) {
-              p = iter;  // Record iter when convergence first detected
-            }
-            if (db <= params.epsilon) {
-              pixels[index].status = 2u;  // Converged (periodic)
-              break;
-            }
-          }
-          iter++;
-        }
-        // Save state
-        pixels[index].zr = zr;
-        pixels[index].zi = zi;
-        pixels[index].base_r = base_r;
-        pixels[index].base_i = base_i;
-        pixels[index].iter = iter;
-        pixels[index].period = p;
-      }
-    `;
-
-    const shaderModule = this.device.createShaderModule({
-      code: shaderCode,
-      label: 'Mandelbrot compute shader'
-    });
-
-    this.pipeline = this.device.createComputePipeline({
-      layout: 'auto',
-      compute: {
-        module: shaderModule,
-        entryPoint: 'main'
-      },
-      label: 'Mandelbrot compute pipeline'
-    });
-  }
-
-  async createBuffers() {
-    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
-
-    // Check buffer size limits before creating (safety margin applied upstream)
-    const maxBufferSize = Math.min(
-      this.device.limits.maxBufferSize,
-      this.device.limits.maxStorageBufferBindingSize
-    );
-    // PixelState struct: 3 u32 + 4 f32 = 28 bytes per pixel
-    const BYTES_PER_PIXEL = 28;
-    const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
-
-    if (pixelBufferSize > maxBufferSize) {
-      throw new Error(
-        `Buffer size (${(pixelBufferSize / (1024 * 1024)).toFixed(1)} MB) ` +
-        `exceeds WebGPU limit (${(maxBufferSize / (1024 * 1024)).toFixed(1)} MB). ` +
-        `Board ${this.config.dimsWidth}x${this.config.dimsHeight} is too large ` +
-        `for GPU acceleration.`);
-    }
-
-    // Uniform buffer for shader parameters
-    this.buffers.params = this.device.createBuffer({
-      size: 128,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      label: 'Parameters buffer'
-    });
-
-    // Consolidated pixel state buffer
-    // (PixelState struct: iter, status, period, zr, zi, base_r, base_i)
-    this.buffers.pixels = this.device.createBuffer({
-      size: pixelBufferSize,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Pixel state buffer'
-    });
-
-    // Staging buffer for reading pixel state back to CPU
-    this.buffers.stagingPixels = this.device.createBuffer({
-      size: pixelBufferSize,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      label: 'Staging pixels buffer'
-    });
-
-    // Initialize pixel state buffer using overlapping typed array views
-    // PixelState struct layout: [iter(u32), status(u32), period(u32),
-    //   zr(f32), zi(f32), base_r(f32), base_i(f32)]
-    const pixelData = new ArrayBuffer(pixelBufferSize);
-    const pixelU32 = new Uint32Array(pixelData);
-    const pixelF32 = new Float32Array(pixelData);
-
-    for (let i = 0; i < dimsArea; i++) {
-      const idx7 = i * 7;  // 7 x 4-byte values per pixel
-      // Integer fields (offsets 0-2)
-      pixelU32[idx7 + 0] = 0;  // iter
-      pixelU32[idx7 + 1] = 0;  // status (0 = computing)
-      pixelU32[idx7 + 2] = 0;  // period
-      // Float fields (offsets 3-6)
-      pixelF32[idx7 + 3] = 0;  // zr
-      pixelF32[idx7 + 4] = 0;  // zi
-      pixelF32[idx7 + 5] = 0;  // base_r
-      pixelF32[idx7 + 6] = 0;  // base_i
-    }
-    this.device.queue.writeBuffer(this.buffers.pixels, 0, pixelData);
-  }
-
-  createBindGroup() {
-    // 2-binding layout: params, pixels
-    this.bindGroup = this.device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.buffers.params } },
-        { binding: 1, resource: { buffer: this.buffers.pixels } }
-      ],
-      label: 'Mandelbrot bind group'
-    });
-  }
-
-  async compute(targetIters = null) {
-    // Prevent concurrent compute() calls
-    if (this.isComputing) {
-      return;
-    }
-    this.isComputing = true;
-    try {
-    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
-    const workgroupSize = 64;
-    const BYTES_PER_PIXEL = 28;  // 7 x 4-byte values per pixel
-
-    // Prepare parameters for GPU
-    const re_double = qdToNumber(this.re);
-    const im_double = qdToNumber(this.im);
-    const pixel_size = this.size;
-
-    // Check if all done
-    if (this.un === 0) {
-      return;
-    }
-
-    // Use passed targetIters, or calculate dynamically based on remaining pixels
-    let iterationsPerBatch;
-    if (targetIters !== null) {
-      iterationsPerBatch = targetIters;
-    } else {
-      // Default: scale iterations inversely with remaining pixels
-      const targetWork = 333337;
-      iterationsPerBatch = Math.max(17, Math.floor(targetWork / Math.max(this.un, 1)));
-    }
-
-    // 2D workgroup dispatch - process all pixels
-    const numWorkgroups = Math.ceil(dimsArea / workgroupSize);
-    const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
-    const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
-
-    // Precompute Fibonacci checkpoint offsets for this batch
-    const checkpointOffsets = [];
-    const bufferIter = this.it;
-    for (let i = 0; i < iterationsPerBatch; i++) {
-      const globalIter = bufferIter + i;
-      if (fibonacciPeriod(globalIter) === 1) {
-        checkpointOffsets.push(i);
-      }
-    }
-    const checkpointCount = Math.min(checkpointOffsets.length, 8);
-
-    // Upload parameters to uniform buffer
-    const paramsBuffer = new ArrayBuffer(128);
-    const paramsF32 = new Float32Array(paramsBuffer);
-    const paramsU32 = new Uint32Array(paramsBuffer);
-
-    paramsF32[0] = re_double;
-    paramsF32[1] = im_double;
-    paramsF32[2] = pixel_size;
-    paramsF32[3] = this.config.aspectRatio;
-    paramsU32[4] = this.config.dimsWidth;
-    paramsU32[5] = this.config.dimsHeight;
-    paramsU32[6] = iterationsPerBatch;
-    paramsU32[7] = dimsArea;  // Total pixel count
-    paramsF32[8] = this.epsilon;
-    paramsF32[9] = this.epsilon2;
-    paramsU32[10] = this.config.exponent;
-    paramsU32[11] = workgroupsX * workgroupSize;  // Total threads in X dimension
-    paramsU32[12] = bufferIter;  // Starting iteration
-    paramsU32[13] = checkpointCount;  // Number of checkpoints in this batch
-
-    // Pack all 8 checkpoint offsets (fill unused slots with 0)
-    for (let i = 0; i < 8; i++) {
-      paramsU32[14 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
-    }
-
-    this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
-
-    // Create command encoder
-    const commandEncoder = this.device.createCommandEncoder({
-      label: 'Mandelbrot compute encoder'
-    });
-
-    // Compute pass
-    const passEncoder = commandEncoder.beginComputePass({
-      label: 'Mandelbrot compute pass'
-    });
-
-    passEncoder.setPipeline(this.pipeline);
-    passEncoder.setBindGroup(0, this.bindGroup);
-    passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);  // 2D dispatch
-    passEncoder.end();
-
-    // Copy consolidated pixel buffer to staging
-    commandEncoder.copyBufferToBuffer(
-      this.buffers.pixels, 0, this.buffers.stagingPixels, 0, dimsArea * BYTES_PER_PIXEL);
-
-    // Submit compute + buffer copy in single batch
-    this.device.queue.submit([commandEncoder.finish()]);
-    await this.device.queue.onSubmittedWorkDone();
-
-    // Update iteration counter (before processing results, like CPU implementations)
-    this.it += iterationsPerBatch;
-
-    // Read consolidated pixel state buffer
-    await this.buffers.stagingPixels.mapAsync(GPUMapMode.READ);
-    const pixelData = new ArrayBuffer(dimsArea * BYTES_PER_PIXEL);
-    const srcData = this.buffers.stagingPixels.getMappedRange();
-    new Uint8Array(pixelData).set(new Uint8Array(srcData));
-    this.buffers.stagingPixels.unmap();
-
-    // Create typed array views for reading pixel state
-    const pixelU32 = new Uint32Array(pixelData);
-    const pixelF32 = new Float32Array(pixelData);
-
-    // Find pixels that NEWLY diverged or converged this batch
-    // Simple loop over all pixels, skip already-finished ones
-    const pixelsByIteration = new Map(); // For diverged: iter -> [indices]
-    const convergedByIteration = new Map(); // For converged: iter -> [{index, z, p}]
-    let totalDiverged = 0;
-    let stillComputing = 0;
-
-    for (let i = 0; i < dimsArea; i++) {
-      // Skip already-finished pixels
-      if (this.nn[i] !== 0) {
-        if (this.nn[i] > 0) totalDiverged++;
-        continue;
-      }
-
-      const idx7 = i * 7;
-      const iters = pixelU32[idx7 + 0];   // iter
-      const status = pixelU32[idx7 + 1];  // status
-      const period = pixelU32[idx7 + 2];  // period
-      const zr = pixelF32[idx7 + 3];      // zr
-      const zi = pixelF32[idx7 + 4];      // zi
-
-      if (status === 0) {
-        stillComputing++;
-        continue;
-      }
-
-      if (status === 1) {
-        // Newly diverged
-        this.nn[i] = iters;
-        this.pp[i] = 1;
-        totalDiverged++;
-
-        if (!pixelsByIteration.has(iters)) {
-          pixelsByIteration.set(iters, []);
-        }
-        pixelsByIteration.get(iters).push(i);
-
-        // Decrement ch if this pixel was in the spike
-        if (this.inSpike && this.inSpike[i] && this.ch > 0) {
-          this.ch -= 1;
-        }
-      } else if (status === 2) {
-        // Newly converged
-        this.nn[i] = -iters;  // Negative iteration for converged pixels
-
-        // Add 1 because GPU shader increments iter before setting checkpoint,
-        // so period value is 1 less than what CPU board would store
-        this.pp[i] = period + 1;
-
-        if (!convergedByIteration.has(iters)) {
-          convergedByIteration.set(iters, []);
-        }
-        convergedByIteration.get(iters).push({
-          index: i,
-          z: [zr, zi],  // float64 pair
-          p: this.pp[i]
-        });
-
-        // Decrement ch if this pixel was in the spike
-        if (this.inSpike && this.inSpike[i] && this.ch > 0) {
-          this.ch -= 1;
-        }
-      }
-    }
-
-    // Create change objects for newly diverged and converged pixels
-    const allIterations = new Set([...pixelsByIteration.keys(),
-                                    ...convergedByIteration.keys()]);
-    const sortedIterations = Array.from(allIterations).sort((a, b) => a - b);
-    let totalChanges = 0;
-
-    for (const iter of sortedIterations) {
-      const divergedIndices = pixelsByIteration.get(iter) || [];
-      const convergedData = convergedByIteration.get(iter) || [];
-
-      this.changeList.push({
-        iter: iter,
-        nn: divergedIndices,
-        vv: convergedData
-      });
-      totalChanges += divergedIndices.length + convergedData.length;
-    }
-
-    // Update board statistics
-    this.di = totalDiverged;
-    this.un = stillComputing;
-    this.updateSize = totalChanges;
-
-    } catch (error) {
-      console.error(`GpuBoard.compute() ERROR:`, error);
-    } finally {
-      this.isComputing = false;
-    }
-  }
-
-  async serialize() {
-    // Ensure GPU is ready before reading buffers
-    await this.ensureGPUReady();
-
-    // Read GPU pixel buffer
-    const gpuPixelData = await this.readPixelBuffer();
-
-    // Build sparse nn array for completed pixels (like CPU boards)
-    const completedIndexes = [];
-    const completedNn = [];
-    for (let i = 0; i < this.nn.length; i++) {
-      if (this.nn[i] !== 0) {
-        completedIndexes.push(i);
-        completedNn.push(this.nn[i]);
-      }
-    }
-
-    return {
-      ...(await super.serialize()),
-      // GPU pixel buffer as array (for JSON serialization)
-      gpuPixelData: gpuPixelData ? Array.from(new Uint8Array(gpuPixelData)) : null,
-      effort: this.effort,
-      // Completed pixels (sparse format)
-      completedIndexes,
-      completedNn,
-    };
-  }
-
-  static async fromSerializedAsync(serialized) {
-    const board = new GpuBoard(
-      serialized.k,
-      serialized.sizesQD[0],
-      serialized.sizesQD[1],
-      serialized.sizesQD[2],
-      serialized.config,
-      serialized.id
-    );
-
-    // Wait for GPU initialization
-    await board.ensureGPUReady();
-
-    // Restore GPU pixel buffer
-    if (serialized.gpuPixelData && board.isGPUReady) {
-      const pixelData = new Uint8Array(serialized.gpuPixelData).buffer;
-      await board.writePixelBuffer(pixelData);
-    }
-
-    board.effort = serialized.effort || 1;
-
-    // Restore Board state
-    board.it = serialized.it;
-    board.un = serialized.un;
-    board.di = serialized.di;
-    board.ch = serialized.ch || 0;
-
-    // Restore nn array from base serialization
-    board.nn = new Array(serialized.config.dimsArea).fill(0);
-    if (serialized.completedIndexes) {
-      for (let i = 0; i < serialized.completedIndexes.length; i++) {
-        board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
-      }
-    }
-
-    return board;
-  }
-
-  static fromSerialized(serialized) {
-    // For backwards compatibility with sync Board.fromSerialized
-    // GPU boards require async initialization, so this returns a board
-    // that will continue initializing in the background
-    const board = new GpuBoard(
-      serialized.k,
-      serialized.sizesQD[0],
-      serialized.sizesQD[1],
-      serialized.sizesQD[2],
-      serialized.config,
-      serialized.id
-    );
-
-    // Schedule async restoration
-    board.gpuInitPromise = board.gpuInitPromise.then(async () => {
-      // Restore GPU pixel buffer
-      if (serialized.gpuPixelData && board.isGPUReady) {
-        const pixelData = new Uint8Array(serialized.gpuPixelData).buffer;
-        await board.writePixelBuffer(pixelData);
-      }
-
-      board.effort = serialized.effort || 1;
-
-      // Restore Board state
-      board.it = serialized.it;
-      board.un = serialized.un;
-      board.di = serialized.di;
-      board.ch = serialized.ch || 0;
-
-      // Restore nn array
-      board.nn = new Array(serialized.config.dimsArea).fill(0);
-      if (serialized.completedIndexes) {
-        for (let i = 0; i < serialized.completedIndexes.length; i++) {
-          board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
-        }
-      }
-    });
-
-    return board;
-  }
-}
-
-// Sparse GPU board with periodic buffer compaction
-// Uses simple all-pixel loops for readout (like GpuZhuoranBoard)
-// Compacts buffers when dead pixels >= 25% of remaining
-class SparseGpuBoard extends GpuBaseBoard {
   static BYTES_PER_PIXEL = 32;  // 8 fields: orig_index + iter/status/period + zr/zi/base_r/base_i
 
   constructor(k, size, re, im, config, id) {
     super(k, size, re, im, config, id);
-    this.effort = 5;  // Same as GpuBoard
+    this.effort = 5;
 
     const pix = this.pixelSize;
     this.epsilon = pix / 10;
@@ -8324,10 +7091,89 @@ class SparseGpuBoard extends GpuBaseBoard {
     const workgroupSize = 64;
 
     try {
-      // STEP 1: Process pending results from PREVIOUS batch (overlaps with GPU work)
-      let pixelU32ForCompaction = null;
+      // STEP 1: Check if done (before submitting new work)
+      if (this.activeCount === 0 || this.un === 0) {
+        this.un = 0;
+        // Flush any pending results before returning
+        if (this.hasPendingResults) {
+          await this.flushPendingResults();
+        }
+        return;
+      }
+
+      // STEP 2: Submit new GPU batch FIRST (non-blocking)
+      // This starts the GPU working while we process previous results
+      const re_double = qdToNumber(this.re);
+      const im_double = qdToNumber(this.im);
+      const pixel_size = this.size;
+
+      let iterationsPerBatch;
+      if (targetIters !== null) {
+        iterationsPerBatch = targetIters;
+      } else {
+        const targetWork = 333337;
+        iterationsPerBatch = Math.max(17, Math.floor(targetWork / Math.max(this.un, 1)));
+      }
+
+      const numWorkgroups = Math.ceil(this.activeCount / workgroupSize);
+      const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
+      const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
+
+      const checkpointOffsets = [];
+      const bufferIter = this.it;
+      for (let i = 0; i < iterationsPerBatch; i++) {
+        if (fibonacciPeriod(bufferIter + i) === 1) checkpointOffsets.push(i);
+      }
+      const checkpointCount = Math.min(checkpointOffsets.length, 8);
+
+      const paramsBuffer = new ArrayBuffer(128);
+      const paramsF32 = new Float32Array(paramsBuffer);
+      const paramsU32 = new Uint32Array(paramsBuffer);
+
+      paramsF32[0] = re_double;
+      paramsF32[1] = im_double;
+      paramsF32[2] = pixel_size;
+      paramsF32[3] = this.config.aspectRatio;
+      paramsU32[4] = this.config.dimsWidth;
+      paramsU32[5] = this.config.dimsHeight;
+      paramsU32[6] = iterationsPerBatch;
+      paramsU32[7] = this.activeCount;
+      paramsF32[8] = this.epsilon;
+      paramsF32[9] = this.epsilon2;
+      paramsU32[10] = this.config.exponent;
+      paramsU32[11] = workgroupsX * workgroupSize;
+      paramsU32[12] = bufferIter;
+      paramsU32[13] = checkpointCount;
+      for (let i = 0; i < 8; i++) {
+        paramsU32[14 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
+      }
+
+      this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
+
+      const commandEncoder = this.device.createCommandEncoder({ label: 'GpuBoard compute' });
+      const passEncoder = commandEncoder.beginComputePass({ label: 'GpuBoard pass' });
+      passEncoder.setPipeline(this.pipeline);
+      passEncoder.setBindGroup(0, this.bindGroup);
+      passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
+      passEncoder.end();
+
+      // Copy to current staging buffer
+      const writeBuffer = this.buffers.stagingPixels[this.stagingBufferIndex];
+      const activeBufferSize = this.activeCount * BYTES_PER_PIXEL;
+      commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, writeBuffer, 0, activeBufferSize);
+
+      this.device.queue.submit([commandEncoder.finish()]);
+      // GPU is now computing in parallel!
+
+      // Track this batch for later processing
+      const newPendingActiveCount = this.activeCount;
+      const newStagingIndex = this.stagingBufferIndex;
+      this.stagingBufferIndex = 1 - this.stagingBufferIndex;  // Swap for next batch
+      this.it += iterationsPerBatch;
+
+      // STEP 3: Process pending results from PREVIOUS batch (overlaps with GPU work)
       if (this.hasPendingResults) {
-        const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
+        const readBuffer = this.buffers.stagingPixels[1 - newStagingIndex];  // The OTHER buffer
         const readActiveCount = this.pendingActiveCount;
         const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
 
@@ -8402,88 +7248,22 @@ class SparseGpuBoard extends GpuBaseBoard {
         // Compaction cost = activeRemaining pixels to write
         const activeRemaining = this.activeCount - this.deadSinceCompaction;
         if (activeRemaining > 0 && this.cumulativeWastedReads >= activeRemaining * this.compactionCostRatio) {
+          // Need to wait for current GPU batch to finish before compaction
+          await this.device.queue.onSubmittedWorkDone();
           await this.compactBuffers(pixelU32);
           this.cumulativeWastedReads = 0;
           this.hasPendingResults = false;  // Buffers recreated, no pending results
           this.lastBatchCompacted = true;
+          return;  // Exit - next compute() will start fresh with compacted buffers
         }
       }
 
-      // STEP 2: Check if done
-      if (this.activeCount === 0 || this.un === 0) {
-        this.un = 0;
-        return;
-      }
-
-      // STEP 3: Submit new GPU batch
-      const re_double = qdToNumber(this.re);
-      const im_double = qdToNumber(this.im);
-      const pixel_size = this.size;
-
-      let iterationsPerBatch;
-      if (targetIters !== null) {
-        iterationsPerBatch = targetIters;
-      } else {
-        const targetWork = 333337;
-        iterationsPerBatch = Math.max(17, Math.floor(targetWork / Math.max(this.un, 1)));
-      }
-
-      const numWorkgroups = Math.ceil(this.activeCount / workgroupSize);
-      const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
-      const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
-
-      const checkpointOffsets = [];
-      const bufferIter = this.it;
-      for (let i = 0; i < iterationsPerBatch; i++) {
-        if (fibonacciPeriod(bufferIter + i) === 1) checkpointOffsets.push(i);
-      }
-      const checkpointCount = Math.min(checkpointOffsets.length, 8);
-
-      const paramsBuffer = new ArrayBuffer(128);
-      const paramsF32 = new Float32Array(paramsBuffer);
-      const paramsU32 = new Uint32Array(paramsBuffer);
-
-      paramsF32[0] = re_double;
-      paramsF32[1] = im_double;
-      paramsF32[2] = pixel_size;
-      paramsF32[3] = this.config.aspectRatio;
-      paramsU32[4] = this.config.dimsWidth;
-      paramsU32[5] = this.config.dimsHeight;
-      paramsU32[6] = iterationsPerBatch;
-      paramsU32[7] = this.activeCount;
-      paramsF32[8] = this.epsilon;
-      paramsF32[9] = this.epsilon2;
-      paramsU32[10] = this.config.exponent;
-      paramsU32[11] = workgroupsX * workgroupSize;
-      paramsU32[12] = bufferIter;
-      paramsU32[13] = checkpointCount;
-      for (let i = 0; i < 8; i++) {
-        paramsU32[14 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
-      }
-
-      this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
-
-      const commandEncoder = this.device.createCommandEncoder({ label: 'SparseGpu compute' });
-      const passEncoder = commandEncoder.beginComputePass({ label: 'SparseGpu pass' });
-      passEncoder.setPipeline(this.pipeline);
-      passEncoder.setBindGroup(0, this.bindGroup);
-      passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
-      passEncoder.end();
-
-      // Copy to current staging buffer
-      const writeBuffer = this.buffers.stagingPixels[this.stagingBufferIndex];
-      const activeBufferSize = this.activeCount * BYTES_PER_PIXEL;
-      commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, writeBuffer, 0, activeBufferSize);
-
-      this.device.queue.submit([commandEncoder.finish()]);
-
-      this.it += iterationsPerBatch;
-      this.pendingActiveCount = this.activeCount;
+      // Update pending state for next iteration
+      this.pendingActiveCount = newPendingActiveCount;
       this.hasPendingResults = true;
-      this.stagingBufferIndex = 1 - this.stagingBufferIndex;  // Swap for next batch
 
     } catch (error) {
-      console.error(`SparseGpuBoard.compute() ERROR:`, error);
+      console.error(`GpuBoard.compute() ERROR:`, error);
     } finally {
       this.isComputing = false;
     }
@@ -8593,7 +7373,7 @@ class SparseGpuBoard extends GpuBaseBoard {
   }
 
   static fromSerialized(serialized) {
-    const board = new SparseGpuBoard(
+    const board = new GpuBoard(
       serialized.k,
       serialized.sizesQD[0],
       serialized.sizesQD[1],
@@ -8842,10 +7622,10 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
     this.device.queue.submit([commandEncoder.finish()]);
     await this.device.queue.onSubmittedWorkDone();
 
-    // Read back the data
-    await stagingBuffer.mapAsync(GPUMapMode.READ);
+    // Read back the data - use getMappedRange with size to only get what we need
+    await stagingBuffer.mapAsync(GPUMapMode.READ, 0, bufferSize);
     const pixelData = new ArrayBuffer(bufferSize);
-    const srcData = stagingBuffer.getMappedRange();
+    const srcData = stagingBuffer.getMappedRange(0, bufferSize);
     new Uint8Array(pixelData).set(new Uint8Array(srcData));
     stagingBuffer.unmap();
 
@@ -11124,10 +9904,7 @@ const forcedBoardTypes = {
     'cpu': CpuBoard,
     'ddz': DDZhuoranBoard,
     'qdz': QDZhuoranBoard,
-    'pert': PerturbationBoard,
-    'qdpert': QDPerturbationBoard,
     'gpu': GpuBoard,
-    'sparse': SparseGpuBoard,
     'gpuz': GpuZhuoranBoard,
     'adaptive': AdaptiveGpuBoard,
     'qdcpu': QDCpuBoard
@@ -11168,7 +9945,6 @@ function selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard) {
   }
 
   // If GPU is not available, select a CPU board
-  // DDZhuoranBoard is ~6x faster than PerturbationBoard at medium zoom
   const CpuBoardClass = (
       (pixelSize > 1e-15) ? CpuBoard :
       (pixelSize > 1e-30) ? DDZhuoranBoard :
@@ -12646,8 +11422,7 @@ function ArqdSquare(r, i, a1, a2, a3, a4) {
   ArqdRenorm(r, i, p0, p1, s0, s1, s2);
 }
 
-// Oct-precision absolute difference: r = |a - b|
-// Used for cycle detection in QDPerturbationBoard
+// Quad-precision absolute difference: r = |a - b|
 function ArqdAbsSub(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   ArqdAdd(r, i, a1, a2, a3, a4, -b1, -b2, -b3, -b4);
   if (r[i] + r[i+1] + r[i+2] + r[i+3] < 0) {
