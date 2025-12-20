@@ -10944,6 +10944,11 @@ if (location.search.includes('debug=')) {
 
       // Helper functions for stepping through iterations
       window.step = function(n = 1, workerIndex = 0, callback = null) {
+        if (typeof workerIndex === 'function') {
+          callback = workerIndex;
+          workerIndex = 0;
+        }
+
         const worker = window[`worker${workerIndex}`];
         if (!worker || !worker.stepMode) {
           console.log(`Step mode not active for worker${workerIndex}. Load page with ?debug=w,s`);
