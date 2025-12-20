@@ -1178,6 +1178,7 @@ class View {
     const changedIndices = [];
 
     for (const { nn, vv, iter } of changeList) {
+      // nn and vv contain both GPU-computed and precomputed pixels (merged in GpuBoard)
       for (const index of nn) {
         this.nn[index] = iter;
         changedIndices.push(index);
@@ -3149,7 +3150,9 @@ class URLHandler {
             ? `&pixelratio=${this.config.pixelRatio}` : '') +
         (this.config.debug
             ? `&debug=${this.config.debug}` : '') +
-        (LANG_FROM_URL ? `&lang=${SELECTED_LANG}` : '');
+        (LANG_FROM_URL ? `&lang=${SELECTED_LANG}` : '') +
+        (this.config.enableInheritance === false
+            ? '&inherit=0' : '');
     return url.replace('&', '?');
   }
 }
@@ -5060,10 +5063,12 @@ class PrecomputedPoints {
     return pending;
   }
 
-  // Get all iterations that have pending reports up to maxIter.
+  // Get all iterations that have pending reports BELOW maxIter.
+  // Uses strict less-than to ensure GPU pixels at maxIter are all reported
+  // before precomputed pixels at that iteration are included.
   getPendingIterations(maxIter) {
     return Array.from(this.pendingReports.keys())
-      .filter(iter => iter <= maxIter)
+      .filter(iter => iter < maxIter)
       .sort((a, b) => a - b);
   }
 
@@ -7674,30 +7679,22 @@ class GpuBoard extends GpuBaseBoard {
         this.cumulativeWastedReads += this.deadSinceCompaction;
 
         // Create change objects, merging precomputed points with GPU results
-        // Collect all iterations that have either GPU results or precomputed points
+        // ONLY use iterations from GPU results - don't add precomputed-only iterations
+        // This ensures precomputed pixels are merged with GPU pixels at the same iteration,
+        // avoiding duplicate histogram entries due to double buffering
         const allIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
 
-        // Add any precomputed iterations up to current it
-        if (this.precomputed) {
-          for (const preIter of this.precomputed.getPendingIterations(this.it)) {
-            allIterations.add(preIter);
-          }
-        }
-
         for (const iter of Array.from(allIterations).sort((a, b) => a - b)) {
-          const divergedIndices = pixelsByIteration.get(iter) || [];
-          const convergedData = convergedByIteration.get(iter) || [];
-          let precomputedDiverged = 0;
-          let precomputedConverged = 0;
+          // Make copies so we don't modify the original Maps
+          const divergedIndices = [...(pixelsByIteration.get(iter) || [])];
+          const convergedData = [...(convergedByIteration.get(iter) || [])];
 
-          // Merge precomputed points at this iteration
+          // Only merge precomputed pixels at iterations where GPU has results
+          // This ensures they're in the same histogram entry
           if (this.precomputed) {
             const precomputed = this.precomputed.extractAtIteration(iter);
             if (precomputed) {
-              precomputedDiverged = precomputed.diverged.length;
-              precomputedConverged = precomputed.converged.length;
-              // Apply precomputed results to board state
-              // Note: diverged items are just index numbers, not objects
+              // Apply precomputed results to board state and add to nn/vv
               for (const idx of precomputed.diverged) {
                 this.nn[idx] = iter;
                 this.pp[idx] = 1;
@@ -7705,7 +7702,6 @@ class GpuBoard extends GpuBaseBoard {
                 this.un--;
                 divergedIndices.push(idx);
               }
-              // Note: converged items are {index, z, p} objects
               for (const c of precomputed.converged) {
                 this.nn[c.index] = -iter;
                 this.pp[c.index] = c.p;
@@ -7719,10 +7715,16 @@ class GpuBoard extends GpuBaseBoard {
             }
           }
 
+          // Sort by index for consistent ordering
+          divergedIndices.sort((a, b) => a - b);
+          convergedData.sort((a, b) => a.index - b.index);
+
+          // Report if there are any results
           if (divergedIndices.length > 0 || convergedData.length > 0) {
             this.changeList.push({
-              iter, nn: divergedIndices, vv: convergedData,
-              precomputedDiverged, precomputedConverged
+              iter,
+              nn: divergedIndices,
+              vv: convergedData
             });
             this.updateSize += divergedIndices.length + convergedData.length;
           }
