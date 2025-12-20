@@ -7285,6 +7285,8 @@ class GpuBoard extends GpuBaseBoard {
         const readActiveCount = this.pendingActiveCount;
         const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
 
+        // Ensure the previous batch's copy to this buffer is complete before mapping
+        await this.device.queue.onSubmittedWorkDone();
         await readBuffer.mapAsync(GPUMapMode.READ);
         const pixelData = new ArrayBuffer(readBufferSize);
         const srcData = readBuffer.getMappedRange();
@@ -7378,6 +7380,11 @@ class GpuBoard extends GpuBaseBoard {
   }
 
   async serialize() {
+    // Wait for any in-progress compute() to finish to avoid mapAsync race condition
+    while (this.isComputing) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
     // CRITICAL: Flush pending results before serializing
     // The double-buffered staging has results that haven't been processed yet
     if (this.hasPendingResults) {
@@ -7420,6 +7427,8 @@ class GpuBoard extends GpuBaseBoard {
     const readActiveCount = this.pendingActiveCount;
     const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
 
+    // Ensure GPU work is complete before mapping
+    await this.device.queue.onSubmittedWorkDone();
     await readBuffer.mapAsync(GPUMapMode.READ);
     const pixelData = new ArrayBuffer(readBufferSize);
     const srcData = readBuffer.getMappedRange();
@@ -7668,6 +7677,8 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
     const readActiveCount = this.pendingActiveCount;
     const pixelBufferSize = readActiveCount * BYTES_PER_PIXEL;
 
+    // Ensure GPU work is complete before mapping
+    await this.device.queue.onSubmittedWorkDone();
     await readBuffer.mapAsync(GPUMapMode.READ);
     const pixelData = new ArrayBuffer(pixelBufferSize);
     const srcData = readBuffer.getMappedRange();
@@ -8621,6 +8632,8 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       const readActiveCount = this.pendingActiveCount;
       const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
 
+      // Ensure the previous batch's copy to this buffer is complete before mapping
+      await this.device.queue.onSubmittedWorkDone();
       await readBuffer.mapAsync(GPUMapMode.READ);
       const pixelData = new ArrayBuffer(readBufferSize);
       const srcData = readBuffer.getMappedRange();
@@ -8768,6 +8781,11 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
   // flushPendingResults() and readPixelBuffer() inherited from GpuZhuoranBaseBoard
 
   async serialize() {
+    // Wait for any in-progress compute() to finish to avoid mapAsync race condition
+    while (this.isComputing) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
     // CRITICAL: Flush pending results before serializing
     if (this.hasPendingResults) {
       await this.flushPendingResults();
@@ -9765,6 +9783,8 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         const readActiveCount = this.pendingActiveCount;
         const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
 
+        // Ensure the previous batch's copy to this buffer is complete before mapping
+        await this.device.queue.onSubmittedWorkDone();
         await readBuffer.mapAsync(GPUMapMode.READ);
         const pixelData = new ArrayBuffer(readBufferSize);
         const srcData = readBuffer.getMappedRange();
@@ -9900,6 +9920,11 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
   // flushPendingResults() and readPixelBuffer() inherited from GpuZhuoranBaseBoard
 
   async serialize() {
+    // Wait for any in-progress compute() to finish to avoid mapAsync race condition
+    while (this.isComputing) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
     // CRITICAL: Flush pending results before serializing
     if (this.hasPendingResults) {
       await this.flushPendingResults();
