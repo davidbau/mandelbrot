@@ -682,6 +682,30 @@ Speedup: 2.52x
 - Speedup > 1.5× with inheritance enabled
 - No visual differences between `inherit=0` and `inherit=1` final renders
 
+## Implementation Notes
+
+### Autonomy Guidelines
+
+When implementing this plan, work autonomously:
+- Use `tests/debug-*.js` scripts for debugging rather than inline commands requiring approval
+- Prefer file-based logging over console inspection
+- Take steps that don't require manual approval (use pre-approved tool patterns)
+- Commit incrementally with working tests at each step
+
+### Additional Implementation Considerations
+
+1. **Grid dimension mismatch**: Parent and child may have different aspect ratios or grid sizes. The coordinate mapping in `computeInheritance()` must handle this correctly - map by fractional position, not pixel index.
+
+2. **Converged data availability**: When inheriting converged pixels, the parent's `convergedData` Map must have the entry. Skip inheritance for any converged pixel where `convergedData.get(parentIdx)` is undefined.
+
+3. **Incremental rollout**: Implement for one board type first (suggest GpuBoard), verify it works, then extend to others. Boards that don't yet support inheritance should ignore the `inheritedData` parameter gracefully.
+
+4. **Message size**: For large grids (e.g., 4K), inheritedData could be large. Monitor postMessage overhead. If needed, consider sending only iteration counts and reconstructing z values for converged pixels.
+
+5. **Debug logging**: Add `?debug=inherit` flag to log inheritance statistics per board without cluttering normal output.
+
+6. **Compaction interaction**: When GPU boards compact their buffers, precomputed pixels are already excluded from the initial buffer, so no special handling needed during compaction.
+
 ## Design Decisions
 
 1. **Edge handling**: Use 3×3 neighbor window. Simple and sufficient for typical 5× zoom.
