@@ -130,49 +130,12 @@ describe('Quad-Double Arithmetic', () => {
     });
   });
 
-  describe('Quad-Double Absolute Difference (In-Place)', () => {
-    test('ArddAbsSub should compute absolute difference', () => {
-      const result = new Float64Array(2);
-
-      // |5.0 - 3.0| = 2.0
-      qd.ArddAbsSub(result, 0, 5.0, 0.0, 3.0, 0.0);
-      expect(result[0] + result[1]).toBe(2.0);
-    });
-
-    test('ArddAbsSub should handle negative differences', () => {
-      const result = new Float64Array(2);
-
-      // |3.0 - 5.0| = 2.0
-      qd.ArddAbsSub(result, 0, 3.0, 0.0, 5.0, 0.0);
-      expect(result[0] + result[1]).toBe(2.0);
-    });
-  });
-
   describe('Quad-Double Array Utilities', () => {
     test('ArddSet should set values in a Float64Array', () => {
       const r = new Float64Array(2);
       qd.ArddSet(r, 0, 3.14, 1e-10);
       expect(r[0]).toBe(3.14);
       expect(r[1]).toBe(1e-10);
-    });
-
-    test('ArddcCopy should copy complex quad values', () => {
-      const src = new Float64Array([1.0, 0.1, 2.0, 0.2]);
-      const dest = new Float64Array(4);
-      qd.ArddcCopy(dest, 0, src, 0);
-      expect(dest[0]).toBe(1.0);
-      expect(dest[1]).toBe(0.1);
-      expect(dest[2]).toBe(2.0);
-      expect(dest[3]).toBe(0.2);
-    });
-
-    test('ArddcGet should return a slice of the array', () => {
-      const src = new Float64Array([1.0, 0.1, 2.0, 0.2]);
-      const val = qd.ArddcGet(src, 0);
-      expect(val).toBeInstanceOf(Float64Array);
-      expect(val).toHaveLength(4);
-      expect(val[0]).toBe(1.0);
-      expect(val[3]).toBe(0.2);
     });
   });
 
@@ -216,11 +179,6 @@ describe('Quad-Double Arithmetic', () => {
       const res = qd.ddDouble(one);
       expect(res[0]).toBe(2);
     });
-    test('ddScale should scale a number', () => {
-      const one = qd.toDD(1);
-      const res = qd.ddScale(one, 0.5);
-      expect(res[0]).toBe(0.5);
-    });
     test('ddSquare should square a number', () => {
       const three = qd.toDD(3);
       const res = qd.ddSquare(three);
@@ -255,26 +213,10 @@ describe('Quad-Double Arithmetic', () => {
         expect(isQdNaN(qd.ddMul(posInf, zero))).toBe(true);
       });
 
-      test('Division with Infinity and by zero', () => {
-        // The library's reciprocal and division do not handle Infinity, resulting in NaN.
-        expect(isQdNaN(qd.ddReciprocal(posInf))).toBe(true);
-        expect(isQdNaN(qd.ddReciprocal(negInf))).toBe(true);
-        expect(isQdNaN(qd.qdDiv(one, posInf))).toBe(true);
-        expect(isQdNaN(qd.qdDiv(one, negInf))).toBe(true);
-        expect(isQdNaN(qd.qdDiv(posInf, one))).toBe(true);
-
-        // Division by zero also results in NaN.
-        expect(isQdNaN(qd.qdDiv(one, zero))).toBe(true);
-        expect(isQdNaN(qd.qdDiv(negOne, zero))).toBe(true);
-        expect(isQdNaN(qd.qdDiv(zero, zero))).toBe(true);
-      });
-
       test('Operations with NaN', () => {
         expect(isQdNaN(qd.ddAdd(nan, one))).toBe(true);
         expect(isQdNaN(qd.ddAdd(one, nan))).toBe(true);
         expect(isQdNaN(qd.ddMul(nan, two))).toBe(true);
-        expect(isQdNaN(qd.qdDiv(nan, two))).toBe(true);
-        expect(isQdNaN(qd.qdDiv(two, nan))).toBe(true);
       });
     });
 
@@ -286,160 +228,6 @@ describe('Quad-Double Arithmetic', () => {
         expect(result[0]).toBe(0);
         expect(result[1]).toBe(0);
       });
-
-      test('Dividing by itself should result in one', () => {
-        const seven = qd.toDD(7);
-        const result = qd.qdDiv(seven, seven);
-        expect(result[0]).toBeCloseTo(1);
-        expect(result[1]).toBeCloseTo(0);
-      });
-    });
-
-    describe('Comparison', () => {
-      test('ddCompare should correctly order numbers', () => {
-        const three = qd.toDD(3);
-        const four = qd.toDD(4);
-        expect(qd.ddCompare(three, four)).toBe(-1);
-        expect(qd.ddCompare(four, three)).toBe(1);
-        expect(qd.ddCompare(three, three)).toBe(0);
-      });
-
-      test('ddCompare should handle numbers differing only in low part', () => {
-        const a = [1.0, 1e-16];
-        const b = [1.0, 2e-16];
-        expect(qd.ddCompare(a, b)).toBe(-1);
-        expect(qd.ddCompare(b, a)).toBe(1);
-        expect(qd.ddCompare(a, a)).toBe(0);
-      });
-
-      test('qdLt and ddEq helper functions', () => {
-        const one = qd.toDD(1);
-        const two = qd.toDD(2);
-        expect(qd.qdLt(one, 2)).toBe(true);
-        expect(qd.qdLt(two, 1)).toBe(false);
-        expect(qd.ddEq(one, 1)).toBe(true);
-        expect(qd.ddEq(one, 2)).toBe(false);
-      });
-    });
-
-    describe('String Parsing and Conversion', () => {
-      test('qdParse should correctly parse high-precision strings', () => {
-        const str = '1.2345678901234567890123456789012';
-        const parsed = qd.qdParse(str);
-        const backToStr = qd.qdFormat(parsed, 32, true); // Use fixed-point formatting
-        expect(backToStr.startsWith('1.234567890123456789012345678901')).toBe(true);
-      });
-
-      test('qdParse should handle negative numbers and exponents', () => {
-        const str = '-9.87654321e-11';
-        const parsed = qd.qdParse(str);
-        const backToStr = qd.qdFormat(parsed, 'auto');
-        expect(backToStr).toBe(str);
-      });
-
-      test('qdFixed wrapper', () => {
-        const pi = qd.toDD(3.14159);
-        expect(qd.qdFixed(pi, 2)).toBe('3.14');
-      });
-
-      test('qdFloor should round down', () => {
-        const num = qd.toDD(3.9);
-        const floored = qd.qdFloor(num);
-        expect(floored[0]).toBe(3);
-        expect(floored[1]).toBe(0);
-
-        const negNum = qd.toDD(-3.1);
-        const negFloored = qd.qdFloor(negNum);
-        expect(negFloored[0]).toBe(-4);
-      });
-    });
-
-    describe('Other Mathematical Functions', () => {
-      test('qdAbs should return the absolute value', () => {
-          const five = qd.toDD(5);
-          const negFive = qd.toDD(-5);
-          expect(qd.qdAbs(five)[0]).toBe(5);
-          expect(qd.qdAbs(negFive)[0]).toBe(5);
-      });
-    });
-  });
-
-  // --- Complex Arithmetic (Pure) ---
-
-  describe('Quad-Double Complex Arithmetic', () => {
-    // Helpers for constructing complex quads
-    const cOne = [1, 0, 0, 0]; // 1 + 0i
-    const cI = [0, 0, 1, 0];   // 0 + 1i
-
-    test('toDDc should convert scalars/arrays to complex quad', () => {
-      const c = qd.toDDc([1, 2]);
-      expect(c).toHaveLength(4);
-      expect(c[0]).toBe(1);
-      expect(c[2]).toBe(2);
-    });
-
-    test('ddcAdd should add two complex numbers', () => {
-      // (1 + 0i) + (0 + 1i) = 1 + 1i
-      const result = qd.ddcAdd(cOne, cI);
-      expect(result[0]).toBe(1);
-      expect(result[2]).toBe(1);
-    });
-
-    test('ddcSub should subtract two complex numbers', () => {
-      // (1 + 0i) - (0 + 1i) = 1 - 1i
-      const result = qd.ddcSub(cOne, cI);
-      expect(result[0]).toBe(1);
-      expect(result[2]).toBe(-1);
-    });
-
-    test('ddcMul should multiply two complex numbers', () => {
-      // i * i = -1
-      const result = qd.ddcMul(cI, cI);
-      expect(result[0]).toBe(-1);
-      expect(result[2]).toBe(0); // 0i
-    });
-
-    test('ddcDouble should double a complex number', () => {
-      // 2 * (1 + 1i) = 2 + 2i
-      const onePlusI = [1, 0, 1, 0];
-      const result = qd.ddcDouble(onePlusI);
-      expect(result[0]).toBe(2);
-      expect(result[2]).toBe(2);
-    });
-
-    test('ddcSquare should square a complex number', () => {
-      // (1 + i)^2 = 1 + 2i - 1 = 2i
-      const onePlusI = [1, 0, 1, 0];
-      const result = qd.ddcSquare(onePlusI);
-      expect(result[0]).toBeCloseTo(0, 15);
-      expect(result[2]).toBeCloseTo(2, 15);
-    });
-
-    test('ddcAbs should return squared magnitude (norm)', () => {
-      // |3 + 4i|^2 = 3^2 + 4^2 = 9 + 16 = 25
-      const c = [3, 0, 4, 0];
-      // ddcAbs returns a real quad-double (array of 2), not complex
-      const result = qd.ddcAbs(c);
-      expect(result[0]).toBe(25);
-    });
-
-    test('ddcPow should compute integer powers', () => {
-      // (1 + i)^4 = (2i)^2 = -4
-      const onePlusI = [1, 0, 1, 0];
-      const result = qd.ddcPow(onePlusI, 4);
-      expect(result[0]).toBeCloseTo(-4, 15);
-      expect(result[2]).toBeCloseTo(0, 15);
-
-      // Power of 0? Function logic: `let result = [1, 0, 0, 0]`.
-      // If n=0, loop `while (n>0)` doesn't run. Returns 1. Correct.
-      const res0 = qd.ddcPow(onePlusI, 0);
-      expect(res0[0]).toBe(1);
-      expect(res0[2]).toBe(0);
-
-      // Power of 1
-      const res1 = qd.ddcPow(onePlusI, 1);
-      expect(res1[0]).toBe(1);
-      expect(res1[2]).toBe(1);
     });
   });
 

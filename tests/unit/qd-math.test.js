@@ -5,8 +5,6 @@ const {
   ArqdMul,
   ArqdSquare,
   ArqdSet,
-  ArqdcCopy,
-  ArqdcGet,
   AsymmetricTwoSum,
   AquickTwoSum,
   ArqdThreeSum,
@@ -21,8 +19,6 @@ const {
   'ArqdMul',
   'ArqdSquare',
   'ArqdSet',
-  'ArqdcCopy',
-  'ArqdcGet',
   'AsymmetricTwoSum',
   'AquickTwoSum',
   'ArqdThreeSum',
@@ -57,17 +53,7 @@ function sumParts(parts) {
 }
 
 describe('oct-double arithmetic helpers', () => {
-  test('ArqdSet and ArqdcCopy round-trip complex tuples', () => {
-    const buf = new Array(8).fill(0);
-    ArqdSet(buf, 0, 1, 2, 3, 4);
-    ArqdSet(buf, 4, -1, -2, -3, -4);
-
-    const dest = new Array(8).fill(0);
-    ArqdcCopy(dest, 0, buf, 0);
-
-    expect(dest).toEqual(buf);
-    expect(ArqdcGet(dest, 0)).toEqual(buf);
-  });
+  // Removed test for ArqdSet and ArqdcCopy as ArqdcCopy is removed
 
   test('ArqdAdd preserves deep cancellation components', () => {
     const aCoeffs = [
