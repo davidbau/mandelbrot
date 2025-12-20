@@ -610,6 +610,125 @@ if (params.loop_enabled && ref_iter >= params.loop_threshold) {
 
 This allows pixels to iterate indefinitely without requiring unbounded memory for the reference orbit or threading structures.
 
+### Double-Buffering
+
+GPU boards use double-buffering to overlap computation with result processing:
+
+```
+Traditional (serial):
+  [GPU compute] → [CPU readback] → [GPU compute] → [CPU readback]
+                   ▲ idle GPU       ▲ idle GPU
+
+Double-buffered (pipelined):
+  [GPU compute batch N  ] → [GPU compute batch N+1] → [GPU compute N+2]
+            └──────────────► [CPU process N      ] → [CPU process N+1]
+```
+
+The implementation uses two staging buffers that alternate roles:
+
+```javascript
+// In compute():
+const currentStaging = this.buffers.stagingBuffers[this.currentStagingIndex];
+const pendingStaging = this.buffers.stagingBuffers[1 - this.currentStagingIndex];
+
+// 1. Start GPU compute (writes to pendingStaging)
+encoder.copyBufferToBuffer(this.buffers.pixels, 0, pendingStaging, 0, bufferSize);
+this.device.queue.submit([encoder.finish()]);
+
+// 2. Process previous batch results (from currentStaging) while GPU runs
+if (this.hasPendingResults) {
+  await currentStaging.mapAsync(GPUMapMode.READ);
+  // ... process results from previous batch
+  currentStaging.unmap();
+}
+
+// 3. Swap buffers for next iteration
+this.currentStagingIndex = 1 - this.currentStagingIndex;
+```
+
+This eliminates GPU idle time during result processing, providing ~15-25% throughput improvement depending on the ratio of compute time to readback time.
+
+### Sparse Compaction
+
+As pixels escape or converge, they become "dead" but remain in the GPU buffer, wasting bandwidth on every batch. Sparse compaction periodically rebuilds the buffer with only active pixels:
+
+```
+Before compaction (60% dead):
+  [■][□][■][□][□][■][□][□][■][□]  ← 10 pixels processed, 4 active
+       dead pixels waste GPU bandwidth
+
+After compaction:
+  [■][■][■][■]  ← 4 pixels processed, 4 active
+       100% useful work
+```
+
+The compaction decision uses a cost-benefit heuristic:
+
+```javascript
+// Compaction saves: (deadPixels × futureReads) bandwidth
+// Compaction costs: (activePixels) buffer writes
+
+const wastedReads = this.cumulativeWastedReads;  // Dead pixels read since last compaction
+const activeRemaining = this.activeCount - this.deadSinceCompaction;
+const compactionCost = activeRemaining * this.compactionCostRatio;  // ~1.0
+
+if (wastedReads >= compactionCost) {
+  await this.compactBuffers();
+  this.cumulativeWastedReads = 0;
+}
+```
+
+This triggers compaction when cumulative wasted bandwidth exceeds the one-time cost of rebuilding the buffer. For typical renders, this means compaction happens 3-5 times as the image converges.
+
+Each `PixelState` struct includes an `orig_index` field so compacted pixels can be mapped back to their display coordinates:
+
+```wgsl
+struct PixelState {
+  orig_index: u32,  // Original grid position (for coordinate lookup)
+  iter: u32,
+  status: u32,
+  // ... other fields
+}
+```
+
+### Parallel CPU/GPU Execution
+
+For perturbation-based boards (GpuZhuoranBoard, AdaptiveGpuBoard), the CPU must extend the reference orbit as pixels advance. This work can run in parallel with GPU computation:
+
+```
+Traditional:
+  [Extend orbit to iter N] → [GPU compute to N] → [Extend to N+M] → [GPU compute to N+M]
+   CPU work                   GPU work            CPU work          GPU work
+
+Parallel:
+  [GPU compute to N    ] → [GPU compute to N+M   ] → [GPU compute to N+2M]
+  [Extend orbit to N+M ] → [Extend orbit to N+2M ] → ...
+   CPU runs during GPU      CPU runs during GPU
+```
+
+The implementation extends the reference orbit speculatively before waiting for GPU results:
+
+```javascript
+async compute() {
+  // 1. Extend reference orbit (CPU work)
+  const targetIter = this.it + this.iterationsPerBatch;
+  this.extendReferenceOrbit(targetIter);
+
+  // 2. Dispatch GPU compute (non-blocking)
+  encoder.dispatchWorkgroups(workgroupsX, workgroupsY);
+  this.device.queue.submit([encoder.finish()]);
+
+  // 3. CPU is now free to do other work (e.g., extend orbit further)
+  //    while GPU processes the batch
+
+  // 4. Process results when GPU finishes
+  await stagingBuffer.mapAsync(GPUMapMode.READ);
+  // ...
+}
+```
+
+For boards with heavy reference orbit computation (especially QD precision), this parallelism can hide most of the CPU overhead behind GPU execution time.
+
 ## WebGPU Availability
 
 WebGPU is available in:
