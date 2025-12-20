@@ -15,11 +15,15 @@ const WORKER_COVERAGE_FILE = path.join(COVERAGE_DIR, 'worker-coverage.json');
 
 // Track active worker CDP sessions for coverage
 const workerSessions = new Map();
+// Track test names for pages
+const pageTestNames = new Map();
 
 /**
  * Start collecting coverage on a page and its workers
  */
-async function startCoverage(page) {
+async function startCoverage(page, testName = 'unknown') {
+  pageTestNames.set(page, testName);
+
   // Start main thread coverage
   await page.coverage.startJSCoverage({
     resetOnNavigation: false,
@@ -124,6 +128,8 @@ async function stopCoverage(page) {
   }
 
   const coverage = await page.coverage.stopJSCoverage();
+  const testName = pageTestNames.get(page) || 'unknown';
+  pageTestNames.delete(page);
 
   // Create output directory
   if (!fs.existsSync(COVERAGE_DIR)) {
@@ -140,8 +146,12 @@ async function stopCoverage(page) {
     }
   }
 
-  // Append new coverage
-  allCoverage.push(...coverage);
+  // Append new coverage with test name
+  allCoverage.push({
+    testName,
+    coverage
+  });
+  
   fs.writeFileSync(RAW_COVERAGE_FILE, JSON.stringify(allCoverage));
 }
 
@@ -156,6 +166,7 @@ function clearCoverage() {
     fs.unlinkSync(WORKER_COVERAGE_FILE);
   }
   workerSessions.clear();
+  pageTestNames.clear();
 }
 
 // Directory to store extracted scripts for coverage reporting
@@ -226,10 +237,21 @@ async function writeCoverageReport() {
     return;
   }
 
-  const coverageData = JSON.parse(fs.readFileSync(RAW_COVERAGE_FILE, 'utf8'));
-  if (coverageData.length === 0) {
+  const rawData = JSON.parse(fs.readFileSync(RAW_COVERAGE_FILE, 'utf8'));
+  if (rawData.length === 0) {
     console.log('No coverage data collected');
     return;
+  }
+  
+  // Flatten coverage for standard reporting (ignore test names for now)
+  // Check if data is already in new format (with testName) or old format (direct array)
+  // New format: [{ testName, coverage: [] }, ...]
+  // Old format: [{ url, ... }, ...]
+  let flatCoverage = [];
+  if (rawData[0] && rawData[0].coverage) {
+    flatCoverage = rawData.flatMap(item => item.coverage);
+  } else {
+    flatCoverage = rawData;
   }
 
   // Prepare V8 coverage data for monocart
@@ -241,7 +263,7 @@ async function writeCoverageReport() {
   }
 
   // Process main thread scripts from index.html
-  for (const entry of coverageData) {
+  for (const entry of flatCoverage) {
     // Only collect coverage for index.html (main thread scripts)
     if (!entry.url.includes('index.html')) continue;
 
@@ -349,12 +371,9 @@ async function writeCoverageReport() {
     fs.rmSync(monocartDir, { recursive: true, force: true });
   }
 
-  console.log(`Coverage data written to ${path.join(COVERAGE_DIR, 'coverage.json')}`);
-
-  // Clean up raw data
-  if (fs.existsSync(RAW_COVERAGE_FILE)) {
-    fs.unlinkSync(RAW_COVERAGE_FILE);
-  }
+  // if (fs.existsSync(RAW_COVERAGE_FILE)) {
+  //   fs.unlinkSync(RAW_COVERAGE_FILE);
+  // }
 }
 
 /**

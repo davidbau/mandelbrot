@@ -70,7 +70,12 @@ async function setupPage(browser, options = {}) {
 
   // Start coverage collection if enabled
   if (isCoverageEnabled()) {
-    await startCoverage(page);
+    let testName = 'unknown';
+    try {
+       // Only available inside test/it blocks or if running via Jest
+       testName = expect.getState().currentTestName || 'unknown';
+    } catch(e) {}
+    await startCoverage(page, testName);
   }
 
   // Wrap page.close to terminate workers and collect coverage before closing
