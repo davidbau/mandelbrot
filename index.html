@@ -10943,10 +10943,10 @@ if (location.search.includes('debug=')) {
       };
 
       // Helper functions for stepping through iterations
-      window.step = function(n = 1, callback = null) {
-        const worker = window.worker0;
+      window.step = function(n = 1, workerIndex = 0, callback = null) {
+        const worker = window[`worker${workerIndex}`];
         if (!worker || !worker.stepMode) {
-          console.log('Step mode not active. Load page with ?debug=w,s');
+          console.log(`Step mode not active for worker${workerIndex}. Load page with ?debug=w,s`);
           return;
         }
 
@@ -10954,44 +10954,44 @@ if (location.search.includes('debug=')) {
         worker.stepsRequested += n;
 
         if (!callback) {
-          console.log(`Stepping ${n} iteration(s)...`);
+          console.log(`Stepping worker${workerIndex} ${n} iteration(s)...`);
         }
         return worker.boards;
       };
 
-      window.stepAll = function() {
-        const worker = window.worker0;
+      window.stepAll = function(workerIndex = 0) {
+        const worker = window[`worker${workerIndex}`];
         if (!worker) {
-          console.log('No worker available');
+          console.log(`No worker${workerIndex} available`);
           return;
         }
 
         worker.stepMode = false;
         worker.stepsRequested = 1; // Queue one step to trigger continuous iteration
-        console.log('Resuming continuous iteration...');
+        console.log(`Resuming continuous iteration for worker${workerIndex}...`);
       };
 
-      window.pause = function() {
-        const worker = window.worker0;
+      window.pause = function(workerIndex = 0) {
+        const worker = window[`worker${workerIndex}`];
         if (!worker) {
-          console.log('No worker available');
+          console.log(`No worker${workerIndex} available`);
           return;
         }
 
         worker.stepMode = true;
         worker.stepsRequested = 0; // Clear any pending steps
-        console.log('Paused. Use step() or step(n) to continue.');
+        console.log(`Paused worker${workerIndex}. Use step() or step(n) to continue.`);
       };
 
-      window.inspectBoard = function(k = 0) {
-        const worker = window.worker0;
+      window.inspectBoard = function(k = 0, workerIndex = 0) {
+        const worker = window[`worker${workerIndex}`];
         if (!worker || !worker.boards.has(k)) {
-          console.log(`Board ${k} not found. Available:`, Array.from(worker?.boards?.keys() || []));
+          console.log(`Board ${k} not found on worker${workerIndex}. Available:`, Array.from(worker?.boards?.keys() || []));
           return null;
         }
 
         const board = worker.boards.get(k);
-        console.log(`Board ${k} (${board.constructor.name}):`);
+        console.log(`Board ${k} on worker${workerIndex} (${board.constructor.name}):`);
         console.log(`  Iteration: ${board.it}`);
         console.log(`  Unfinished pixels: ${board.un}`);
         console.log(`  Diverged: ${board.di}`);
@@ -11000,10 +11000,10 @@ if (location.search.includes('debug=')) {
         return board;
       };
 
-      window.tracePixel = async function(k, pixelIndex) {
-        const worker = window.worker0;
+      window.tracePixel = async function(k, pixelIndex, workerIndex = 0) {
+        const worker = window[`worker${workerIndex}`];
         if (!worker || !worker.boards.has(k)) {
-          console.log(`Board ${k} not found`);
+          console.log(`Board ${k} not found on worker${workerIndex}`);
           return null;
         }
 
