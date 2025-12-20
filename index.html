@@ -4851,8 +4851,8 @@ class Board {
     this.effort = 100;      // Benchmarked: 4.4 ns/px-iter (baseline)
 
     this.pix = this.pixelSize;
-    this.epsilon = Math.min(1e-12, this.pix / 10);
-    this.epsilon2 = Math.min(1e-9, this.pix * 10);
+    this.epsilon = this.pix / 10;
+    this.epsilon2 = this.pix * 10;
 
     this.lastTime = 0;      // Time last message sent out
     this.changeList = [];   // List of new data to send
@@ -7401,8 +7401,8 @@ class GpuBoard extends GpuBaseBoard {
     // Epsilon values for convergence detection scale with pixel size
     const pix = this.pixelSize;
     // GPU uses float32 precision, so thresholds must be larger than CPU's float64
-    this.epsilon = Math.min(1e-7, pix / 10);   // Final convergence threshold
-    this.epsilon2 = Math.min(1e-5, pix * 10);  // Getting close threshold
+    this.epsilon = pix / 10;   // Final convergence threshold
+    this.epsilon2 = pix * 10;  // Getting close threshold
     this.checkSpike(size, re, im);
     // Start GPU initialization (async)
     this.gpuInitPromise = this.initGPU();
@@ -7975,8 +7975,8 @@ class SparseGpuBoard extends GpuBaseBoard {
     this.effort = 5;  // Same as GpuBoard
 
     const pix = this.pixelSize;
-    this.epsilon = Math.min(1e-7, pix / 10);
-    this.epsilon2 = Math.min(1e-5, pix * 10);
+    this.epsilon = pix / 10;
+    this.epsilon2 = pix * 10;
     this.checkSpike(size, re, im);
 
     // Compaction state (orig_index embedded in each pixel, no separate mapping needed)
@@ -9074,8 +9074,8 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
 
         // Convergence thresholds scale with pixel size for deep zooms
         // GPU uses float32 precision, so thresholds must be larger than CPU's float64
-        let epsilon = min(1e-7, params.pixel_size / 10.0);   // Final convergence threshold
-        let epsilon2 = min(1e-5, params.pixel_size * 10.0);  // Getting close threshold
+        let epsilon = params.pixel_size / 10.0;   // Final convergence threshold
+        let epsilon2 = params.pixel_size * 10.0;  // Getting close threshold
 
         // Track next checkpoint using O(1) counter for adaptive checkpoints
         var next_checkpoint_idx = 0u;
@@ -9841,8 +9841,23 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
     // Initialize per-pixel perturbation data (sets initialScale and pixelScale)
     this.initPixels(size, re, im);
 
+    // Double-buffered staging for overlapping CPU/GPU work
+    this.stagingBufferIndex = 0;
+    this.hasPendingResults = false;
+    this.pendingIterationsPerBatch = 0;
+    this._baseIt = 1;  // Committed iteration count (BoardBase initializes this.it = 1)
+
     // Start GPU initialization (async)
     this.gpuInitPromise = this.initGPU();
+  }
+
+  // Return iteration count including pending (for accurate reporting)
+  get it() {
+    return this._baseIt + (this.hasPendingResults ? this.pendingIterationsPerBatch : 0);
+  }
+
+  set it(value) {
+    this._baseIt = value;
   }
 
   // extendReferenceOrbit() inherited from QDReferenceOrbitMixin
@@ -10053,25 +10068,39 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
     const PIXEL_BYTES = 60;  // 15 × 4 bytes
     const ITER_BYTES = 20;   // 5 × 4 bytes
 
+    const pixelBufferSize = dimsArea * PIXEL_BYTES;
     this.buffers = {
       params: this.device.createBuffer({
         size: 128,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
       }),
       pixels: this.device.createBuffer({
-        size: dimsArea * PIXEL_BYTES,
+        size: pixelBufferSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
       }),
       iters: this.device.createBuffer({
         size: 1024 * ITER_BYTES,  // Start small, will resize as needed
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-      })
+      }),
+      // Double-buffered staging for overlapping CPU/GPU work
+      stagingPixels: [
+        this.device.createBuffer({
+          size: pixelBufferSize,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+          label: 'Staging pixels buffer 0'
+        }),
+        this.device.createBuffer({
+          size: pixelBufferSize,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+          label: 'Staging pixels buffer 1'
+        })
+      ]
     };
 
     // Initialize pixels buffer with overlapping typed array views
     // PixelState layout: [iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx,
     //                     dzr, dzi, bbr, bbi, ckpt_bbr, ckpt_bbi, dcr, dci]
-    const pixelBuffer = new ArrayBuffer(dimsArea * PIXEL_BYTES);
+    const pixelBuffer = new ArrayBuffer(pixelBufferSize);
     const pixelsI32 = new Int32Array(pixelBuffer);
     const pixelsF32 = new Float32Array(pixelBuffer);
 
@@ -10242,8 +10271,8 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
         let dci = pixels[index].dci;
 
         // Convergence thresholds - scaled by initialScale for comparison
-        let epsilon_actual = min(1e-7, params.pixel_size / 10.0);
-        let epsilon2_actual = min(1e-5, params.pixel_size * 10.0);
+        let epsilon_actual = params.pixel_size / 10.0;
+        let epsilon2_actual = params.pixel_size * 10.0;
         // Convert to initialScale for scaled comparisons
         let epsilon = ldexp(epsilon_actual, -params.initial_scale);
         let epsilon2 = ldexp(epsilon2_actual, -params.initial_scale);
@@ -10342,31 +10371,6 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
 
           // Check convergence with lazy threading (all comparisons in initialScale)
           if (checkpoint_refidx != 0xFFFFFFFFu && !just_updated && scale >= -126) {
-            const THREADING_CAPACITY = 1048576u;
-
-            if (ref_iter >= THREADING_CAPACITY) {
-              // Fallback: compare absolute positions (in actual coords)
-              let z_total_r = zr;
-              let z_total_i = zi;
-              let bbr_actual = ldexp(checkpoint_bb_r, params.initial_scale);
-              let bbi_actual = ldexp(checkpoint_bb_i, params.initial_scale);
-              let ref_ckpt = getRefOrbit(checkpoint_refidx);
-              let z_checkpoint_r = ref_ckpt.x + bbr_actual;
-              let z_checkpoint_i = ref_ckpt.y + bbi_actual;
-
-              let diff_r = z_total_r - z_checkpoint_r;
-              let diff_i = z_total_i - z_checkpoint_i;
-              let db = max(abs(diff_r), abs(diff_i));
-
-              if (db <= epsilon2_actual) {
-                if (pp == 0u) { pp = iter; }
-                if (db <= epsilon_actual) {
-                  pixels[index].status = 2;
-                  pixels[index].period = i32(pp);
-                  break;
-                }
-              }
-            } else {
               // LAZY THREADING convergence check in initialScale
               // Convert current dz to initialScale for comparison
               let dzr_scaled = ldexp(dzr_actual, -params.initial_scale);
@@ -10415,7 +10419,6 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
                   pending_checkpoint_refidx = ref_iter;
                 }
               }
-            }
           }
 
           // === PERTURBATION ITERATION ===
@@ -10587,8 +10590,112 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
 
     try {
       const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
+      const THREADING_CAPACITY = 1048576;
+      const BYTES_PER_PIXEL = 60;  // 15 fields × 4 bytes
+      const BYTES_PER_ITER = 20;   // 5 f32 per iteration
 
-      // Calculate batch size - use passed targetIters or calculate based on pixels
+      // ================================================================
+      // STEP 1: Process pending results from previous batch (if any)
+      // ================================================================
+      if (this.hasPendingResults) {
+        const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
+        const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
+
+        await readBuffer.mapAsync(GPUMapMode.READ);
+        const pixelData = new ArrayBuffer(pixelBufferSize);
+        const srcData = readBuffer.getMappedRange();
+        new Uint8Array(pixelData).set(new Uint8Array(srcData));
+        readBuffer.unmap();
+
+        const pixelsI32 = new Int32Array(pixelData);
+        const pixelsF32 = new Float32Array(pixelData);
+
+        // Update global iteration counter using _baseIt directly
+        this._baseIt += this.pendingIterationsPerBatch;
+
+        // PixelState field indices (15 fields per pixel)
+        const STRIDE = 15;
+        const P_ITER = 0, P_SCALE = 1, P_STATUS = 2, P_PERIOD = 3, P_REF_ITER = 4;
+        const P_DZR = 7, P_DZI = 8;
+
+        // Process GPU results
+        const pixelsByIteration = new Map();
+        const convergedByIteration = new Map();
+        let hasConverged = false;
+
+        for (let i = 0; i < dimsArea; i++) {
+          const idx = i * STRIDE;
+          const status = pixelsI32[idx + P_STATUS];
+          const period = pixelsI32[idx + P_PERIOD];
+          if (this.nn[i] !== 0) continue;
+          if (status === 1) {
+            const iters = pixelsI32[idx + P_ITER];
+            this.nn[i] = iters;
+            this.pp[i] = period;
+            if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
+            pixelsByIteration.get(iters).push(i);
+            this.di++;
+            this.un--;
+            if (this.inSpike && this.inSpike[i] && this.ch > 0) this.ch -= 1;
+          } else if (status === 2) {
+            hasConverged = true;
+          }
+        }
+
+        if (hasConverged) {
+          for (let i = 0; i < dimsArea; i++) {
+            const idx = i * STRIDE;
+            const status = pixelsI32[idx + P_STATUS];
+            const period = pixelsI32[idx + P_PERIOD];
+            if (this.nn[i]) continue;
+            if (status === 2) {
+              const iters = pixelsI32[idx + P_ITER];
+              this.nn[i] = -iters;
+              this.pp[i] = period - 1;
+              const refIter = pixelsI32[idx + P_REF_ITER];
+              // AdaptiveGpuBoard stores dz BEFORE iteration (break before iter step),
+              // so dz corresponds to refIter, not refIter+1
+              const scale = pixelsI32[idx + P_SCALE];
+              const dzr = pixelsF32[idx + P_DZR] * Math.pow(2, scale);
+              const dzi = pixelsF32[idx + P_DZI] * Math.pow(2, scale);
+              const ref = this.qdRefOrbit[Math.min(refIter, this.qdRefOrbit.length - 1)];
+              // Compute z = ref + dz in full QD precision (8 elements for complex)
+              const zrQD = toQDAdd([ref[0], ref[1], ref[2], ref[3]], [dzr, 0, 0, 0]);
+              const ziQD = toQDAdd([ref[4], ref[5], ref[6], ref[7]], [dzi, 0, 0, 0]);
+              if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
+              convergedByIteration.get(iters).push(
+                { index: i, z: [...zrQD, ...ziQD], p: this.pp[i] });
+              this.un--;
+              if (this.inSpike && this.inSpike[i] && this.ch > 0) this.ch -= 1;
+            }
+          }
+        }
+
+        // Queue changes grouped by iteration
+        const allIterations = new Set([...pixelsByIteration.keys(),
+                                        ...convergedByIteration.keys()]);
+        for (const iter of Array.from(allIterations).sort((a, b) => a - b)) {
+          const divergedIndices = pixelsByIteration.get(iter) || [];
+          const convergedData = convergedByIteration.get(iter) || [];
+          if (divergedIndices.length > 0 || convergedData.length > 0) {
+            this.queueChanges({ iter, nn: divergedIndices, vv: convergedData });
+          }
+        }
+
+        this.hasPendingResults = false;
+      }
+
+      // ================================================================
+      // STEP 2: Check if all done (after processing pending results)
+      // ================================================================
+      if (this.un === 0) {
+        this.isComputing = false;
+        return;
+      }
+
+      // ================================================================
+      // STEP 3: Calculate batch size and extend reference orbit for this batch
+      // ================================================================
       const pixelsToIterate = this.un + this.ch;
       let iterationsPerBatch;
       if (targetIters !== null) {
@@ -10597,16 +10704,10 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
         iterationsPerBatch = Math.max(17, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
       }
 
-      // Extend reference orbit on CPU as needed
-      // Use buffer to reduce extension frequency (10k or 10% extra)
-      const THREADING_CAPACITY = 1048576;
+      // Extend reference orbit to exactly what this batch needs (no buffer)
+      // Step 6 will speculatively extend further while GPU works
       const currentNeed = this.it + iterationsPerBatch;
-      const maxAllowedGrowth = Math.max(currentNeed + 10000, Math.round(currentNeed * 1.1));
-      const threadingBuffer = Math.min(this.refIterations + 100, maxAllowedGrowth);
-      const targetRefIterations = Math.min(
-        Math.max(currentNeed, threadingBuffer),
-        THREADING_CAPACITY
-      );
+      const targetRefIterations = Math.min(currentNeed, THREADING_CAPACITY);
       while (!this.refOrbitEscaped && this.refIterations < targetRefIterations) {
         this.extendReferenceOrbit();
       }
@@ -10616,15 +10717,15 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
         this.setupReferenceOrbitLoop();
       }
 
-      // Upload combined ref orbit + threading data
+      // ================================================================
+      // STEP 4: Upload iteration state to GPU
+      // ================================================================
       await this.uploadIters();
 
-      if (this.un === 0) {
-        this.isComputing = false;
-        return;
-      }
-
-      // Compute checkpoint offsets for convergence detection (enabled at all zoom levels)
+      // ================================================================
+      // STEP 5: Set up parameters and dispatch GPU
+      // ================================================================
+      // Compute checkpoint offsets for convergence detection
       const checkpointOffsets = [];
       const bufferIter = this.it;
       for (let i = 0; i < iterationsPerBatch; i++) {
@@ -10685,86 +10786,41 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
       passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
       passEncoder.end();
 
+      // Copy results to current staging buffer (for double-buffering)
+      const writeBuffer = this.buffers.stagingPixels[this.stagingBufferIndex];
+      const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
+      commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, writeBuffer, 0, pixelBufferSize);
+
+      // Start timing from GPU submit (when GPU work begins)
+      const gpuStartTime = performance.now();
       this.device.queue.submit([commandEncoder.finish()]);
-      await this.device.queue.onSubmittedWorkDone();
 
-      this.it += iterationsPerBatch;
+      // ================================================================
+      // STEP 6: Speculative reference orbit extension while GPU works
+      // ================================================================
+      // Extend orbit speculatively for NEXT batch's needs:
+      // Next batch's this.it = current this.it + iterationsPerBatch (pending results)
+      // Next batch's need = nextIt + iterationsPerBatch + buffer
+      const speculativeTimeLimit = 100;  // ms - optimal based on benchmarking
+      const nextBatchIt = this.it + iterationsPerBatch;  // what this.it will be next batch
+      const nextBatchNeed = nextBatchIt + iterationsPerBatch;  // what next batch will need
+      const speculativeTarget = Math.min(
+        Math.max(nextBatchNeed + 10000, Math.round(nextBatchNeed * 1.1)),
+        THREADING_CAPACITY
+      );
 
-      // Read consolidated pixels buffer
-      // PixelState layout (15 fields × 4 bytes = 60 bytes/pixel):
-      //   Int32 (indices 0-6): iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx
-      //   Float32 (indices 7-14): dzr, dzi, bbr, bbi, ckpt_bbr, ckpt_bbi, dcr, dci
-      const pixelsU32 = await this.readBuffer(this.buffers.pixels, Uint32Array);
-      const pixelsI32 = new Int32Array(pixelsU32.buffer);
-      const pixelsF32 = new Float32Array(pixelsU32.buffer);
-
-      // Process GPU results
-      const pixelsByIteration = new Map();
-      const convergedByIteration = new Map();
-      let hasConverged = false;
-
-      // PixelState field indices (in units of 4 bytes)
-      const STRIDE = 15;  // 15 fields per pixel
-      const P_ITER = 0, P_SCALE = 1, P_STATUS = 2, P_PERIOD = 3, P_REF_ITER = 4;
-      const P_DZR = 7, P_DZI = 8;
-
-      for (let i = 0; i < dimsArea; i++) {
-        const idx = i * STRIDE;
-        const status = pixelsI32[idx + P_STATUS];
-        const period = pixelsI32[idx + P_PERIOD];
-        if (this.nn[i] !== 0) continue;
-        if (status === 1) {
-          const iters = pixelsI32[idx + P_ITER];
-          this.nn[i] = iters;
-          this.pp[i] = period;
-          if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
-          pixelsByIteration.get(iters).push(i);
-          this.di++;
-          this.un--;
-          if (this.inSpike && this.inSpike[i] && this.ch > 0) this.ch -= 1;
-        } else if (status === 2) {
-          hasConverged = true;
-        }
+      while (!this.refOrbitEscaped &&
+             this.refIterations < speculativeTarget &&
+             (performance.now() - gpuStartTime) < speculativeTimeLimit) {
+        this.extendReferenceOrbit();
       }
 
-      if (hasConverged) {
-        for (let i = 0; i < dimsArea; i++) {
-          const idx = i * STRIDE;
-          const status = pixelsI32[idx + P_STATUS];
-          const period = pixelsI32[idx + P_PERIOD];
-          if (this.nn[i]) continue;
-          if (status === 2) {
-            const iters = pixelsI32[idx + P_ITER];
-            this.nn[i] = -iters;
-            this.pp[i] = period - 1;
-            const refIter = pixelsI32[idx + P_REF_ITER];
-            // AdaptiveGpuBoard stores dz BEFORE iteration (break before iter step),
-            // so dz corresponds to refIter, not refIter+1
-            const scale = pixelsI32[idx + P_SCALE];
-            const dzr = pixelsF32[idx + P_DZR] * Math.pow(2, scale);
-            const dzi = pixelsF32[idx + P_DZI] * Math.pow(2, scale);
-            const ref = this.qdRefOrbit[Math.min(refIter, this.qdRefOrbit.length - 1)];
-            // Compute z = ref + dz in full QD precision (8 elements for complex)
-            const zrQD = toQDAdd([ref[0], ref[1], ref[2], ref[3]], [dzr, 0, 0, 0]);
-            const ziQD = toQDAdd([ref[4], ref[5], ref[6], ref[7]], [dzi, 0, 0, 0]);
-            if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
-            convergedByIteration.get(iters).push(
-              { index: i, z: [...zrQD, ...ziQD], p: this.pp[i] });
-            this.un--;
-            if (this.inSpike && this.inSpike[i] && this.ch > 0) this.ch -= 1;
-          }
-        }
-      }
-
-      const allIterations = new Set([...pixelsByIteration.keys(),
-                                      ...convergedByIteration.keys()]);
-      for (const iter of Array.from(allIterations).sort((a, b) => a - b)) {
-        const divergedIndices = pixelsByIteration.get(iter) || [];
-        const convergedData = convergedByIteration.get(iter) || [];
-        if (divergedIndices.length > 0 || convergedData.length > 0) {
-          this.queueChanges({ iter: iter, nn: divergedIndices, vv: convergedData });
-        }
-      }
+      // ================================================================
+      // STEP 7: Mark pending results and swap staging buffer
+      // ================================================================
+      this.pendingIterationsPerBatch = iterationsPerBatch;
+      this.hasPendingResults = true;
+      this.stagingBufferIndex = 1 - this.stagingBufferIndex;
 
     } catch (error) {
       console.error('AdaptiveGpuBoard.compute() ERROR:',
@@ -10774,7 +10830,92 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
     }
   }
 
+  async flushPendingResults() {
+    // Process pending results from the staging buffer without starting a new batch
+    if (!this.hasPendingResults) return;
+
+    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
+    const BYTES_PER_PIXEL = 60;  // 15 fields × 4 bytes
+    const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
+    const pixelBufferSize = dimsArea * BYTES_PER_PIXEL;
+
+    await readBuffer.mapAsync(GPUMapMode.READ);
+    const pixelData = new ArrayBuffer(pixelBufferSize);
+    const srcData = readBuffer.getMappedRange();
+    new Uint8Array(pixelData).set(new Uint8Array(srcData));
+    readBuffer.unmap();
+
+    const pixelsI32 = new Int32Array(pixelData);
+    const pixelsF32 = new Float32Array(pixelData);
+
+    // Update global iteration counter using _baseIt directly
+    this._baseIt += this.pendingIterationsPerBatch;
+
+    // PixelState struct offsets (15 fields per pixel)
+    const STRIDE = 15;
+    const P_ITER = 0, P_SCALE = 1, P_STATUS = 2, P_PERIOD = 3, P_REF_ITER = 4;
+    const P_DZR = 7, P_DZI = 8;
+
+    // Process results
+    for (let i = 0; i < dimsArea; i++) {
+      const idx = i * STRIDE;
+      const status = pixelsI32[idx + P_STATUS];
+      const period = pixelsI32[idx + P_PERIOD];
+
+      if (this.nn[i] !== 0) continue;
+
+      if (status === 1) {
+        const iters = pixelsI32[idx + P_ITER];
+        this.nn[i] = iters;
+        this.pp[i] = period;
+        this.di++;
+        this.un--;
+      } else if (status === 2) {
+        const iters = pixelsI32[idx + P_ITER];
+        this.nn[i] = -iters;
+        this.pp[i] = period - 1;
+        this.un--;
+      }
+    }
+
+    this.hasPendingResults = false;
+  }
+
+  async readPixelBuffer() {
+    // Override to handle double-buffered staging array
+    if (!this.isGPUReady || !this.buffers.pixels) {
+      return null;
+    }
+
+    const BYTES_PER_PIXEL = 60;  // 15 fields × 4 bytes
+    const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
+    const bufferSize = dimsArea * BYTES_PER_PIXEL;
+
+    // Use the first staging buffer for serialization reads
+    const stagingBuffer = this.buffers.stagingPixels[0];
+
+    // Copy pixels buffer to staging
+    const commandEncoder = this.device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, stagingBuffer, 0, bufferSize);
+    this.device.queue.submit([commandEncoder.finish()]);
+    await this.device.queue.onSubmittedWorkDone();
+
+    // Read back the data
+    await stagingBuffer.mapAsync(GPUMapMode.READ);
+    const pixelData = new ArrayBuffer(bufferSize);
+    const srcData = stagingBuffer.getMappedRange();
+    new Uint8Array(pixelData).set(new Uint8Array(srcData));
+    stagingBuffer.unmap();
+
+    return pixelData;
+  }
+
   async serialize() {
+    // CRITICAL: Flush pending results before serializing
+    if (this.hasPendingResults) {
+      await this.flushPendingResults();
+    }
+
     // Ensure GPU is ready before reading buffers
     await this.ensureGPUReady();
 
