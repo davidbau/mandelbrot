@@ -9,6 +9,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // Use acorn-loose for more forgiving parsing of potentially incomplete code
 let acornLoose;
@@ -584,6 +585,11 @@ function getFileAtCommit(commit, filepath) {
   }
 }
 
+// Compute a stable hash for cached artifacts
+function hashContent(text) {
+  return crypto.createHash('sha1').update(text).digest('hex');
+}
+
 // Extract co-author flags for a commit body
 function getCoauthorFlags(hash) {
   try {
@@ -638,6 +644,18 @@ function countTests(hash) {
   } catch (e) {
     // tests/ directory doesn't exist at this commit
     return 0;
+  }
+}
+
+function getTestsTreeHash(hash) {
+  try {
+    return execSync(`git rev-parse ${hash}:tests`, {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'] // suppress git warnings when tests/ is absent
+    }).trim();
+  } catch (e) {
+    return null; // tests/ missing at this commit (avoid emitting git warnings)
   }
 }
 
@@ -699,6 +717,8 @@ async function main() {
   console.log(`Found ${commits.length} commits`);
 
   const timeline = [];
+  const graphCache = new Map();     // htmlHash -> parsed graph data
+  const testCountCache = new Map(); // tests tree hash -> test count
 
   for (let i = 0; i < commits.length; i++) {
     const commit = commits[i];
@@ -708,9 +728,34 @@ async function main() {
     if (!html) continue;
 
     const coauthors = getCoauthorFlags(commit.hash);
-    const { js, scriptRanges } = extractJS(html);
-    const graph = extractCallGraph(js, scriptRanges);
-    const lineCount = html.split('\n').length;
+    const htmlHash = hashContent(html);
+
+    let graphData = graphCache.get(htmlHash);
+    if (!graphData) {
+      const { js, scriptRanges } = extractJS(html);
+      const graph = extractCallGraph(js, scriptRanges);
+      const lineCount = html.split('\n').length;
+      graphData = {
+        lineCount,
+        nodes: graph.nodes,
+        edges: graph.edges,
+        nodeCount: graph.nodes.length,
+        edgeCount: graph.edges.length
+      };
+      graphCache.set(htmlHash, graphData);
+    }
+
+    // Cache test counts by tests/ tree hash to avoid re-counting unchanged trees
+    const testsTreeHash = getTestsTreeHash(commit.hash);
+    let testCount;
+    if (!testsTreeHash) {
+      testCount = 0;
+    } else if (testCountCache.has(testsTreeHash)) {
+      testCount = testCountCache.get(testsTreeHash);
+    } else {
+      testCount = countTests(commit.hash);
+      testCountCache.set(testsTreeHash, testCount);
+    }
 
     timeline.push({
       hash: commit.hash.slice(0, 7),
@@ -719,12 +764,12 @@ async function main() {
       claudeCoauthored: coauthors.claude,
       geminiCoauthored: coauthors.gemini,
       codexCoauthored: coauthors.codex,
-      lineCount,
-      testCount: countTests(commit.hash),
-      nodeCount: graph.nodes.length,
-      edgeCount: graph.edges.length,
-      nodes: graph.nodes,
-      edges: graph.edges
+      lineCount: graphData.lineCount,
+      testCount,
+      nodeCount: graphData.nodeCount,
+      edgeCount: graphData.edgeCount,
+      nodes: graphData.nodes,
+      edges: graphData.edges
     });
   }
 

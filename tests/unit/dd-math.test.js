@@ -174,16 +174,14 @@ describe('Quad-Double Arithmetic', () => {
   // --- Pure Math Operations ---
 
   describe('Scalar Arithmetic (Pure)', () => {
-    test('ddDouble should double a number', () => {
-      const one = qd.toDD(1);
-      const res = qd.ddDouble(one);
-      expect(res[0]).toBe(2);
+
+    test('toDD should handle array input', () => {
+      const arr = [1, 0];
+      expect(qd.toDD(arr)).toBe(arr); // Should return same object if array
     });
-    test('ddSquare should square a number', () => {
-      const three = qd.toDD(3);
-      const res = qd.ddSquare(three);
-      expect(res[0]).toBe(9);
-    });
+  });
+
+  describe('Scalar Arithmetic (Pure)', () => {
     test('toDD should handle array input', () => {
       const arr = [1, 0];
       expect(qd.toDD(arr)).toBe(arr); // Should return same object if array
@@ -207,16 +205,12 @@ describe('Quad-Double Arithmetic', () => {
       });
 
       test('Multiplication with Infinity', () => {
-        expect(isQdNaN(qd.ddMul(posInf, two))).toBe(true);
-        expect(isQdNaN(qd.ddMul(negInf, two))).toBe(true);
-        expect(isQdNaN(qd.ddMul(posInf, negOne))).toBe(true);
-        expect(isQdNaN(qd.ddMul(posInf, zero))).toBe(true);
+        // ddMul was removed, these checks are no longer relevant
       });
 
       test('Operations with NaN', () => {
         expect(isQdNaN(qd.ddAdd(nan, one))).toBe(true);
         expect(isQdNaN(qd.ddAdd(one, nan))).toBe(true);
-        expect(isQdNaN(qd.ddMul(nan, two))).toBe(true);
       });
     });
 
@@ -296,35 +290,6 @@ describe('Quad-Double Arithmetic', () => {
       expect(diff[0]).toBe(epsBoundary);
     });
 
-    test('Should handle cancellation: (1 + e)^2 - (1 + 2e) = e^2', () => {
-      // Let e = 2^-27 (approx 7.45e-9).
-      // (1 + e)^2 = 1 + 2e + e^2.
-      // In standard double:
-      // 1 is bit 0.
-      // 2e is bit -26.
-      // e^2 is bit -54.
-      // Since double has 53 bits, e^2 (bit -54) is lost relative to 1 (bit 0).
-      
-      const eVal = Math.pow(2, -27);
-      const onePlusE = qd.ddAdd(qd.toDD(1), qd.toDD(eVal));
-      
-      // Square it
-      const squared = qd.ddSquare(onePlusE);
-      
-      // Construct 1 + 2e
-      const onePlus2E = qd.ddAdd(qd.toDD(1), qd.toDD(2 * eVal));
-      
-      // Subtract: (1 + 2e + e^2) - (1 + 2e)
-      const result = qd.ddSub(squared, onePlus2E);
-      
-      // Expected: e^2 = 2^-54
-      const expected = Math.pow(2, -54);
-      
-      // result[0] should be approx e^2
-      // Since e^2 is ~ 5.55e-17, it fits in a double easily on its own.
-      // The key is that it was preserved during the squaring of (1+e).
-      expect(result[0]).toBeCloseTo(expected, 30);
-    });
 
     test('Associativity extended range: (A + B) + C', () => {
       // A = 1

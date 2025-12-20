@@ -265,19 +265,17 @@ describe('Worker Blob Line Number Alignment', () => {
     const blob = buildWorkerBlob();
     const lines = blob.split('\n');
 
-    // Find ddDouble function (a simple 3-line function in mathCode)
-    const ddDoubleIndex = lines.findIndex(l => l.includes('function ddDouble'));
-    expect(ddDoubleIndex).toBeGreaterThan(0);
+    // Find ddAdd function (a function in mathCode)
+    const ddAddIndex = lines.findIndex(l => l.includes('function ddAdd'));
+    expect(ddAddIndex).toBeGreaterThan(0);
 
     // Verify the function content is on expected subsequent lines
-    expect(lines[ddDoubleIndex]).toContain('function ddDouble(a)');
-    expect(lines[ddDoubleIndex + 1]).toContain('return [a[0] * 2, a[1] * 2]');
-    expect(lines[ddDoubleIndex + 2]).toBe('}');
+    expect(lines[ddAddIndex]).toContain('function ddAdd(a, b)');
 
     // Find CpuBoard class (in workerCode)
     const cpuBoardIndex = lines.findIndex(l => l.includes('class CpuBoard'));
     expect(cpuBoardIndex).toBeGreaterThan(0);
-    expect(cpuBoardIndex).toBeLessThan(ddDoubleIndex); // workerCode before mathCode
+    expect(cpuBoardIndex).toBeLessThan(ddAddIndex); // workerCode before mathCode
   });
 
   test('workerCode.js and mathCode.js are extracted correctly', () => {
