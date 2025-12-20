@@ -10122,31 +10122,33 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
     };
 
     // Initialize pixels buffer with overlapping typed array views
-    // PixelState layout: [iter, scale, status, period, ref_iter, ckpt_refidx, pending_refidx,
-    //                     dzr, dzi, bbr, bbi, ckpt_bbr, ckpt_bbi, dcr, dci]
+    // PixelState layout matches GpuZhuoranBoard for first 14 fields:
+    // [iter, status, period, ref_iter, ckpt_refidx, pending_refidx,
+    //  dzr, dzi, bbr, bbi, ckpt_bbr, ckpt_bbi, dcr, dci, scale]
     const pixelBuffer = new ArrayBuffer(pixelBufferSize);
     const pixelsI32 = new Int32Array(pixelBuffer);
     const pixelsF32 = new Float32Array(pixelBuffer);
 
     for (let i = 0; i < dimsArea; i++) {
       const idx = i * 15;  // 15 fields per pixel
-      // Integer fields (indices 0-6)
+      // Integer fields (indices 0-5) - matches GpuZhuoranBoard
       pixelsI32[idx + 0] = 1;                    // iter starts at 1
-      pixelsI32[idx + 1] = this.pixelScale[i];  // scale from initPixels
-      pixelsI32[idx + 2] = 0;                    // status = computing
-      pixelsI32[idx + 3] = 0;                    // period = 0
-      pixelsI32[idx + 4] = this.refIter[i];     // ref_iter
-      pixelsI32[idx + 5] = -1;                   // ckpt_refidx (-1 = no checkpoint)
-      pixelsI32[idx + 6] = -1;                   // pending_refidx
-      // Float fields (indices 7-14)
-      pixelsF32[idx + 7] = this.dz[i * 2];      // dzr (scaled by per-pixel scale)
-      pixelsF32[idx + 8] = this.dz[i * 2 + 1];  // dzi
-      pixelsF32[idx + 9] = 0;                    // bbr (scaled by initialScale)
-      pixelsF32[idx + 10] = 0;                   // bbi
-      pixelsF32[idx + 11] = 0;                   // ckpt_bbr
-      pixelsF32[idx + 12] = 0;                   // ckpt_bbi
-      pixelsF32[idx + 13] = this.dc[i * 2];     // dcr (scaled by initialScale)
-      pixelsF32[idx + 14] = this.dc[i * 2 + 1]; // dci
+      pixelsI32[idx + 1] = 0;                    // status = computing
+      pixelsI32[idx + 2] = 0;                    // period = 0
+      pixelsI32[idx + 3] = this.refIter[i];     // ref_iter
+      pixelsI32[idx + 4] = -1;                   // ckpt_refidx (-1 = no checkpoint)
+      pixelsI32[idx + 5] = -1;                   // pending_refidx
+      // Float fields (indices 6-13) - matches GpuZhuoranBoard
+      pixelsF32[idx + 6] = this.dz[i * 2];      // dzr (scaled by per-pixel scale)
+      pixelsF32[idx + 7] = this.dz[i * 2 + 1];  // dzi
+      pixelsF32[idx + 8] = 0;                    // bbr (scaled by initialScale)
+      pixelsF32[idx + 9] = 0;                    // bbi
+      pixelsF32[idx + 10] = 0;                   // ckpt_bbr
+      pixelsF32[idx + 11] = 0;                   // ckpt_bbi
+      pixelsF32[idx + 12] = this.dc[i * 2];     // dcr (scaled by initialScale)
+      pixelsF32[idx + 13] = this.dc[i * 2 + 1]; // dci
+      // AdaptiveGpuBoard-specific field at end (index 14)
+      pixelsI32[idx + 14] = this.pixelScale[i]; // scale from initPixels
     }
     this.device.queue.writeBuffer(this.buffers.pixels, 0, pixelBuffer);
 
@@ -10199,27 +10201,27 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
         loop_delta_i: f32,
       }
 
-      // Per-pixel state: 7 i32 + 8 f32 = 60 bytes
+      // Per-pixel state: 6 i32 + 8 f32 + 1 i32 = 60 bytes
+      // Layout matches GpuZhuoranBoard for first 14 fields (scale at end)
       // Layout (i32/u32 view):
       //   [0] iter: i32
-      //   [1] scale: i32
-      //   [2] status: i32
-      //   [3] period: i32
-      //   [4] ref_iter: i32
-      //   [5] ckpt_refidx: i32
-      //   [6] pending_refidx: i32
-      //   [7] dzr: f32
-      //   [8] dzi: f32
-      //   [9] bbr: f32
-      //   [10] bbi: f32
-      //   [11] ckpt_bbr: f32
-      //   [12] ckpt_bbi: f32
-      //   [13] dcr: f32
-      //   [14] dci: f32
+      //   [1] status: i32
+      //   [2] period: i32
+      //   [3] ref_iter: i32
+      //   [4] ckpt_refidx: i32
+      //   [5] pending_refidx: i32
+      //   [6] dzr: f32
+      //   [7] dzi: f32
+      //   [8] bbr: f32
+      //   [9] bbi: f32
+      //   [10] ckpt_bbr: f32
+      //   [11] ckpt_bbi: f32
+      //   [12] dcr: f32
+      //   [13] dci: f32
+      //   [14] scale: i32  (AdaptiveGpuBoard-specific, at end for layout compatibility)
       struct PixelState {
-        // Integer fields (7 i32)
+        // Integer fields (6 i32) - matches GpuZhuoranBoard
         iter: i32,
-        scale: i32,
         status: i32,
         period: i32,
         ref_iter: i32,
@@ -10234,6 +10236,8 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
         ckpt_bbi: f32,
         dcr: f32,
         dci: f32,
+        // AdaptiveGpuBoard-specific field at end
+        scale: i32,
       }
 
       // Per-iteration state (reference orbit + threading): 5 f32 = 20 bytes
@@ -10643,8 +10647,9 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
 
         // PixelState field indices (15 fields per pixel)
         const STRIDE = 15;
-        const P_ITER = 0, P_SCALE = 1, P_STATUS = 2, P_PERIOD = 3, P_REF_ITER = 4;
-        const P_DZR = 7, P_DZI = 8;
+        // Field indices match GpuZhuoranBoard for first 14 fields (scale at end)
+        const P_ITER = 0, P_STATUS = 1, P_PERIOD = 2, P_REF_ITER = 3;
+        const P_DZR = 6, P_DZI = 7, P_SCALE = 14;
 
         // Process GPU results
         const pixelsByIteration = new Map();
@@ -10881,8 +10886,9 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
 
     // PixelState struct offsets (15 fields per pixel)
     const STRIDE = 15;
-    const P_ITER = 0, P_SCALE = 1, P_STATUS = 2, P_PERIOD = 3, P_REF_ITER = 4;
-    const P_DZR = 7, P_DZI = 8;
+    // Field indices match GpuZhuoranBoard for first 14 fields (scale at end)
+    const P_ITER = 0, P_STATUS = 1, P_PERIOD = 2, P_REF_ITER = 3;
+    const P_DZR = 6, P_DZI = 7, P_SCALE = 14;
 
     // Process results
     for (let i = 0; i < dimsArea; i++) {
