@@ -584,16 +584,27 @@ function getFileAtCommit(commit, filepath) {
   }
 }
 
-// Check if a commit was co-authored by Claude
-function isClaudeCoauthored(hash) {
+// Extract co-author flags for a commit body
+function getCoauthorFlags(hash) {
   try {
     const body = execSync(`git log -1 --format="%b" ${hash}`, {
       encoding: 'utf8',
       maxBuffer: 1024 * 1024
     });
-    return /Co-Authored-By.*Claude/i.test(body);
+
+    // Helper to check for Co-Authored-By lines that include a name
+    const hasCoauthor = (name) => {
+      const pattern = new RegExp(`Co-Authored-By[^\\n]*${name}`, 'i');
+      return pattern.test(body);
+    };
+
+    return {
+      claude: hasCoauthor('Claude'),
+      gemini: hasCoauthor('Gemini'),
+      codex: hasCoauthor('Codex')
+    };
   } catch (e) {
-    return false;
+    return { claude: false, gemini: false, codex: false };
   }
 }
 
@@ -696,6 +707,7 @@ async function main() {
     const html = getFileAtCommit(commit.hash, 'index.html');
     if (!html) continue;
 
+    const coauthors = getCoauthorFlags(commit.hash);
     const { js, scriptRanges } = extractJS(html);
     const graph = extractCallGraph(js, scriptRanges);
     const lineCount = html.split('\n').length;
@@ -704,7 +716,9 @@ async function main() {
       hash: commit.hash.slice(0, 7),
       date: commit.date,
       message: commit.message.slice(0, 60),
-      claudeCoauthored: isClaudeCoauthored(commit.hash),
+      claudeCoauthored: coauthors.claude,
+      geminiCoauthored: coauthors.gemini,
+      codexCoauthored: coauthors.codex,
       lineCount,
       testCount: countTests(commit.hash),
       nodeCount: graph.nodes.length,
