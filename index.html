@@ -4882,16 +4882,6 @@ class Board {
   // Derived scalar property
   get pixelSize() { return this.size / this.config.dimsWidth; }
 
-  // Epsilon escalation: at high iteration counts, relax convergence thresholds
-  // At 1M iterations: no effect, at 100M: 10x, at 10B: 100x
-  getEscalatedEpsilon(iter) {
-    const escalation = Math.max(1, Math.sqrt(iter) / 1000);
-    return {
-      epsilon: this.epsilon * escalation,
-      epsilon2: this.epsilon2 * escalation
-    };
-  }
-
   async serialize() {
     return {
       type: this.constructor.name,
@@ -5154,7 +5144,8 @@ class CpuBoard extends Board {
     const rb = this.bb[m2];
     const jb = this.bb[m2i];
     const db = Math.abs(rb - ra) + Math.abs(jb - ja);  // distance from checkpoint
-    const { epsilon, epsilon2 } = this.getEscalatedEpsilon(this.it);
+    const epsilon = this.epsilon;
+    const epsilon2 = this.epsilon2;
     if (db <= epsilon2) {
       if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
       if (db <= epsilon) {
@@ -5396,7 +5387,8 @@ class QDCpuBoard extends Board {
     const diffI = toQDSub(finalZi, bbI);
     const db = Math.abs(diffR[0] + diffR[1] + diffR[2] + diffR[3]) +
                Math.abs(diffI[0] + diffI[1] + diffI[2] + diffI[3]);
-    const { epsilon, epsilon2 } = this.getEscalatedEpsilon(this.it);
+    const epsilon = this.epsilon;
+    const epsilon2 = this.epsilon2;
     if (db <= epsilon2) {
       if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
       if (db <= epsilon) {
@@ -6165,7 +6157,8 @@ class CpuZhuoranBaseBoard extends Board {
         const totalDiffI = this.threadDeltaIm[index] + dzDiffI;
         const db = Math.max(Math.abs(totalDiffR), Math.abs(totalDiffI));
 
-        const { epsilon, epsilon2 } = this.getEscalatedEpsilon(this.it);
+        const epsilon = this.epsilon;
+        const epsilon2 = this.epsilon2;
         if (db <= epsilon2) {
           if (!this.pp[index]) {
             this.pp[index] = this.it - 1;
@@ -6967,10 +6960,9 @@ class GpuBoard extends GpuBaseBoard {
 
         var next_checkpoint_idx = 0u;
 
-        // Escalate epsilon at high iteration counts: at 1M no effect, at 100M 10x, at 10B 100x
-        let escalation = max(1.0, sqrt(f32(iter)) / 1000.0);
-        let epsilon = params.epsilon * escalation;
-        let epsilon2 = params.epsilon2 * escalation;
+        // Fixed epsilon derived from pixel size (no iteration-based escalation)
+        let epsilon = params.epsilon;
+        let epsilon2 = params.epsilon2;
 
         for (var i = 0u; i < params.iterations_per_batch; i++) {
           if (next_checkpoint_idx < params.checkpoint_count) {
@@ -8183,14 +8175,12 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         let dcr = pixels[index].dcr;
         let dci = pixels[index].dci;
 
-        // Convergence thresholds scale with pixel size for deep zooms
+        // Convergence thresholds scale with pixel size for deep zooms (no iteration-based escalation)
         // GPU uses float32 precision, so thresholds must be larger than CPU's float64
         let epsilon_base = params.pixel_size / 10.0;   // Final convergence threshold
         let epsilon2_base = params.pixel_size * 10.0;  // Getting close threshold
-        // Escalate epsilon at high iteration counts: at 1M no effect, at 100M 10x, at 10B 100x
-        let escalation = max(1.0, sqrt(f32(iter)) / 1000.0);
-        let epsilon = epsilon_base * escalation;
-        let epsilon2 = epsilon2_base * escalation;
+        let epsilon = epsilon_base;
+        let epsilon2 = epsilon2_base;
 
         // Track next checkpoint using O(1) counter for adaptive checkpoints
         var next_checkpoint_idx = 0u;
@@ -9333,16 +9323,12 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         let dcr = pixels[index].dcr;
         let dci = pixels[index].dci;
 
-        // Convergence thresholds - scaled by initialScale for comparison
+        // Convergence thresholds - scaled by initialScale for comparison (no iteration-based escalation)
         let epsilon_base = params.pixel_size / 10.0;
         let epsilon2_base = params.pixel_size * 10.0;
-        // Escalate epsilon at high iteration counts: at 1M no effect, at 100M 10x, at 10B 100x
-        let escalation = max(1.0, sqrt(f32(iter)) / 1000.0);
-        let epsilon_actual = epsilon_base * escalation;
-        let epsilon2_actual = epsilon2_base * escalation;
         // Convert to initialScale for scaled comparisons
-        let epsilon = ldexp(epsilon_actual, -params.initial_scale);
-        let epsilon2 = ldexp(epsilon2_actual, -params.initial_scale);
+        let epsilon = ldexp(epsilon_base, -params.initial_scale);
+        let epsilon2 = ldexp(epsilon2_base, -params.initial_scale);
 
         // Track next checkpoint using O(1) counter for adaptive checkpoints
         var next_checkpoint_idx = 0u;
