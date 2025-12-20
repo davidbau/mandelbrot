@@ -188,6 +188,44 @@ function extractCallGraph(js, scriptRanges = []) {
       return;
     }
 
+    // Detect class expressions assigned to variables: const X = class ...
+    if (node.type === 'VariableDeclarator' && node.id?.name && node.init?.type === 'ClassExpression') {
+      const className = node.id.name;
+      const classNode = node.init;
+      let extendsName = null;
+      let mixinName = null;
+      let mixinBase = null;
+
+      if (classNode.superClass?.type === 'Identifier') {
+        extendsName = classNode.superClass.name;
+      } else if (classNode.superClass?.type === 'CallExpression') {
+        if (classNode.superClass.callee?.type === 'Identifier') {
+            mixinName = classNode.superClass.callee.name;
+        }
+        if (classNode.superClass.arguments?.[0]?.type === 'Identifier') {
+            mixinBase = classNode.superClass.arguments[0].name;
+        }
+      }
+
+      const loc = node.start || 0;
+      const jsLine = node.loc?.start?.line || offsetToLine(loc, lineOffsets);
+      const jsEndLine = node.loc?.end?.line || jsLine;
+      classes.set(className, {
+        extends: extendsName,
+        mixinName,
+        mixinBase,
+        methods: new Set(),
+        loc,
+        script: getScriptIndex(loc, scriptRanges),
+        line: getHtmlLine(jsLine, loc),
+        endLine: getHtmlLine(jsEndLine, loc)
+      });
+      
+      // Recurse into class body (node.init) with class context
+      collectDefinitions(classNode, className);
+      return;
+    }
+
     let name = null;
     let type = 'function';
 
@@ -279,44 +317,223 @@ function extractCallGraph(js, scriptRanges = []) {
 
   collectDefinitions(ast);
 
+  // Index methods by name for "guess by name" lookup
+  const methodIndex = new Map(); // methodName -> Set<className>
+  for (const [className, classData] of classes) {
+    for (const method of classData.methods) {
+      if (!methodIndex.has(method)) {
+        methodIndex.set(method, new Set());
+      }
+      methodIndex.get(method).add(className);
+    }
+  }
+
+  // Helper to resolve method in class hierarchy
+  function resolveMethodInClass(className, methodName) {
+    const visited = new Set();
+    const queue = [className];
+
+    while (queue.length > 0) {
+      const currentName = queue.shift();
+      if (visited.has(currentName)) continue;
+      visited.add(currentName);
+
+      const classData = classes.get(currentName);
+      if (!classData) continue;
+
+      // Check if this class has the method
+      if (classData.methods.has(methodName)) {
+        return `${currentName}.${methodName}`;
+      }
+
+      // Add parents to queue
+      if (classData.extends) queue.push(classData.extends);
+      if (classData.mixinName) queue.push(classData.mixinName);
+      if (classData.mixinBase) queue.push(classData.mixinBase);
+    }
+    return null;
+  }
+
+  // Helper to guess class from variable name
+  function guessClassFromVar(varName) {
+    // 1. Exact match (case sensitive) - uncommon for instances but possible
+    if (classes.has(varName)) return varName;
+
+    // 2. Case-insensitive match
+    const lowerVar = varName.toLowerCase();
+    for (const className of classes.keys()) {
+      if (className.toLowerCase() === lowerVar) return className;
+    }
+
+    // 3. Substring/Suffix match (e.g., "cpuBoard" -> "CpuBoard" or "Board")
+    // Prioritize longer matches (more specific)
+    let bestMatch = null;
+    for (const className of classes.keys()) {
+      const lowerClass = className.toLowerCase();
+      // Check if variable name contains class name or vice versa, but favor suffix
+      if (lowerVar.includes(lowerClass) || lowerClass.includes(lowerVar)) {
+        // Simple heuristic: if the variable ends with the class name (e.g. cpuBoard ends with Board)
+        if (lowerVar.endsWith(lowerClass)) {
+            if (!bestMatch || className.length > bestMatch.length) {
+                bestMatch = className;
+            }
+        }
+        // Or if the class name contains the variable name (e.g. MandelbrotExplorer contains explorer)
+        else if (lowerClass.includes(lowerVar)) {
+             if (!bestMatch || className.length > bestMatch.length) {
+                bestMatch = className;
+            }
+        }
+      }
+    }
+    return bestMatch;
+  }
+
   // Find function calls within each function body
-  function findCalls(node, currentFunc = null, currentClass = null) {
+  function findCalls(node, currentFunc = null, currentClass = null, scope = {}) {
     if (!node || typeof node !== 'object') return;
 
     // Update current function/class context
     let funcName = currentFunc;
     let className = currentClass;
+    // Create new scope for this block/function (simple inheritance)
+    let currentScope = { ...scope };
 
     if (node.type === 'ClassDeclaration' && node.id?.name) {
       className = node.id.name;
     }
+
+    if (node.type === 'VariableDeclarator' && node.id?.name) {
+        if (node.init?.type === 'ClassExpression') {
+             className = node.id.name;
+        } else if (node.init?.type?.includes('Function') || node.init?.type === 'ArrowFunctionExpression') {
+             funcName = node.id.name;
+        }
+    }
+    
     if (node.type === 'FunctionDeclaration' && node.id) {
       funcName = node.id.name;
     } else if (node.type === 'MethodDefinition' && node.key && className) {
       funcName = `${className}.${node.key.name || node.key.value}`;
+    } else if (node.type === 'PropertyDefinition' && node.value?.type?.includes('Function') && className) {
+        // Class fields that are functions: class A { field = () => {} }
+        const methodName = node.key?.name || node.key?.value;
+        funcName = `${className}.${methodName}`;
+    }
+
+    // Track variable types: const x = new ClassName()
+    if (node.type === 'VariableDeclarator' && node.id?.name && node.init?.type === 'NewExpression') {
+        if (node.init.callee?.type === 'Identifier') {
+            currentScope[node.id.name] = node.init.callee.name;
+        }
     }
 
     // Detect function calls
     if (node.type === 'CallExpression') {
-      let callee = null;
+      let targets = [];
+
+      // Case 1: Direct function call: func()
       if (node.callee?.type === 'Identifier') {
-        callee = node.callee.name;
-      } else if (node.callee?.type === 'MemberExpression' && node.callee.property) {
-        callee = node.callee.property.name || node.callee.property.value;
+        const callee = node.callee.name;
+        if (functions.has(callee)) {
+          targets.push(callee);
+        }
+      } 
+      // Case 2: Method call: obj.method()
+      else if (node.callee?.type === 'MemberExpression' && node.callee.property) {
+        const methodName = node.callee.property.name || node.callee.property.value;
+        const objectNode = node.callee.object;
+
+        // 2a. this.method()
+        if (objectNode.type === 'ThisExpression' && className) {
+            const resolved = resolveMethodInClass(className, methodName);
+            if (resolved) {
+                targets.push(resolved);
+            }
+        } 
+        // 2b. obj.prop.method() or this.prop.method() - Chain guessing
+        else if (objectNode.type === 'MemberExpression' && objectNode.property) {
+             const propName = objectNode.property.name || objectNode.property.value;
+             if (typeof propName === 'string') {
+                 // Guess class from the property name itself (e.g. this.config.init() -> "config" implies "Config")
+                 const targetClass = guessClassFromVar(propName);
+                 if (targetClass) {
+                     const resolved = resolveMethodInClass(targetClass, methodName);
+                     if (resolved) {
+                         targets.push(resolved);
+                     }
+                 }
+             }
+        }
+        // 2c. variable.method()
+        else if (objectNode.type === 'Identifier') {
+            const varName = objectNode.name;
+            let targetClass = currentScope[varName];
+
+            // If not in local scope, try to guess from name
+            if (!targetClass) {
+                targetClass = guessClassFromVar(varName);
+            }
+
+            const COMMON_METHODS = new Set([
+                'add', 'write', 'clear', 'push', 'pop', 'remove', 'delete', 
+                'toString', 'keys', 'values', 'entries', 'forEach', 'map'
+            ]);
+
+            if (targetClass) {
+                // Try to resolve in the guessed class
+                const resolved = resolveMethodInClass(targetClass, methodName);
+                if (resolved) {
+                    targets.push(resolved);
+                } else {
+                     // The guessed class doesn't have the method. 
+                     // It might be an interface or abstract class.
+                     // Fallback: Link to ALL classes that have this method, unless it's too generic
+                     if (!COMMON_METHODS.has(methodName) && methodIndex.has(methodName)) {
+                         for (const cls of methodIndex.get(methodName)) {
+                             targets.push(`${cls}.${methodName}`);
+                         }
+                     }
+                }
+            } else {
+                // No clue what class this is.
+                // Fallback: Link to ALL classes that have this method, unless it's too generic
+                if (!COMMON_METHODS.has(methodName) && methodIndex.has(methodName)) {
+                    for (const cls of methodIndex.get(methodName)) {
+                        targets.push(`${cls}.${methodName}`);
+                    }
+                }
+            }
+        }
       }
 
-      if (callee && funcName && functions.has(callee)) {
-        functions.get(funcName)?.calls.add(callee);
+      // Add edges
+      if (funcName && functions.has(funcName)) {
+        for (const target of targets) {
+            // Avoid self-loops if desired, but they can be valid recursion
+            functions.get(funcName).calls.add(target);
+        }
       }
+    }
+
+    // Detect constructor calls
+    if (node.type === 'NewExpression' && node.callee?.type === 'Identifier') {
+        const targetClass = node.callee.name;
+        // Resolve constructor (check class and ancestors)
+        const constructorName = resolveMethodInClass(targetClass, 'constructor');
+        
+        if (constructorName && funcName && functions.has(funcName)) {
+            functions.get(funcName).calls.add(constructorName);
+        }
     }
 
     for (const key of Object.keys(node)) {
       if (key === 'type' || key === 'start' || key === 'end') continue;
       const child = node[key];
       if (Array.isArray(child)) {
-        child.forEach(c => findCalls(c, funcName, className));
+        child.forEach(c => findCalls(c, funcName, className, currentScope));
       } else if (child && typeof child === 'object') {
-        findCalls(child, funcName, className);
+        findCalls(child, funcName, className, currentScope);
       }
     }
   }
