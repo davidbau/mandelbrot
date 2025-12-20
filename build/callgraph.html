@@ -243,6 +243,7 @@
     let isPlaying = false;
     let playInterval = null;
     let simulation = null;
+    let zoomBehavior = null;
 
     // Claude badge SVG for co-authored commits
     const claudeBadge = `<span class="coauthor-icon claude-icon" title="Co-authored with Claude">
@@ -415,9 +416,10 @@
 
       // Add zoom behavior
       const g = svg.append('g');
-      svg.call(d3.zoom()
+      zoomBehavior = d3.zoom()
         .scaleExtent([0.1, 4])
-        .on('zoom', (event) => g.attr('transform', event.transform)));
+        .on('zoom', (event) => g.attr('transform', event.transform));
+      svg.call(zoomBehavior);
 
       // Add arrow marker for directed edges
       svg.append('defs').append('marker')
@@ -629,6 +631,7 @@
       simulation.nodes(nodes);
       simulation.force('link').links(edges);
       simulation.alpha(0.3).restart();
+      simulation.on('end', () => adjustViewIfOvercrowded(nodes, width, height));
 
       simulation.on('tick', () => {
         linkMerge.attr('d', d => {
@@ -714,6 +717,35 @@
       if (!event.active) simulation.alphaTarget(0);
       d.fx = null;
       d.fy = null;
+    }
+
+    // If stable nodes settle outside the viewport while playing, gently zoom out
+    function adjustViewIfOvercrowded(nodes, width, height) {
+      if (!isPlaying || !zoomBehavior) return;
+      const svg = d3.select('svg');
+      const transform = d3.zoomTransform(svg.node());
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      let hasStable = false;
+      nodes.forEach(n => {
+        if (n.isNew) return; // ignore nodes still flying in
+        hasStable = true;
+        const x = transform.applyX(n.x);
+        const y = transform.applyY(n.y);
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      });
+      if (!hasStable) return;
+      const halfW = width / 2;
+      const halfH = height / 2;
+      const marginX = halfW * 0.9;
+      const marginY = halfH * 0.9;
+      const overflow = (minX < -marginX) || (maxX > marginX) || (minY < -marginY) || (maxY > marginY);
+      if (overflow) {
+        const targetScale = transform.k * 0.98; // ~2% zoom out
+        svg.transition().duration(400).call(zoomBehavior.scaleTo, targetScale);
+      }
     }
 
     // Handle resize/orientation change

@@ -682,14 +682,14 @@ Speedup: 2.52x
 - Speedup > 1.5× with inheritance enabled
 - No visual differences between `inherit=0` and `inherit=1` final renders
 
-## Open Questions
+## Design Decisions
 
-1. **Edge handling**: Should we use a larger neighbor window (5×5) for more conservative inheritance near boundaries?
+1. **Edge handling**: Use 3×3 neighbor window. Simple and sufficient for typical 5× zoom.
 
-2. **Partial completion**: If parent is still computing, should we wait or skip inheritance?
+2. **Partial completion**: Don't wait for parent to complete. Use whatever information is available at zoom time. Pixels with `nn[i] === 0` (unknown) in the parent are treated as unknown in the child and must be computed.
 
-3. **Zoom factor variations**: The 9-neighbor heuristic assumes moderate zoom. For very large zooms (>10×), may need larger windows.
+3. **Zoom factor variations**: Log a warning if zoom factor > 10× (where 3×3 window may be insufficient), but proceed with inheritance anyway.
 
-4. **Serialization**: When boards are serialized/transferred between workers, should precomputed state be preserved?
+4. **Serialization**: `PrecomputedPoints` state must be included in board serialization. When a board is transferred between workers, its precomputed data goes with it.
 
-5. **Inheritance chain**: Should grandchild views inherit from grandparent if parent is incomplete?
+5. **Inheritance chain**: Only inherit from immediate parent. No grandparent inheritance for now.
