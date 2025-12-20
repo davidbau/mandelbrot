@@ -5,7 +5,7 @@
 const puppeteer = require('puppeteer');
 const path = require('path');
 
-const TEST_DURATION_MS = 10000;
+const TEST_DURATION_MS = 30000;
 const LOCATION = 'z=1e4&c=-0.75+0.01i';
 
 async function runBenchmark(boardType) {
@@ -39,14 +39,16 @@ async function runBenchmark(boardType) {
         it: v.it,
         un: v.un,
         di: v.di,
-        boardType: v.boardType
+        boardType: v.boardType,
+        compactionCount: v.compactionCount || 0,
+        activeCount: v.activeCount || v.config?.dimsArea
       };
     });
 
     if (status) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       if (status.it !== lastIt || status.un !== lastUn) {
-        console.log(`  ${elapsed}s: it=${status.it.toLocaleString()}, un=${status.un.toLocaleString()}, di=${status.di.toLocaleString()}`);
+        console.log(`  ${elapsed}s: it=${status.it.toLocaleString()}, un=${status.un.toLocaleString()}, di=${status.di.toLocaleString()}, compactions=${status.compactionCount}, active=${status.activeCount.toLocaleString()}`);
         lastIt = status.it;
         lastUn = status.un;
       }
@@ -63,7 +65,9 @@ async function runBenchmark(boardType) {
       di: v.di,
       boardType: v.boardType,
       dimsWidth: v.config.dimsWidth,
-      dimsHeight: v.config.dimsHeight
+      dimsHeight: v.config.dimsHeight,
+      compactionCount: v.compactionCount || 0,
+      activeCount: v.activeCount || v.config?.dimsArea
     };
   });
 
@@ -74,7 +78,9 @@ async function runBenchmark(boardType) {
     iterations: finalStatus?.it || 0,
     unfinished: finalStatus?.un || 0,
     diverged: finalStatus?.di || 0,
-    dims: finalStatus ? `${finalStatus.dimsWidth}x${finalStatus.dimsHeight}` : 'unknown'
+    dims: finalStatus ? `${finalStatus.dimsWidth}x${finalStatus.dimsHeight}` : 'unknown',
+    compactionCount: finalStatus?.compactionCount || 0,
+    activeCount: finalStatus?.activeCount || 0
   };
 }
 
@@ -91,12 +97,12 @@ async function runBenchmark(boardType) {
   for (const board of boards) {
     const result = await runBenchmark(board);
     results.push(result);
-    console.log(`\nResult: ${result.iterations.toLocaleString()} iterations, ${result.unfinished.toLocaleString()} unfinished, ${result.diverged.toLocaleString()} diverged`);
+    console.log(`\nResult: ${result.iterations.toLocaleString()} iterations, ${result.unfinished.toLocaleString()} unfinished, ${result.diverged.toLocaleString()} diverged, ${result.compactionCount} compactions`);
   }
 
   console.log('\n=== Summary ===');
-  console.log('Board\t\tIterations\tUnfinished\tDiverged\tDims');
+  console.log('Board\t\tIterations\tCompactions\tUnfinished\tDims');
   for (const r of results) {
-    console.log(`${r.boardType}\t\t${r.iterations.toLocaleString()}\t\t${r.unfinished.toLocaleString()}\t\t${r.diverged.toLocaleString()}\t\t${r.dims}`);
+    console.log(`${r.boardType}\t\t${r.iterations.toLocaleString()}\t\t${r.compactionCount}\t\t${r.unfinished.toLocaleString()}\t\t${r.dims}`);
   }
 })();

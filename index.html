@@ -1171,7 +1171,7 @@ class View {
   }
 
   updateFromWorkerResult(data) {
-    const { changeList, un, di, ch, it, workerInfo, boardType } = data;
+    const { changeList, un, di, ch, it, workerInfo, boardType, compactionCount, activeCount } = data;
     const changedIndices = [];
 
     for (const { nn, vv, iter } of changeList) {
@@ -1196,6 +1196,12 @@ class View {
     this.workerInfo = workerInfo;
     if (boardType) {
       this.boardType = boardType;
+    }
+    if (compactionCount !== undefined) {
+      this.compactionCount = compactionCount;
+    }
+    if (activeCount !== undefined) {
+      this.activeCount = activeCount;
     }
     // Freeze stats timing when board completes (unfinished() === 0 means done)
     if (this.unfinished() === 0 && !this.boardEndTime) {
@@ -8672,6 +8678,7 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
     this.activeCount = this.config.dimsArea;
     this.deadSinceCompaction = 0;
     this.wastedBandwidth = 0;  // Cumulative bytes wasted copying dead pixels
+    this.compactionCount = 0;  // Number of compactions performed
     this.pendingActiveCount = this.config.dimsArea;
     this.lastBatchCompacted = false;
   }
@@ -8726,6 +8733,7 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
     this.activeCount = newActiveCount;
     this.deadSinceCompaction = 0;
     this.wastedBandwidth = 0;  // Reset after compaction
+    this.compactionCount++;
 
     const newPixelBufferSize = newActiveCount * BYTES_PER_PIXEL;
 
@@ -11464,7 +11472,9 @@ class FractalWorker {
             boardEffort,
             remainingWork,
             workerInfo,
-            boardType: board.constructor.name
+            boardType: board.constructor.name,
+            compactionCount: board.compactionCount || 0,
+            activeCount: board.activeCount || board.config.dimsArea
           }
         });
         board.lastTime = now;
