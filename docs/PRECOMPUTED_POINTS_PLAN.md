@@ -292,6 +292,396 @@ The sparse `inheritedData` format is efficient:
 7. Add `flushAtIteration()` calls to all `iterate()` methods
 8. Test with various zoom levels and locations
 
+## Debug Flag
+
+Add a URL parameter `?inherit=0` to disable inheritance for A/B comparison:
+
+```javascript
+// In Config or URL parameter handling:
+get enableInheritance() {
+  return this.state.config.enableInheritance ?? true;
+}
+
+// In Grid.startViewComputation():
+let inheritedData = null;
+if (this.config.enableInheritance &&
+    view.parentView && view.parentView.isComplete()) {
+  inheritedData = this.computeInheritance(...);
+}
+```
+
+**URL Parameters:**
+- `?inherit=1` (default): Enable parent-to-child inheritance
+- `?inherit=0`: Disable inheritance, compute all pixels from scratch
+
+**Logging for debugging:**
+```javascript
+// In worker, log inheritance stats:
+if (inheritedData) {
+  const total = config.dimsArea;
+  const inherited = inheritedData.diverged.length + inheritedData.converged.length;
+  console.log(`Board ${k}: inherited ${inherited}/${total} (${(100*inherited/total).toFixed(1)}%)`);
+}
+```
+
+## Testing Plan
+
+### Unit Tests
+
+Add to `tests/unit/precomputed-points.test.js`:
+
+**1. PrecomputedPoints class tests:**
+```javascript
+describe('PrecomputedPoints', () => {
+  test('constructor builds knownPixels set correctly', () => {
+    const data = {
+      diverged: [{index: 0, iter: 100}, {index: 5, iter: 100}],
+      converged: [{index: 10, iter: 50, z: [0.1, 0.2], p: 3}]
+    };
+    const pp = new PrecomputedPoints(data);
+    expect(pp.isPrecomputed(0)).toBe(true);
+    expect(pp.isPrecomputed(5)).toBe(true);
+    expect(pp.isPrecomputed(10)).toBe(true);
+    expect(pp.isPrecomputed(1)).toBe(false);
+    expect(pp.getPrecomputedCount()).toBe(3);
+  });
+
+  test('pendingReports groups by iteration', () => {
+    const data = {
+      diverged: [
+        {index: 0, iter: 100},
+        {index: 1, iter: 200},
+        {index: 2, iter: 100}
+      ],
+      converged: []
+    };
+    const pp = new PrecomputedPoints(data);
+    expect(pp.pendingReports.get(100).diverged).toEqual([0, 2]);
+    expect(pp.pendingReports.get(200).diverged).toEqual([1]);
+  });
+
+  test('flushAtIteration injects changes and updates board state', () => {
+    const data = {
+      diverged: [{index: 5, iter: 100}],
+      converged: [{index: 10, iter: 100, z: [0.1, 0.2], p: 3}]
+    };
+    const pp = new PrecomputedPoints(data);
+    const mockBoard = {
+      nn: new Array(20).fill(0),
+      di: 0,
+      un: 20,
+      changeList: [],
+      queueChanges(c) { this.changeList.push(c); }
+    };
+
+    pp.flushAtIteration(100, mockBoard);
+
+    expect(mockBoard.nn[5]).toBe(100);
+    expect(mockBoard.nn[10]).toBe(-100);
+    expect(mockBoard.di).toBe(1);
+    expect(mockBoard.un).toBe(18);
+    expect(mockBoard.changeList).toHaveLength(1);
+    expect(pp.pendingReports.has(100)).toBe(false);
+  });
+
+  test('flushAtIteration is idempotent for non-existent iterations', () => {
+    const pp = new PrecomputedPoints({diverged: [], converged: []});
+    const mockBoard = { nn: [], di: 0, un: 10, changeList: [], queueChanges() {} };
+    pp.flushAtIteration(999, mockBoard);
+    expect(mockBoard.un).toBe(10); // unchanged
+  });
+
+  test('isEmpty returns true when all pending flushed', () => {
+    const data = { diverged: [{index: 0, iter: 100}], converged: [] };
+    const pp = new PrecomputedPoints(data);
+    expect(pp.isEmpty()).toBe(false);
+    pp.flushAtIteration(100, { nn: [0], di: 0, un: 1, queueChanges() {} });
+    expect(pp.isEmpty()).toBe(true);
+  });
+});
+```
+
+**2. computeInheritance function tests:**
+```javascript
+describe('computeInheritance', () => {
+  test('returns empty for incomplete parent', () => {
+    const parent = { nn: new Array(100).fill(0), config: {dimsWidth: 10, dimsHeight: 10} };
+    const child = { config: {dimsWidth: 10, dimsHeight: 10} };
+    const result = computeInheritance(parent, child, 5);
+    expect(result.diverged).toHaveLength(0);
+    expect(result.converged).toHaveLength(0);
+  });
+
+  test('inherits uniform diverged regions', () => {
+    // 10x10 parent, all pixels diverged at iter 100
+    const parent = {
+      nn: new Array(100).fill(100),
+      config: {dimsWidth: 10, dimsHeight: 10}
+    };
+    const child = { config: {dimsWidth: 10, dimsHeight: 10} };
+    const result = computeInheritance(parent, child, 1);
+    // Inner 8x8 can be inherited (edges excluded for 9-neighbor check)
+    expect(result.diverged.length).toBeGreaterThan(0);
+    expect(result.diverged.every(d => d.iter === 100)).toBe(true);
+  });
+
+  test('does not inherit non-uniform regions', () => {
+    // Checkerboard pattern - no pixel has uniform neighbors
+    const parent = {
+      nn: new Array(100).fill(0).map((_, i) => (i % 2 === 0) ? 100 : 200),
+      config: {dimsWidth: 10, dimsHeight: 10}
+    };
+    const child = { config: {dimsWidth: 10, dimsHeight: 10} };
+    const result = computeInheritance(parent, child, 1);
+    expect(result.diverged).toHaveLength(0);
+  });
+
+  test('inherits converged pixels with z and period', () => {
+    const parent = {
+      nn: new Array(100).fill(-50),  // All converged at iter 50
+      convergedData: new Map(),
+      config: {dimsWidth: 10, dimsHeight: 10}
+    };
+    // Add converged data for inner pixels
+    for (let i = 0; i < 100; i++) {
+      parent.convergedData.set(i, {z: [0.1, 0.2], p: 3});
+    }
+    const child = { config: {dimsWidth: 10, dimsHeight: 10} };
+    const result = computeInheritance(parent, child, 1);
+    expect(result.converged.length).toBeGreaterThan(0);
+    expect(result.converged[0]).toMatchObject({iter: 50, z: [0.1, 0.2], p: 3});
+  });
+
+  test('coordinate mapping is correct for 5x zoom', () => {
+    // 10x10 parent, 50x50 child at 5x zoom
+    const parent = {
+      nn: new Array(100).fill(100),
+      config: {dimsWidth: 10, dimsHeight: 10}
+    };
+    const child = { config: {dimsWidth: 50, dimsHeight: 50} };
+    const result = computeInheritance(parent, child, 5);
+    // Center region of child should map to center of parent
+    // Verify some specific mappings
+    expect(result.diverged.some(d => d.index === 25 * 50 + 25)).toBe(true); // center
+  });
+});
+```
+
+### Integration Tests
+
+Add to `tests/integration/precomputed-inheritance.test.js`:
+
+**1. End-to-end inheritance test:**
+```javascript
+describe('Precomputed Inheritance', () => {
+  test('child view inherits from completed parent', async () => {
+    await page.goto(`file://${indexPath}?z=10&inherit=1`);
+
+    // Wait for first view to complete
+    await page.waitForFunction(() => {
+      const view = window.grid?.views[0];
+      return view && view.un === 0;
+    }, {timeout: 30000});
+
+    // Trigger zoom to create child view
+    await page.keyboard.press('Space');
+
+    // Wait for child to start
+    await page.waitForFunction(() => window.grid?.views[1]);
+
+    // Check that child has precomputed pixels
+    const stats = await page.evaluate(() => {
+      const child = window.grid.views[1];
+      // Count pixels that were immediately known (nn !== 0 before first iteration)
+      return {
+        total: child.config.dimsArea,
+        un: child.un,
+        precomputed: child.config.dimsArea - child.un - child.di - child.ch
+      };
+    });
+
+    // Expect significant inheritance (>30% for typical Mandelbrot view)
+    expect(stats.precomputed / stats.total).toBeGreaterThan(0.3);
+  });
+
+  test('inherit=0 disables inheritance', async () => {
+    await page.goto(`file://${indexPath}?z=10&inherit=0`);
+
+    // Wait for first view to complete
+    await page.waitForFunction(() => {
+      const view = window.grid?.views[0];
+      return view && view.un === 0;
+    }, {timeout: 30000});
+
+    // Trigger zoom
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => window.grid?.views[1]);
+
+    // Check that child starts with all pixels unknown
+    const initialUn = await page.evaluate(() => window.grid.views[1].un);
+    const total = await page.evaluate(() => window.grid.views[1].config.dimsArea);
+
+    expect(initialUn).toBe(total);  // No inheritance
+  });
+
+  test('inherited pixels render correctly', async () => {
+    await page.goto(`file://${indexPath}?z=10&inherit=1`);
+
+    // Complete first view
+    await page.waitForFunction(() => {
+      const view = window.grid?.views[0];
+      return view && view.un === 0;
+    }, {timeout: 30000});
+
+    // Capture parent canvas
+    const parentPixels = await page.evaluate(() => {
+      const canvas = document.querySelector('canvas');
+      const ctx = canvas.getContext('2d');
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      return Array.from(data.slice(0, 100)); // First 100 values
+    });
+
+    // Zoom and complete child
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => {
+      const view = window.grid?.views[1];
+      return view && view.un === 0;
+    }, {timeout: 60000});
+
+    // Child center should match parent center colors (for uniform regions)
+    const childPixels = await page.evaluate(() => {
+      const canvases = document.querySelectorAll('canvas');
+      const canvas = canvases[1];
+      const ctx = canvas.getContext('2d');
+      // Sample center region
+      const cx = Math.floor(canvas.width / 2);
+      const cy = Math.floor(canvas.height / 2);
+      const data = ctx.getImageData(cx-5, cy-5, 10, 10).data;
+      return Array.from(data.slice(0, 100));
+    });
+
+    // Verify colors are reasonable (not black/uncomputed)
+    const hasColor = childPixels.some((v, i) => i % 4 < 3 && v > 0);
+    expect(hasColor).toBe(true);
+  });
+
+  test('visual continuity - precomputed pixels appear at correct iteration', async () => {
+    await page.goto(`file://${indexPath}?z=10&inherit=1&debug=t`);
+
+    // Complete parent
+    await page.waitForFunction(() => {
+      const view = window.grid?.views[0];
+      return view && view.un === 0;
+    }, {timeout: 30000});
+
+    // Start child and capture early state
+    await page.keyboard.press('Space');
+
+    // Wait for child to process a few iterations
+    await page.waitForFunction(() => {
+      const view = window.grid?.views[1];
+      return view && view.it > 50;
+    });
+
+    // Check that some pixels are already known at low iteration counts
+    const earlyKnown = await page.evaluate(() => {
+      const view = window.grid.views[1];
+      let knownCount = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] !== 0 && Math.abs(view.nn[i]) <= view.it) {
+          knownCount++;
+        }
+      }
+      return knownCount;
+    });
+
+    expect(earlyKnown).toBeGreaterThan(0);
+  });
+});
+```
+
+**2. Board-specific integration tests:**
+```javascript
+describe('Inheritance with different board types', () => {
+  const boardTypes = ['cpu', 'gpu', 'gpuz', 'adaptive'];
+
+  boardTypes.forEach(board => {
+    test(`${board} board handles inherited data correctly`, async () => {
+      await page.goto(`file://${indexPath}?z=10&board=${board}&inherit=1`);
+
+      // Complete parent and zoom
+      await page.waitForFunction(() => {
+        const view = window.grid?.views[0];
+        return view && view.un === 0;
+      }, {timeout: 60000});
+
+      await page.keyboard.press('Space');
+
+      // Wait for child to complete
+      await page.waitForFunction(() => {
+        const view = window.grid?.views[1];
+        return view && view.un === 0;
+      }, {timeout: 120000});
+
+      // Verify final state is consistent
+      const childState = await page.evaluate(() => {
+        const view = window.grid.views[1];
+        return {
+          un: view.un,
+          di: view.di,
+          total: view.config.dimsArea,
+          allResolved: view.nn.every(n => n !== 0)
+        };
+      });
+
+      expect(childState.un).toBe(0);
+      expect(childState.di + childState.ch).toBeLessThanOrEqual(childState.total);
+    });
+  });
+});
+```
+
+## Benchmark Plan
+
+### Test Scenario
+
+Use the default starting view (z=1, centered on cardioid) with a single 5× zoom:
+
+```bash
+node tests/benchmark-inheritance.js
+```
+
+### Metrics
+
+Run 5 times each with `?inherit=1` and `?inherit=0`, measuring:
+
+1. **Inheritance rate**: `inherited_pixels / total_pixels`
+2. **Child completion time**: `view.boardEndTime - view.boardStartTime`
+3. **Speedup**: `time_without / time_with`
+
+### Expected Output
+
+```
+=== Inheritance Benchmark ===
+
+Without inheritance (baseline):
+  Child completion: 1250ms, 1180ms, 1320ms, 1210ms, 1275ms
+  Mean: 1247ms
+
+With inheritance:
+  Inherited: 68.2% (1842/2700 pixels)
+  Child completion: 485ms, 512ms, 478ms, 495ms, 502ms
+  Mean: 494ms
+
+Speedup: 2.52x
+```
+
+### Success Criteria
+
+- Inheritance rate > 50% for default view
+- Speedup > 1.5× with inheritance enabled
+- No visual differences between `inherit=0` and `inherit=1` final renders
+
 ## Open Questions
 
 1. **Edge handling**: Should we use a larger neighbor window (5×5) for more conservative inheritance near boundaries?
@@ -301,3 +691,5 @@ The sparse `inheritedData` format is efficient:
 3. **Zoom factor variations**: The 9-neighbor heuristic assumes moderate zoom. For very large zooms (>10×), may need larger windows.
 
 4. **Serialization**: When boards are serialized/transferred between workers, should precomputed state be preserved?
+
+5. **Inheritance chain**: Should grandchild views inherit from grandparent if parent is incomplete?
