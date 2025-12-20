@@ -136,20 +136,15 @@ and debugging the different computation engines.
 ?board=gpu       # GpuBoard (WebGPU float32)
 ?board=ddz       # DDZhuoranBoard (CPU DD precision with rebasing)
 ?board=gpuz      # GpuZhuoranBoard (GPU DD precision with rebasing)
-?board=pert      # PerturbationBoard (CPU DD precision)
-?board=qdpert    # QDPerturbationBoard (CPU QD precision)
 ?board=qdz       # QDZhuoranBoard (CPU QD precision with rebasing)
 ?board=adaptive  # AdaptiveGpuBoard (GPU QD precision with adaptive scaling)
-?board=qdcpu     # QDCpuBoard (CPU QD precision, no perturbation)
+?board=qdcpu     # QDCpuBoard (CPU QD precision, no perturbation; for testing)
 ```
 
-**When to use each board:**
-- `cpu` - Reference implementation, always accurate
-- `gpu` - Fast, good for z < 10^6
-- `ddz` - CPU perturbation with DD precision, good for z < 10^15
-- `gpuz` - GPU perturbation with DD precision, fast for z < 10^15
-- `qdz` - CPU perturbation with QD precision, for z < 10^30
-- `adaptive` - GPU with QD precision and adaptive per-pixel scaling, for z > 10^15
+**When to use each board (auto-selection heuristics):**
+- GPU path (if available): `gpu` for shallow (pixel size > ~1e-7), `gpuz` for medium (pixel size > ~1e-30), `adaptive` for ultra-deep (pixel size <= ~1e-30).
+- CPU fallback: `cpu` for shallow (pixel size > ~1e-15), `ddz` for medium (pixel size > ~1e-30), `qdz` for ultra-deep (pixel size <= ~1e-30).
+- `qdcpu` is not auto-selected; use only when you want direct QD iteration (slower, stricter epsilon) for testing.
 
 ## Localization
 

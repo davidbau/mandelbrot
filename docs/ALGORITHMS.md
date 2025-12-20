@@ -58,14 +58,19 @@ Originally, powers of 2 were used for checkpoint intervals. The problem was that
 
 ### Epsilon Thresholds
 
-Two epsilon values control detection sensitivity, and they scale with `pixelSize` to remain meaningful at any zoom level. At deep zooms, a fixed epsilon would be far too loose.
+Two epsilon values control detection sensitivity, and they scale with `pixelSize` to remain meaningful at any zoom level. In the current implementation, they are set per board and are not clamped:
 
 ```javascript
-this.epsilon = Math.min(1e-12, pixelSize / 10);   // Strict: confirmed convergence
-this.epsilon2 = Math.min(1e-9, pixelSize * 10);   // Loose: probable convergence
+// Base Board (CPU, GPU perturbation)
+this.epsilon  = pixelSize / 10; // Strict: confirmed convergence
+this.epsilon2 = pixelSize * 10; // Loose: probable convergence
+
+// QDCpuBoard (direct QD iteration needs much tighter thresholds)
+this.epsilon  = pixelSize * 1e-20;
+this.epsilon2 = pixelSize * 1e-15;
 ```
 
-The strict `epsilon` is a fraction of the pixel size to confirm the orbit has settled well within a pixel's area. The looser `epsilon2` is larger than a pixel to generously detect orbits that are merely approaching a cycle.
+The strict `epsilon` is a fraction of the pixel size to confirm the orbit has settled well within a pixel's area. The looser `epsilon2` is larger than a pixel to generously detect orbits that are merely approaching a cycle. Tighter thresholds are used for direct QD iteration to avoid false convergence at extreme zooms.
 
 When `|z - checkpoint| < epsilon2`, we note the iteration as a candidate period. When it drops below `epsilon`, we confirm convergence. This two-stage approach catches gradual, spiraling convergence earlier while avoiding false positives.
 
