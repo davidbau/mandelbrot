@@ -304,4 +304,215 @@ describe('Inheritance color behavior', () => {
 
     await page.close();
   }, 180000);
+
+  test('child view should not have color stripes from precomputed pixels', async () => {
+    // Stripes appear as sharp color transitions between precomputed (green) and
+    // GPU-computed (pink) pixels. This test zooms in using 'i' and checks for
+    // excessive warm/cool transitions in the rendered canvas.
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1470, height: 827 });
+
+    // Use neon theme for clear warm/cool distinction
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2`, {
+      waitUntil: 'domcontentloaded'
+    });
+
+    // Wait for view 0 to reach 90% completion
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views[0];
+      if (!view) return false;
+      let done = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] !== 0) done++;
+      }
+      return done / view.nn.length >= 0.9;
+    }, { timeout: 120000 });
+
+    // Wait for no update process before pressing key
+    await page.waitForFunction(() => !window.explorer?.grid?.currentUpdateProcess, { timeout: 30000 });
+
+    // Press 'i' to zoom in
+    await page.keyboard.press('i');
+
+    // Wait for view 1 to exist
+    await page.waitForFunction(() => window.explorer?.grid?.views?.length >= 2, { timeout: 10000 });
+
+    // Wait for view 1 to reach 90% completion
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views[1];
+      if (!view) return false;
+      let done = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] !== 0) done++;
+      }
+      return done / view.nn.length >= 0.9;
+    }, { timeout: 120000 });
+
+    // Get pixel colors from a horizontal row in the middle of view 1
+    const result = await page.evaluate(() => {
+      const canvas = window.explorer.grid.canvas(1);
+      const ctx = canvas.getContext('2d');
+
+      // Get middle row of the canvas
+      const middleY = Math.floor(canvas.height / 2);
+      const imageData = ctx.getImageData(0, middleY, canvas.width, 1);
+      const pixels = imageData.data;
+
+      // Count sharp transitions between warm (r>g) and cool (g>r) colors
+      let sharpTransitions = 0;
+      let prevWarm = null;
+
+      for (let x = 0; x < canvas.width; x++) {
+        const idx = x * 4;
+        const r = pixels[idx];
+        const g = pixels[idx + 1];
+        const currWarm = r > g;
+
+        if (prevWarm !== null && prevWarm !== currWarm) {
+          sharpTransitions++;
+        }
+        prevWarm = currWarm;
+      }
+
+      // Count warm vs cool pixels
+      let warmCount = 0, coolCount = 0;
+      for (let x = 0; x < canvas.width; x++) {
+        const idx = x * 4;
+        if (pixels[idx] > pixels[idx + 1]) warmCount++;
+        else coolCount++;
+      }
+
+      return {
+        canvasWidth: canvas.width,
+        sharpTransitions,
+        warmCount,
+        coolCount
+      };
+    });
+
+    console.log('Stripe analysis:', result);
+
+    // In a smooth gradient, there should be very few sharp transitions
+    // between warm and cool colors. Stripes cause many transitions.
+    // Allow up to 10 transitions for normal gradient boundaries.
+    expect(result.sharpTransitions).toBeLessThan(10);
+
+    await page.close();
+  }, 180000);
+
+  test('third view (2 zooms) should not have stripes or transparent pixels', async () => {
+    // After pressing 'i' twice, the 3rd view should still have smooth colors
+    // with no stripes or transparent pixels from unflushed precomputed data.
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1470, height: 827 });
+
+    // Use neon theme for clear warm/cool distinction
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2`, {
+      waitUntil: 'domcontentloaded'
+    });
+
+    // Wait for view 0 to reach 90% completion
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views[0];
+      if (!view) return false;
+      let done = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] !== 0) done++;
+      }
+      return done / view.nn.length >= 0.9;
+    }, { timeout: 120000 });
+
+    // Wait for no update process before pressing key
+    await page.waitForFunction(() => !window.explorer?.grid?.currentUpdateProcess, { timeout: 30000 });
+
+    // Press 'i' to zoom in - create view 1
+    await page.keyboard.press('i');
+    await page.waitForFunction(() => window.explorer?.grid?.views?.length >= 2, { timeout: 10000 });
+
+    // Wait for view 1 to reach 90% completion
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views[1];
+      if (!view) return false;
+      let done = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] !== 0) done++;
+      }
+      return done / view.nn.length >= 0.9;
+    }, { timeout: 120000 });
+
+    // Wait for no update process before pressing key again
+    await page.waitForFunction(() => !window.explorer?.grid?.currentUpdateProcess, { timeout: 30000 });
+
+    // Press 'i' again to zoom in - create view 2
+    await page.keyboard.press('i');
+    await page.waitForFunction(() => window.explorer?.grid?.views?.length >= 3, { timeout: 10000 });
+
+    // Wait for view 2 to reach 90% completion
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views[2];
+      if (!view) return false;
+      let done = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] !== 0) done++;
+      }
+      return done / view.nn.length >= 0.9;
+    }, { timeout: 120000 });
+
+    // Get pixel colors from a horizontal row in the middle of view 2
+    const result = await page.evaluate(() => {
+      const canvas = window.explorer.grid.canvas(2);
+      const ctx = canvas.getContext('2d');
+
+      // Get middle row of the canvas
+      const middleY = Math.floor(canvas.height / 2);
+      const imageData = ctx.getImageData(0, middleY, canvas.width, 1);
+      const pixels = imageData.data;
+
+      // Count sharp transitions between warm (r>g) and cool (g>r) colors
+      let sharpTransitions = 0;
+      let prevWarm = null;
+      let transparentCount = 0;
+
+      for (let x = 0; x < canvas.width; x++) {
+        const idx = x * 4;
+        const r = pixels[idx];
+        const g = pixels[idx + 1];
+        const a = pixels[idx + 3];
+
+        if (a < 255) transparentCount++;
+
+        const currWarm = r > g;
+        if (prevWarm !== null && prevWarm !== currWarm) {
+          sharpTransitions++;
+        }
+        prevWarm = currWarm;
+      }
+
+      // Count warm vs cool pixels
+      let warmCount = 0, coolCount = 0;
+      for (let x = 0; x < canvas.width; x++) {
+        const idx = x * 4;
+        if (pixels[idx] > pixels[idx + 1]) warmCount++;
+        else coolCount++;
+      }
+
+      return {
+        canvasWidth: canvas.width,
+        sharpTransitions,
+        warmCount,
+        coolCount,
+        transparentCount
+      };
+    });
+
+    console.log('View 2 stripe analysis:', result);
+
+    // The 3rd view should have all warm colors with just 2 transitions
+    // (3 color bands). No green/cool pixels and no transparent pixels.
+    expect(result.sharpTransitions).toBeLessThanOrEqual(2);
+    expect(result.coolCount).toBe(0);
+    expect(result.transparentCount).toBe(0);
+
+    await page.close();
+  }, 180000);
 });

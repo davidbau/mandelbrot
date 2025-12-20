@@ -717,3 +717,166 @@ When implementing this plan, work autonomously:
 4. **Serialization**: `PrecomputedPoints` state must be included in board serialization. When a board is transferred between workers, its precomputed data goes with it.
 
 5. **Inheritance chain**: Only inherit from immediate parent. No grandparent inheritance for now.
+
+---
+
+## Detailed Design: Reporting Strategy
+
+### Invariants to Maintain
+
+1. **Monotonic iteration reporting**: Pixels must be reported in non-decreasing iteration order. If iteration 100 is reported, no later report can be at iteration < 100.
+
+2. **Each pixel reported exactly once**: Every pixel index appears in exactly one changeList entry.
+
+3. **Consistent histogram (no stripes)**: At each iteration, all reported pixels contribute to the same histogram entry with the same fracK value.
+
+4. **Accurate progress tracking**:
+   - `unP` = pixels not yet reported to changeList = `unC + pendingPrecomputed`
+   - `unC` = GPU pixels still computing = `activeCount - deadSinceCompaction`
+   - `pendingPrecomputed` = precomputed pixels not yet flushed
+
+### Equivalence Classes for 9-Point Safety Check
+
+The 9-point uniformity check ensures safe inheritance by verifying that a pixel and all 8 neighbors are in the same "equivalence class":
+
+**For diverged (escaped) pixels:**
+- All 9 pixels must have diverged at the SAME iteration count
+- If center diverged at iteration 100, all 8 neighbors must also have nn[i] = 100
+- Rationale: If neighbors diverged at different iterations, the boundary may cross through this region
+
+**For converged (periodic) pixels:**
+- All 9 pixels must have converged with the SAME period
+- If center has period 3, all 8 neighbors must also be converged with period 3
+- Rationale: Different periods indicate different attractors or boundary regions
+
+**Mixed neighborhoods:**
+- If any neighbor differs in type (diverged vs converged) or value, do NOT inherit
+- This pixel is in a transition zone and must be computed fresh
+
+### Diverged vs Converged: Key Differences
+
+**Diverged (escaped) pixels:**
+- `nn[i] > 0`: Positive iteration count when |z| exceeded escape radius
+- Coloring uses iteration count + fractional escape (smooth coloring)
+- Inheritance passes: `{index, iter}`
+- Safe to inherit: All neighbors escaped at same iteration
+
+**Converged (periodic) pixels:**
+- `nn[i] < 0`: Negative iteration count when periodic orbit detected
+- Coloring uses: period (cycle length) + position within cycle (z value)
+- Inheritance passes: `{index, iter, z: [zr, zi], p: period}`
+- Safe to inherit: All neighbors converged with same period
+- z value is needed for interior coloring based on orbit position
+
+### Reporting Algorithm
+
+**Phase 1: GPU produces results**
+
+When GPU completes a batch at iterations `[i1, i2, i3, ...]`:
+
+1. Collect GPU results into `pixelsByIteration` and `convergedByIteration` maps
+2. For each iteration i in sorted order (ascending):
+   a. Get GPU diverged pixels at iteration i
+   b. Get GPU converged pixels at iteration i
+   c. Get precomputed pixels at iteration i (exact match)
+   d. Report all together in one changeList entry
+
+**Phase 2: Precomputed at iterations BELOW GPU min**
+
+After Phase 1, any precomputed at iterations < minGpuIter haven't been reported.
+Strategy: Report them all at minGpuIter to share its fracK.
+
+This violates the "true" iteration, but maintains visual consistency (no stripes).
+
+**Phase 3: Precomputed at iterations ABOVE GPU max**
+
+When GPU finishes all work (`activeRemaining = 0`):
+- Remaining precomputed are at iterations > any GPU iteration
+- Report them at their actual iterations (in ascending order)
+- Or report all at maxGpuIter for consistency
+
+**Phase 4: All precomputed, no GPU (`unC = 0`)**
+
+Special case: Every pixel was precomputed.
+- No GPU work at all
+- Report all precomputed at their actual iterations (in order)
+- Or report all at iteration 1 for simplicity
+
+### Edge Case: Deep Interior (Slow GPU Progress)
+
+In deep interior regions, GPU may run many iterations before any pixel finishes.
+During this time:
+- `pendingPrecomputed` stays high
+- `unP = unC + pendingPrecomputed` is correct
+- No reports are sent until first GPU result
+
+This is correct behavior: precomputed will be reported when GPU produces its first result.
+
+### Algorithm Pseudocode
+
+```
+processComputeResults(gpuResults):
+    // Collect GPU results by iteration
+    for each gpuPixel in gpuResults:
+        if diverged: add to pixelsByIteration[iter]
+        if converged: add to convergedByIteration[iter]
+
+    gpuIters = sorted(union(pixelsByIteration.keys, convergedByIteration.keys))
+    minGpuIter = gpuIters.first or null
+
+    // PHASE 1 & 2: First GPU result triggers precomputed flush
+    if minGpuIter != null and not precomputedFlushed:
+        // Report ALL precomputed at minGpuIter
+        allPrecomputed = precomputed.extractAll()
+        report(minGpuIter, allPrecomputed)
+        precomputedFlushed = true
+
+    // Report GPU results
+    for iter in gpuIters:
+        diverged = pixelsByIteration[iter] or []
+        converged = convergedByIteration[iter] or []
+        report(iter, {diverged, converged})
+
+    // PHASE 3: Cleanup when GPU done
+    if activeRemaining == 0 and precomputed.hasPending():
+        // Report remaining at their actual iterations
+        for iter in sorted(precomputed.pendingIterations):
+            report(iter, precomputed.extractAt(iter))
+        // Or: report all at maxGpuIter
+
+report(iter, {diverged, converged}):
+    for idx in diverged: nn[idx] = iter; di++
+    for c in converged: nn[c.index] = -iter; pp[c.index] = c.p
+    changeList.push({iter, nn: diverged, vv: converged})
+    updateSize += diverged.length + converged.length
+```
+
+### Verification: Invariants Are Maintained
+
+1. **Monotonic**:
+   - Phase 1&2: All precomputed at minGpuIter, then GPU iters in order ✓
+   - Phase 3: Remaining precomputed in ascending order ✓
+
+2. **Each pixel once**:
+   - `extractAll()` clears all precomputed
+   - GPU results checked via `if nn[idx] != 0: continue`
+   - No double-reporting ✓
+
+3. **Consistent histogram**:
+   - All precomputed share minGpuIter's fracK ✓
+   - GPU pixels at same iter reported together ✓
+
+4. **Accurate progress**:
+   - `unP = unC + pendingPrecomputed`
+   - After extractAll: pendingPrecomputed = 0
+   - unP = unC (GPU work remaining) ✓
+
+---
+
+## Open Questions
+
+1. **Stripe detection**: How do we verify no stripes? The current test checks warm/cool transitions in a pixel row. Is this sufficient?
+
+2. **Period uniformity check**: Current code checks if neighbors have same period. Should we also check z values are close?
+
+3. **Very deep zoom**: At zoom > 1e50, float64 may lose precision in coordinate mapping. Does this cause misalignment?
