@@ -4875,6 +4875,16 @@ class Board {
   // Derived scalar property
   get pixelSize() { return this.size / this.config.dimsWidth; }
 
+  // Epsilon escalation: at high iteration counts, relax convergence thresholds
+  // At 1M iterations: no effect, at 100M: 10x, at 10B: 100x
+  getEscalatedEpsilon(iter) {
+    const escalation = Math.max(1, Math.sqrt(iter) / 1000);
+    return {
+      epsilon: this.epsilon * escalation,
+      epsilon2: this.epsilon2 * escalation
+    };
+  }
+
   async serialize() {
     return {
       type: this.constructor.name,
@@ -5140,9 +5150,10 @@ class CpuBoard extends Board {
     const rb = this.bb[m2];
     const jb = this.bb[m2i];
     const db = Math.abs(rb - ra) + Math.abs(jb - ja);  // distance from checkpoint
-    if (db <= this.epsilon2) {
+    const { epsilon, epsilon2 } = this.getEscalatedEpsilon(this.it);
+    if (db <= epsilon2) {
       if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
-      if (db <= this.epsilon) {
+      if (db <= epsilon) {
         this.nn[m] = -this.it;
         if (this.inspike(this.cc[m2], this.cc[m2i]) && this.ch > 0) {
           this.ch -= 1;
@@ -5381,9 +5392,10 @@ class QDCpuBoard extends Board {
     const diffI = toQDSub(finalZi, bbI);
     const db = Math.abs(diffR[0] + diffR[1] + diffR[2] + diffR[3]) +
                Math.abs(diffI[0] + diffI[1] + diffI[2] + diffI[3]);
-    if (db <= this.epsilon2) {
+    const { epsilon, epsilon2 } = this.getEscalatedEpsilon(this.it);
+    if (db <= epsilon2) {
       if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
-      if (db <= this.epsilon) {
+      if (db <= epsilon) {
         this.nn[m] = -this.it;
         const cR = this.cc[m8] + this.cc[m8+1] + this.cc[m8+2] + this.cc[m8+3];
         const cI = this.cc[m8+4] + this.cc[m8+5] + this.cc[m8+6] + this.cc[m8+7];
@@ -5701,9 +5713,10 @@ class PerturbationBoard extends Board {
     ArddAbsSub(tt, 2, bj1, bj2, nz[m4+2], nz[m4+3]);// 2: abs(nzj - bj)
     ArddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);     // 4: db = abs(nzr-br)+abs(nzj-bj)
     const db = tt[4] + tt[5]  // distance from checkpoint
-    if (db <= this.epsilon2) {
+    const { epsilon, epsilon2 } = this.getEscalatedEpsilon(this.it);
+    if (db <= epsilon2) {
       if (!this.pp[m]) { this.pp[m] = this.it; }  // Record iter when first detected
-      if (db <= this.epsilon) {
+      if (db <= epsilon) {
         this.nn[m] = -this.it;
         if (this.inspikeDDA(cr1, cr2, cj1, cj2) && this.ch > 0) {
           this.ch -= 1;
@@ -6038,9 +6051,10 @@ class QDPerturbationBoard extends Board {
     ArqdAbsSub(tt, 4, bj1, bj2, this.zz[m8+4], this.zz[m8+5]);
     ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3], tt[4], tt[5], tt[6], tt[7]);
     const db = tt[8] + tt[9];
-    if (db <= this.epsilon2) {
+    const { epsilon, epsilon2 } = this.getEscalatedEpsilon(this.it);
+    if (db <= epsilon2) {
       if (!this.pp[m]) { this.pp[m] = this.it; }
-      if (db <= this.epsilon) {
+      if (db <= epsilon) {
         this.nn[m] = -this.it;
         if (this.inspikeDDA(cr1, cr2, cj1, cj2) && this.ch > 0) {
           this.ch -= 1;
@@ -6804,11 +6818,12 @@ class CpuZhuoranBaseBoard extends Board {
         const totalDiffI = this.threadDeltaIm[index] + dzDiffI;
         const db = Math.max(Math.abs(totalDiffR), Math.abs(totalDiffI));
 
-        if (db <= this.epsilon2) {
+        const { epsilon, epsilon2 } = this.getEscalatedEpsilon(this.it);
+        if (db <= epsilon2) {
           if (!this.pp[index]) {
             this.pp[index] = this.it - 1;
           }
-          if (db <= this.epsilon) {
+          if (db <= epsilon) {
             return -1;  // Converged via threading!
           }
         }
@@ -7135,7 +7150,7 @@ class GpuBaseBoard extends Board {
     this._readPixelBufferPromise = null;  // Lock for readPixelBuffer
     this.effort = 10;  // Default for GPU boards (~10× faster than CPU), overridden by subclasses
     this.minBatchIters = 17;  // GPU boards need minimum iterations per batch to amortize overhead
-    this.maxBatchIters = 99991;  // Cap to avoid very long batches with few pixels
+    this.maxBatchIters = 134567;  // Cap to avoid very long batches with few pixels
   }
 
   checkSpike(size, re, im) {
@@ -8071,6 +8086,11 @@ class SparseGpuBoard extends GpuBaseBoard {
 
         var next_checkpoint_idx = 0u;
 
+        // Escalate epsilon at high iteration counts: at 1M no effect, at 100M 10x, at 10B 100x
+        let escalation = max(1.0, sqrt(f32(iter)) / 1000.0);
+        let epsilon = params.epsilon * escalation;
+        let epsilon2 = params.epsilon2 * escalation;
+
         for (var i = 0u; i < params.iterations_per_batch; i++) {
           if (next_checkpoint_idx < params.checkpoint_count) {
             var checkpoint_offset = 0u;
@@ -8115,11 +8135,11 @@ class SparseGpuBoard extends GpuBaseBoard {
           let dr = zr - base_r;
           let di = zi - base_i;
           let db = abs(dr) + abs(di);
-          if (db <= params.epsilon2) {
+          if (db <= epsilon2) {
             if (p == 0u) {
               p = iter;
             }
-            if (db <= params.epsilon) {
+            if (db <= epsilon) {
               pixels[active_idx].status = 2u;
               break;
             }
@@ -9074,8 +9094,12 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuBaseBoard) {
 
         // Convergence thresholds scale with pixel size for deep zooms
         // GPU uses float32 precision, so thresholds must be larger than CPU's float64
-        let epsilon = params.pixel_size / 10.0;   // Final convergence threshold
-        let epsilon2 = params.pixel_size * 10.0;  // Getting close threshold
+        let epsilon_base = params.pixel_size / 10.0;   // Final convergence threshold
+        let epsilon2_base = params.pixel_size * 10.0;  // Getting close threshold
+        // Escalate epsilon at high iteration counts: at 1M no effect, at 100M 10x, at 10B 100x
+        let escalation = max(1.0, sqrt(f32(iter)) / 1000.0);
+        let epsilon = epsilon_base * escalation;
+        let epsilon2 = epsilon2_base * escalation;
 
         // Track next checkpoint using O(1) counter for adaptive checkpoints
         var next_checkpoint_idx = 0u;
@@ -10271,8 +10295,12 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuBaseBoard) {
         let dci = pixels[index].dci;
 
         // Convergence thresholds - scaled by initialScale for comparison
-        let epsilon_actual = params.pixel_size / 10.0;
-        let epsilon2_actual = params.pixel_size * 10.0;
+        let epsilon_base = params.pixel_size / 10.0;
+        let epsilon2_base = params.pixel_size * 10.0;
+        // Escalate epsilon at high iteration counts: at 1M no effect, at 100M 10x, at 10B 100x
+        let escalation = max(1.0, sqrt(f32(iter)) / 1000.0);
+        let epsilon_actual = epsilon_base * escalation;
+        let epsilon2_actual = epsilon2_base * escalation;
         // Convert to initialScale for scaled comparisons
         let epsilon = ldexp(epsilon_actual, -params.initial_scale);
         let epsilon2 = ldexp(epsilon2_actual, -params.initial_scale);
