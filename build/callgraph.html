@@ -244,6 +244,7 @@
     let playInterval = null;
     let simulation = null;
     let zoomBehavior = null;
+    let overcrowdCheckTimeout = null;
 
     // Claude badge SVG for co-authored commits
     const claudeBadge = `<span class="coauthor-icon claude-icon" title="Co-authored with Claude">
@@ -631,7 +632,13 @@
       simulation.nodes(nodes);
       simulation.force('link').links(edges);
       simulation.alpha(0.3).restart();
-      simulation.on('end', () => adjustViewIfOvercrowded(nodes, width, height));
+      simulation.on('end', () => adjustViewIfOvercrowded(width, height));
+      if (!overcrowdCheckTimeout) {
+        overcrowdCheckTimeout = setTimeout(() => {
+          overcrowdCheckTimeout = null;
+          adjustViewIfOvercrowded(width, height);
+        }, 600);
+      }
 
       simulation.on('tick', () => {
         linkMerge.attr('d', d => {
@@ -720,8 +727,10 @@
     }
 
     // If stable nodes settle outside the viewport while playing, gently zoom out
-    function adjustViewIfOvercrowded(nodes, width, height) {
-      if (!isPlaying || !zoomBehavior) return;
+    function adjustViewIfOvercrowded(width, height) {
+      if (!isPlaying || !zoomBehavior || !simulation) return;
+      const nodes = simulation.nodes();
+      if (!nodes || nodes.length === 0) return;
       const svg = d3.select('svg');
       const transform = d3.zoomTransform(svg.node());
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -739,12 +748,12 @@
       if (!hasStable) return;
       const halfW = width / 2;
       const halfH = height / 2;
-      const marginX = halfW * 0.9;
-      const marginY = halfH * 0.9;
+      const marginX = halfW;
+      const marginY = halfH;
       const overflow = (minX < -marginX) || (maxX > marginX) || (minY < -marginY) || (maxY > marginY);
       if (overflow) {
-        const targetScale = transform.k * 0.98; // ~2% zoom out
-        svg.transition().duration(400).call(zoomBehavior.scaleTo, targetScale);
+        const targetScale = transform.k * 0.95; // ~5% zoom out
+        svg.transition().duration(600).call(zoomBehavior.scaleTo, targetScale);
       }
     }
 
