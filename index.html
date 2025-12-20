@@ -10936,22 +10936,7 @@ function ddAdd(a, b) {
   return fast2Sum(v1, v2 + l2);
 }
 
-function ddMul(a, b) {
-  let [a1, a0] = a;
-  let [b1, b0] = b;
-  let [p1, p2] = twoProduct(a1, b1);
-  return fast2Sum(p1, p2 + a1 * b0 + b1 * a0);
-}
 
-function ddDouble(a) {
-  return [a[0] * 2, a[1] * 2];
-}
-
-function ddSquare(a) {
-  let [a1, a0] = a;
-  let [p1, p2] = twoSquare(a1);
-  return fast2Sum(p1, p2 + 2 * a1 * a0);
-}
 
 
 function ddNegate(a) {
