@@ -218,6 +218,17 @@ This helps visualize which pixels are being inherited from the parent view.
 - **Best case** (deep in cardioid): 80-90% inherited
 - **Worst case** (chaotic boundary): <10% inherited
 
+### Inheritance Scan Optimizations
+
+- Precompute parent uniformity in the parent rectangle once, then reuse it for child pixels.
+- Cache child→parent index mapping per row/column to avoid repeated coordinate math.
+- Iterate parent pixels and fill child runs that map to the same parent index.
+
+### Microbenchmark Helper
+
+`tests/debug-inheritance-timing.js` measures `computeInheritance` via `page.evaluate`
+for a couple of fixed points. Edit the script if you need different inputs.
+
 ### Memory Efficiency
 
 The sparse TypedArray format is efficient:

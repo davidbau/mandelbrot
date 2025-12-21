@@ -1682,88 +1682,155 @@ class Grid {
 
     const diverged = [];
     const converged = [];
+    const uniformCache = new Int8Array(parentWidth * parentHeight);
+    const parentPxByCx = new Int32Array(childWidth);
+    const parentPyByCy = new Int32Array(childHeight);
+    const childXStart = new Int32Array(parentWidth).fill(-1);
+    const childXEnd = new Int32Array(parentWidth).fill(-1);
+    const childYStart = new Int32Array(parentHeight).fill(-1);
+    const childYEnd = new Int32Array(parentHeight).fill(-1);
 
-    // For each child pixel, find corresponding parent pixel by complex coordinates
+    const scale = childPixelSize / parentPixelSize;
+    const xBase = (childCenterRe - parentCenterRe) / parentPixelSize +
+      parentWidth / 2 - (childWidth / 2) * scale;
+    const yBase = parentHeight / 2 - (childCenterIm - parentCenterIm) / parentPixelSize -
+      (childHeight / 2) * scale;
+    for (let cx = 0; cx < childWidth; cx++) {
+      const px = Math.floor(xBase + cx * scale);
+      parentPxByCx[cx] = px;
+      if (px >= 0 && px < parentWidth) {
+        if (childXStart[px] === -1) childXStart[px] = cx;
+        childXEnd[px] = cx;
+      }
+    }
     for (let cy = 0; cy < childHeight; cy++) {
-      for (let cx = 0; cx < childWidth; cx++) {
-        const childIdx = cy * childWidth + cx;
+      const py = Math.floor(yBase + cy * scale);
+      parentPyByCy[cy] = py;
+      if (py >= 0 && py < parentHeight) {
+        if (childYStart[py] === -1) childYStart[py] = cy;
+        childYEnd[py] = cy;
+      }
+    }
 
-        // Compute complex coordinates of this child pixel using the same convention as compute.
-        const childCoord = pixelToComplexCoords(
-          childCenterRe, childCenterIm, childView.size, childWidth, childHeight, cx, cy);
+    const corners = [
+      pixelToComplexCoords(childCenterRe, childCenterIm, childView.size, childWidth, childHeight, 0, 0),
+      pixelToComplexCoords(childCenterRe, childCenterIm, childView.size, childWidth, childHeight, childWidth - 1, 0),
+      pixelToComplexCoords(childCenterRe, childCenterIm, childView.size, childWidth, childHeight, 0, childHeight - 1),
+      pixelToComplexCoords(childCenterRe, childCenterIm, childView.size, childWidth, childHeight, childWidth - 1, childHeight - 1)
+    ];
+    let minPxFloat = Infinity;
+    let maxPxFloat = -Infinity;
+    let minPyFloat = Infinity;
+    let maxPyFloat = -Infinity;
+    for (const corner of corners) {
+      const parentCoord = complexToPixelCoords(
+        parentCenterRe, parentCenterIm, parentView.size, parentWidth, parentHeight,
+        corner.re, corner.im);
+      minPxFloat = Math.min(minPxFloat, parentCoord.px);
+      maxPxFloat = Math.max(maxPxFloat, parentCoord.px);
+      minPyFloat = Math.min(minPyFloat, parentCoord.py);
+      maxPyFloat = Math.max(maxPyFloat, parentCoord.py);
+    }
+    const minPx = Math.max(1, Math.floor(minPxFloat));
+    const maxPx = Math.min(parentWidth - 2, Math.floor(maxPxFloat));
+    const minPy = Math.max(1, Math.floor(minPyFloat));
+    const maxPy = Math.min(parentHeight - 2, Math.floor(maxPyFloat));
 
-        // Map complex coordinates to parent pixel coordinates
-        const parentCoord = complexToPixelCoords(
-          parentCenterRe, parentCenterIm, parentView.size, parentWidth, parentHeight,
-          childCoord.re, childCoord.im);
-        const pxFloat = parentCoord.px;
-        const pyFloat = parentCoord.py;
-        const px = Math.floor(pxFloat);
-        const py = Math.floor(pyFloat);
+    const rangeMinPx = Math.max(0, minPx - 1);
+    const rangeMaxPx = Math.min(parentWidth - 1, maxPx + 1);
+    const rangeMinPy = Math.max(0, minPy - 1);
+    const rangeMaxPy = Math.min(parentHeight - 1, maxPy + 1);
+    const keyMap = new Int32Array(parentWidth * parentHeight);
+    const runMap = new Uint8Array(parentWidth * parentHeight);
 
-        // Check bounds - need 1 pixel margin for 3x3 neighbor check
-        if (px < 1 || px >= parentWidth - 1 || py < 1 || py >= parentHeight - 1) {
+    for (let py = rangeMinPy; py <= rangeMaxPy; py++) {
+      for (let px = rangeMinPx; px <= rangeMaxPx; px++) {
+        const parentIdx = py * parentWidth + px;
+        const parentIter = parentView.nn[parentIdx];
+        if (parentIter === 0) continue;
+        if (parentIter > 0) {
+          keyMap[parentIdx] = parentIter;
           continue;
         }
+        const centerConverged = parentView.convergedData.get(parentIdx);
+        if (!centerConverged) continue;
+        keyMap[parentIdx] = -fibonacciPeriod(centerConverged.p);
+      }
+    }
+
+    for (let py = rangeMinPy; py <= rangeMaxPy; py++) {
+      for (let px = rangeMaxPx; px >= rangeMinPx; px--) {
+        const idx = py * parentWidth + px;
+        const key = keyMap[idx];
+        if (key === 0) {
+          runMap[idx] = 0;
+          continue;
+        }
+        if (px === rangeMaxPx) {
+          runMap[idx] = 1;
+          continue;
+        }
+        const rightIdx = idx + 1;
+        if (keyMap[rightIdx] === key) {
+          runMap[idx] = Math.min(3, runMap[rightIdx] + 1);
+        } else {
+          runMap[idx] = 1;
+        }
+      }
+    }
+
+    for (let py = minPy; py <= maxPy; py++) {
+      for (let px = minPx; px <= maxPx; px++) {
+        const parentIdx = py * parentWidth + px;
+        const key = keyMap[parentIdx];
+        if (key === 0) {
+          uniformCache[parentIdx] = -1;
+          continue;
+        }
+        let uniform = true;
+        for (let dy = -1; dy <= 1 && uniform; dy++) {
+          const rowIdx = (py + dy) * parentWidth + (px - 1);
+          if (keyMap[rowIdx] !== key || runMap[rowIdx] < 3) {
+            uniform = false;
+          }
+        }
+        uniformCache[parentIdx] = uniform ? 1 : -1;
+      }
+    }
+
+    for (let py = minPy; py <= maxPy; py++) {
+      const cyStart = childYStart[py];
+      if (cyStart === -1) continue;
+      const cyEnd = childYEnd[py];
+      for (let px = minPx; px <= maxPx; px++) {
+        const cxStart = childXStart[px];
+        if (cxStart === -1) continue;
+        if (uniformCache[py * parentWidth + px] !== 1) continue;
 
         const parentIdx = py * parentWidth + px;
         const parentIter = parentView.nn[parentIdx];
-
-        // Skip if parent pixel not yet computed
         if (parentIter === 0) continue;
-
-        // Check 3x3 neighbor uniformity
-        // For diverged pixels (nn > 0): all neighbors must have same iteration
-        // For converged pixels (nn < 0): all neighbors must also be converged
-        // with matching period (same attractor)
-        let uniform = true;
         const isConverged = parentIter < 0;
         const centerConverged = isConverged ?
           parentView.convergedData.get(parentIdx) : null;
         if (isConverged && !centerConverged) continue;
-        const centerPeriod = isConverged ? fibonacciPeriod(centerConverged.p) : null;
-        for (let dy = -1; dy <= 1 && uniform; dy++) {
-          for (let dx = -1; dx <= 1 && uniform; dx++) {
-            const neighborIdx = (py + dy) * parentWidth + (px + dx);
-            const neighborIter = parentView.nn[neighborIdx];
+        const cxEnd = childXEnd[px];
 
-            if (isConverged) {
-              // For converged: neighbors must also be converged
-              if (neighborIter >= 0) {
-                uniform = false;
-                continue;
-              }
-              const neighborData = parentView.convergedData.get(neighborIdx);
-              if (!neighborData) {
-                uniform = false;
-                continue;
-              }
-              if (fibonacciPeriod(neighborData.p) !== centerPeriod) {
-                uniform = false;
-              }
+        for (let cy = cyStart; cy <= cyEnd; cy++) {
+          const rowBase = cy * childWidth;
+          for (let cx = cxStart; cx <= cxEnd; cx++) {
+            const childIdx = rowBase + cx;
+            if (parentIter > 0) {
+              diverged.push({ index: childIdx, iter: parentIter });
             } else {
-              // For diverged: neighbors must have same iteration
-              if (neighborIter !== parentIter) {
-                uniform = false;
-              }
+              converged.push({
+                index: childIdx,
+                iter: -parentIter,
+                z: centerConverged.z,
+                p: centerConverged.p
+              });
             }
           }
-        }
-
-        if (!uniform) continue;
-
-        // Can inherit this pixel
-        if (parentIter > 0) {
-          // Diverged pixel
-          diverged.push({ index: childIdx, iter: parentIter });
-        } else {
-          // Converged pixel - need z and period from convergedData
-          converged.push({
-            index: childIdx,
-            iter: -parentIter,
-            z: centerConverged.z,
-            p: centerConverged.p
-          });
         }
       }
     }
