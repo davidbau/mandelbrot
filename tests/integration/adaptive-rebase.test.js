@@ -64,7 +64,7 @@ describe('AdaptiveGpuBoard rebase behavior', () => {
       grid: '40',  // Larger grid = fewer pixels for speed
       pixelratio: '1',
       board: 'adaptive',
-      debug: 'w,s'  // MockWorker + step mode
+      debug: 'w,s,fastload'  // MockWorker + step mode + fast view loading
     });
 
     const url = `file://${path.join(process.cwd(), 'index.html')}?${params}`;
@@ -110,7 +110,7 @@ describe('AdaptiveGpuBoard rebase behavior', () => {
         grid: '40',
         pixelratio: '1',
         board: boardType,
-        debug: 'w,s'
+        debug: 'w,s,fastload'  // MockWorker + step mode + fast view loading
       });
 
       const url = `file://${path.join(process.cwd(), 'index.html')}?${params}`;

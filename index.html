@@ -2263,7 +2263,9 @@ class Grid {
       }
       this.updateFullscreenButton();
       newViewIndex++;
-      setTimeout(processNextNew, 200);
+      // Use shorter delay with debug=fastload for tests
+      const delay = this.config.debug?.includes('fastload') ? 0 : 200;
+      setTimeout(processNextNew, delay);
     };
 
     return {
