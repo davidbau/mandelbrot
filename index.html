@@ -1026,8 +1026,16 @@ class Config {
   initSizes() {
     let cssDims, cssDimsWidth, cssDimsHeight;
 
-    // In fullscreen, use full window dimensions with no margins
-    if (document.fullscreenElement) {
+    // Check for debug dims override: debug=dims:WxH (also sets aspect ratio)
+    const dimsOverride = this.debug?.match(/dims:(\d+)x(\d+)/);
+    if (dimsOverride) {
+      cssDimsWidth = parseInt(dimsOverride[1], 10);
+      cssDimsHeight = parseInt(dimsOverride[2], 10);
+      cssDims = cssDimsWidth;
+      // Update aspect ratio to match
+      this.store.dispatch(this.store.actions.setAspectRatio(cssDimsWidth / cssDimsHeight));
+    } else if (document.fullscreenElement) {
+      // In fullscreen, use full window dimensions with no margins
       const availWidth = window.innerWidth;
       const availHeight = window.innerHeight;
 
@@ -1673,11 +1681,6 @@ class Grid {
     if (zoomFactor > 8) {
       console.warn(`Inheritance disabled: zoom factor ${zoomFactor.toFixed(1)}x exceeds safety limit of 8x`);
       return emptyPacked();
-    }
-
-    // Warn if zoom factor is large but allowed
-    if (zoomFactor > 5) {
-      console.warn(`Inheritance warning: zoom factor ${zoomFactor.toFixed(1)}x exceeds 5x, 3x3 window may be insufficient`);
     }
 
     // Get centers and sizes as doubles (first element of QD arrays)
