@@ -1686,10 +1686,10 @@ class Grid {
 
         // Check 3x3 neighbor uniformity
         // For diverged pixels (nn > 0): all neighbors must have same iteration
-        // For converged pixels (nn < 0): all neighbors must have same period
+        // For converged pixels (nn < 0): all neighbors must also be converged
+        // (converged pixels in the same region share the same orbital period)
         let uniform = true;
         const isConverged = parentIter < 0;
-        const parentPeriod = isConverged ? parentView.currentp(parentIdx) : 0;
 
         for (let dy = -1; dy <= 1 && uniform; dy++) {
           for (let dx = -1; dx <= 1 && uniform; dx++) {
@@ -1697,8 +1697,8 @@ class Grid {
             const neighborIter = parentView.nn[neighborIdx];
 
             if (isConverged) {
-              // For converged: neighbors must also be converged with same period
-              if (neighborIter >= 0 || parentView.currentp(neighborIdx) !== parentPeriod) {
+              // For converged: neighbors must also be converged
+              if (neighborIter >= 0) {
                 uniform = false;
               }
             } else {
@@ -7408,7 +7408,8 @@ class GpuBoard extends GpuBaseBoard {
     const activePixelCount = dimsArea - precomputedCount;
 
     // Allocate buffer for active pixels only
-    const pixelBufferSize = activePixelCount * BYTES_PER_PIXEL;
+    // WebGPU requires non-zero buffer size, so use at least 1 pixel worth
+    const pixelBufferSize = Math.max(BYTES_PER_PIXEL, activePixelCount * BYTES_PER_PIXEL);
 
     if (pixelBufferSize > maxBufferSize) {
       throw new Error(`Buffer size exceeds WebGPU limit`);

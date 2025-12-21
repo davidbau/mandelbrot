@@ -583,4 +583,109 @@ describe('Inheritance color behavior', () => {
 
     await page.close();
   }, TEST_TIMEOUT);
+
+  test('converged pixels with same period should all be inherited despite different iterations', async () => {
+    // Bug: pixels in the cardioid all converge to period 0, but at different iterations.
+    // They should all be inherited because they share the same period, but the current
+    // code fails to inherit pixels at iteration boundaries.
+    const page = await browser.newPage();
+    // Small viewport with grid=20 gives ~10x10 pixels per view
+    await page.setViewport({ width: 200, height: 200 });
+
+    // Center on cardioid so most pixels converge
+    await page.goto(`http://localhost:${port}?board=gpu&inherit=1&grid=20&c=-0.5+0i&z=2&debug=inherit`, {
+      waitUntil: 'domcontentloaded'
+    });
+
+    // Wait for parent view to complete
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views[0];
+      return view && view.unfinished() === 0;
+    }, { timeout: 60000 });
+
+    // Verify parent has converged pixels (should be mostly converged when centered on cardioid)
+    const parentStats = await page.evaluate(() => {
+      const view = window.explorer.grid.views[0];
+      let converged = 0, diverged = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] < 0) converged++;
+        else if (view.nn[i] > 0) diverged++;
+      }
+      return { converged, diverged, total: view.nn.length };
+    });
+
+    // Parent should have significant number of converged pixels (at least 30% for cardioid center)
+    expect(parentStats.converged).toBeGreaterThan(parentStats.total * 0.3);
+
+    // Wait for no update process before clicking
+    await page.waitForFunction(() => !window.explorer?.grid?.currentUpdateProcess, { timeout: 30000 });
+
+    // Click 10% to the right of center (in the cardioid interior)
+    const canvas0 = await page.$('#b_0 canvas');
+    const box = await canvas0.boundingBox();
+    await page.mouse.click(box.x + box.width * 0.6, box.y + box.height / 2);
+
+    // Wait for child view to be created
+    await page.waitForFunction(() => window.explorer?.grid?.views?.length >= 2, { timeout: 10000 });
+
+    // Wait a moment for inheritance to be computed and sent to worker
+    await new Promise(r => setTimeout(r, 500));
+
+    // Check inheritance - the child view's nn array should have inherited values
+    const inheritanceStats = await page.evaluate(() => {
+      const parentView = window.explorer.grid.views[0];
+      const childView = window.explorer.grid.views[1];
+      const w = window.explorer.grid.config.dimsWidth;
+      const h = window.explorer.grid.config.dimsHeight;
+
+      // Count parent converged pixels
+      let parentConverged = 0;
+      let parentConvergedWithData = 0;
+      for (let i = 0; i < parentView.nn.length; i++) {
+        if (parentView.nn[i] < 0) {
+          parentConverged++;
+          if (parentView.convergedData.has(i)) parentConvergedWithData++;
+        }
+      }
+
+      // Count child pixels that have been set (inherited or computed)
+      let childInherited = 0;
+      for (let i = 0; i < childView.nn.length; i++) {
+        if (childView.nn[i] !== 0) childInherited++;
+      }
+
+      // Call computeInheritance to see what we'd get
+      const manualInheritance = window.explorer.grid.computeInheritance(parentView, childView);
+
+      return {
+        parentConverged,
+        parentConvergedWithData,
+        parentTotal: parentView.nn.length,
+        childTotal: childView.nn.length,
+        manualDiverged: manualInheritance?.diverged?.length || 0,
+        manualConverged: manualInheritance?.converged?.length || 0
+      };
+    });
+
+    // The child view zooms into a mostly-converged region of the parent.
+    // All converged pixels have the same period (period 0/1 for cardioid).
+    // They should ALL be inherited regardless of iteration boundaries.
+    // The bug causes stripes of non-inherited pixels at iteration boundaries.
+
+    // Check manual inheritance calculation (what computeInheritance returns)
+    const manualTotal = inheritanceStats.manualDiverged + inheritanceStats.manualConverged;
+
+    // Debug output if no inheritance
+    if (manualTotal === 0) {
+      console.log('DEBUG - No inheritance!', inheritanceStats);
+    }
+
+    // The bug: converged pixels at iteration boundaries aren't being inherited
+    // because the check requires same iteration, not same period.
+    // When clicking in the middle of the cardioid, we expect near 100% inheritance.
+    const expectedMinManual = inheritanceStats.childTotal * 0.95;
+    expect(manualTotal).toBeGreaterThanOrEqual(expectedMinManual);
+
+    await page.close();
+  }, TEST_TIMEOUT);
 });
