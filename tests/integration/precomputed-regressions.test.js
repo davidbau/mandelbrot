@@ -18,7 +18,7 @@ describe('Precomputed inheritance regressions', () => {
 
   afterAll(async () => {
     if (browser) await browser.close();
-  });
+  }, TEST_TIMEOUT);
 
   test('computeInheritance rejects converged regions with mismatched derived periods', async () => {
     const page = await setupPage(browser);
