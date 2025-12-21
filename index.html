@@ -1617,6 +1617,11 @@ class Grid {
     let inheritedData = null;
     if (this.config.enableInheritance && view.parentView) {
       inheritedData = this.computeInheritance(view.parentView, view);
+
+      // Draw inherited pixels in pink for debugging
+      if (this.config.debug && this.config.debug.includes('inherit')) {
+        this.drawInheritedPixels(k, inheritedData);
+      }
     }
 
     this.scheduler.assignBoardToWorker(
@@ -1811,6 +1816,33 @@ class Grid {
       for (let change of data.changeList) {
         this.views[k].drawchange(ctx, change);
       }
+    }
+  }
+
+  // Draw inherited pixels in pink/magenta for debugging (when debug=inherit)
+  drawInheritedPixels(k, inheritedData) {
+    if (!inheritedData) return;
+    const canvas = this.canvas(k);
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const width = this.config.dimsWidth;
+    const pixelRatio = this.config.pixelRatio || 1;
+
+    // Draw diverged pixels in hot pink
+    ctx.fillStyle = '#ff69b4';
+    for (const item of inheritedData.diverged) {
+      const x = item.index % width;
+      const y = Math.floor(item.index / width);
+      ctx.fillRect(x * pixelRatio, y * pixelRatio, pixelRatio, pixelRatio);
+    }
+
+    // Draw converged pixels in magenta (slightly different shade)
+    ctx.fillStyle = '#ff00ff';
+    for (const item of inheritedData.converged) {
+      const x = item.index % width;
+      const y = Math.floor(item.index / width);
+      ctx.fillRect(x * pixelRatio, y * pixelRatio, pixelRatio, pixelRatio);
     }
   }
 
