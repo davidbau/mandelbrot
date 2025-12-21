@@ -114,4 +114,54 @@ describe('Precomputed inheritance regressions', () => {
 
     await page.close();
   }, TEST_TIMEOUT);
+
+  async function getInheritedLogCount(page, boardType, className) {
+    const logs = [];
+    page.on('console', msg => logs.push(msg.text()));
+
+    await page.goto(
+      `file://${indexPath}?dims=20x20&grid=1&board=${boardType}&inherit=1&debug=inherit&c=-0.5+0i&z=2`,
+      { waitUntil: 'domcontentloaded' }
+    );
+
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views?.[0];
+      return view && view.unfinished() === 0;
+    }, { timeout: 30000 });
+
+    await page.evaluate(() => {
+      const grid = window.explorer.grid;
+      const parent = grid.views[0];
+      const size = parent.size / grid.config.zoomfactor;
+      grid.makeView(1, size, parent.re, parent.im, true);
+      grid.startViewComputation(1);
+    });
+
+    const deadline = Date.now() + 30000;
+    let line = null;
+    while (Date.now() < deadline) {
+      line = logs.find(msg => msg.includes(`Board 1 (${className})`) && msg.includes('received'));
+      if (line) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!line) {
+      throw new Error(`No inheritance log found for ${className}`);
+    }
+    const match = line.match(/received (\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  }
+
+  test('GpuZhuoranBoard applies inherited precomputed points', async () => {
+    const page = await setupPage(browser);
+    const inheritedCount = await getInheritedLogCount(page, 'gpuz', 'GpuZhuoranBoard');
+    expect(inheritedCount).toBeGreaterThan(0);
+    await page.close();
+  }, TEST_TIMEOUT);
+
+  test('AdaptiveGpuBoard applies inherited precomputed points', async () => {
+    const page = await setupPage(browser);
+    const inheritedCount = await getInheritedLogCount(page, 'adaptive', 'AdaptiveGpuBoard');
+    expect(inheritedCount).toBeGreaterThan(0);
+    await page.close();
+  }, TEST_TIMEOUT);
 });
