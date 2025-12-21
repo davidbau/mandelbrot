@@ -1659,14 +1659,17 @@ class Grid {
 
         // Compute complex coordinates of this child pixel
         // Using same formula as shader: center + (x - width/2) * pixelSize
+        // Note: pixelSize is size/width, and the vertical span is size/aspectRatio,
+        // but since aspectRatio = width/height, vertical_pixel_size = size/(aspectRatio*height)
+        // = size*height/(width*height) = size/width = pixelSize. So pixels are square.
         const xOffset = (cx - childWidth / 2 + 0.5) * childPixelSize;
-        const yOffset = (childHeight / 2 - cy - 0.5) * (childPixelSize / aspectRatio);
+        const yOffset = (childHeight / 2 - cy - 0.5) * childPixelSize;
         const complexRe = childCenterRe + xOffset;
         const complexIm = childCenterIm + yOffset;
 
         // Map complex coordinates to parent pixel coordinates
         const pxFloat = (complexRe - parentCenterRe) / parentPixelSize + parentWidth / 2;
-        const pyFloat = parentHeight / 2 - (complexIm - parentCenterIm) / (parentPixelSize / aspectRatio);
+        const pyFloat = parentHeight / 2 - (complexIm - parentCenterIm) / parentPixelSize;
         const px = Math.floor(pxFloat);
         const py = Math.floor(pyFloat);
 
@@ -5083,8 +5086,13 @@ class PrecomputedPoints {
     for (const iter of iters) {
       const pending = this.pendingReports.get(iter);
       if (pending) {
-        combined.diverged.push(...pending.diverged);
-        combined.converged.push(...pending.converged);
+        // Use loop instead of spread to avoid stack overflow with large arrays
+        for (const item of pending.diverged) {
+          combined.diverged.push(item);
+        }
+        for (const item of pending.converged) {
+          combined.converged.push(item);
+        }
         this.pendingReports.delete(iter);
       }
     }

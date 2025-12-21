@@ -23,9 +23,6 @@ const qdFuncs = createTestEnvironment([
   // Core qd functions
   'toDD',
   'ddAdd',
-  'ddMul',
-  'ddDouble',
-  'ddSquare',
   'ddNegate',
   'ddSub',
   // Spline interpolation (QD = quad-double precision)

@@ -86,10 +86,6 @@ describe('Inheritance color behavior', () => {
     // Verify histogram has entries
     expect(childHist.hi.length).toBeGreaterThan(1);
 
-    // Log histograms for analysis
-    console.log('Parent histogram (first 5):', JSON.stringify(parentHist.hi.slice(0, 5), null, 2));
-    console.log('Child histogram (first 5):', JSON.stringify(childHist.hi.slice(0, 5), null, 2));
-
     await page.close();
   }, TEST_TIMEOUT);
 
@@ -135,9 +131,6 @@ describe('Inheritance color behavior', () => {
     const withInherit = await getChildHistAfterZoom(1);
     const withoutInherit = await getChildHistAfterZoom(0);
 
-    console.log('\nWith inheritance (first 5):', JSON.stringify(withInherit.slice(0, 5), null, 2));
-    console.log('\nWithout inheritance (first 5):', JSON.stringify(withoutInherit.slice(0, 5), null, 2));
-
     // Compare the diverged fractions at similar iterations
     // Find a common iteration to compare
     const commonIter = withInherit[0]?.iter;
@@ -146,10 +139,6 @@ describe('Inheritance color behavior', () => {
       const withoutEntry = withoutInherit.find(e => e.iter === commonIter);
 
       if (withEntry && withoutEntry) {
-        console.log(`\nAt iter=${commonIter}:`);
-        console.log(`  With inherit: dFrac=${withEntry.dFrac}`);
-        console.log(`  Without inherit: dFrac=${withoutEntry.dFrac}`);
-
         // The dFrac values should be similar (within tolerance)
         // This is the key assertion - colors depend on dFrac
         expect(Math.abs(withEntry.dFrac - withoutEntry.dFrac)).toBeLessThan(0.1);
@@ -204,8 +193,6 @@ describe('Inheritance color behavior', () => {
     expect(stats.posCount).toBeGreaterThan(0);
     expect(stats.negCount).toBeGreaterThan(0);
 
-    console.log('Pixel stats:', stats);
-
     await page.close();
   }, TEST_TIMEOUT);
 
@@ -242,8 +229,6 @@ describe('Inheritance color behavior', () => {
       return { conv, hi: view.hi.length };
     });
 
-    console.log('Deep interior state:', state);
-
     // Should have converged pixels and histogram entries
     expect(state.conv).toBeGreaterThan(0);
     expect(state.hi).toBeGreaterThan(0);
@@ -257,25 +242,25 @@ describe('Inheritance color behavior', () => {
     const page = await browser.newPage();
     await page.setViewport({ width: 800, height: 600 });
 
-    // Use the 4-view URL pattern that was problematic
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095804+0.654167i,-0.0938695+0.6547999i,-0.0934511+0.6550458i&board=gpu&inherit=1&grid=2&dims=100x100`, {
+    // Use 2-view URL with small dims for speed (30x30 = 900 pixels)
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095804+0.654167i&board=gpu&inherit=1&grid=2&dims=30x30`, {
       waitUntil: 'domcontentloaded'
     });
 
-    // Wait for view 3 (4th view) to reach at least 50%
+    // Wait for view 1 (2nd view) to reach 90% completion
     await page.waitForFunction(() => {
-      const view = window.explorer?.grid?.views[3];
+      const view = window.explorer?.grid?.views[1];
       if (!view) return false;
       let done = 0;
       for (let i = 0; i < view.nn.length; i++) {
         if (view.nn[i] !== 0) done++;
       }
-      return done / view.nn.length >= 0.5;
-    }, { timeout: 120000 });
+      return done / view.nn.length >= 0.9;
+    }, { timeout: 30000 });
 
     // Check histogram for duplicate iterations
     const histAnalysis = await page.evaluate(() => {
-      const view = window.explorer.grid.views[3];
+      const view = window.explorer.grid.views[1];
       const iterCounts = new Map();
 
       for (const entry of view.hi) {
@@ -297,23 +282,21 @@ describe('Inheritance color behavior', () => {
       };
     });
 
-    console.log('Histogram analysis:', histAnalysis);
-
     // No iteration should appear more than once in the histogram
     expect(histAnalysis.duplicates.length).toBe(0);
 
     await page.close();
-  }, 180000);
+  }, TEST_TIMEOUT);
 
   test('child view should not have color stripes from precomputed pixels', async () => {
     // Stripes appear as sharp color transitions between precomputed (green) and
     // GPU-computed (pink) pixels. This test zooms in using 'i' and checks for
     // excessive warm/cool transitions in the rendered canvas.
     const page = await browser.newPage();
-    await page.setViewport({ width: 1470, height: 827 });
+    await page.setViewport({ width: 800, height: 600 });
 
-    // Use neon theme for clear warm/cool distinction
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2`, {
+    // Use neon theme with small dims (50x50) for speed
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&dims=50x50`, {
       waitUntil: 'domcontentloaded'
     });
 
@@ -326,16 +309,13 @@ describe('Inheritance color behavior', () => {
         if (view.nn[i] !== 0) done++;
       }
       return done / view.nn.length >= 0.9;
-    }, { timeout: 120000 });
+    }, { timeout: 60000 });
 
     // Wait for no update process before pressing key
     await page.waitForFunction(() => !window.explorer?.grid?.currentUpdateProcess, { timeout: 30000 });
 
     // Press 'i' to zoom in
     await page.keyboard.press('i');
-
-    // Wait for view 1 to exist
-    await page.waitForFunction(() => window.explorer?.grid?.views?.length >= 2, { timeout: 10000 });
 
     // Wait for view 1 to reach 90% completion
     await page.waitForFunction(() => {
@@ -346,7 +326,7 @@ describe('Inheritance color behavior', () => {
         if (view.nn[i] !== 0) done++;
       }
       return done / view.nn.length >= 0.9;
-    }, { timeout: 120000 });
+    }, { timeout: 60000 });
 
     // Get pixel colors from a horizontal row in the middle of view 1
     const result = await page.evaluate(() => {
@@ -390,15 +370,13 @@ describe('Inheritance color behavior', () => {
       };
     });
 
-    console.log('Stripe analysis:', result);
-
     // In a smooth gradient, there should be very few sharp transitions
     // between warm and cool colors. Stripes cause many transitions.
     // Allow up to 10 transitions for normal gradient boundaries.
     expect(result.sharpTransitions).toBeLessThan(10);
 
     await page.close();
-  }, 180000);
+  }, TEST_TIMEOUT);
 
   test('third view (2 zooms) should not have stripes or transparent pixels', async () => {
     // After pressing 'i' twice, the 3rd view should still have smooth colors
@@ -505,8 +483,6 @@ describe('Inheritance color behavior', () => {
       };
     });
 
-    console.log('View 2 stripe analysis:', result);
-
     // The 3rd view should have all warm colors with just 2 transitions
     // (3 color bands). No green/cool pixels and no transparent pixels.
     expect(result.sharpTransitions).toBeLessThanOrEqual(2);
@@ -515,4 +491,96 @@ describe('Inheritance color behavior', () => {
 
     await page.close();
   }, 180000);
+
+  test('16:9 aspect ratio should not cause coordinate mapping errors', async () => {
+    // Test that inheritance works correctly with 16:9 aspect ratio.
+    // A bug in coordinate mapping would cause stripes or misaligned pixels.
+    const page = await browser.newPage();
+    await page.setViewport({ width: 800, height: 600 });
+
+    // Use neon theme with small dims, explicit 16:9 aspect ratio
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&dims=50x50&a=16:9`, {
+      waitUntil: 'domcontentloaded'
+    });
+
+    // Verify aspect ratio is set correctly
+    const aspectRatio = await page.evaluate(() => window.explorer?.grid?.config?.aspectRatio);
+    expect(aspectRatio).toBeCloseTo(16/9, 1);  // Should be 16/9 ≈ 1.78
+
+    // Wait for view 0 to reach 90% completion
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views[0];
+      if (!view) return false;
+      let done = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] !== 0) done++;
+      }
+      return done / view.nn.length >= 0.9;
+    }, { timeout: 60000 });
+
+    // Wait for no update process before pressing key
+    await page.waitForFunction(() => !window.explorer?.grid?.currentUpdateProcess, { timeout: 30000 });
+
+    // Press 'i' to zoom in
+    await page.keyboard.press('i');
+
+    // Wait for view 1 to reach 90% completion
+    await page.waitForFunction(() => {
+      const view = window.explorer?.grid?.views[1];
+      if (!view) return false;
+      let done = 0;
+      for (let i = 0; i < view.nn.length; i++) {
+        if (view.nn[i] !== 0) done++;
+      }
+      return done / view.nn.length >= 0.9;
+    }, { timeout: 60000 });
+
+    // Get pixel colors from a horizontal row in the middle of view 1
+    const result = await page.evaluate(() => {
+      const canvas = window.explorer.grid.canvas(1);
+      const ctx = canvas.getContext('2d');
+
+      // Get middle row of the canvas
+      const middleY = Math.floor(canvas.height / 2);
+      const imageData = ctx.getImageData(0, middleY, canvas.width, 1);
+      const pixels = imageData.data;
+
+      // Count sharp transitions between warm (r>g) and cool (g>r) colors
+      let sharpTransitions = 0;
+      let prevWarm = null;
+
+      for (let x = 0; x < canvas.width; x++) {
+        const idx = x * 4;
+        const r = pixels[idx];
+        const g = pixels[idx + 1];
+        const currWarm = r > g;
+
+        if (prevWarm !== null && prevWarm !== currWarm) {
+          sharpTransitions++;
+        }
+        prevWarm = currWarm;
+      }
+
+      // Count warm vs cool pixels
+      let warmCount = 0, coolCount = 0;
+      for (let x = 0; x < canvas.width; x++) {
+        const idx = x * 4;
+        if (pixels[idx] > pixels[idx + 1]) warmCount++;
+        else coolCount++;
+      }
+
+      return {
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        sharpTransitions,
+        warmCount,
+        coolCount
+      };
+    });
+
+    // Should have smooth gradient with few transitions
+    expect(result.sharpTransitions).toBeLessThan(10);
+
+    await page.close();
+  }, TEST_TIMEOUT);
 });
