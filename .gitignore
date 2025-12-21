@@ -6,6 +6,7 @@ claude/
 node_modules/
 npm-debug.log
 .nyc_output/
+coverage/raw-coverage.json
 *.log
 .puppeteer-profile/
 .puppeteer-profile-*/

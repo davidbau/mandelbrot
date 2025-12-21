@@ -191,6 +191,12 @@ if (coverageFiles.length > 0) {
   if (fs.existsSync(unitCoverageFile)) {
     fs.unlinkSync(unitCoverageFile);
   }
+  const rawCoverageFile = path.join(NYC_OUTPUT, 'raw-coverage.json');
+  if (fs.existsSync(rawCoverageFile)) {
+    const coverageDir = path.join(ROOT_DIR, 'coverage');
+    fs.mkdirSync(coverageDir, { recursive: true });
+    fs.renameSync(rawCoverageFile, path.join(coverageDir, 'raw-coverage.json'));
+  }
 }
 
 // Step 7: Generate report
