@@ -97,20 +97,18 @@ describe('AdaptiveGpuBoard', () => {
     expect(boardType).toBe('AdaptiveGpuBoard');
   }, 15000);
 
-  // Skip: QDZhuoranBoard (CPU) is too slow under Jest constraints.
-  // The test works when run manually but times out in CI due to CPU board overhead.
-  test.skip('convergence detection at z=5', async () => {
+  test('convergence detection at z=5', async () => {
     const CONVERGENT_CENTER = '+0.1972+0.5798i';
 
-    const octResult = await runBoard('qdz', '5', CONVERGENT_CENTER, 500);
-    expect(octResult.converged).toBeGreaterThan(0);
+    const gpuResult = await runBoard('gpuz', '5', CONVERGENT_CENTER, 500);
+    expect(gpuResult.converged).toBeGreaterThan(0);
 
     await page.close();
     page = await browser.newPage();
 
     const adaptiveResult = await runBoard('adaptive', '5', CONVERGENT_CENTER, 500);
     // Expect reasonable convergence detection
-    expect(adaptiveResult.converged).toBeGreaterThan(octResult.converged * 0.5);
+    expect(adaptiveResult.converged).toBeGreaterThan(gpuResult.converged * 0.5);
   }, 60000);
 
   test('no trapezoid bug at z=5e29 (rebasing threshold)', async () => {
