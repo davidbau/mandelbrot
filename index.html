@@ -2123,7 +2123,7 @@ class Grid {
       }
 
       const k = newViewIndices[newViewIndex];
-      this.views[k] = this.makeView(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2]);
+      this.views[k] = this.makeView(k, state.sizes[k][0], state.sizes[k][1], state.sizes[k][2], true);
       this.views[k].draw(this.canvas(k).getContext('2d'));
 
       // Set up parent-child relationship for new view
@@ -2131,12 +2131,15 @@ class Grid {
         this.views[k].setParentView(this.views[k - 1]);
       }
 
+      // Start computation with inheritance from parent
+      this.startViewComputation(k);
+
       if (state.hidden.indexOf(k) >= 0) {
         this.hidecanvas(k);
       }
       this.updateFullscreenButton();
       newViewIndex++;
-      setTimeout(processNextNew, 50);
+      setTimeout(processNextNew, 200);
     };
 
     return {
