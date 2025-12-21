@@ -5044,32 +5044,98 @@ function hasDebugFlag(config, flag) {
 
 // Utility class for managing precomputed pixel data inherited from parent views.
 // Used by all board types to skip computation for pixels known from parent.
+// Uses TypedArrays for efficient storage of pending data.
 class PrecomputedPoints {
   constructor(inheritedData) {
-    // Store pending reports by iteration: Map<iter, {diverged: [idx], converged: [{index,z,p}]}>
-    this.pendingReports = new Map();
     // Track which pixels are pre-known (for excluding from compute)
     this.knownPixels = new Set();
+    // Map<iter, {dStart, dCount, cStart, cCount}>
+    this.rangeMap = new Map();
 
-    if (!inheritedData) return;
-
-    for (const item of inheritedData.diverged || []) {
-      const { index, iter } = item;
-      this.knownPixels.add(index);
-      if (!this.pendingReports.has(iter)) {
-        this.pendingReports.set(iter, { diverged: [], converged: [] });
-      }
-      this.pendingReports.get(iter).diverged.push(index);
+    if (!inheritedData) {
+      this.dIndices = new Uint32Array(0);
+      this.cIndices = new Uint32Array(0);
+      this.cP = new Uint32Array(0);
+      this.cZ = new Float64Array(0);
+      this.zStride = 2;
+      return;
     }
 
-    for (const item of inheritedData.converged || []) {
-      const { index, iter, z, p } = item;
-      this.knownPixels.add(index);
-      if (!this.pendingReports.has(iter)) {
-        this.pendingReports.set(iter, { diverged: [], converged: [] });
-      }
-      this.pendingReports.get(iter).converged.push({ index, z, p });
+    const diverged = inheritedData.diverged || [];
+    const converged = inheritedData.converged || [];
+
+    // Sort to ensure contiguous storage per iteration
+    // (Use stable sort if preserving index order matters, but here it doesn't)
+    diverged.sort((a, b) => a.iter - b.iter);
+    converged.sort((a, b) => a.iter - b.iter);
+
+    // Allocate storage
+    this.dIndices = new Uint32Array(diverged.length);
+    this.cIndices = new Uint32Array(converged.length);
+    this.cP = new Uint32Array(converged.length);
+
+    // Determine Z stride
+    this.zStride = 2;
+    if (converged.length > 0 && converged[0].z && converged[0].z.length > 2) {
+      this.zStride = converged[0].z.length;
     }
+    this.cZ = new Float64Array(converged.length * this.zStride);
+
+    // Fill Diverged
+    let currentIter = -1;
+    let start = 0;
+    for (let i = 0; i < diverged.length; i++) {
+      const item = diverged[i];
+      this.knownPixels.add(item.index);
+      this.dIndices[i] = item.index;
+
+      if (item.iter !== currentIter) {
+        if (currentIter !== -1) {
+          this._getRange(currentIter).dCount = i - start;
+        }
+        currentIter = item.iter;
+        start = i;
+        this._getRange(currentIter).dStart = start;
+      }
+    }
+    if (currentIter !== -1) {
+      this._getRange(currentIter).dCount = diverged.length - start;
+    }
+
+    // Fill Converged
+    currentIter = -1;
+    start = 0;
+    for (let i = 0; i < converged.length; i++) {
+      const item = converged[i];
+      this.knownPixels.add(item.index);
+      this.cIndices[i] = item.index;
+      this.cP[i] = item.p;
+      
+      const zOffset = i * this.zStride;
+      const zLen = Math.min(this.zStride, item.z ? item.z.length : 0);
+      for (let k = 0; k < zLen; k++) {
+        this.cZ[zOffset + k] = item.z[k];
+      }
+
+      if (item.iter !== currentIter) {
+        if (currentIter !== -1) {
+          this._getRange(currentIter).cCount = i - start;
+        }
+        currentIter = item.iter;
+        start = i;
+        this._getRange(currentIter).cStart = start;
+      }
+    }
+    if (currentIter !== -1) {
+      this._getRange(currentIter).cCount = converged.length - start;
+    }
+  }
+
+  _getRange(iter) {
+    if (!this.rangeMap.has(iter)) {
+      this.rangeMap.set(iter, { dStart: 0, dCount: 0, cStart: 0, cCount: 0 });
+    }
+    return this.rangeMap.get(iter);
   }
 
   isPrecomputed(index) {
@@ -5083,79 +5149,106 @@ class PrecomputedPoints {
   // Get count of pending (not yet reported) precomputed points
   getPendingCount() {
     let count = 0;
-    for (const pending of this.pendingReports.values()) {
-      count += pending.diverged.length + pending.converged.length;
+    for (const range of this.rangeMap.values()) {
+      count += range.dCount + range.cCount;
     }
     return count;
+  }
+
+  // Helper to reconstruct objects from TypedArrays
+  _extractData(range) {
+    const diverged = [];
+    if (range.dCount > 0) {
+      for (let i = 0; i < range.dCount; i++) {
+        diverged.push(this.dIndices[range.dStart + i]);
+      }
+    }
+
+    const converged = [];
+    if (range.cCount > 0) {
+      for (let i = 0; i < range.cCount; i++) {
+        const idx = range.cStart + i;
+        const z = new Array(this.zStride);
+        for (let k = 0; k < this.zStride; k++) {
+          z[k] = this.cZ[idx * this.zStride + k];
+        }
+        converged.push({
+          index: this.cIndices[idx],
+          z: z,
+          p: this.cP[idx]
+        });
+      }
+    }
+    return { diverged, converged };
   }
 
   // Called each iteration to inject pending reports into changeList.
   // Reports pixels that completed at this iteration count.
   flushAtIteration(iter, board) {
-    const pending = this.pendingReports.get(iter);
-    if (!pending) return;
+    const range = this.rangeMap.get(iter);
+    if (!range) return;
+
+    const { diverged, converged } = this._extractData(range);
 
     // Queue the changes for reporting to main thread
+    // Note: diverged is just indices (nn), converged is objects (vv)
     board.queueChanges({
       iter,
-      nn: pending.diverged,
-      vv: pending.converged
+      nn: diverged,
+      vv: converged
     });
 
     // Update board's internal counters
-    board.di += pending.diverged.length;
-    board.un -= pending.diverged.length + pending.converged.length;
+    board.di += diverged.length;
+    board.un -= diverged.length + converged.length;
 
     // Mark pixels as done in nn[]
-    for (const idx of pending.diverged) {
+    for (const idx of diverged) {
       board.nn[idx] = iter;
     }
-    for (const c of pending.converged) {
+    for (const c of converged) {
       board.nn[c.index] = -iter;
     }
 
-    this.pendingReports.delete(iter);
+    this.rangeMap.delete(iter);
   }
 
   // Get and remove pending reports for a specific iteration.
   // Returns {diverged: [...], converged: [...]} or null if none.
   // Does NOT update board counters - caller is responsible for that.
   extractAtIteration(iter) {
-    const pending = this.pendingReports.get(iter);
-    if (!pending) return null;
-    this.pendingReports.delete(iter);
-    return pending;
+    const range = this.rangeMap.get(iter);
+    if (!range) return null;
+    
+    const data = this._extractData(range);
+    this.rangeMap.delete(iter);
+    
+    // Consumers expect {diverged: [indices], converged: [objects]}
+    // _extractData provides exactly this.
+    return data;
   }
 
   // Get all iterations that have pending reports BELOW maxIter.
-  // Uses strict less-than to ensure GPU pixels at maxIter are all reported
-  // before precomputed pixels at that iteration are included.
   getPendingIterations(maxIter) {
-    return Array.from(this.pendingReports.keys())
+    return Array.from(this.rangeMap.keys())
       .filter(iter => iter < maxIter)
       .sort((a, b) => a - b);
   }
 
   // Extract and remove ALL pending reports below maxIter.
-  // Returns combined {diverged: [...], converged: [...]} or null if none.
-  // Used to merge all low-iteration precomputed into the first GPU batch.
   extractBelowIteration(maxIter) {
     const iters = this.getPendingIterations(maxIter);
     if (iters.length === 0) return null;
 
     const combined = { diverged: [], converged: [] };
     for (const iter of iters) {
-      const pending = this.pendingReports.get(iter);
-      if (pending) {
-        // Use loop instead of spread to avoid stack overflow with large arrays
-        for (const item of pending.diverged) {
-          combined.diverged.push(item);
-        }
-        for (const item of pending.converged) {
-          combined.converged.push(item);
-        }
-        this.pendingReports.delete(iter);
-      }
+      const range = this.rangeMap.get(iter);
+      const data = this._extractData(range);
+      
+      for (const item of data.diverged) combined.diverged.push(item);
+      for (const item of data.converged) combined.converged.push(item);
+      
+      this.rangeMap.delete(iter);
     }
     return combined.diverged.length > 0 || combined.converged.length > 0 ? combined : null;
   }
@@ -5164,7 +5257,7 @@ class PrecomputedPoints {
   // Used by GPU boards that compute in batches.
   flushUpToIteration(maxIter, board) {
     // Get iterations in sorted order to maintain proper changeList ordering
-    const iterations = Array.from(this.pendingReports.keys())
+    const iterations = Array.from(this.rangeMap.keys())
       .filter(iter => iter <= maxIter)
       .sort((a, b) => a - b);
 
@@ -5175,45 +5268,40 @@ class PrecomputedPoints {
 
   // Check if all pending reports have been flushed
   isEmpty() {
-    return this.pendingReports.size === 0;
+    return this.rangeMap.size === 0;
   }
 
   // Serialize for board transfer between workers
   serialize() {
     const diverged = [];
     const converged = [];
-    for (const [iter, pending] of this.pendingReports) {
-      for (const idx of pending.diverged) {
+    
+    for (const iter of this.rangeMap.keys()) {
+      const range = this.rangeMap.get(iter);
+      const data = this._extractData(range);
+      
+      for (const idx of data.diverged) {
         diverged.push({ index: idx, iter });
       }
-      for (const c of pending.converged) {
-        converged.push({ index: c.index, iter, z: c.z, p: c.p });
+      for (const item of data.converged) {
+        converged.push({ 
+          index: item.index, 
+          iter, 
+          z: item.z, 
+          p: item.p 
+        });
       }
     }
-    return { diverged, converged, knownPixels: Array.from(this.knownPixels) };
+    // knownPixels is redundant as it can be rebuilt from diverged/converged
+    return { diverged, converged };
   }
 
   // Restore from serialized state
   static fromSerialized(data) {
     if (!data) return null;
-    const pp = new PrecomputedPoints(null);
-    pp.knownPixels = new Set(data.knownPixels || []);
-    // Rebuild pendingReports from diverged/converged
-    for (const item of data.diverged || []) {
-      if (!pp.pendingReports.has(item.iter)) {
-        pp.pendingReports.set(item.iter, { diverged: [], converged: [] });
-      }
-      pp.pendingReports.get(item.iter).diverged.push(item.index);
-    }
-    for (const item of data.converged || []) {
-      if (!pp.pendingReports.has(item.iter)) {
-        pp.pendingReports.set(item.iter, { diverged: [], converged: [] });
-      }
-      pp.pendingReports.get(item.iter).converged.push({
-        index: item.index, z: item.z, p: item.p
-      });
-    }
-    return pp;
+    // Constructor rebuilds everything (TypedArrays, knownPixels, rangeMap)
+    // from the diverged/converged arrays
+    return new PrecomputedPoints(data);
   }
 }
 
