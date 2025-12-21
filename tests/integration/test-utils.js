@@ -5,6 +5,7 @@
 const puppeteer = require('puppeteer');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { setTimeout: sleep } = require('node:timers/promises');
 const { startCoverage, stopCoverage, clearCoverage, isCoverageEnabled } = require('../utils/coverage');
 
@@ -41,21 +42,33 @@ async function waitForViewReady(page, viewIndex = 0) {
 // Standard browser setup for tests
 async function setupBrowser() {
   const chromePath = findChrome();
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mandelbrot-puppeteer-'));
   const launchOptions = {
     headless: 'new',
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-crashpad',
+      '--disable-features=Crashpad',
+      '--no-first-run',
+      '--no-default-browser-check',
       '--enable-unsafe-webgpu',
       '--enable-features=Vulkan',
       '--use-angle=metal',
     ]
   };
+  launchOptions.userDataDir = userDataDir;
   if (chromePath) {
     launchOptions.executablePath = chromePath;
   }
-  return await puppeteer.launch(launchOptions);
+  const browser = await puppeteer.launch(launchOptions);
+  const originalClose = browser.close.bind(browser);
+  browser.close = async () => {
+    await originalClose();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  };
+  return browser;
 }
 
 // Standard page setup for tests

@@ -27,7 +27,7 @@ At 5× zoom, each parent pixel maps to a 5×5 region of 25 child pixels.
 ## Data Flow
 
 ```
-Parent View (complete)
+Parent View (partial or complete)
     │
     ├── nn[] - iteration counts
     ├── convergedData - Map of {z, p} for converged pixels
@@ -162,7 +162,7 @@ startViewComputation(k) {
 
   // Compute inheritance from parent if available
   let inheritedData = null;
-  if (view.parentView && view.parentView.isComplete()) {
+  if (view.parentView) {
     inheritedData = this.computeInheritance(
       view.parentView,
       view,
@@ -305,7 +305,7 @@ get enableInheritance() {
 // In Grid.startViewComputation():
 let inheritedData = null;
 if (this.config.enableInheritance &&
-    view.parentView && view.parentView.isComplete()) {
+    view.parentView) {
   inheritedData = this.computeInheritance(...);
 }
 ```

@@ -1692,9 +1692,16 @@ class Grid {
         // Check 3x3 neighbor uniformity
         // For diverged pixels (nn > 0): all neighbors must have same iteration
         // For converged pixels (nn < 0): all neighbors must also be converged
-        // (converged pixels in the same region share the same orbital period)
+        // with matching period (same attractor)
         let uniform = true;
         const isConverged = parentIter < 0;
+        const centerConverged = isConverged ?
+          parentView.convergedData.get(parentIdx) : null;
+        if (isConverged && !centerConverged) continue;
+        const centerZ = centerConverged ? centerConverged.z : null;
+        const centerReQD = centerZ ? centerZ.slice(0, 4) : null;
+        const centerImQD = centerZ ? centerZ.slice(4, 8) : null;
+        const zTolerance = Math.max(parentPixelSize * 4, 1e-12);
 
         for (let dy = -1; dy <= 1 && uniform; dy++) {
           for (let dx = -1; dx <= 1 && uniform; dx++) {
@@ -1704,6 +1711,23 @@ class Grid {
             if (isConverged) {
               // For converged: neighbors must also be converged
               if (neighborIter >= 0) {
+                uniform = false;
+                continue;
+              }
+              const neighborData = parentView.convergedData.get(neighborIdx);
+              if (!neighborData) {
+                uniform = false;
+                continue;
+              }
+              let sameAttractor = neighborData.p === centerConverged.p;
+              if (!sameAttractor) {
+                const neighborZ = neighborData.z;
+                const dzRe = Math.abs(qdToNumber(toQDSub(centerReQD, neighborZ.slice(0, 4))));
+                const dzIm = Math.abs(qdToNumber(toQDSub(centerImQD, neighborZ.slice(4, 8))));
+                const dz = Math.max(dzRe, dzIm);
+                sameAttractor = dz <= zTolerance;
+              }
+              if (!sameAttractor) {
                 uniform = false;
               }
             } else {
@@ -1723,15 +1747,12 @@ class Grid {
           diverged.push({ index: childIdx, iter: parentIter });
         } else {
           // Converged pixel - need z and period from convergedData
-          const data = parentView.convergedData.get(parentIdx);
-          if (data) {
-            converged.push({
-              index: childIdx,
-              iter: -parentIter,
-              z: data.z,
-              p: data.p
-            });
-          }
+          converged.push({
+            index: childIdx,
+            iter: -parentIter,
+            z: centerConverged.z,
+            p: centerConverged.p
+          });
         }
       }
     }
@@ -5464,14 +5485,13 @@ class CpuBoard extends Board {
         }
       }
 
-      this.it++;
-
       // Flush precomputed points at this iteration
       if (this.precomputed) {
         this.precomputed.flushAtIteration(this.it, this);
       }
 
       this.queueChanges(changes);
+      this.it++;
     }
   }
 
@@ -5699,14 +5719,13 @@ class QDCpuBoard extends Board {
         this.compact();
       }
 
-      this.it++;
-
       // Flush precomputed points at this iteration
       if (this.precomputed) {
         this.precomputed.flushAtIteration(this.it, this);
       }
 
       this.queueChanges(changes);
+      this.it++;
     }
   }
 
@@ -7591,6 +7610,34 @@ class GpuBoard extends GpuBaseBoard {
     try {
       // STEP 1: Check if done (before submitting new work)
       if (this.activeCount === 0 || this.un === 0) {
+        // If all pixels are precomputed (no GPU work), report them now.
+        if (this.activeCount === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
+          const remainingIters = Array.from(this.precomputed.pendingReports.keys()).sort((a, b) => a - b);
+          for (const iter of remainingIters) {
+            const pending = this.precomputed.extractAtIteration(iter);
+            if (pending) {
+              const divergedIndices = [];
+              const convergedData = [];
+              for (const idx of pending.diverged) {
+                this.nn[idx] = iter;
+                this.pp[idx] = 1;
+                this.di++;
+                this.un--;
+                divergedIndices.push(idx);
+              }
+              for (const c of pending.converged) {
+                this.nn[c.index] = -iter;
+                this.pp[c.index] = c.p;
+                this.un--;
+                convergedData.push({ index: c.index, z: c.z, p: c.p });
+              }
+              if (divergedIndices.length > 0 || convergedData.length > 0) {
+                this.changeList.push({ iter, nn: divergedIndices, vv: convergedData });
+                this.updateSize += divergedIndices.length + convergedData.length;
+              }
+            }
+          }
+        }
         this.un = 0;
         // Flush any pending results before returning
         if (this.hasPendingResults) {
