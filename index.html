@@ -1657,16 +1657,16 @@ class Grid {
     const zoomFactor = parentView.size / childView.size;
 
     // Disable inheritance if zoom factor is too large for 3x3 window safety
-    // At >20x, a single parent pixel covers >400 child pixels, making the 9-neighbor
+    // At >8x, a single parent pixel covers >64 child pixels, making the 9-neighbor
     // check statistically insufficient to guarantee safety.
-    if (zoomFactor > 20) {
-      console.warn(`Inheritance disabled: zoom factor ${zoomFactor.toFixed(1)}x exceeds safety limit of 20x`);
+    if (zoomFactor > 8) {
+      console.warn(`Inheritance disabled: zoom factor ${zoomFactor.toFixed(1)}x exceeds safety limit of 8x`);
       return { diverged: [], converged: [] };
     }
 
     // Warn if zoom factor is large but allowed
-    if (zoomFactor > 10) {
-      console.warn(`Inheritance warning: zoom factor ${zoomFactor.toFixed(1)}x exceeds 10x, 3x3 window may be insufficient`);
+    if (zoomFactor > 5) {
+      console.warn(`Inheritance warning: zoom factor ${zoomFactor.toFixed(1)}x exceeds 5x, 3x3 window may be insufficient`);
     }
 
     // Get centers and sizes as doubles (first element of QD arrays)
