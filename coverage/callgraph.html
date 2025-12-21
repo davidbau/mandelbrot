@@ -504,12 +504,12 @@
           // Existing node: restore position, fix it initially
           return { ...n, isNew, x: pos.x, y: pos.y, fx: pos.x, fy: pos.y };
         } else {
-          // New node: position near center with small random offset
+          // New node: position near center (0,0) with small random offset
           return {
             ...n,
             isNew,
-            x: width / 2 + (Math.random() - 0.5) * 100,
-            y: height / 2 + (Math.random() - 0.5) * 100
+            x: (Math.random() - 0.5) * 100,
+            y: (Math.random() - 0.5) * 100
           };
         }
       });
@@ -727,6 +727,7 @@
     }
 
     // If stable nodes settle outside the viewport while playing, gently zoom out
+    // Also ease the view back towards center if off-center
     function adjustViewIfOvercrowded(width, height) {
       if (!isPlaying || !zoomBehavior || !simulation) return;
       const nodes = simulation.nodes();
@@ -751,9 +752,25 @@
       const marginX = halfW;
       const marginY = halfH;
       const overflow = (minX < -marginX) || (maxX > marginX) || (minY < -marginY) || (maxY > marginY);
-      if (overflow) {
-        const targetScale = transform.k * 0.95; // ~5% zoom out
-        svg.transition().duration(3000).ease(d3.easeSineOut).call(zoomBehavior.scaleTo, targetScale);
+
+      // Calculate center of stable nodes in screen coords
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+      const offCenter = Math.abs(centerX) > 50 || Math.abs(centerY) > 50;
+
+      if (overflow || offCenter) {
+        let targetTransform = transform;
+        if (overflow) {
+          // Zoom out by 5%
+          targetTransform = transform.scale(0.95);
+        }
+        if (offCenter) {
+          // Ease 20% back towards center
+          const newX = transform.x - centerX * 0.2;
+          const newY = transform.y - centerY * 0.2;
+          targetTransform = d3.zoomIdentity.translate(newX, newY).scale(targetTransform.k);
+        }
+        svg.transition().duration(3000).ease(d3.easeSinOut).call(zoomBehavior.transform, targetTransform);
       }
     }
 

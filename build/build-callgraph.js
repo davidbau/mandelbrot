@@ -590,9 +590,15 @@ function hashContent(text) {
   return crypto.createHash('sha1').update(text).digest('hex');
 }
 
-// Extract co-author flags for a commit body
+// Extract co-author flags for a commit (checks both author and co-author lines)
 function getCoauthorFlags(hash) {
   try {
+    // Get author email and commit body
+    const authorEmail = execSync(`git log -1 --format="%ae" ${hash}`, {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024
+    }).trim().toLowerCase();
+
     const body = execSync(`git log -1 --format="%b" ${hash}`, {
       encoding: 'utf8',
       maxBuffer: 1024 * 1024
@@ -604,10 +610,11 @@ function getCoauthorFlags(hash) {
       return pattern.test(body);
     };
 
+    // Check if AI is the main author (by email) or a co-author
     return {
-      claude: hasCoauthor('Claude'),
-      gemini: hasCoauthor('Gemini'),
-      codex: hasCoauthor('Codex')
+      claude: hasCoauthor('Claude') || authorEmail.includes('anthropic'),
+      gemini: hasCoauthor('Gemini') || authorEmail.includes('google'),
+      codex: hasCoauthor('Codex') || authorEmail.includes('openai')
     };
   } catch (e) {
     return { claude: false, gemini: false, codex: false };
