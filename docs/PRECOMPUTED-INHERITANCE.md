@@ -223,6 +223,7 @@ This helps visualize which pixels are being inherited from the parent view.
 - Precompute parent uniformity in the parent rectangle once, then reuse it for child pixels.
 - Cache child→parent index mapping per row/column to avoid repeated coordinate math.
 - Iterate parent pixels and fill child runs that map to the same parent index.
+- Pack inheritance results into typed arrays on the main thread and transfer buffers to workers.
 
 ### Microbenchmark Helper
 

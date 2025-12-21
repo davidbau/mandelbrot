@@ -1653,7 +1653,16 @@ class Grid {
     const parentHeight = this.config.dimsHeight;
     const childWidth = this.config.dimsWidth;
     const childHeight = this.config.dimsHeight;
-    const aspectRatio = this.config.aspectRatio;
+    const emptyPacked = () => ({
+      packed: true,
+      dIndices: new Uint32Array(0),
+      cIndices: new Uint32Array(0),
+      cP: new Uint32Array(0),
+      cZ: new Float64Array(0),
+      zStride: 2,
+      ranges: new Uint32Array(0),
+      knownMask: new Uint8Array(0)
+    });
 
     // Compute effective zoom factor between parent and child
     const zoomFactor = parentView.size / childView.size;
@@ -1663,7 +1672,7 @@ class Grid {
     // check statistically insufficient to guarantee safety.
     if (zoomFactor > 8) {
       console.warn(`Inheritance disabled: zoom factor ${zoomFactor.toFixed(1)}x exceeds safety limit of 8x`);
-      return { diverged: [], converged: [] };
+      return emptyPacked();
     }
 
     // Warn if zoom factor is large but allowed
@@ -1680,8 +1689,6 @@ class Grid {
     const parentCenterIm = qdToNumber(parentView.im);
     const parentPixelSize = parentView.size / parentWidth;
 
-    const diverged = [];
-    const converged = [];
     const uniformCache = new Int8Array(parentWidth * parentHeight);
     const childXStart = new Int32Array(parentWidth).fill(-1);
     const childXEnd = new Int32Array(parentWidth).fill(-1);
@@ -1794,6 +1801,76 @@ class Grid {
       }
     }
 
+    const iterCounts = new Map();
+    let totalDiverged = 0;
+    let totalConverged = 0;
+    let zStride = 2;
+    let zStrideSet = false;
+
+    for (let py = minPy; py <= maxPy; py++) {
+      const cyStart = childYStart[py];
+      if (cyStart === -1) continue;
+      const cyEnd = childYEnd[py];
+      const yCount = cyEnd - cyStart + 1;
+      for (let px = minPx; px <= maxPx; px++) {
+        const cxStart = childXStart[px];
+        if (cxStart === -1) continue;
+        if (uniformCache[py * parentWidth + px] !== 1) continue;
+
+        const parentIdx = py * parentWidth + px;
+        const parentIter = parentView.nn[parentIdx];
+        if (parentIter === 0) continue;
+        const cxEnd = childXEnd[px];
+        const count = (cxEnd - cxStart + 1) * yCount;
+        if (parentIter > 0) {
+          const entry = iterCounts.get(parentIter) || { dCount: 0, cCount: 0 };
+          entry.dCount += count;
+          iterCounts.set(parentIter, entry);
+          totalDiverged += count;
+        } else {
+          const centerConverged = parentView.convergedData.get(parentIdx);
+          if (!centerConverged) continue;
+          if (!zStrideSet && centerConverged.z && centerConverged.z.length > 2) {
+            zStride = centerConverged.z.length;
+            zStrideSet = true;
+          }
+          const iterKey = -parentIter;
+          const entry = iterCounts.get(iterKey) || { dCount: 0, cCount: 0 };
+          entry.cCount += count;
+          iterCounts.set(iterKey, entry);
+          totalConverged += count;
+        }
+      }
+    }
+
+    const totalInherited = totalDiverged + totalConverged;
+    if (totalInherited === 0) {
+      return emptyPacked();
+    }
+    const dIndices = new Uint32Array(totalDiverged);
+    const cIndices = new Uint32Array(totalConverged);
+    const cP = new Uint32Array(totalConverged);
+    const cZ = new Float64Array(totalConverged * zStride);
+    const knownMask = new Uint8Array(childWidth * childHeight);
+    const iterEntries = Array.from(iterCounts.entries()).sort((a, b) => a[0] - b[0]);
+    const ranges = new Uint32Array(iterEntries.length * 5);
+    const iterWrite = new Map();
+    let dOffset = 0;
+    let cOffset = 0;
+    for (let i = 0; i < iterEntries.length; i++) {
+      const [iter, counts] = iterEntries[i];
+      const dStart = dOffset;
+      const cStart = cOffset;
+      ranges[i * 5] = iter;
+      ranges[i * 5 + 1] = dStart;
+      ranges[i * 5 + 2] = counts.dCount;
+      ranges[i * 5 + 3] = cStart;
+      ranges[i * 5 + 4] = counts.cCount;
+      iterWrite.set(iter, { dWrite: dStart, cWrite: cStart });
+      dOffset += counts.dCount;
+      cOffset += counts.cCount;
+    }
+
     for (let py = minPy; py <= maxPy; py++) {
       const cyStart = childYStart[py];
       if (cyStart === -1) continue;
@@ -1812,21 +1889,39 @@ class Grid {
         if (isConverged && !centerConverged) continue;
         const cxEnd = childXEnd[px];
 
-        for (let cy = cyStart; cy <= cyEnd; cy++) {
-          const rowBase = cy * childWidth;
-          for (let cx = cxStart; cx <= cxEnd; cx++) {
-            const childIdx = rowBase + cx;
-            if (parentIter > 0) {
-              diverged.push({ index: childIdx, iter: parentIter });
-            } else {
-              converged.push({
-                index: childIdx,
-                iter: -parentIter,
-                z: centerConverged.z,
-                p: centerConverged.p
-              });
+        if (parentIter > 0) {
+          const writer = iterWrite.get(parentIter);
+          let dWrite = writer.dWrite;
+          for (let cy = cyStart; cy <= cyEnd; cy++) {
+            const rowBase = cy * childWidth;
+            for (let cx = cxStart; cx <= cxEnd; cx++) {
+              const childIdx = rowBase + cx;
+              dIndices[dWrite++] = childIdx;
+              knownMask[childIdx] = 1;
             }
           }
+          writer.dWrite = dWrite;
+        } else {
+          const iterKey = -parentIter;
+          const writer = iterWrite.get(iterKey);
+          let cWrite = writer.cWrite;
+          const z = centerConverged.z || [];
+          const zLen = Math.min(zStride, z.length);
+          for (let cy = cyStart; cy <= cyEnd; cy++) {
+            const rowBase = cy * childWidth;
+            for (let cx = cxStart; cx <= cxEnd; cx++) {
+              const childIdx = rowBase + cx;
+              cIndices[cWrite] = childIdx;
+              cP[cWrite] = centerConverged.p;
+              const zOffset = cWrite * zStride;
+              for (let k = 0; k < zLen; k++) {
+                cZ[zOffset + k] = z[k];
+              }
+              knownMask[childIdx] = 1;
+              cWrite++;
+            }
+          }
+          writer.cWrite = cWrite;
         }
       }
     }
@@ -1834,11 +1929,19 @@ class Grid {
     // Log inheritance stats if debug flag set
     if (this.config.debug && this.config.debug.includes('inherit')) {
       const total = childWidth * childHeight;
-      const inherited = diverged.length + converged.length;
-      console.log(`Inheritance: ${inherited}/${total} pixels (${(100 * inherited / total).toFixed(1)}%) from parent view ${parentView.k} to child view ${childView.k}`);
+      console.log(`Inheritance: ${totalInherited}/${total} pixels (${(100 * totalInherited / total).toFixed(1)}%) from parent view ${parentView.k} to child view ${childView.k}`);
     }
 
-    return { diverged, converged };
+    return {
+      packed: true,
+      dIndices,
+      cIndices,
+      cP,
+      cZ,
+      zStride,
+      ranges,
+      knownMask
+    };
   }
 
   removeView(k) {
@@ -1923,6 +2026,27 @@ class Grid {
     const ctx = canvas.getContext('2d');
     const width = this.config.dimsWidth;
     const pixelRatio = this.config.pixelRatio || 1;
+
+    if (inheritedData.packed) {
+      // Draw diverged pixels in hot pink
+      ctx.fillStyle = '#ff69b4';
+      for (let i = 0; i < inheritedData.dIndices.length; i++) {
+        const idx = inheritedData.dIndices[i];
+        const x = idx % width;
+        const y = Math.floor(idx / width);
+        ctx.fillRect(x * pixelRatio, y * pixelRatio, pixelRatio, pixelRatio);
+      }
+
+      // Draw converged pixels in magenta (slightly different shade)
+      ctx.fillStyle = '#ff00ff';
+      for (let i = 0; i < inheritedData.cIndices.length; i++) {
+        const idx = inheritedData.cIndices[i];
+        const x = idx % width;
+        const y = Math.floor(idx / width);
+        ctx.fillRect(x * pixelRatio, y * pixelRatio, pixelRatio, pixelRatio);
+      }
+      return;
+    }
 
     // Draw diverged pixels in hot pink
     ctx.fillStyle = '#ff69b4';
@@ -4459,7 +4583,7 @@ class Scheduler {
     if (!isFinite(size)) {
       console.warn(`Board ${k}: non-finite size`, size);
     }
-    worker.postMessage({
+    const message = {
       type: 'addBoard',
       data: {
         k,
@@ -4480,7 +4604,21 @@ class Scheduler {
         workerNumber,
         inheritedData
       }
-    });
+    };
+    const transfers = [];
+    if (inheritedData && inheritedData.packed) {
+      if (inheritedData.dIndices) transfers.push(inheritedData.dIndices.buffer);
+      if (inheritedData.cIndices) transfers.push(inheritedData.cIndices.buffer);
+      if (inheritedData.cP) transfers.push(inheritedData.cP.buffer);
+      if (inheritedData.cZ) transfers.push(inheritedData.cZ.buffer);
+      if (inheritedData.ranges) transfers.push(inheritedData.ranges.buffer);
+      if (inheritedData.knownMask) transfers.push(inheritedData.knownMask.buffer);
+    }
+    if (transfers.length > 0) {
+      worker.postMessage(message, transfers);
+    } else {
+      worker.postMessage(message);
+    }
   }
 
   // Remove board at index k. If expectedId is provided, only remove if the
@@ -5117,6 +5255,8 @@ class PrecomputedPoints {
   constructor(inheritedData) {
     // Track which pixels are pre-known (for excluding from compute)
     this.knownPixels = new Set();
+    this.knownMask = null;
+    this.knownCount = 0;
     // Map<iter, {dStart, dCount, cStart, cCount}>
     this.rangeMap = new Map();
 
@@ -5126,6 +5266,28 @@ class PrecomputedPoints {
       this.cP = new Uint32Array(0);
       this.cZ = new Float64Array(0);
       this.zStride = 2;
+      return;
+    }
+
+    if (inheritedData.packed) {
+      this.dIndices = inheritedData.dIndices || new Uint32Array(0);
+      this.cIndices = inheritedData.cIndices || new Uint32Array(0);
+      this.cP = inheritedData.cP || new Uint32Array(0);
+      this.cZ = inheritedData.cZ || new Float64Array(0);
+      this.zStride = inheritedData.zStride || 2;
+      this.knownMask = inheritedData.knownMask || null;
+      this.knownCount = this.dIndices.length + this.cIndices.length;
+
+      const ranges = inheritedData.ranges || new Uint32Array(0);
+      for (let i = 0; i + 4 < ranges.length; i += 5) {
+        const iter = ranges[i];
+        this.rangeMap.set(iter, {
+          dStart: ranges[i + 1],
+          dCount: ranges[i + 2],
+          cStart: ranges[i + 3],
+          cCount: ranges[i + 4]
+        });
+      }
       return;
     }
 
@@ -5197,6 +5359,7 @@ class PrecomputedPoints {
     if (currentIter !== -1) {
       this._getRange(currentIter).cCount = converged.length - start;
     }
+    this.knownCount = this.knownPixels.size;
   }
 
   _getRange(iter) {
@@ -5207,10 +5370,16 @@ class PrecomputedPoints {
   }
 
   isPrecomputed(index) {
+    if (this.knownMask) {
+      return this.knownMask[index] === 1;
+    }
     return this.knownPixels.has(index);
   }
 
   getPrecomputedCount() {
+    if (this.knownMask) {
+      return this.knownCount;
+    }
     return this.knownPixels.size;
   }
 
@@ -11188,7 +11357,9 @@ class FractalWorker {
 
         // Log inheritance stats if debug=inherit is set
         if (data.inheritedData && hasDebugFlag(data.config, 'inherit')) {
-          const inherited = (data.inheritedData.diverged?.length || 0) + (data.inheritedData.converged?.length || 0);
+          const inherited = data.inheritedData.packed ?
+            ((data.inheritedData.dIndices?.length || 0) + (data.inheritedData.cIndices?.length || 0)) :
+            ((data.inheritedData.diverged?.length || 0) + (data.inheritedData.converged?.length || 0));
           console.log(`Board ${data.k} (${BoardClass.name}): received ${inherited} inherited pixels`);
         }
 

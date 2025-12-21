@@ -660,9 +660,12 @@ describe('Inheritance color behavior', () => {
       const manualInheritance = window.explorer.grid.computeInheritance(parentView, childView);
 
       let periodMismatchInherited = 0;
-      for (const entry of manualInheritance?.converged || []) {
-        const cx = entry.index % w;
-        const cy = Math.floor(entry.index / w);
+      const convergedIndices = manualInheritance?.packed ?
+        manualInheritance.cIndices : (manualInheritance?.converged || []).map(entry => entry.index);
+      for (let i = 0; i < convergedIndices.length; i++) {
+        const idx = convergedIndices[i];
+        const cx = idx % w;
+        const cy = Math.floor(idx / w);
         const childCoord = window.pixelToComplexCoords(
           childCenterRe, childCenterIm, childView.size, w, h, cx, cy);
         const parentCoord = window.complexToPixelCoords(
@@ -670,7 +673,7 @@ describe('Inheritance color behavior', () => {
         const px = Math.floor(parentCoord.px);
         const py = Math.floor(parentCoord.py);
         if (px < 1 || px >= w - 1 || py < 1 || py >= h - 1) {
-          pMismatchInherited++;
+          periodMismatchInherited++;
           continue;
         }
         const parentIdx = py * w + px;
@@ -699,8 +702,10 @@ describe('Inheritance color behavior', () => {
         parentConvergedWithData,
         parentTotal: parentView.nn.length,
         childTotal: childView.nn.length,
-        manualDiverged: manualInheritance?.diverged?.length || 0,
-        manualConverged: manualInheritance?.converged?.length || 0,
+        manualDiverged: manualInheritance?.packed ?
+          (manualInheritance?.dIndices?.length || 0) : (manualInheritance?.diverged?.length || 0),
+        manualConverged: manualInheritance?.packed ?
+          (manualInheritance?.cIndices?.length || 0) : (manualInheritance?.converged?.length || 0),
         periodMismatchInherited
       };
     });

@@ -51,9 +51,12 @@ describe('Precomputed inheritance regressions', () => {
 
       const child = { size: parent.size, re: parent.re, im: parent.im };
       const inherited = grid.computeInheritance(parent, child);
+      const inheritedIndices = inherited.packed ?
+        Array.from(inherited.cIndices) :
+        inherited.converged.map(item => item.index);
       return {
         centerIdx,
-        inherited: inherited.converged.map(item => item.index)
+        inherited: inheritedIndices
       };
     });
 
