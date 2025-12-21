@@ -1719,6 +1719,7 @@ class Grid {
         const centerConverged = isConverged ?
           parentView.convergedData.get(parentIdx) : null;
         if (isConverged && !centerConverged) continue;
+        const centerPeriod = isConverged ? fibonacciPeriod(centerConverged.p) : null;
         for (let dy = -1; dy <= 1 && uniform; dy++) {
           for (let dx = -1; dx <= 1 && uniform; dx++) {
             const neighborIdx = (py + dy) * parentWidth + (px + dx);
@@ -1735,7 +1736,7 @@ class Grid {
                 uniform = false;
                 continue;
               }
-              if (neighborData.p !== centerConverged.p) {
+              if (fibonacciPeriod(neighborData.p) !== centerPeriod) {
                 uniform = false;
               }
             } else {
@@ -5228,11 +5229,11 @@ class PrecomputedPoints {
     return data;
   }
 
-  // Get all iterations that have pending reports BELOW maxIter.
-  getPendingIterations(maxIter) {
-    return Array.from(this.rangeMap.keys())
-      .filter(iter => iter < maxIter)
-      .sort((a, b) => a - b);
+  // Get all iterations that have pending reports, optionally below maxIter.
+  getPendingIterations(maxIter = null) {
+    const keys = Array.from(this.rangeMap.keys());
+    const filtered = maxIter === null ? keys : keys.filter(iter => iter < maxIter);
+    return filtered.sort((a, b) => a - b);
   }
 
   // Extract and remove ALL pending reports below maxIter.
@@ -7708,7 +7709,7 @@ class GpuBoard extends GpuBaseBoard {
       if (this.activeCount === 0 || this.un === 0) {
         // If all pixels are precomputed (no GPU work), report them now.
         if (this.activeCount === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
-          const remainingIters = Array.from(this.precomputed.pendingReports.keys()).sort((a, b) => a - b);
+          const remainingIters = this.precomputed.getPendingIterations();
           for (const iter of remainingIters) {
             const pending = this.precomputed.extractAtIteration(iter);
             if (pending) {
@@ -7961,7 +7962,7 @@ class GpuBoard extends GpuBaseBoard {
         // This handles precomputed at iterations HIGHER than the last GPU result
         const activeRemaining = this.activeCount - this.deadSinceCompaction;
         if (activeRemaining === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
-          const remainingIters = Array.from(this.precomputed.pendingReports.keys()).sort((a, b) => a - b);
+          const remainingIters = this.precomputed.getPendingIterations();
           for (const iter of remainingIters) {
             const pending = this.precomputed.extractAtIteration(iter);
             if (pending) {
@@ -9122,7 +9123,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     // ================================================================
     if (this.activeCount === 0) {
       if (this.precomputed && this.precomputed.getPendingCount() > 0) {
-        const remainingIters = Array.from(this.precomputed.pendingReports.keys()).sort((a, b) => a - b);
+        const remainingIters = this.precomputed.getPendingIterations();
         for (const iter of remainingIters) {
           const pending = this.precomputed.extractAtIteration(iter);
           if (pending) {
@@ -9465,7 +9466,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       // After GPU batch: if all GPU pixels are done but precomputed remain, flush them
       const activeRemaining = this.activeCount - this.deadSinceCompaction;
       if (activeRemaining === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
-        const remainingIters = Array.from(this.precomputed.pendingReports.keys()).sort((a, b) => a - b);
+        const remainingIters = this.precomputed.getPendingIterations();
         for (const iter of remainingIters) {
           const pending = this.precomputed.extractAtIteration(iter);
           if (pending) {
@@ -10468,7 +10469,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       // ================================================================
       if (this.activeCount === 0) {
         if (this.precomputed && this.precomputed.getPendingCount() > 0) {
-          const remainingIters = Array.from(this.precomputed.pendingReports.keys()).sort((a, b) => a - b);
+          const remainingIters = this.precomputed.getPendingIterations();
           for (const iter of remainingIters) {
             const pending = this.precomputed.extractAtIteration(iter);
             if (pending) {
@@ -10753,7 +10754,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         // After GPU batch: if all GPU pixels are done but precomputed remain, flush them
         const activeRemaining = this.activeCount - this.deadSinceCompaction;
         if (activeRemaining === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
-          const remainingIters = Array.from(this.precomputed.pendingReports.keys()).sort((a, b) => a - b);
+          const remainingIters = this.precomputed.getPendingIterations();
           for (const iter of remainingIters) {
             const pending = this.precomputed.extractAtIteration(iter);
             if (pending) {

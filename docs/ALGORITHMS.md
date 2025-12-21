@@ -47,7 +47,8 @@ if (isFibonacci(iteration)) {
 // Check if current z matches any recent checkpoint
 const delta = |z - checkpoint|;
 if (delta < epsilon) {
-  // Converged! Period ≈ (current_iter - checkpoint_iter)
+  // Converged! Record the absolute iteration when convergence is detected.
+  // The UI later derives a displayable period via fibonacciPeriod(iteration).
   markConverged(pixel, iteration);
 }
 ```
@@ -75,6 +76,8 @@ The strict `epsilon` is a fraction of the pixel size to confirm the orbit has se
 When `|z - checkpoint| < epsilon2`, we note the iteration as a candidate period. When it drops below `epsilon`, we confirm convergence. This two-stage approach catches gradual, spiraling convergence earlier while avoiding false positives.
 
 Why two thresholds? Convergence to a cycle is gradual—the orbit spirals inward, getting closer each time. A single tight threshold would miss early detection opportunities. The loose threshold (`epsilon2`) lets us notice "this point is probably converging" and record the likely period. The strict threshold (`epsilon`) confirms it.
+
+In the current implementation, the stored `pp` value is the **absolute iteration** when convergence is first detected (the `epsilon2` threshold), not the minimum cycle length. The display period is derived from that iteration using `fibonacciPeriod(pp)`, which encodes both "how many iterations it took to converge" and the checkpoint schedule.
 
 ## Perturbation Theory: Breaking the Precision Barrier
 

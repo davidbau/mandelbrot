@@ -659,7 +659,7 @@ describe('Inheritance color behavior', () => {
       // Call computeInheritance to see what we'd get
       const manualInheritance = window.explorer.grid.computeInheritance(parentView, childView);
 
-      let pMismatchInherited = 0;
+      let periodMismatchInherited = 0;
       for (const entry of manualInheritance?.converged || []) {
         const cx = entry.index % w;
         const cy = Math.floor(entry.index / w);
@@ -676,15 +676,17 @@ describe('Inheritance color behavior', () => {
         const parentIdx = py * w + px;
         const centerConverged = parentView.convergedData.get(parentIdx);
         if (!centerConverged) {
-          pMismatchInherited++;
+          periodMismatchInherited++;
           continue;
         }
+        const centerPeriod = window.fibonacciPeriod(centerConverged.p);
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
             const neighborIdx = (py + dy) * w + (px + dx);
             const neighborData = parentView.convergedData.get(neighborIdx);
-            if (!neighborData || neighborData.p !== centerConverged.p) {
-              pMismatchInherited++;
+            if (!neighborData ||
+                window.fibonacciPeriod(neighborData.p) !== centerPeriod) {
+              periodMismatchInherited++;
               dy = 2;
               break;
             }
@@ -699,13 +701,14 @@ describe('Inheritance color behavior', () => {
         childTotal: childView.nn.length,
         manualDiverged: manualInheritance?.diverged?.length || 0,
         manualConverged: manualInheritance?.converged?.length || 0,
-        pMismatchInherited
+        periodMismatchInherited
       };
     });
 
     const manualTotal = inheritanceStats.manualDiverged + inheritanceStats.manualConverged;
     expect(manualTotal).toBeGreaterThan(0);
-    expect(inheritanceStats.pMismatchInherited).toBe(0);
+    expect(inheritanceStats.periodMismatchInherited).toBe(0);
+    expect(manualTotal).toBe(inheritanceStats.childTotal);
 
     await page.close();
   }, TEST_TIMEOUT);

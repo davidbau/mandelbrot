@@ -20,7 +20,7 @@ describe('Precomputed inheritance regressions', () => {
     if (browser) await browser.close();
   });
 
-  test('computeInheritance rejects converged regions with mismatched periods', async () => {
+  test('computeInheritance rejects converged regions with mismatched derived periods', async () => {
     const page = await setupPage(browser);
 
     await page.goto(`file://${indexPath}?dims=5x5&grid=1`, {
@@ -47,7 +47,7 @@ describe('Precomputed inheritance regressions', () => {
       }
 
       const mismatchIdx = (centerY - 1) * width + centerX;
-      parent.convergedData.set(mismatchIdx, { z: [0, 0], p: 3 });
+      parent.convergedData.set(mismatchIdx, { z: [0, 0], p: 4 });
 
       const child = { size: parent.size, re: parent.re, im: parent.im };
       const inherited = grid.computeInheritance(parent, child);
