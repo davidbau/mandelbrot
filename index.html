@@ -6413,8 +6413,8 @@ const QDReferenceOrbitMixin = (Base) => class extends Base {
 // Base class for CPU-based Zhuoran perturbation boards (DD and QD precision)
 // Subclasses implement precision-specific reference orbit computation
 class CpuZhuoranBaseBoard extends Board {
-  constructor(k, size, re, im, config, id) {
-    super(k, size, re, im, config, id);
+  constructor(k, size, re, im, config, id, inheritedData = null) {
+    super(k, size, re, im, config, id, inheritedData);
 
     // Per-pixel thread tracking for convergence detection
     this.currentThreadIter = new Array(this.config.dimsArea).fill(0);
@@ -6518,6 +6518,12 @@ class CpuZhuoranBaseBoard extends Board {
       if (this.pixelIndexes.length > this.un * 1.25) {
         this.pixelIndexes = this.pixelIndexes.filter(i => !this.nn[i]);
       }
+
+      // Flush precomputed points at this iteration
+      if (this.precomputed) {
+        this.precomputed.flushAtIteration(this.it, this);
+      }
+
       this.it++;
       this.queueChanges(changes);
     }
@@ -6781,8 +6787,8 @@ class CpuZhuoranBaseBoard extends Board {
 // DD-precision implementation of CpuZhuoranBaseBoard
 // Uses DDReferenceOrbitMixin for reference orbit computation
 class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
-  constructor(k, size, re, im, config, id) {
-    super(k, size, re, im, config, id);
+  constructor(k, size, re, im, config, id, inheritedData = null) {
+    super(k, size, re, im, config, id, inheritedData);
     this.effort = 450;  // Benchmarked: 19.6 ns/px-iter, 4.5× slower than CPU
 
     // Initialize DD reference orbit (refC, refOrbit, threading, etc.)
@@ -6822,7 +6828,11 @@ class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
         this.dz[index * 2 + 1] = dci;
         // Start at iteration 1 (z = c)
         this.refIter[index] = 1;
-        this.pixelIndexes.push(index);
+
+        // Skip precomputed pixels - they'll be flushed at their iteration
+        if (!this.precomputed || !this.precomputed.isPrecomputed(index)) {
+          this.pixelIndexes.push(index);
+        }
 
         // Count spike pixels
         const cr = refRe + dcr;
@@ -6878,8 +6888,8 @@ class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
 // Provides higher precision (~212 bits) reference for very deep zooms
 // Uses QDReferenceOrbitMixin for reference orbit computation
 class QDZhuoranBoard extends QDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
-  constructor(k, size, re, im, config, id) {
-    super(k, size, re, im, config, id);
+  constructor(k, size, re, im, config, id, inheritedData = null) {
+    super(k, size, re, im, config, id, inheritedData);
     this.effort = 480;  // Benchmarked: 21.0 ns/px-iter, 4.8× slower than CPU
 
     // Initialize QD reference orbit (refC_qd, qdRefOrbit, threading, etc.)
@@ -6919,7 +6929,11 @@ class QDZhuoranBoard extends QDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
         this.dz[index * 2 + 1] = dci;
         // Start at iteration 1 (z = c)
         this.refIter[index] = 1;
-        this.pixelIndexes.push(index);
+
+        // Skip precomputed pixels - they'll be flushed at their iteration
+        if (!this.precomputed || !this.precomputed.isPrecomputed(index)) {
+          this.pixelIndexes.push(index);
+        }
 
         // Count spike pixels
         const cr = refRe + dcr;
