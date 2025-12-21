@@ -753,7 +753,7 @@
       const overflow = (minX < -marginX) || (maxX > marginX) || (minY < -marginY) || (maxY > marginY);
       if (overflow) {
         const targetScale = transform.k * 0.95; // ~5% zoom out
-        svg.transition().duration(600).call(zoomBehavior.scaleTo, targetScale);
+        svg.transition().duration(3000).ease(d3.easeSineOut).call(zoomBehavior.scaleTo, targetScale);
       }
     }
 
