@@ -51,13 +51,13 @@ describe('Parent-child view iteration matching', () => {
     }
   }, TEST_TIMEOUT);
 
-  // Skip: Deep zoom CPU computation is too slow for reliable CI
-  test.skip('z=1e20 with 16:9 aspect ratio should have matching iteration counts', async () => {
+  test('z=1e20 with 16:9 aspect ratio should have matching iteration counts', async () => {
     if (launchFailed) return;
 
     // Test precision matching at z=1e20 (requires quad precision)
     // c=-1.8 is in the period-3 bulb; grid=10&subpixel=1 for faster test execution
-    const url = '?z=1.00e+20&a=16:9&grid=10&subpixel=1&c=-1.8+0i';
+    const url = '?z=1.00e+20&a=16:9&grid=1&subpixel=1&c=-1.8+0i' +
+      '&board=gpuz&width=240&height=135&pixelratio=1&maxiter=800&debug=fastload';
 
     await navigateToAppBasic(page, url);
 
@@ -80,14 +80,13 @@ describe('Parent-child view iteration matching', () => {
              window.explorer.grid.views[1] !== null;
     }, { timeout: 15000 });
 
-    // Wait for child view to be mostly complete (parent may have some convergent pixels)
+    // Wait for child view to be meaningfully computed (avoid long deep-zoom stalls)
     await page.waitForFunction(() => {
       const v0 = window.explorer.grid.views[0];
       const v1 = window.explorer.grid.views[1];
-      // Allow a few uncomputed pixels (deep zoom can have boundary pixels that take very long)
-      return v0 && v1 &&
-             v1.un <= 10 &&  // Child mostly computed
-             v0.di > v0.config.dimsArea * 0.5;  // Parent needs >50% diverged
+      if (!v0 || !v1) return false;
+      const v1Computed = 1 - (v1.un / v1.config.dimsArea);
+      return v1Computed >= 0.2; // Require 20% computed before comparing
     }, { timeout: 90000 });
 
     // Get detailed comparison data
@@ -145,8 +144,11 @@ describe('Parent-child view iteration matching', () => {
           if (v0x >= 0 && v0x < dimsWidth && v0y >= 0 && v0y < dimsHeight) {
             const v0idx = v0y * dimsWidth + v0x;
 
-            const v0iter = view0.nn[v0idx];
-            const v1iter = view1.nn[v1idx];
+          const v0iter = view0.nn[v0idx];
+          const v1iter = view1.nn[v1idx];
+
+          // Skip samples that aren't computed in both views yet
+          if (v0iter === 0 || v1iter === 0) continue;
 
             const diff = Math.abs(v0iter - v1iter);
             totalSamples++;
@@ -186,6 +188,7 @@ describe('Parent-child view iteration matching', () => {
     // At z=1e20, expect reasonable match rates
     // Perfect matching is limited by subpixel positioning and rounding
     // closeRate = within 1 iteration, exactRate = exact match
+    expect(comparison.totalSamples).toBeGreaterThan(20);
     expect(comparison.closeRate).toBeGreaterThan(0.5);
     expect(comparison.exactRate).toBeGreaterThan(0.35);
   }, PARENT_CHILD_TIMEOUT);
