@@ -6697,8 +6697,52 @@ class CpuZhuoranBaseBoard extends Board {
   // Extend reference orbit by one iteration (precision-specific)
   extendReferenceOrbit() { throw new Error('Abstract method'); }
 
-  // Initialize pixels (precision-specific)
-  initPixels() { throw new Error('Abstract method'); }
+  // Initialize pixels (shared by DD and QD subclasses)
+  initPixels() {
+    // Compute delta c directly without precision loss.
+    // At deep zoom, computing cr = center + offset loses precision.
+    // Since the reference point IS the view center, dc is just the pixel offset from center.
+    const sizeScalar = this.size;
+    const dimsWidth = this.config.dimsWidth;
+    const dimsHeight = this.config.dimsHeight;
+    const aspectRatio = this.config.aspectRatio;
+
+    // Convert reference point to double for spike detection
+    // Subclasses implement these accessors via mixins
+    const refRe = this.getRefCReal();
+    const refIm = this.getRefCImag();
+
+    for (let y = 0; y < dimsHeight; y++) {
+      const yFrac = (0.5 - y / dimsHeight);
+      const dci = yFrac * (sizeScalar / aspectRatio);
+
+      for (let x = 0; x < dimsWidth; x++) {
+        const xFrac = (x / dimsWidth - 0.5);
+        const dcr = xFrac * sizeScalar;
+
+        const index = y * dimsWidth + x;
+        this.dc[index * 2] = dcr;
+        this.dc[index * 2 + 1] = dci;
+        // Start with z = c, so dz = dc
+        this.dz[index * 2] = dcr;
+        this.dz[index * 2 + 1] = dci;
+        // Start at iteration 1 (z = c)
+        this.refIter[index] = 1;
+
+        // Skip precomputed pixels - they'll be flushed at their iteration
+        if (!this.precomputed || !this.precomputed.isPrecomputed(index)) {
+          this.pixelIndexes.push(index);
+        }
+
+        // Count spike pixels
+        const cr = refRe + dcr;
+        const ci = refIm + dci;
+        if (this.inspike(cr, ci)) {
+          this.ch += 1;
+        }
+      }
+    }
+  }
 
   // Shared iterate() method - works for both DD and QD
   iterate(targetIters = 1) {
@@ -7037,51 +7081,6 @@ class DDZhuoranBoard extends DDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
     this.initPixels();
   }
 
-  initPixels() {
-    // Compute delta c directly without precision loss.
-    // At deep zoom, computing cr = center + offset loses precision.
-    // Since the reference point IS the view center, dc is just the pixel offset from center.
-    const sizeScalar = this.size;
-    const dimsWidth = this.config.dimsWidth;
-    const dimsHeight = this.config.dimsHeight;
-    const aspectRatio = this.config.aspectRatio;
-
-    // Convert reference point to double for spike detection
-    const refRe = this.refC[0] + this.refC[1];
-    const refIm = this.refC[2] + this.refC[3];
-
-    for (let y = 0; y < dimsHeight; y++) {
-      const yFrac = (0.5 - y / dimsHeight);
-      const dci = yFrac * (sizeScalar / aspectRatio);
-
-      for (let x = 0; x < dimsWidth; x++) {
-        const xFrac = (x / dimsWidth - 0.5);
-        const dcr = xFrac * sizeScalar;
-
-        const index = y * dimsWidth + x;
-        this.dc[index * 2] = dcr;
-        this.dc[index * 2 + 1] = dci;
-        // Start with z = c, so dz = dc
-        this.dz[index * 2] = dcr;
-        this.dz[index * 2 + 1] = dci;
-        // Start at iteration 1 (z = c)
-        this.refIter[index] = 1;
-
-        // Skip precomputed pixels - they'll be flushed at their iteration
-        if (!this.precomputed || !this.precomputed.isPrecomputed(index)) {
-          this.pixelIndexes.push(index);
-        }
-
-        // Count spike pixels
-        const cr = refRe + dcr;
-        const ci = refIm + dci;
-        if (this.inspike(cr, ci)) {
-          this.ch += 1;
-        }
-      }
-    }
-  }
-
   static fromSerialized(serialized) {
     const board = new DDZhuoranBoard(
       serialized.k,
@@ -7136,51 +7135,6 @@ class QDZhuoranBoard extends QDReferenceOrbitMixin(CpuZhuoranBaseBoard) {
     this.initQDReferenceOrbit([...refReQD, ...refImQD]);
 
     this.initPixels();
-  }
-
-  initPixels() {
-    // Compute delta c directly without precision loss.
-    // At deep zoom, computing cr = center + offset loses precision.
-    // Since the reference point IS the view center, dc is just the pixel offset from center.
-    const sizeScalar = this.size;
-    const dimsWidth = this.config.dimsWidth;
-    const dimsHeight = this.config.dimsHeight;
-    const aspectRatio = this.config.aspectRatio;
-
-    // Convert reference point to double for spike detection
-    const refRe = this.refC_qd[0] + this.refC_qd[1] + this.refC_qd[2] + this.refC_qd[3];
-    const refIm = this.refC_qd[4] + this.refC_qd[5] + this.refC_qd[6] + this.refC_qd[7];
-
-    for (let y = 0; y < dimsHeight; y++) {
-      const yFrac = (0.5 - y / dimsHeight);
-      const dci = yFrac * (sizeScalar / aspectRatio);
-
-      for (let x = 0; x < dimsWidth; x++) {
-        const xFrac = (x / dimsWidth - 0.5);
-        const dcr = xFrac * sizeScalar;
-
-        const index = y * dimsWidth + x;
-        this.dc[index * 2] = dcr;
-        this.dc[index * 2 + 1] = dci;
-        // Start with z = c, so dz = dc
-        this.dz[index * 2] = dcr;
-        this.dz[index * 2 + 1] = dci;
-        // Start at iteration 1 (z = c)
-        this.refIter[index] = 1;
-
-        // Skip precomputed pixels - they'll be flushed at their iteration
-        if (!this.precomputed || !this.precomputed.isPrecomputed(index)) {
-          this.pixelIndexes.push(index);
-        }
-
-        // Count spike pixels
-        const cr = refRe + dcr;
-        const ci = refIm + dci;
-        if (this.inspike(cr, ci)) {
-          this.ch += 1;
-        }
-      }
-    }
   }
 
   async serialize() {
