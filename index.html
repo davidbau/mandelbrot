@@ -32,7 +32,9 @@ URL options: ?grid=3           to select 3-column view,
              &lang=es          language (en/es/zh/zh-tw/ar/id/pt/fr/ja/ru/de),
               &gpu=0           disable GPU acceleration,
             &board=gpuz        force algorithm (cpu/gpu/gpuz/ddz/qdz/
-                               pert/qdpert/adaptive/qdcpu).
+                               adaptive/qdcpu),
+           &inherit=0          disable parent-to-child inheritance,
+             &debug=w,s        debug flags (w,s,n,t,b,r,inherit).
 
 Implementation notes.  To minimize computation, the code identifies both
 points that diverge and points that converge.  It uses a method that can
@@ -2978,8 +2980,7 @@ class URLHandler {
         parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
           const validTypes = [
-            'cpu', 'ddz', 'qdz', 'pert', 'qdpert', 'gpu', 'sparse', 'gpuz',
-            'adaptive', 'qdcpu'
+            'cpu', 'ddz', 'qdz', 'gpu', 'gpuz', 'adaptive', 'qdcpu'
           ];
           if (validTypes.includes(boardType)) {
             configUpdates.forceBoard = boardType;

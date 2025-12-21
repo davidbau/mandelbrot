@@ -128,10 +128,8 @@ You can use the browser's developer console to observe computation progress, wor
 |-----------|-------------|-------------|
 | `?board=cpu` | CpuBoard | Simple float64 CPU board |
 | `?board=gpu` | GpuBoard | WebGPU float32 board |
-| `?board=pert` | PerturbationBoard | DD-precision CPU perturbation (no rebasing) |
 | `?board=ddz` | DDZhuoranBoard | DD-precision CPU with Zhuoran rebasing |
 | `?board=gpuz` | GpuZhuoranBoard | DD-precision GPU with Zhuoran rebasing |
-| `?board=qdpert` | QDPerturbationBoard | QD-precision CPU perturbation (no rebasing) |
 | `?board=qdz` | QDZhuoranBoard | QD-precision CPU with Zhuoran rebasing |
 | `?board=qdcpu` | QDCpuBoard | Simple QD-precision CPU board |
 | `?board=adaptive` | AdaptiveGpuBoard | QD-precision GPU with adaptive per-pixel scaling |
@@ -198,6 +196,18 @@ pause()                          // Pause again when needed
 - Comparing board states at specific iterations
 - Investigating why specific pixels converge/diverge
 - Profiling individual iteration batches
+
+### Additional Debug Flags
+
+Debug flags are comma-separated in `?debug=...`:
+
+- `w` — Run workers on the main thread (MockWorker mode).
+- `s` — Step mode (requires `w`).
+- `n` — No initial view creation (blank canvas).
+- `t` — Log timing per batch.
+- `b` — Collect batch timing stats (use `analyzeBatchTimings(k)` in console).
+- `r` — Random batch sizes for benchmarking.
+- `inherit` — Log inheritance stats and flash inherited pixels.
 
 ## Contributing
 

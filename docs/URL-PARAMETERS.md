@@ -146,6 +146,30 @@ and debugging the different computation engines.
 - CPU fallback: `cpu` for shallow (pixel size > ~1e-15), `ddz` for medium (pixel size > ~1e-30), `qdz` for ultra-deep (pixel size <= ~1e-30).
 - `qdcpu` is not auto-selected; use only when you want direct QD iteration (slower, stricter epsilon) for testing.
 
+### `inherit` - Parent-to-Child Inheritance
+
+Controls precomputed inheritance between zoom levels.
+
+```
+?inherit=1       # Enable inheritance (default)
+?inherit=0       # Disable inheritance for A/B comparisons
+```
+
+### `debug` - Debug Flags
+
+Comma-separated debug flags (some with optional values). Useful in combination
+with `?debug=w` when debugging on the main thread.
+
+```
+?debug=w         # Run workers on the main thread (MockWorker)
+?debug=w,s       # Step mode (manual iteration stepping)
+?debug=w,n       # No initial view creation (blank canvas)
+?debug=t         # Log timing per batch
+?debug=b         # Collect batch timing stats
+?debug=r         # Random batch sizes for benchmarking
+?debug=inherit   # Log inheritance stats and flash inherited pixels
+```
+
 ## Localization
 
 ### `lang` - Language
@@ -185,7 +209,7 @@ Sets the UI language for help text and other interface elements.
 
 **Force CPU computation for debugging:**
 ```
-?gpu=0&board=perturbation
+?gpu=0&board=cpu
 ```
 
 **Spanish interface with custom grid:**
