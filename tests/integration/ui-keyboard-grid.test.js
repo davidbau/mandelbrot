@@ -131,9 +131,9 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
       expect(diFinal).toBeGreaterThan(diAfterLayout + 5);
     }, TEST_TIMEOUT);
 
-    // Skip: Grid with 4+ columns is slow and flaky in CI
-    test.skip('Multiple H presses should not stall computation', async () => {
-      await page.goto(`file://${path.join(__dirname, '../../index.html')}`);
+    test('Multiple H presses should not stall computation', async () => {
+      const url = `file://${path.join(__dirname, '../../index.html')}?debug=fastload&width=240&height=240&pixelratio=1`;
+      await page.goto(url);
       await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
 
       // Wait for initial view with some computation started
@@ -162,21 +162,31 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
         { timeout: 15000 }
       );
 
-      // Record iteration count
-      const diAfterLayout = await page.evaluate(() => window.explorer.grid.views[0]?.di || 0);
+      // Record total uncomputed pixels after layout
+      const unAfterLayout = await page.evaluate(() => {
+        const views = window.explorer.grid.views || [];
+        return views.reduce((sum, view) => sum + (view?.un ?? 0), 0);
+      });
 
-      // Wait for computation to continue - should increase by at least 5 diverged pixels
+      // Wait for computation to continue after layout (un should decrease)
       await page.waitForFunction(
-        (baseline) => (window.explorer.grid.views[0]?.di || 0) > baseline + 5,
+        (baseline) => {
+          const views = window.explorer.grid.views || [];
+          const current = views.reduce((sum, view) => sum + (view?.un ?? 0), 0);
+          return current < baseline;
+        },
         { timeout: 30000 },
-        diAfterLayout
+        unAfterLayout
       );
 
       // Check progress
-      const diFinal = await page.evaluate(() => window.explorer.grid.views[0]?.di || 0);
+      const unFinal = await page.evaluate(() => {
+        const views = window.explorer.grid.views || [];
+        return views.reduce((sum, view) => sum + (view?.un ?? 0), 0);
+      });
 
       // Should have made progress
-      expect(diFinal).toBeGreaterThan(diAfterLayout + 5);
+      expect(unFinal).toBeLessThan(unAfterLayout);
     }, TEST_TIMEOUT);
 
     test('H followed by G should resume computation', async () => {
