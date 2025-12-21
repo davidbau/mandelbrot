@@ -584,10 +584,8 @@ describe('Inheritance color behavior', () => {
     await page.close();
   }, TEST_TIMEOUT);
 
-  test('converged pixels with same period should all be inherited despite different iterations', async () => {
-    // Bug: pixels in the cardioid all converge to period 0, but at different iterations.
-    // They should all be inherited because they share the same period, but the current
-    // code fails to inherit pixels at iteration boundaries.
+  test('converged pixels only inherit when period matches', async () => {
+    // Inheritance should reject converged neighbors when the period differs.
     const page = await browser.newPage();
     // Small viewport with grid=20 gives ~10x10 pixels per view
     await page.setViewport({ width: 200, height: 200 });
@@ -637,6 +635,10 @@ describe('Inheritance color behavior', () => {
       const childView = window.explorer.grid.views[1];
       const w = window.explorer.grid.config.dimsWidth;
       const h = window.explorer.grid.config.dimsHeight;
+      const childCenterRe = window.qdToNumber(childView.re);
+      const childCenterIm = window.qdToNumber(childView.im);
+      const parentCenterRe = window.qdToNumber(parentView.re);
+      const parentCenterIm = window.qdToNumber(parentView.im);
 
       // Count parent converged pixels
       let parentConverged = 0;
@@ -657,34 +659,53 @@ describe('Inheritance color behavior', () => {
       // Call computeInheritance to see what we'd get
       const manualInheritance = window.explorer.grid.computeInheritance(parentView, childView);
 
+      let pMismatchInherited = 0;
+      for (const entry of manualInheritance?.converged || []) {
+        const cx = entry.index % w;
+        const cy = Math.floor(entry.index / w);
+        const childCoord = window.pixelToComplexCoords(
+          childCenterRe, childCenterIm, childView.size, w, h, cx, cy);
+        const parentCoord = window.complexToPixelCoords(
+          parentCenterRe, parentCenterIm, parentView.size, w, h, childCoord.re, childCoord.im);
+        const px = Math.floor(parentCoord.px);
+        const py = Math.floor(parentCoord.py);
+        if (px < 1 || px >= w - 1 || py < 1 || py >= h - 1) {
+          pMismatchInherited++;
+          continue;
+        }
+        const parentIdx = py * w + px;
+        const centerConverged = parentView.convergedData.get(parentIdx);
+        if (!centerConverged) {
+          pMismatchInherited++;
+          continue;
+        }
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const neighborIdx = (py + dy) * w + (px + dx);
+            const neighborData = parentView.convergedData.get(neighborIdx);
+            if (!neighborData || neighborData.p !== centerConverged.p) {
+              pMismatchInherited++;
+              dy = 2;
+              break;
+            }
+          }
+        }
+      }
+
       return {
         parentConverged,
         parentConvergedWithData,
         parentTotal: parentView.nn.length,
         childTotal: childView.nn.length,
         manualDiverged: manualInheritance?.diverged?.length || 0,
-        manualConverged: manualInheritance?.converged?.length || 0
+        manualConverged: manualInheritance?.converged?.length || 0,
+        pMismatchInherited
       };
     });
 
-    // The child view zooms into a mostly-converged region of the parent.
-    // All converged pixels have the same period (period 0/1 for cardioid).
-    // They should ALL be inherited regardless of iteration boundaries.
-    // The bug causes stripes of non-inherited pixels at iteration boundaries.
-
-    // Check manual inheritance calculation (what computeInheritance returns)
     const manualTotal = inheritanceStats.manualDiverged + inheritanceStats.manualConverged;
-
-    // Debug output if no inheritance
-    if (manualTotal === 0) {
-      console.log('DEBUG - No inheritance!', inheritanceStats);
-    }
-
-    // The bug: converged pixels at iteration boundaries aren't being inherited
-    // because the check requires same iteration, not same period.
-    // When clicking in the middle of the cardioid, we expect near 100% inheritance.
-    const expectedMinManual = inheritanceStats.childTotal * 0.95;
-    expect(manualTotal).toBeGreaterThanOrEqual(expectedMinManual);
+    expect(manualTotal).toBeGreaterThan(0);
+    expect(inheritanceStats.pMismatchInherited).toBe(0);
 
     await page.close();
   }, TEST_TIMEOUT);

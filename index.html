@@ -1574,6 +1574,22 @@ class View {
   }
 }
 
+// Map a pixel index to complex coordinates using the same convention as GPU/CPU compute.
+function pixelToComplexCoords(centerRe, centerIm, size, dimsWidth, dimsHeight, x, y) {
+  const pixelSize = size / dimsWidth;
+  const xOffset = (x - dimsWidth / 2) * pixelSize;
+  const yOffset = (dimsHeight / 2 - y) * pixelSize;
+  return { re: centerRe + xOffset, im: centerIm + yOffset };
+}
+
+// Map complex coordinates to pixel-space coordinates for a view.
+function complexToPixelCoords(centerRe, centerIm, size, dimsWidth, dimsHeight, re, im) {
+  const pixelSize = size / dimsWidth;
+  const px = (re - centerRe) / pixelSize + dimsWidth / 2;
+  const py = dimsHeight / 2 - (im - centerIm) / pixelSize;
+  return { px, py };
+}
+
 // Manages the array of views and their layout in the grid.
 class Grid {
   constructor(config, store = null) {
@@ -1662,19 +1678,16 @@ class Grid {
       for (let cx = 0; cx < childWidth; cx++) {
         const childIdx = cy * childWidth + cx;
 
-        // Compute complex coordinates of this child pixel
-        // Using same formula as shader: center + (x - width/2) * pixelSize
-        // Note: pixelSize is size/width, and the vertical span is size/aspectRatio,
-        // but since aspectRatio = width/height, vertical_pixel_size = size/(aspectRatio*height)
-        // = size*height/(width*height) = size/width = pixelSize. So pixels are square.
-        const xOffset = (cx - childWidth / 2 + 0.5) * childPixelSize;
-        const yOffset = (childHeight / 2 - cy - 0.5) * childPixelSize;
-        const complexRe = childCenterRe + xOffset;
-        const complexIm = childCenterIm + yOffset;
+        // Compute complex coordinates of this child pixel using the same convention as compute.
+        const childCoord = pixelToComplexCoords(
+          childCenterRe, childCenterIm, childView.size, childWidth, childHeight, cx, cy);
 
         // Map complex coordinates to parent pixel coordinates
-        const pxFloat = (complexRe - parentCenterRe) / parentPixelSize + parentWidth / 2;
-        const pyFloat = parentHeight / 2 - (complexIm - parentCenterIm) / parentPixelSize;
+        const parentCoord = complexToPixelCoords(
+          parentCenterRe, parentCenterIm, parentView.size, parentWidth, parentHeight,
+          childCoord.re, childCoord.im);
+        const pxFloat = parentCoord.px;
+        const pyFloat = parentCoord.py;
         const px = Math.floor(pxFloat);
         const py = Math.floor(pyFloat);
 
@@ -1698,11 +1711,6 @@ class Grid {
         const centerConverged = isConverged ?
           parentView.convergedData.get(parentIdx) : null;
         if (isConverged && !centerConverged) continue;
-        const centerZ = centerConverged ? centerConverged.z : null;
-        const centerReQD = centerZ ? centerZ.slice(0, 4) : null;
-        const centerImQD = centerZ ? centerZ.slice(4, 8) : null;
-        const zTolerance = Math.max(parentPixelSize * 4, 1e-12);
-
         for (let dy = -1; dy <= 1 && uniform; dy++) {
           for (let dx = -1; dx <= 1 && uniform; dx++) {
             const neighborIdx = (py + dy) * parentWidth + (px + dx);
@@ -1719,15 +1727,7 @@ class Grid {
                 uniform = false;
                 continue;
               }
-              let sameAttractor = neighborData.p === centerConverged.p;
-              if (!sameAttractor) {
-                const neighborZ = neighborData.z;
-                const dzRe = Math.abs(qdToNumber(toQDSub(centerReQD, neighborZ.slice(0, 4))));
-                const dzIm = Math.abs(qdToNumber(toQDSub(centerImQD, neighborZ.slice(4, 8))));
-                const dz = Math.max(dzRe, dzIm);
-                sameAttractor = dz <= zTolerance;
-              }
-              if (!sameAttractor) {
+              if (neighborData.p !== centerConverged.p) {
                 uniform = false;
               }
             } else {
