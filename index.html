@@ -1683,8 +1683,6 @@ class Grid {
     const diverged = [];
     const converged = [];
     const uniformCache = new Int8Array(parentWidth * parentHeight);
-    const parentPxByCx = new Int32Array(childWidth);
-    const parentPyByCy = new Int32Array(childHeight);
     const childXStart = new Int32Array(parentWidth).fill(-1);
     const childXEnd = new Int32Array(parentWidth).fill(-1);
     const childYStart = new Int32Array(parentHeight).fill(-1);
@@ -1697,7 +1695,6 @@ class Grid {
       (childHeight / 2) * scale;
     for (let cx = 0; cx < childWidth; cx++) {
       const px = Math.floor(xBase + cx * scale);
-      parentPxByCx[cx] = px;
       if (px >= 0 && px < parentWidth) {
         if (childXStart[px] === -1) childXStart[px] = cx;
         childXEnd[px] = cx;
@@ -1705,7 +1702,6 @@ class Grid {
     }
     for (let cy = 0; cy < childHeight; cy++) {
       const py = Math.floor(yBase + cy * scale);
-      parentPyByCy[cy] = py;
       if (py >= 0 && py < parentHeight) {
         if (childYStart[py] === -1) childYStart[py] = cy;
         childYEnd[py] = cy;
