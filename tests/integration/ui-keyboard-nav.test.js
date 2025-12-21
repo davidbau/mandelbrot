@@ -203,39 +203,40 @@ describe('Keyboard Navigation Tests', () => {
       expect(afterCenter.view0_re).toBeCloseTo(beforeCenter.view0_re, 5);
     }, TEST_TIMEOUT);
 
-    // Skip: Multi-view click interactions are flaky in CI
-    test.skip('Ctrl+C should center ALL views including the first view', async () => {
+    test('Ctrl+C should center ALL views including the first view', async () => {
+      await page.goto(`file://${path.join(__dirname, '../../index.html')}?debug=fastload&width=240&height=240&pixelratio=1`);
       await waitForViewReady(page);
-      // Wait for no update in progress before clicking
       await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
-      // Create view 2 by clicking off-center on view 1
-      const canvas1 = await page.$('#grid canvas');
-      const box1 = await canvas1.boundingBox();
-      await page.mouse.click(box1.x + box1.width * 0.3, box1.y + box1.height * 0.3);
-      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });
-
-      // Wait for second canvas to appear
-      await page.waitForSelector('#grid #b_1 canvas', { timeout: 5000 });
-      // Wait for some computation so we have a valid canvas
+      // Create view 2 by calling cellclick directly (more stable than mouse events)
+      await page.evaluate(() => {
+        const { zoomManager, config } = window.explorer;
+        const cx = Math.floor(config.dimsWidth * 0.3);
+        const cy = Math.floor(config.dimsHeight * 0.3);
+        zoomManager.cellclick(0, cy * config.dimsWidth + cx, false);
+      });
+      await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 10000 });
       await page.waitForFunction(() => {
         const view = window.explorer.grid.views[1];
-        return view && !view.uninteresting();
+        return view && !view.uninteresting() && !window.explorer.grid.currentUpdateProcess;
       }, { timeout: 10000 });
 
-      // Wait for update to complete before clicking
-      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
-
-      // Create view 3 by clicking on view 2's canvas
-      const canvas2 = await page.$('#grid #b_1 canvas');
-      const box2 = await canvas2.boundingBox();
-      await page.mouse.click(box2.x + box2.width * 0.5, box2.y + box2.height * 0.5);
+      // Create view 3 by clicking off-center on view 2
+      await page.evaluate(() => {
+        const { zoomManager, config } = window.explorer;
+        const cx = Math.floor(config.dimsWidth * 0.6);
+        const cy = Math.floor(config.dimsHeight * 0.4);
+        zoomManager.cellclick(1, cy * config.dimsWidth + cx, false);
+      });
       await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 10000 });
+      await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
       // Get positions before centering
       const before = await page.evaluate(() => ({
         view0_re: window.explorer.grid.views[0].re[0],
+        view0_im: window.explorer.grid.views[0].im[0],
         view2_re: window.explorer.grid.views[2].re[0],
+        view2_im: window.explorer.grid.views[2].im[0],
         viewCount: window.explorer.grid.views.length
       }));
       expect(before.viewCount).toBe(3);
@@ -250,14 +251,17 @@ describe('Keyboard Navigation Tests', () => {
 
       const after = await page.evaluate(() => ({
         view0_re: window.explorer.grid.views[0].re[0],
+        view0_im: window.explorer.grid.views[0].im[0],
         view2_re: window.explorer.grid.views[2].re[0],
+        view2_im: window.explorer.grid.views[2].im[0],
         viewCount: window.explorer.grid.views.length
       }));
 
       // View count should remain the same
       expect(after.viewCount).toBe(3);
-      // With Ctrl, view 0 should have moved to center on deepest view
-      // (it might be the same if deepest happens to be at default center)
+      // With Ctrl, view 0 should have moved to deepest view center
+      expect(after.view0_re).toBeCloseTo(after.view2_re, 6);
+      expect(after.view0_im).toBeCloseTo(after.view2_im, 6);
     }, TEST_TIMEOUT);
   }, TEST_TIMEOUT);
 
