@@ -80,13 +80,46 @@ describe('Parent-child view iteration matching', () => {
              window.explorer.grid.views[1] !== null;
     }, { timeout: 15000 });
 
-    // Wait for child view to be meaningfully computed (avoid long deep-zoom stalls)
+    // Wait until enough sample points are computed to make a stable comparison
     await page.waitForFunction(() => {
-      const v0 = window.explorer.grid.views[0];
-      const v1 = window.explorer.grid.views[1];
-      if (!v0 || !v1) return false;
-      const v1Computed = 1 - (v1.un / v1.config.dimsArea);
-      return v1Computed >= 0.2; // Require 20% computed before comparing
+      const view0 = window.explorer?.grid?.views?.[0];
+      const view1 = window.explorer?.grid?.views?.[1];
+      if (!view0 || !view1) return false;
+
+      const config = window.explorer.config;
+      const samplePoints = 11;
+      const dimsWidth = config.dimsWidth;
+      const dimsHeight = config.dimsHeight;
+      const aspectRatio = config.aspectRatio;
+
+      let totalSamples = 0;
+      for (let sy = 0; sy < samplePoints; sy++) {
+        for (let sx = 0; sx < samplePoints; sx++) {
+          const v1x = Math.floor(dimsWidth * (0.3 + 0.4 * sx / (samplePoints - 1)));
+          const v1y = Math.floor(dimsHeight * (0.3 + 0.4 * sy / (samplePoints - 1)));
+          const v1idx = v1y * dimsWidth + v1x;
+
+          const v1PixelC = view1.currentc(v1idx);
+          const pixelRQD = [v1PixelC[0], v1PixelC[1], v1PixelC[2], v1PixelC[3]];
+          const pixelIQD = [v1PixelC[4], v1PixelC[5], v1PixelC[6], v1PixelC[7]];
+
+          const deltaR = toQDSub(pixelRQD, view0.sizesQD[1]);
+          const deltaI = toQDSub(pixelIQD, view0.sizesQD[2]);
+
+          const v0x = Math.round((qdToNumber(deltaR) / view0.sizesQD[0] + 0.5) * dimsWidth);
+          const v0y = Math.round((0.5 - qdToNumber(deltaI) * aspectRatio / view0.sizesQD[0]) * dimsHeight);
+
+          if (v0x >= 0 && v0x < dimsWidth && v0y >= 0 && v0y < dimsHeight) {
+            const v0idx = v0y * dimsWidth + v0x;
+            const v0iter = view0.nn[v0idx];
+            const v1iter = view1.nn[v1idx];
+            if (v0iter === 0 || v1iter === 0) continue;
+            totalSamples++;
+            if (totalSamples > 20) return true;
+          }
+        }
+      }
+      return false;
     }, { timeout: 90000 });
 
     // Get detailed comparison data
