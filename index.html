@@ -258,7 +258,7 @@ href="#github-icon"/></svg></a></p>
 //    - CpuBoard: Basic CPU computation (shallow zoom)
 //    - DDZhuoranBoard: DD precision with perturbation theory (CPU, medium zoom)
 //    - QDZhuoranBoard: QD precision with perturbation theory (CPU, deep zoom)
-//    - GpuBoard: WebGPU with sparse compaction (shallow zoom)
+//    - GpuBoard: WebGPU (shallow zoom)
 //    - GpuZhuoranBoard: WebGPU with DD perturbation (medium zoom)
 //    - AdaptiveGpuBoard: WebGPU with QD perturbation (deep zoom)
 //
@@ -1184,7 +1184,20 @@ class View {
   }
 
   updateFromWorkerResult(data) {
-    const { changeList, un, di, ch, it, workerInfo, boardType, compactionCount, activeCount } = data;
+    const {
+      changeList,
+      un,
+      di,
+      ch,
+      it,
+      workerInfo,
+      boardType,
+      compactionCount,
+      activeCount,
+      resultsReadbackBytes,
+      resultsReadbackBatches,
+      lastResultsCount
+    } = data;
     const changedIndices = [];
 
     for (const { nn, vv, iter } of changeList) {
@@ -1216,6 +1229,15 @@ class View {
     }
     if (activeCount !== undefined) {
       this.activeCount = activeCount;
+    }
+    if (resultsReadbackBytes !== undefined) {
+      this.resultsReadbackBytes = resultsReadbackBytes;
+    }
+    if (resultsReadbackBatches !== undefined) {
+      this.resultsReadbackBatches = resultsReadbackBatches;
+    }
+    if (lastResultsCount !== undefined) {
+      this.lastResultsCount = lastResultsCount;
     }
     // Freeze stats timing when board completes (unfinished() === 0 means done)
     if (this.unfinished() === 0 && !this.boardEndTime) {
@@ -5253,6 +5275,7 @@ function hasDebugFlag(config, flag) {
   return parts.some(p => p === flag || p.startsWith(flag + '='));
 }
 
+
 // Utility class for managing precomputed pixel data inherited from parent views.
 // Used by all board types to skip computation for pixels known from parent.
 // Uses TypedArrays for efficient storage of pending data.
@@ -7388,6 +7411,7 @@ class GpuBaseBoard extends Board {
     this.compactionCount = 0;
     this.pendingActiveCount = this.config.dimsArea;
     this.lastBatchCompacted = false;
+    this.cumulativeWastedReads = 0;
   }
 
   /**
@@ -7400,6 +7424,118 @@ class GpuBaseBoard extends Board {
     const survivingPixels = this.activeCount - this.deadSinceCompaction;
     const compactionCost = survivingPixels * BYTES_PER_PIXEL * 2;
     return this.wastedBandwidth > compactionCost;
+  }
+
+  initResultsReadback(recordBytes, maxCount) {
+    const safeMax = Math.max(1, maxCount);
+    this.resultsRecordBytes = recordBytes;
+    this.resultsHeaderBytes = 16;
+    this.resultsMaxCount = safeMax;
+    this.resultsBufferSize = this.resultsHeaderBytes + (recordBytes * safeMax);
+    this._resultsCounterReset = new Uint32Array([0]);
+
+    if (this.buffers.results) {
+      for (const buf of this.buffers.results) {
+        buf.destroy();
+      }
+    }
+    if (this.buffers.resultsCountStaging) {
+      for (const buf of this.buffers.resultsCountStaging) {
+        buf.destroy();
+      }
+    }
+    if (this.buffers.resultsStaging) {
+      for (const buf of this.buffers.resultsStaging) {
+        buf.destroy();
+      }
+    }
+
+    this.buffers.results = [
+      this.device.createBuffer({
+        size: this.resultsBufferSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        label: 'Results buffer 0'
+      }),
+      this.device.createBuffer({
+        size: this.resultsBufferSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        label: 'Results buffer 1'
+      })
+    ];
+
+    this.buffers.resultsCountStaging = [
+      this.device.createBuffer({
+        size: 4,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Results count staging 0'
+      }),
+      this.device.createBuffer({
+        size: 4,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Results count staging 1'
+      })
+    ];
+
+    const stagingSize = recordBytes * safeMax;
+    this.buffers.resultsStaging = [
+      this.device.createBuffer({
+        size: Math.max(4, stagingSize),
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Results staging 0'
+      }),
+      this.device.createBuffer({
+        size: Math.max(4, stagingSize),
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Results staging 1'
+      })
+    ];
+
+    this.resultsBufferIndex = 0;
+    this.pendingResultsIndex = null;
+    this.hasPendingResults = false;
+    this.resultsReadbackBytes = 0;
+    this.resultsReadbackBatches = 0;
+    this.lastResultsCount = 0;
+  }
+
+  resetResultsCounter(index) {
+    this.device.queue.writeBuffer(this.buffers.results[index], 0, this._resultsCounterReset);
+  }
+
+  queueResultsCounterCopy(commandEncoder, index) {
+    commandEncoder.copyBufferToBuffer(
+      this.buffers.results[index], 0, this.buffers.resultsCountStaging[index], 0, 4);
+  }
+
+  async readResultsCounter(index) {
+    const staging = this.buffers.resultsCountStaging[index];
+    await staging.mapAsync(GPUMapMode.READ, 0, 4);
+    const data = new Uint32Array(staging.getMappedRange(0, 4));
+    const count = Math.min(data[0], this.resultsMaxCount);
+    staging.unmap();
+    return count;
+  }
+
+  async readResultsData(index, count) {
+    if (count <= 0) return null;
+    const bytes = count * this.resultsRecordBytes;
+    const commandEncoder = this.device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(
+      this.buffers.results[index],
+      this.resultsHeaderBytes,
+      this.buffers.resultsStaging[index],
+      0,
+      bytes
+    );
+    this.device.queue.submit([commandEncoder.finish()]);
+    await this.device.queue.onSubmittedWorkDone();
+    const staging = this.buffers.resultsStaging[index];
+    await staging.mapAsync(GPUMapMode.READ, 0, bytes);
+    const data = new ArrayBuffer(bytes);
+    const src = staging.getMappedRange(0, bytes);
+    new Uint8Array(data).set(new Uint8Array(src));
+    staging.unmap();
+    return data;
   }
 
   /**
@@ -7629,8 +7765,17 @@ class GpuBoard extends GpuBaseBoard {
         base_i: f32,
       }
 
+      struct Results {
+        count: atomic<u32>,
+        _pad0: u32,
+        _pad1: u32,
+        _pad2: u32,
+        records: array<PixelState>,
+      }
+
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
+      @group(0) @binding(2) var<storage, read_write> results: Results;
 
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -7659,6 +7804,7 @@ class GpuBoard extends GpuBaseBoard {
         var base_r = pixels[active_idx].base_r;
         var base_i = pixels[active_idx].base_i;
         var p = pixels[active_idx].period;
+        var finished = false;
 
         if (iter == 0u && base_r == 0.0 && base_i == 0.0) {
           base_r = zr;
@@ -7699,6 +7845,7 @@ class GpuBoard extends GpuBaseBoard {
 
           if (mag_sq > 4.0 || !(mag_sq <= 1e38)) {
             pixels[active_idx].status = 1u;
+            finished = true;
             break;
           }
 
@@ -7721,6 +7868,7 @@ class GpuBoard extends GpuBaseBoard {
             }
             if (db <= epsilon) {
               pixels[active_idx].status = 2u;
+              finished = true;
               break;
             }
           }
@@ -7733,6 +7881,11 @@ class GpuBoard extends GpuBaseBoard {
         pixels[active_idx].base_i = base_i;
         pixels[active_idx].iter = iter;
         pixels[active_idx].period = p;
+
+        if (finished) {
+          let outIndex = atomicAdd(&results.count, 1u);
+          results.records[outIndex] = pixels[active_idx];
+        }
       }
     `;
 
@@ -7770,6 +7923,10 @@ class GpuBoard extends GpuBaseBoard {
 
     if (pixelBufferSize > maxBufferSize) {
       throw new Error(`Buffer size exceeds WebGPU limit`);
+    }
+    const resultsBufferSize = 16 + (activePixelCount * BYTES_PER_PIXEL);
+    if (resultsBufferSize > maxBufferSize) {
+      throw new Error(`Results buffer size exceeds WebGPU limit`);
     }
 
     // Uniform buffer for parameters
@@ -7830,17 +7987,178 @@ class GpuBoard extends GpuBaseBoard {
     // Note: don't adjust this.un here - it will be decremented by flushUpToIteration
     // when precomputed points are flushed, which properly updates di/un together
     this.deadSinceCompaction = 0;
+    this.initResultsReadback(BYTES_PER_PIXEL, activePixelCount);
   }
 
   createBindGroup() {
-    this.bindGroup = this.device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.buffers.params } },
-        { binding: 1, resource: { buffer: this.buffers.pixels } }
-      ],
-      label: 'SparseGpu bind group'
-    });
+    this.bindGroups = this.buffers.results.map((resultsBuffer, index) => (
+      this.device.createBindGroup({
+        layout: this.pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.buffers.params } },
+          { binding: 1, resource: { buffer: this.buffers.pixels } },
+          { binding: 2, resource: { buffer: resultsBuffer } }
+        ],
+        label: `SparseGpu bind group ${index}`
+      })
+    ));
+    this.bindGroup = this.bindGroups[0];
+  }
+
+  processResultsData(data, count) {
+    this._baseIt += this.pendingIterationsPerBatch;
+    if (count <= 0) {
+      this.lastResultsCount = 0;
+      this.resultsReadbackBatches += 1;
+      return;
+    }
+    if (!data) return;
+    this.lastResultsCount = count;
+    this.resultsReadbackBatches += 1;
+    this.resultsReadbackBytes += count * this.resultsRecordBytes;
+    const pixelU32 = new Uint32Array(data);
+    const pixelF32 = new Float32Array(data);
+    const pixelsByIteration = new Map();
+    const convergedByIteration = new Map();
+    let newDead = 0;
+
+    for (let i = 0; i < count; i++) {
+      const idx8 = i * 8;
+      const origIndex = pixelU32[idx8 + 0];
+      const iters = pixelU32[idx8 + 1];
+      const status = pixelU32[idx8 + 2];
+      const period = pixelU32[idx8 + 3];
+      const zr = pixelF32[idx8 + 4];
+      const zi = pixelF32[idx8 + 5];
+
+      if (status === 0) continue;
+      if (this.nn[origIndex] !== 0) continue;
+
+      newDead++;
+
+      if (status === 1) {
+        this.nn[origIndex] = iters;
+        this.pp[origIndex] = 1;
+        this.di++;
+
+        if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
+        pixelsByIteration.get(iters).push(origIndex);
+
+        if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
+      } else if (status === 2) {
+        this.nn[origIndex] = -iters;
+        this.pp[origIndex] = period + 1;
+
+        if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
+        convergedByIteration.get(iters).push({
+          index: origIndex,
+          z: [zr, zi],
+          p: this.pp[origIndex]
+        });
+
+        if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
+      }
+    }
+
+    this.deadSinceCompaction += newDead;
+    const pendingPrecomputed = this.precomputed ? this.precomputed.getPendingCount() : 0;
+    this.un = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed;
+
+    const gpuIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+    const sortedGpuIters = Array.from(gpuIterations).sort((a, b) => a - b);
+    const minGpuIter = sortedGpuIters.length > 0 ? sortedGpuIters[0] : null;
+
+    for (const iter of sortedGpuIters) {
+      const divergedIndices = [...(pixelsByIteration.get(iter) || [])];
+      const convergedData = [...(convergedByIteration.get(iter) || [])];
+
+      if (this.precomputed) {
+        if (iter === minGpuIter) {
+          const lowPrecomputed = this.precomputed.extractBelowIteration(iter);
+          if (lowPrecomputed) {
+            for (const idx of lowPrecomputed.diverged) {
+              this.nn[idx] = iter;
+              this.pp[idx] = 1;
+              this.di++;
+              this.un--;
+              divergedIndices.push(idx);
+            }
+            for (const c of lowPrecomputed.converged) {
+              this.nn[c.index] = -iter;
+              this.pp[c.index] = c.p;
+              this.un--;
+              convergedData.push({
+                index: c.index,
+                z: c.z,
+                p: c.p
+              });
+            }
+          }
+        }
+
+        const precomputed = this.precomputed.extractAtIteration(iter);
+        if (precomputed) {
+          for (const idx of precomputed.diverged) {
+            this.nn[idx] = iter;
+            this.pp[idx] = 1;
+            this.di++;
+            this.un--;
+            divergedIndices.push(idx);
+          }
+          for (const c of precomputed.converged) {
+            this.nn[c.index] = -iter;
+            this.pp[c.index] = c.p;
+            this.un--;
+            convergedData.push({
+              index: c.index,
+              z: c.z,
+              p: c.p
+            });
+          }
+        }
+      }
+
+      divergedIndices.sort((a, b) => a - b);
+      convergedData.sort((a, b) => a.index - b.index);
+
+      if (divergedIndices.length > 0 || convergedData.length > 0) {
+        this.changeList.push({
+          iter,
+          nn: divergedIndices,
+          vv: convergedData
+        });
+        this.updateSize += divergedIndices.length + convergedData.length;
+      }
+    }
+
+    const activeRemaining = this.activeCount - this.deadSinceCompaction;
+    if (activeRemaining === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
+      const remainingIters = this.precomputed.getPendingIterations();
+      for (const iter of remainingIters) {
+        const pending = this.precomputed.extractAtIteration(iter);
+        if (pending) {
+          const divergedIndices = [];
+          const convergedData = [];
+          for (const idx of pending.diverged) {
+            this.nn[idx] = iter;
+            this.pp[idx] = 1;
+            this.di++;
+            this.un--;
+            divergedIndices.push(idx);
+          }
+          for (const c of pending.converged) {
+            this.nn[c.index] = -iter;
+            this.pp[c.index] = c.p;
+            this.un--;
+            convergedData.push({ index: c.index, z: c.z, p: c.p });
+          }
+          if (divergedIndices.length > 0 || convergedData.length > 0) {
+            this.changeList.push({ iter, nn: divergedIndices, vv: convergedData });
+            this.updateSize += divergedIndices.length + convergedData.length;
+          }
+        }
+      }
+    }
   }
 
   async compactBuffers(pixelU32) {
@@ -8001,219 +8319,36 @@ class GpuBoard extends GpuBaseBoard {
 
       this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
+      const resultsIndex = this.resultsBufferIndex;
+      this.resetResultsCounter(resultsIndex);
+
       const commandEncoder = this.device.createCommandEncoder({ label: 'GpuBoard compute' });
       const passEncoder = commandEncoder.beginComputePass({ label: 'GpuBoard pass' });
       passEncoder.setPipeline(this.pipeline);
-      passEncoder.setBindGroup(0, this.bindGroup);
+      passEncoder.setBindGroup(0, this.bindGroups[resultsIndex]);
       passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
       passEncoder.end();
 
-      // Copy to current staging buffer
-      const writeBuffer = this.buffers.stagingPixels[this.stagingBufferIndex];
-      const activeBufferSize = this.activeCount * BYTES_PER_PIXEL;
-      commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, writeBuffer, 0, activeBufferSize);
+      this.queueResultsCounterCopy(commandEncoder, resultsIndex);
 
       this.device.queue.submit([commandEncoder.finish()]);
       // GPU is now computing in parallel!
 
-      // Track this batch for later processing
-      const newPendingActiveCount = this.activeCount;
-      const newStagingIndex = this.stagingBufferIndex;
-      this.stagingBufferIndex = 1 - this.stagingBufferIndex;  // Swap for next batch
-      this.it += iterationsPerBatch;
+      const prevResultsIndex = this.pendingResultsIndex;
+      this.pendingResultsIndex = resultsIndex;
+      this.hasPendingResults = true;
+      this.resultsBufferIndex = 1 - resultsIndex;
 
       // Note: precomputed points are merged with GPU results below, not flushed separately
 
       // STEP 3: Process pending results from PREVIOUS batch (overlaps with GPU work)
-      if (this.hasPendingResults) {
-        const readBuffer = this.buffers.stagingPixels[1 - newStagingIndex];  // The OTHER buffer
-        const readActiveCount = this.pendingActiveCount;
-        const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
-
-        // Ensure the previous batch's copy to this buffer is complete before mapping
+      if (prevResultsIndex !== null) {
         await this.device.queue.onSubmittedWorkDone();
-        await readBuffer.mapAsync(GPUMapMode.READ);
-        const pixelData = new ArrayBuffer(readBufferSize);
-        const srcData = readBuffer.getMappedRange();
-        new Uint8Array(pixelData).set(new Uint8Array(srcData));
-        readBuffer.unmap();
-
-        const pixelU32 = new Uint32Array(pixelData);
-        const pixelF32 = new Float32Array(pixelData);
-
-        // Process results
-        const pixelsByIteration = new Map();
-        const convergedByIteration = new Map();
-        let newDead = 0;
-
-        for (let i = 0; i < readActiveCount; i++) {
-          const idx8 = i * 8;
-          const origIndex = pixelU32[idx8 + 0];  // Each pixel carries its own orig_index
-          const iters = pixelU32[idx8 + 1];
-          const status = pixelU32[idx8 + 2];
-          const period = pixelU32[idx8 + 3];
-          const zr = pixelF32[idx8 + 4];
-          const zi = pixelF32[idx8 + 5];
-
-          if (status === 0) continue;
-          if (this.nn[origIndex] !== 0) continue;  // Already processed
-
-          newDead++;
-
-          if (status === 1) {
-            this.nn[origIndex] = iters;
-            this.pp[origIndex] = 1;
-            this.di++;
-
-            if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
-            pixelsByIteration.get(iters).push(origIndex);
-
-            if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
-          } else if (status === 2) {
-            this.nn[origIndex] = -iters;
-            this.pp[origIndex] = period + 1;
-
-            if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
-            convergedByIteration.get(iters).push({
-              index: origIndex,
-              z: [zr, zi],
-              p: this.pp[origIndex]
-            });
-
-            if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
-          }
-        }
-
-        this.deadSinceCompaction += newDead;
-        const pendingPrecomputed = this.precomputed ? this.precomputed.getPendingCount() : 0;
-        this.un = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed;
-
-        // Accumulate wasted bandwidth: dead pixels read this batch
-        this.cumulativeWastedReads += this.deadSinceCompaction;
-
-        // Create change objects, merging precomputed points with GPU results
-        // Only iterate over GPU iterations - precomputed are merged INTO GPU batches
-        const gpuIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
-        const sortedGpuIters = Array.from(gpuIterations).sort((a, b) => a - b);
-        const minGpuIter = sortedGpuIters.length > 0 ? sortedGpuIters[0] : null;
-
-        for (const iter of sortedGpuIters) {
-          // Make copies so we don't modify the original Maps
-          const divergedIndices = [...(pixelsByIteration.get(iter) || [])];
-          const convergedData = [...(convergedByIteration.get(iter) || [])];
-
-          // Merge precomputed pixels into GPU batches to avoid separate histogram entries
-          if (this.precomputed) {
-            // At the first GPU iteration, also merge ALL precomputed below this iteration
-            // This prevents stripes from separate histogram entries at low iterations
-            if (iter === minGpuIter) {
-              const lowPrecomputed = this.precomputed.extractBelowIteration(iter);
-              if (lowPrecomputed) {
-                for (const idx of lowPrecomputed.diverged) {
-                  this.nn[idx] = iter;  // Report at minGpuIter, not original iter
-                  this.pp[idx] = 1;
-                  this.di++;
-                  this.un--;
-                  divergedIndices.push(idx);
-                }
-                for (const c of lowPrecomputed.converged) {
-                  this.nn[c.index] = -iter;  // Report at minGpuIter
-                  this.pp[c.index] = c.p;
-                  this.un--;
-                  convergedData.push({
-                    index: c.index,
-                    z: c.z,
-                    p: c.p
-                  });
-                }
-              }
-            }
-
-            // Merge precomputed at THIS iteration
-            const precomputed = this.precomputed.extractAtIteration(iter);
-            if (precomputed) {
-              for (const idx of precomputed.diverged) {
-                this.nn[idx] = iter;
-                this.pp[idx] = 1;
-                this.di++;
-                this.un--;
-                divergedIndices.push(idx);
-              }
-              for (const c of precomputed.converged) {
-                this.nn[c.index] = -iter;
-                this.pp[c.index] = c.p;
-                this.un--;
-                convergedData.push({
-                  index: c.index,
-                  z: c.z,
-                  p: c.p
-                });
-              }
-            }
-          }
-
-          // Sort by index for consistent ordering
-          divergedIndices.sort((a, b) => a - b);
-          convergedData.sort((a, b) => a.index - b.index);
-
-          // Report if there are any results
-          if (divergedIndices.length > 0 || convergedData.length > 0) {
-            this.changeList.push({
-              iter,
-              nn: divergedIndices,
-              vv: convergedData
-            });
-            this.updateSize += divergedIndices.length + convergedData.length;
-          }
-        }
-
-        // After GPU batch: if all GPU pixels are done but precomputed remain, flush them
-        // This handles precomputed at iterations HIGHER than the last GPU result
-        const activeRemaining = this.activeCount - this.deadSinceCompaction;
-        if (activeRemaining === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
-          const remainingIters = this.precomputed.getPendingIterations();
-          for (const iter of remainingIters) {
-            const pending = this.precomputed.extractAtIteration(iter);
-            if (pending) {
-              const divergedIndices = [];
-              const convergedData = [];
-              for (const idx of pending.diverged) {
-                this.nn[idx] = iter;
-                this.pp[idx] = 1;
-                this.di++;
-                this.un--;
-                divergedIndices.push(idx);
-              }
-              for (const c of pending.converged) {
-                this.nn[c.index] = -iter;
-                this.pp[c.index] = c.p;
-                this.un--;
-                convergedData.push({ index: c.index, z: c.z, p: c.p });
-              }
-              if (divergedIndices.length > 0 || convergedData.length > 0) {
-                this.changeList.push({ iter, nn: divergedIndices, vv: convergedData });
-                this.updateSize += divergedIndices.length + convergedData.length;
-              }
-            }
-          }
-        }
-
-        // Check compaction: wasted reads >= compaction cost
-        // Compaction cost = activeRemaining pixels to write (reuse activeRemaining from above)
-        if (activeRemaining > 0 && this.cumulativeWastedReads >= activeRemaining * this.compactionCostRatio) {
-          // Need to wait for current GPU batch to finish before compaction
-          await this.device.queue.onSubmittedWorkDone();
-          await this.compactBuffers(pixelU32);
-          this.cumulativeWastedReads = 0;
-          this.hasPendingResults = false;  // Buffers recreated, no pending results
-          this.lastBatchCompacted = true;
-          return;  // Exit - next compute() will start fresh with compacted buffers
-        }
+        const count = await this.readResultsCounter(prevResultsIndex);
+        const data = await this.readResultsData(prevResultsIndex, count);
+        this.processResultsData(data, count);
       }
-
-      // Update pending state for next iteration
-      this.pendingActiveCount = newPendingActiveCount;
-      this.hasPendingResults = true;
+      this.pendingIterationsPerBatch = iterationsPerBatch;
 
     } catch (error) {
       console.error(`GpuBoard.compute() ERROR:`, error);
@@ -8263,49 +8398,14 @@ class GpuBoard extends GpuBaseBoard {
 
   async flushPendingResults() {
     // Process pending results from the staging buffer without starting a new batch
-    if (!this.hasPendingResults) return;
+    if (!this.hasPendingResults || this.pendingResultsIndex === null) return;
 
-    const BYTES_PER_PIXEL = 32;  // 8 fields × 4 bytes
-    const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
-    const readActiveCount = this.pendingActiveCount;
-    const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
-
-    // Ensure GPU work is complete before mapping
     await this.device.queue.onSubmittedWorkDone();
-    await readBuffer.mapAsync(GPUMapMode.READ);
-    const pixelData = new ArrayBuffer(readBufferSize);
-    const srcData = readBuffer.getMappedRange();
-    new Uint8Array(pixelData).set(new Uint8Array(srcData));
-    readBuffer.unmap();
+    const count = await this.readResultsCounter(this.pendingResultsIndex);
+    const data = await this.readResultsData(this.pendingResultsIndex, count);
+    this.processResultsData(data, count);
 
-    const pixelU32 = new Uint32Array(pixelData);
-    const pixelF32 = new Float32Array(pixelData);
-
-    // Process results
-    for (let i = 0; i < readActiveCount; i++) {
-      const idx8 = i * 8;
-      const origIndex = pixelU32[idx8 + 0];  // Each pixel carries its own orig_index
-      const iters = pixelU32[idx8 + 1];
-      const status = pixelU32[idx8 + 2];
-      const period = pixelU32[idx8 + 3];
-
-      if (status === 0) continue;
-      if (this.nn[origIndex] !== 0) continue;
-
-      this.deadSinceCompaction++;
-
-      if (status === 1) {
-        this.nn[origIndex] = iters;
-        this.pp[origIndex] = 1;
-        this.di++;
-      } else if (status === 2) {
-        this.nn[origIndex] = -iters;
-        this.pp[origIndex] = period + 1;
-      }
-    }
-
-    const pendingPrecomputed = this.precomputed ? this.precomputed.getPendingCount() : 0;
-    this.un = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed;
+    this.pendingResultsIndex = null;
     this.hasPendingResults = false;
   }
 
@@ -8378,6 +8478,7 @@ class GpuBoard extends GpuBaseBoard {
           });
         }
 
+        board.initResultsReadback(BYTES_PER_PIXEL, board.activeCount);
         // Recreate bind group with restored buffer
         board.createBindGroup();
       }
@@ -8427,6 +8528,7 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
     this.compactionCount = 0;  // Number of compactions performed
     this.pendingActiveCount = this.config.dimsArea;
     this.lastBatchCompacted = false;
+    this.cumulativeWastedReads = 0;
   }
 
   // Check if compaction is worthwhile based on bandwidth cost
@@ -8518,59 +8620,14 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
 
   async flushPendingResults() {
     // Process pending results from the staging buffer without starting a new batch
-    if (!this.hasPendingResults) return;
+    if (!this.hasPendingResults || this.pendingResultsIndex === null) return;
 
-    const BYTES_PER_PIXEL = this.constructor.BYTES_PER_PIXEL;
-    const STRIDE = this.constructor.STRIDE;
-    const readBuffer = this.buffers.stagingPixels[1 - this.stagingBufferIndex];
-    const readActiveCount = this.pendingActiveCount;
-    const pixelBufferSize = readActiveCount * BYTES_PER_PIXEL;
-
-    // Ensure GPU work is complete before mapping
     await this.device.queue.onSubmittedWorkDone();
-    await readBuffer.mapAsync(GPUMapMode.READ);
-    const pixelData = new ArrayBuffer(pixelBufferSize);
-    const srcData = readBuffer.getMappedRange();
-    new Uint8Array(pixelData).set(new Uint8Array(srcData));
-    readBuffer.unmap();
+    const count = await this.readResultsCounter(this.pendingResultsIndex);
+    const data = await this.readResultsData(this.pendingResultsIndex, count);
+    this.processResultsData(data, count);
 
-    const pixelsI32 = new Int32Array(pixelData);
-
-    // Update global iteration counter using _baseIt directly
-    this._baseIt += this.pendingIterationsPerBatch;
-
-    // PixelState field indices (orig_index at 0)
-    const P_ORIG_INDEX = 0, P_ITER = 1, P_STATUS = 2, P_PERIOD = 3;
-
-    // Process results
-    let newDead = 0;
-    for (let i = 0; i < readActiveCount; i++) {
-      const idx = i * STRIDE;
-      const origIndex = pixelsI32[idx + P_ORIG_INDEX];
-      const status = pixelsI32[idx + P_STATUS];
-      const period = pixelsI32[idx + P_PERIOD];
-
-      if (this.nn[origIndex] !== 0) continue;
-
-      if (status === 1) {
-        const iters = pixelsI32[idx + P_ITER];
-        this.nn[origIndex] = iters;
-        this.pp[origIndex] = period;
-        this.di++;
-        this.un--;
-        newDead++;
-      } else if (status === 2) {
-        const iters = pixelsI32[idx + P_ITER];
-        this.nn[origIndex] = -iters;
-        this.pp[origIndex] = period - 1;
-        this.un--;
-        newDead++;
-      }
-    }
-
-    this.deadSinceCompaction += newDead;
-    const pendingPrecomputed = this.precomputed ? this.precomputed.getPendingCount() : 0;
-    this.un = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed;
+    this.pendingResultsIndex = null;
     this.hasPendingResults = false;
   }
 
@@ -8721,6 +8778,12 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         `Board ${this.config.dimsWidth}x${this.config.dimsHeight} is too large ` +
         `for GPU acceleration.`);
     }
+    const resultsBufferSize = 16 + (activePixelCount * BYTES_PER_PIXEL);
+    if (resultsBufferSize > maxBufferSize) {
+      throw new Error(
+        `Results buffer size (${(resultsBufferSize / (1024 * 1024)).toFixed(1)} MB) ` +
+        `exceeds WebGPU limit (${(maxBufferSize / (1024 * 1024)).toFixed(1)} MB).`);
+    }
 
     // Single unified pixel state buffer (PixelState struct: 7 u32 + 8 f32 = 60 bytes per pixel)
     // Layout per pixel: [orig_index, iter, status, period, ref_iter, ckpt_refidx, pending_refidx,
@@ -8822,19 +8885,178 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     this.pendingActiveCount = activePixelCount;
     this.deadSinceCompaction = 0;
     this.wastedBandwidth = 0;
+    this.initResultsReadback(BYTES_PER_PIXEL, activePixelCount);
   }
 
   createBindGroup() {
     // Unified 3-binding layout for maximum cache coherency
-    this.bindGroup = this.device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.buffers.params } },
-        { binding: 1, resource: { buffer: this.buffers.pixels } },
-        { binding: 2, resource: { buffer: this.buffers.iters } }
-      ],
-      label: 'Perturbation bind group'
-    });
+    this.bindGroups = this.buffers.results.map((resultsBuffer, index) => (
+      this.device.createBindGroup({
+        layout: this.pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.buffers.params } },
+          { binding: 1, resource: { buffer: this.buffers.pixels } },
+          { binding: 2, resource: { buffer: this.buffers.iters } },
+          { binding: 3, resource: { buffer: resultsBuffer } }
+        ],
+        label: `Perturbation bind group ${index}`
+      })
+    ));
+    this.bindGroup = this.bindGroups[0];
+  }
+
+  processResultsData(data, count) {
+    this._baseIt += this.pendingIterationsPerBatch;
+    if (count <= 0) {
+      this.lastResultsCount = 0;
+      this.resultsReadbackBatches += 1;
+      return;
+    }
+    if (!data) return;
+    this.lastResultsCount = count;
+    this.resultsReadbackBatches += 1;
+    this.resultsReadbackBytes += count * this.resultsRecordBytes;
+    const pixelU32 = new Uint32Array(data);
+    const pixelF32 = new Float32Array(data);
+
+    const pixelsByIteration = new Map();
+    const convergedByIteration = new Map();
+    let newDead = 0;
+
+    const INT_ORIG_INDEX = 0, INT_ITER = 1, INT_STATUS = 2, INT_PERIOD = 3, INT_REF_ITER = 4;
+    const FLOAT_DZR = 7, FLOAT_DZI = 8;
+
+    for (let i = 0; i < count; i++) {
+      const idx = i * GpuZhuoranBoard.STRIDE;
+      const origIndex = pixelU32[idx + INT_ORIG_INDEX];
+      const status = pixelU32[idx + INT_STATUS];
+      const period = pixelU32[idx + INT_PERIOD];
+
+      if (this.nn[origIndex] !== 0) continue;
+
+      if (status === 1) {
+        const iters = pixelU32[idx + INT_ITER];
+        this.nn[origIndex] = iters;
+        this.pp[origIndex] = period;
+
+        if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
+        pixelsByIteration.get(iters).push(origIndex);
+        this.di++;
+        this.un--;
+        newDead++;
+
+        if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
+      } else if (status === 2) {
+        const iters = pixelU32[idx + INT_ITER];
+        this.nn[origIndex] = -iters;
+        this.pp[origIndex] = period - 1;
+
+        const refIter = pixelU32[idx + INT_REF_ITER];
+        const nextRefIter = refIter + 1;
+        const dzr = pixelF32[idx + FLOAT_DZR];
+        const dzi = pixelF32[idx + FLOAT_DZI];
+
+        const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
+        const zr = toDDAdd([ref[0], ref[1]], dzr);
+        const zi = toDDAdd([ref[2], ref[3]], dzi);
+        if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
+        convergedByIteration.get(iters).push({
+          index: origIndex,
+          z: [zr[0], zr[1], zi[0], zi[1]],
+          p: this.pp[origIndex]
+        });
+        this.un--;
+        newDead++;
+
+        if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
+      }
+    }
+
+    const gpuIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+    const sortedGpuIters = Array.from(gpuIterations).sort((a, b) => a - b);
+    const minGpuIter = sortedGpuIters.length > 0 ? sortedGpuIters[0] : null;
+
+    for (const iter of sortedGpuIters) {
+      const divergedIndices = [...(pixelsByIteration.get(iter) || [])];
+      const convergedData = [...(convergedByIteration.get(iter) || [])];
+
+      if (this.precomputed) {
+        if (iter === minGpuIter) {
+          const lowPrecomputed = this.precomputed.extractBelowIteration(iter);
+          if (lowPrecomputed) {
+            for (const idx of lowPrecomputed.diverged) {
+              this.nn[idx] = iter;
+              this.pp[idx] = 1;
+              this.di++;
+              this.un--;
+              divergedIndices.push(idx);
+            }
+            for (const c of lowPrecomputed.converged) {
+              this.nn[c.index] = -iter;
+              this.pp[c.index] = c.p;
+              this.un--;
+              convergedData.push({ index: c.index, z: c.z, p: c.p });
+            }
+          }
+        }
+
+        const precomputed = this.precomputed.extractAtIteration(iter);
+        if (precomputed) {
+          for (const idx of precomputed.diverged) {
+            this.nn[idx] = iter;
+            this.pp[idx] = 1;
+            this.di++;
+            this.un--;
+            divergedIndices.push(idx);
+          }
+          for (const c of precomputed.converged) {
+            this.nn[c.index] = -iter;
+            this.pp[c.index] = c.p;
+            this.un--;
+            convergedData.push({ index: c.index, z: c.z, p: c.p });
+          }
+        }
+      }
+
+      divergedIndices.sort((a, b) => a - b);
+      convergedData.sort((a, b) => a.index - b.index);
+
+      if (divergedIndices.length > 0 || convergedData.length > 0) {
+        this.queueChanges({ iter, nn: divergedIndices, vv: convergedData });
+      }
+    }
+
+    this.deadSinceCompaction += newDead;
+    const pendingPrecomputed = this.precomputed ? this.precomputed.getPendingCount() : 0;
+    this.un = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed;
+
+    const activeRemaining = this.activeCount - this.deadSinceCompaction;
+    if (activeRemaining === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
+      const remainingIters = this.precomputed.getPendingIterations();
+      for (const iter of remainingIters) {
+        const pending = this.precomputed.extractAtIteration(iter);
+        if (pending) {
+          const divergedIndices = [];
+          const convergedData = [];
+          for (const idx of pending.diverged) {
+            this.nn[idx] = iter;
+            this.pp[idx] = 1;
+            this.di++;
+            this.un--;
+            divergedIndices.push(idx);
+          }
+          for (const c of pending.converged) {
+            this.nn[c.index] = -iter;
+            this.pp[c.index] = c.p;
+            this.un--;
+            convergedData.push({ index: c.index, z: c.z, p: c.p });
+          }
+          if (divergedIndices.length > 0 || convergedData.length > 0) {
+            this.queueChanges({ iter, nn: divergedIndices, vv: convergedData });
+          }
+        }
+      }
+    }
   }
 
   // extendReferenceOrbit() inherited from DDReferenceOrbitMixin
@@ -8988,6 +9210,14 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         dci: f32,
       }
 
+      struct Results {
+        count: atomic<u32>,
+        _pad0: u32,
+        _pad1: u32,
+        _pad2: u32,
+        records: array<PixelState>,
+      }
+
       // Per-iteration state (reference orbit + threading): 5 f32 = 20 bytes
       // Layout (f32 view):
       //   [0] ref_re: f32
@@ -9006,6 +9236,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
       @group(0) @binding(2) var<storage, read> iters: array<IterState>;
+      @group(0) @binding(3) var<storage, read_write> results: Results;
 
       // Get threading data from unified iters buffer
       // Returns vec3: [next_index_as_f32, deltaRe, deltaIm]
@@ -9045,6 +9276,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         var checkpoint_bb_i = pixels[index].ckpt_bbi;
         let dcr = pixels[index].dcr;
         let dci = pixels[index].dci;
+        var finished = false;
 
         // Convergence thresholds scale with pixel size for deep zooms (no iteration-based escalation)
         // GPU uses float32 precision, so thresholds must be larger than CPU's float64
@@ -9108,6 +9340,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
           if (curr_mag_sq > 4.0 || !(curr_mag_sq <= 1e38)) {
             pixels[index].status = 1u;
             pixels[index].period = pp;
+            finished = true;
             break;
           }
 
@@ -9218,6 +9451,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
                 if (db <= epsilon) {
                   pixels[index].status = 2u;
                   pixels[index].period = pp;
+                  finished = true;
                   break;
                 }
               }
@@ -9237,6 +9471,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
                   if (db <= epsilon) {
                     pixels[index].status = 2u;
                     pixels[index].period = pp;
+                    finished = true;
                     break;
                   }
                 }
@@ -9261,6 +9496,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
                     if (db <= epsilon) {
                       pixels[index].status = 2u;
                       pixels[index].period = pp;
+                      finished = true;
                       break;
                     }
                   }
@@ -9298,6 +9534,11 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         pixels[index].bbi = bbi;
         pixels[index].ckpt_bbr = checkpoint_bb_r;
         pixels[index].ckpt_bbi = checkpoint_bb_i;
+
+        if (finished) {
+          let outIndex = atomicAdd(&results.count, 1u);
+          results.records[outIndex] = pixels[index];
+        }
       }
     `;
 
@@ -9496,224 +9737,35 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
+    const resultsIndex = this.resultsBufferIndex;
+    this.resetResultsCounter(resultsIndex);
+
     const commandEncoder = this.device.createCommandEncoder({ label: 'Perturbation compute' });
     const passEncoder = commandEncoder.beginComputePass({ label: 'Perturbation pass' });
     passEncoder.setPipeline(this.pipeline);
-    passEncoder.setBindGroup(0, this.bindGroup);
+    passEncoder.setBindGroup(0, this.bindGroups[resultsIndex]);
     passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
     passEncoder.end();
 
-    // Copy results to current staging buffer (for double-buffering)
-    const writeBuffer = this.buffers.stagingPixels[this.stagingBufferIndex];
-    const pixelBufferSize = this.activeCount * BYTES_PER_PIXEL;
-    commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, writeBuffer, 0, pixelBufferSize);
+    this.queueResultsCounterCopy(commandEncoder, resultsIndex);
 
     const gpuStartTime = performance.now();
     this.device.queue.submit([commandEncoder.finish()]);
     // GPU is now computing in parallel!
 
-    // Track this batch for later processing
-    const newPendingActiveCount = this.activeCount;
-    const newStagingIndex = this.stagingBufferIndex;
-    this.stagingBufferIndex = 1 - this.stagingBufferIndex;  // Swap for next batch
+    const prevResultsIndex = this.pendingResultsIndex;
+    this.pendingResultsIndex = resultsIndex;
+    this.hasPendingResults = true;
+    this.resultsBufferIndex = 1 - resultsIndex;
 
     // ================================================================
     // STEP 5: Process pending results from PREVIOUS batch (overlaps with GPU)
     // ================================================================
-    let pixelU32ForCompaction = null;
-    if (this.hasPendingResults) {
-      const readBuffer = this.buffers.stagingPixels[1 - newStagingIndex];  // The OTHER buffer
-      const readActiveCount = this.pendingActiveCount;
-      const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
-
-      // Ensure the previous batch's copy to this buffer is complete before mapping
+    if (prevResultsIndex !== null) {
       await this.device.queue.onSubmittedWorkDone();
-      await readBuffer.mapAsync(GPUMapMode.READ);
-      const pixelData = new ArrayBuffer(readBufferSize);
-      const srcData = readBuffer.getMappedRange();
-      new Uint8Array(pixelData).set(new Uint8Array(srcData));
-      readBuffer.unmap();
-
-      const pixelU32 = new Uint32Array(pixelData);
-      const pixelF32 = new Float32Array(pixelData);
-
-      // Update global iteration counter
-      this._baseIt += this.pendingIterationsPerBatch;
-
-      // PixelState struct offsets (15 values per pixel, orig_index at offset 0)
-      const INT_ORIG_INDEX = 0, INT_ITER = 1, INT_STATUS = 2, INT_PERIOD = 3, INT_REF_ITER = 4;
-      const FLOAT_DZR = 7, FLOAT_DZI = 8;
-
-      // Update board state
-      const pixelsByIteration = new Map();
-      const convergedByIteration = new Map();
-      let hasConverged = false;
-      let newDead = 0;
-
-      // First pass: check for diverged pixels and count converged
-      for (let i = 0; i < readActiveCount; i++) {
-        const idx = i * STRIDE;
-        const origIndex = pixelU32[idx + INT_ORIG_INDEX];
-        const status = pixelU32[idx + INT_STATUS];
-        const period = pixelU32[idx + INT_PERIOD];
-
-        if (this.nn[origIndex] !== 0) continue;
-
-        if (status === 1) {
-          const iters = pixelU32[idx + INT_ITER];
-          this.nn[origIndex] = iters;
-          this.pp[origIndex] = period;
-
-          if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
-          pixelsByIteration.get(iters).push(origIndex);
-          this.di++;
-          this.un--;
-          newDead++;
-
-          if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
-        } else if (status === 2) {
-          hasConverged = true;
-        }
-      }
-
-      // Second pass: process converged pixels
-      if (hasConverged) {
-        for (let i = 0; i < readActiveCount; i++) {
-          const idx = i * STRIDE;
-          const origIndex = pixelU32[idx + INT_ORIG_INDEX];
-          const status = pixelU32[idx + INT_STATUS];
-          const period = pixelU32[idx + INT_PERIOD];
-
-          if (this.nn[origIndex]) continue;
-
-          if (status === 2) {
-            const iters = pixelU32[idx + INT_ITER];
-            this.nn[origIndex] = -iters;
-            this.pp[origIndex] = period - 1;
-
-            const refIter = pixelU32[idx + INT_REF_ITER];
-            const nextRefIter = refIter + 1;
-            const dzr = pixelF32[idx + FLOAT_DZR];
-            const dzi = pixelF32[idx + FLOAT_DZI];
-
-            const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
-            const zr = toDDAdd([ref[0], ref[1]], dzr);
-            const zi = toDDAdd([ref[2], ref[3]], dzi);
-            if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
-            convergedByIteration.get(iters).push({
-              index: origIndex,
-              z: [zr[0], zr[1], zi[0], zi[1]],
-              p: this.pp[origIndex]
-            });
-            this.un--;
-            newDead++;
-
-            if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
-          }
-        }
-      }
-
-      // Create change objects, merging precomputed points with GPU results
-      const gpuIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
-      const sortedGpuIters = Array.from(gpuIterations).sort((a, b) => a - b);
-      const minGpuIter = sortedGpuIters.length > 0 ? sortedGpuIters[0] : null;
-
-      for (const iter of sortedGpuIters) {
-        const divergedIndices = [...(pixelsByIteration.get(iter) || [])];
-        const convergedData = [...(convergedByIteration.get(iter) || [])];
-
-        if (this.precomputed) {
-          if (iter === minGpuIter) {
-            const lowPrecomputed = this.precomputed.extractBelowIteration(iter);
-            if (lowPrecomputed) {
-              for (const idx of lowPrecomputed.diverged) {
-                this.nn[idx] = iter;
-                this.pp[idx] = 1;
-                this.di++;
-                this.un--;
-                divergedIndices.push(idx);
-              }
-              for (const c of lowPrecomputed.converged) {
-                this.nn[c.index] = -iter;
-                this.pp[c.index] = c.p;
-                this.un--;
-                convergedData.push({ index: c.index, z: c.z, p: c.p });
-              }
-            }
-          }
-
-          const precomputed = this.precomputed.extractAtIteration(iter);
-          if (precomputed) {
-            for (const idx of precomputed.diverged) {
-              this.nn[idx] = iter;
-              this.pp[idx] = 1;
-              this.di++;
-              this.un--;
-              divergedIndices.push(idx);
-            }
-            for (const c of precomputed.converged) {
-              this.nn[c.index] = -iter;
-              this.pp[c.index] = c.p;
-              this.un--;
-              convergedData.push({ index: c.index, z: c.z, p: c.p });
-            }
-          }
-        }
-
-        divergedIndices.sort((a, b) => a - b);
-        convergedData.sort((a, b) => a.index - b.index);
-
-        if (divergedIndices.length > 0 || convergedData.length > 0) {
-          this.queueChanges({ iter, nn: divergedIndices, vv: convergedData });
-        }
-      }
-
-
-      this.deadSinceCompaction += newDead;
-      this.wastedBandwidth += this.deadSinceCompaction * BYTES_PER_PIXEL;
-
-      // After GPU batch: if all GPU pixels are done but precomputed remain, flush them
-      const activeRemaining = this.activeCount - this.deadSinceCompaction;
-      if (activeRemaining === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
-        const remainingIters = this.precomputed.getPendingIterations();
-        for (const iter of remainingIters) {
-          const pending = this.precomputed.extractAtIteration(iter);
-          if (pending) {
-            const divergedIndices = [];
-            const convergedData = [];
-            for (const idx of pending.diverged) {
-              this.nn[idx] = iter;
-              this.pp[idx] = 1;
-              this.di++;
-              this.un--;
-              divergedIndices.push(idx);
-            }
-            for (const c of pending.converged) {
-              this.nn[c.index] = -iter;
-              this.pp[c.index] = c.p;
-              this.un--;
-              convergedData.push({ index: c.index, z: c.z, p: c.p });
-            }
-            if (divergedIndices.length > 0 || convergedData.length > 0) {
-              this.queueChanges({ iter, nn: divergedIndices, vv: convergedData });
-            }
-          }
-        }
-      }
-
-      // Check if compaction is worthwhile based on bandwidth cost
-      if (this.shouldCompact()) {
-        pixelU32ForCompaction = pixelU32;
-      }
-    }
-
-    // Compact if needed (must wait for GPU before modifying buffers)
-    if (pixelU32ForCompaction) {
-      await this.device.queue.onSubmittedWorkDone();
-      await this.compactBuffers(pixelU32ForCompaction);
-      // After compaction, don't mark new pending - buffers were recreated
-      this.hasPendingResults = false;
-      return;
+      const count = await this.readResultsCounter(prevResultsIndex);
+      const data = await this.readResultsData(prevResultsIndex, count);
+      this.processResultsData(data, count);
     }
 
     // ================================================================
@@ -9736,7 +9788,6 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     // ================================================================
     // STEP 7: Update pending state for next iteration
     // ================================================================
-    this.pendingActiveCount = newPendingActiveCount;
     this.pendingIterationsPerBatch = iterationsPerBatch;
     this.hasPendingResults = true;
 
@@ -9837,6 +9888,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
             label: 'Staging pixels buffer 1 (restored)'
           })
         ];
+        board.initResultsReadback(GpuZhuoranBoard.BYTES_PER_PIXEL, board.activeCount);
         board.createBindGroup();
       }
 
@@ -10134,6 +10186,17 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     const precomputedCount = this.precomputed ? this.precomputed.getPrecomputedCount() : 0;
     const activePixelCount = dimsArea - precomputedCount;
     const pixelBufferSize = Math.max(PIXEL_BYTES, activePixelCount * PIXEL_BYTES);
+    const resultsBufferSize = 16 + (activePixelCount * PIXEL_BYTES);
+    const maxBufferSize = Math.min(
+      this.device.limits.maxBufferSize,
+      this.device.limits.maxStorageBufferBindingSize
+    );
+    if (pixelBufferSize > maxBufferSize) {
+      throw new Error(`Buffer size exceeds WebGPU limit`);
+    }
+    if (resultsBufferSize > maxBufferSize) {
+      throw new Error(`Results buffer size exceeds WebGPU limit`);
+    }
     this.buffers = {
       params: this.device.createBuffer({
         size: 128,
@@ -10203,17 +10266,167 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     this.pendingActiveCount = activePixelCount;
     this.deadSinceCompaction = 0;
     this.wastedBandwidth = 0;
+    this.initResultsReadback(PIXEL_BYTES, activePixelCount);
   }
 
   createBindGroup() {
-    this.bindGroup = this.device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.buffers.params } },
-        { binding: 1, resource: { buffer: this.buffers.pixels } },
-        { binding: 2, resource: { buffer: this.buffers.iters } }
-      ]
-    });
+    this.bindGroups = this.buffers.results.map((resultsBuffer, index) => (
+      this.device.createBindGroup({
+        layout: this.pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.buffers.params } },
+          { binding: 1, resource: { buffer: this.buffers.pixels } },
+          { binding: 2, resource: { buffer: this.buffers.iters } },
+          { binding: 3, resource: { buffer: resultsBuffer } }
+        ],
+        label: `Adaptive perturbation bind group ${index}`
+      })
+    ));
+    this.bindGroup = this.bindGroups[0];
+  }
+
+  processResultsData(data, count) {
+    this._baseIt += this.pendingIterationsPerBatch;
+    if (count <= 0) {
+      this.lastResultsCount = 0;
+      this.resultsReadbackBatches += 1;
+      return;
+    }
+    if (!data) return;
+    this.lastResultsCount = count;
+    this.resultsReadbackBatches += 1;
+    this.resultsReadbackBytes += count * this.resultsRecordBytes;
+    const pixelsI32 = new Int32Array(data);
+    const pixelsF32 = new Float32Array(data);
+
+    const pixelsByIteration = new Map();
+    const convergedByIteration = new Map();
+    let newDead = 0;
+
+    const P_ORIG_INDEX = 0, P_ITER = 1, P_STATUS = 2, P_PERIOD = 3, P_REF_ITER = 4;
+    const P_DZR = 7, P_DZI = 8, P_SCALE = 15;
+
+    for (let i = 0; i < count; i++) {
+      const idx = i * AdaptiveGpuBoard.STRIDE;
+      const origIndex = pixelsI32[idx + P_ORIG_INDEX];
+      const status = pixelsI32[idx + P_STATUS];
+      const period = pixelsI32[idx + P_PERIOD];
+      if (this.nn[origIndex] !== 0) continue;
+      if (status === 1) {
+        const iters = pixelsI32[idx + P_ITER];
+        this.nn[origIndex] = iters;
+        this.pp[origIndex] = period;
+        if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
+        pixelsByIteration.get(iters).push(origIndex);
+        this.di++;
+        this.un--;
+        newDead++;
+        if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
+      } else if (status === 2) {
+        const iters = pixelsI32[idx + P_ITER];
+        this.nn[origIndex] = -iters;
+        this.pp[origIndex] = period - 1;
+        const refIter = pixelsI32[idx + P_REF_ITER];
+        const scale = pixelsI32[idx + P_SCALE];
+        const dzr = pixelsF32[idx + P_DZR] * Math.pow(2, scale);
+        const dzi = pixelsF32[idx + P_DZI] * Math.pow(2, scale);
+        const ref = this.qdRefOrbit[Math.min(refIter, this.qdRefOrbit.length - 1)];
+        const zrQD = toQDAdd([ref[0], ref[1], ref[2], ref[3]], [dzr, 0, 0, 0]);
+        const ziQD = toQDAdd([ref[4], ref[5], ref[6], ref[7]], [dzi, 0, 0, 0]);
+        if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
+        convergedByIteration.get(iters).push(
+          { index: origIndex, z: [...zrQD, ...ziQD], p: this.pp[origIndex] });
+        this.un--;
+        newDead++;
+        if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
+      }
+    }
+
+    const gpuIterations = new Set([...pixelsByIteration.keys(), ...convergedByIteration.keys()]);
+    const sortedGpuIters = Array.from(gpuIterations).sort((a, b) => a - b);
+    const minGpuIter = sortedGpuIters.length > 0 ? sortedGpuIters[0] : null;
+
+    for (const iter of sortedGpuIters) {
+      const divergedIndices = [...(pixelsByIteration.get(iter) || [])];
+      const convergedData = [...(convergedByIteration.get(iter) || [])];
+
+      if (this.precomputed) {
+        if (iter === minGpuIter) {
+          const lowPrecomputed = this.precomputed.extractBelowIteration(iter);
+          if (lowPrecomputed) {
+            for (const idx of lowPrecomputed.diverged) {
+              this.nn[idx] = iter;
+              this.pp[idx] = 1;
+              this.di++;
+              this.un--;
+              divergedIndices.push(idx);
+            }
+            for (const c of lowPrecomputed.converged) {
+              this.nn[c.index] = -iter;
+              this.pp[c.index] = c.p;
+              this.un--;
+              convergedData.push({ index: c.index, z: c.z, p: c.p });
+            }
+          }
+        }
+
+        const precomputed = this.precomputed.extractAtIteration(iter);
+        if (precomputed) {
+          for (const idx of precomputed.diverged) {
+            this.nn[idx] = iter;
+            this.pp[idx] = 1;
+            this.di++;
+            this.un--;
+            divergedIndices.push(idx);
+          }
+          for (const c of precomputed.converged) {
+            this.nn[c.index] = -iter;
+            this.pp[c.index] = c.p;
+            this.un--;
+            convergedData.push({ index: c.index, z: c.z, p: c.p });
+          }
+        }
+      }
+
+      divergedIndices.sort((a, b) => a - b);
+      convergedData.sort((a, b) => a.index - b.index);
+
+      if (divergedIndices.length > 0 || convergedData.length > 0) {
+        this.queueChanges({ iter, nn: divergedIndices, vv: convergedData });
+      }
+    }
+
+    this.deadSinceCompaction += newDead;
+    const pendingPrecomputed = this.precomputed ? this.precomputed.getPendingCount() : 0;
+    this.un = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed;
+
+    const activeRemaining = this.activeCount - this.deadSinceCompaction;
+    if (activeRemaining === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
+      const remainingIters = this.precomputed.getPendingIterations();
+      for (const iter of remainingIters) {
+        const pending = this.precomputed.extractAtIteration(iter);
+        if (pending) {
+          const divergedIndices = [];
+          const convergedData = [];
+          for (const idx of pending.diverged) {
+            this.nn[idx] = iter;
+            this.pp[idx] = 1;
+            this.di++;
+            this.un--;
+            divergedIndices.push(idx);
+          }
+          for (const c of pending.converged) {
+            this.nn[c.index] = -iter;
+            this.pp[c.index] = c.p;
+            this.un--;
+            convergedData.push({ index: c.index, z: c.z, p: c.p });
+          }
+          if (divergedIndices.length > 0 || convergedData.length > 0) {
+            this.queueChanges({ iter, nn: divergedIndices, vv: convergedData });
+          }
+        }
+      }
+    }
   }
 
   async createComputePipeline() {
@@ -10292,6 +10505,14 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         scale: i32,
       }
 
+      struct Results {
+        count: atomic<u32>,
+        _pad0: u32,
+        _pad1: u32,
+        _pad2: u32,
+        records: array<PixelState>,
+      }
+
       // Per-iteration state (reference orbit + threading): 5 f32 = 20 bytes
       // Layout (f32 view):
       //   [0] ref_re: f32
@@ -10310,6 +10531,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
       @group(0) @binding(2) var<storage, read> iters: array<IterState>;
+      @group(0) @binding(3) var<storage, read_write> results: Results;
 
       fn getThread(idx: u32) -> vec3<f32> {
         if (idx >= params.ref_orbit_length) { return vec3<f32>(-1.0, 0.0, 0.0); }
@@ -10348,6 +10570,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         var checkpoint_bb_i = pixels[index].ckpt_bbi;
         let dcr = pixels[index].dcr;
         let dci = pixels[index].dci;
+        var finished = false;
 
         // Convergence thresholds - scaled by initialScale for comparison (no iteration-based escalation)
         let epsilon_base = params.pixel_size / 10.0;
@@ -10385,6 +10608,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
           if (z_mag_sq > 4.0 || !(z_mag_sq <= 1e38)) {  // NaN/Inf check: !(x <= large) catches both
             pixels[index].status = 1;
             pixels[index].period = i32(pp);
+            finished = true;
             break;
           }
 
@@ -10466,6 +10690,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
                   if (db <= epsilon) {
                     pixels[index].status = 2;
                     pixels[index].period = i32(pp);
+                    finished = true;
                     break;
                   }
                 }
@@ -10488,6 +10713,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
                     if (db <= epsilon) {
                       pixels[index].status = 2;
                       pixels[index].period = i32(pp);
+                      finished = true;
                       break;
                     }
                   }
@@ -10626,6 +10852,11 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         pixels[index].bbi = bbi;
         pixels[index].ckpt_bbr = checkpoint_bb_r;
         pixels[index].ckpt_bbi = checkpoint_bb_i;
+
+        if (finished) {
+          let outIndex = atomicAdd(&results.count, 1u);
+          results.records[outIndex] = pixels[index];
+        }
       }
     `;
 
@@ -10796,212 +11027,37 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
 
       this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
+      const resultsIndex = this.resultsBufferIndex;
+      this.resetResultsCounter(resultsIndex);
+
       const commandEncoder = this.device.createCommandEncoder(
         { label: 'Adaptive perturbation compute' });
       const passEncoder = commandEncoder.beginComputePass(
         { label: 'Adaptive perturbation pass' });
       passEncoder.setPipeline(this.pipeline);
-      passEncoder.setBindGroup(0, this.bindGroup);
+      passEncoder.setBindGroup(0, this.bindGroups[resultsIndex]);
       passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
       passEncoder.end();
 
-      // Copy results to current staging buffer (for double-buffering)
-      const writeBuffer = this.buffers.stagingPixels[this.stagingBufferIndex];
-      const pixelBufferSize = this.activeCount * BYTES_PER_PIXEL;
-      commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, writeBuffer, 0, pixelBufferSize);
+      this.queueResultsCounterCopy(commandEncoder, resultsIndex);
 
       const gpuStartTime = performance.now();
       this.device.queue.submit([commandEncoder.finish()]);
       // GPU is now computing in parallel!
 
-      // Track this batch for later processing
-      const newPendingActiveCount = this.activeCount;
-      const newStagingIndex = this.stagingBufferIndex;
-      this.stagingBufferIndex = 1 - this.stagingBufferIndex;  // Swap for next batch
+      const prevResultsIndex = this.pendingResultsIndex;
+      this.pendingResultsIndex = resultsIndex;
+      this.hasPendingResults = true;
+      this.resultsBufferIndex = 1 - resultsIndex;
 
       // ================================================================
       // STEP 5: Process pending results from PREVIOUS batch (overlaps with GPU)
       // ================================================================
-      let pixelU32ForCompaction = null;
-      if (this.hasPendingResults) {
-        const readBuffer = this.buffers.stagingPixels[1 - newStagingIndex];  // The OTHER buffer
-        const readActiveCount = this.pendingActiveCount;
-        const readBufferSize = readActiveCount * BYTES_PER_PIXEL;
-
-        // Ensure the previous batch's copy to this buffer is complete before mapping
+      if (prevResultsIndex !== null) {
         await this.device.queue.onSubmittedWorkDone();
-        await readBuffer.mapAsync(GPUMapMode.READ);
-        const pixelData = new ArrayBuffer(readBufferSize);
-        const srcData = readBuffer.getMappedRange();
-        new Uint8Array(pixelData).set(new Uint8Array(srcData));
-        readBuffer.unmap();
-
-        const pixelsI32 = new Int32Array(pixelData);
-        const pixelsF32 = new Float32Array(pixelData);
-
-        // Update global iteration counter
-        this._baseIt += this.pendingIterationsPerBatch;
-
-        // PixelState field indices (16 fields per pixel, orig_index at 0)
-        const P_ORIG_INDEX = 0, P_ITER = 1, P_STATUS = 2, P_PERIOD = 3, P_REF_ITER = 4;
-        const P_DZR = 7, P_DZI = 8, P_SCALE = 15;
-
-        // Process GPU results
-        const pixelsByIteration = new Map();
-        const convergedByIteration = new Map();
-        let hasConverged = false;
-        let newDead = 0;
-
-        for (let i = 0; i < readActiveCount; i++) {
-          const idx = i * STRIDE;
-          const origIndex = pixelsI32[idx + P_ORIG_INDEX];
-          const status = pixelsI32[idx + P_STATUS];
-          const period = pixelsI32[idx + P_PERIOD];
-          if (this.nn[origIndex] !== 0) continue;
-          if (status === 1) {
-            const iters = pixelsI32[idx + P_ITER];
-            this.nn[origIndex] = iters;
-            this.pp[origIndex] = period;
-            if (!pixelsByIteration.has(iters)) pixelsByIteration.set(iters, []);
-            pixelsByIteration.get(iters).push(origIndex);
-            this.di++;
-            this.un--;
-            newDead++;
-            if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
-          } else if (status === 2) {
-            hasConverged = true;
-          }
-        }
-
-        if (hasConverged) {
-          for (let i = 0; i < readActiveCount; i++) {
-            const idx = i * STRIDE;
-            const origIndex = pixelsI32[idx + P_ORIG_INDEX];
-            const status = pixelsI32[idx + P_STATUS];
-            const period = pixelsI32[idx + P_PERIOD];
-            if (this.nn[origIndex]) continue;
-            if (status === 2) {
-              const iters = pixelsI32[idx + P_ITER];
-              this.nn[origIndex] = -iters;
-              this.pp[origIndex] = period - 1;
-              const refIter = pixelsI32[idx + P_REF_ITER];
-              const scale = pixelsI32[idx + P_SCALE];
-              const dzr = pixelsF32[idx + P_DZR] * Math.pow(2, scale);
-              const dzi = pixelsF32[idx + P_DZI] * Math.pow(2, scale);
-              const ref = this.qdRefOrbit[Math.min(refIter, this.qdRefOrbit.length - 1)];
-              const zrQD = toQDAdd([ref[0], ref[1], ref[2], ref[3]], [dzr, 0, 0, 0]);
-              const ziQD = toQDAdd([ref[4], ref[5], ref[6], ref[7]], [dzi, 0, 0, 0]);
-              if (!convergedByIteration.has(iters)) convergedByIteration.set(iters, []);
-              convergedByIteration.get(iters).push(
-                { index: origIndex, z: [...zrQD, ...ziQD], p: this.pp[origIndex] });
-              this.un--;
-              newDead++;
-              if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
-            }
-          }
-        }
-
-        // Queue changes grouped by iteration, merging precomputed points
-        const gpuIterations = new Set([...pixelsByIteration.keys(),
-                                        ...convergedByIteration.keys()]);
-        const sortedGpuIters = Array.from(gpuIterations).sort((a, b) => a - b);
-        const minGpuIter = sortedGpuIters.length > 0 ? sortedGpuIters[0] : null;
-
-        for (const iter of sortedGpuIters) {
-          const divergedIndices = [...(pixelsByIteration.get(iter) || [])];
-          const convergedData = [...(convergedByIteration.get(iter) || [])];
-
-          if (this.precomputed) {
-            if (iter === minGpuIter) {
-              const lowPrecomputed = this.precomputed.extractBelowIteration(iter);
-              if (lowPrecomputed) {
-                for (const idx of lowPrecomputed.diverged) {
-                  this.nn[idx] = iter;
-                  this.pp[idx] = 1;
-                  this.di++;
-                  this.un--;
-                  divergedIndices.push(idx);
-                }
-                for (const c of lowPrecomputed.converged) {
-                  this.nn[c.index] = -iter;
-                  this.pp[c.index] = c.p;
-                  this.un--;
-                  convergedData.push({ index: c.index, z: c.z, p: c.p });
-                }
-              }
-            }
-
-            const precomputed = this.precomputed.extractAtIteration(iter);
-            if (precomputed) {
-              for (const idx of precomputed.diverged) {
-                this.nn[idx] = iter;
-                this.pp[idx] = 1;
-                this.di++;
-                this.un--;
-                divergedIndices.push(idx);
-              }
-              for (const c of precomputed.converged) {
-                this.nn[c.index] = -iter;
-                this.pp[c.index] = c.p;
-                this.un--;
-                convergedData.push({ index: c.index, z: c.z, p: c.p });
-              }
-            }
-          }
-
-          divergedIndices.sort((a, b) => a - b);
-          convergedData.sort((a, b) => a.index - b.index);
-
-          if (divergedIndices.length > 0 || convergedData.length > 0) {
-            this.queueChanges({ iter, nn: divergedIndices, vv: convergedData });
-          }
-        }
-
-        this.deadSinceCompaction += newDead;
-        this.wastedBandwidth += this.deadSinceCompaction * BYTES_PER_PIXEL;
-
-        // After GPU batch: if all GPU pixels are done but precomputed remain, flush them
-        const activeRemaining = this.activeCount - this.deadSinceCompaction;
-        if (activeRemaining === 0 && this.precomputed && this.precomputed.getPendingCount() > 0) {
-          const remainingIters = this.precomputed.getPendingIterations();
-          for (const iter of remainingIters) {
-            const pending = this.precomputed.extractAtIteration(iter);
-            if (pending) {
-              const divergedIndices = [];
-              const convergedData = [];
-              for (const idx of pending.diverged) {
-                this.nn[idx] = iter;
-                this.pp[idx] = 1;
-                this.di++;
-                this.un--;
-                divergedIndices.push(idx);
-              }
-              for (const c of pending.converged) {
-                this.nn[c.index] = -iter;
-                this.pp[c.index] = c.p;
-                this.un--;
-                convergedData.push({ index: c.index, z: c.z, p: c.p });
-              }
-              if (divergedIndices.length > 0 || convergedData.length > 0) {
-                this.queueChanges({ iter, nn: divergedIndices, vv: convergedData });
-              }
-            }
-          }
-        }
-
-        // Check if compaction is worthwhile based on bandwidth cost
-        if (this.shouldCompact()) {
-          pixelU32ForCompaction = new Uint32Array(pixelData);
-        }
-      }
-
-      // Compact if needed (must wait for GPU before modifying buffers)
-      if (pixelU32ForCompaction) {
-        await this.device.queue.onSubmittedWorkDone();
-        await this.compactBuffers(pixelU32ForCompaction);
-        // After compaction, don't mark new pending - buffers were recreated
-        this.hasPendingResults = false;
-        return;
+        const count = await this.readResultsCounter(prevResultsIndex);
+        const data = await this.readResultsData(prevResultsIndex, count);
+        this.processResultsData(data, count);
       }
 
       // ================================================================
@@ -11024,7 +11080,6 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       // ================================================================
       // STEP 7: Update pending state for next iteration
       // ================================================================
-      this.pendingActiveCount = newPendingActiveCount;
       this.pendingIterationsPerBatch = iterationsPerBatch;
       this.hasPendingResults = true;
 
@@ -11127,6 +11182,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
             label: 'Staging pixels buffer 1 (restored)'
           })
         ];
+        board.initResultsReadback(AdaptiveGpuBoard.BYTES_PER_PIXEL, board.activeCount);
         board.createBindGroup();
       }
 
@@ -11535,7 +11591,10 @@ class FractalWorker {
             workerInfo,
             boardType: board.constructor.name,
             compactionCount: board.compactionCount || 0,
-            activeCount: board.activeCount || board.config.dimsArea
+            activeCount: board.activeCount || board.config.dimsArea,
+            resultsReadbackBytes: board.resultsReadbackBytes || 0,
+            resultsReadbackBatches: board.resultsReadbackBatches || 0,
+            lastResultsCount: board.lastResultsCount || 0
           }
         });
         board.lastTime = now;

@@ -7,6 +7,7 @@ node_modules/
 npm-debug.log
 .nyc_output/
 coverage/raw-coverage.json
+tests/benchmark-results/
 *.log
 .puppeteer-profile/
 .puppeteer-profile-*/
