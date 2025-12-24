@@ -1268,7 +1268,7 @@ class View {
       for (const entry of vv) {
         const { index, z, p } = entry;
         this.nn[index] = -iter;
-        this.convergedData.set(index, { z: toQDc(z), p });  // Normalize to QDc format
+        this.convergedData.set(index, { z, p });  // Store raw format, convert to QDc on-demand
         changedIndices.push(index);
       }
       this.di += nn.length;
@@ -1337,7 +1337,7 @@ class View {
 
   currentz(j) {
     const data = this.convergedData.get(j);
-    return data ? data.z : null;
+    return data ? toQDc(data.z) : null;
   }
 
   currentp(j) {
@@ -8722,14 +8722,6 @@ class GpuBoard extends GpuBaseBoard {
       // Batch tracking: half-open interval [start, end) for proper invariant checking
       this.pendingBatchStartIter = batchStartIter;
       this.pendingBatchEndIter = batchEndIter;
-
-      // Fast first paint: flush accelerating batches immediately at shallow zoom.
-      // Batches 1-4 (iters 1,2,4,8) end at batchEndIter 2,4,8,16.
-      if (batchEndIter <= 16 && this.size > 0.1) {
-        await this.processPendingReadback();
-        this.hasPendingResults = false;
-        this.pendingReadbackIndex = null;
-      }
 
     } catch (error) {
       console.error(`GpuBoard.compute() ERROR:`, error);
