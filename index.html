@@ -1219,9 +1219,16 @@ class View {
       this.un -= nn.length + vv.length;
       this.updateHistogram(this.un, this.di, iter);
     }
-    this.un = un;
-    this.di = di;
-    this.ch = ch;
+    // Only update un/di/ch if we actually had changes - iteration-only updates
+    // should not overwrite these values as it would desync from the histogram.
+    // The histogram is built incrementally via updateHistogram calls in the loop above,
+    // so the first update of un/di/ch must be an iteration with results; otherwise
+    // the histogram will be empty but di/ch will be non-zero, corrupting the colors.
+    if (changeList.length > 0) {
+      this.un = un;
+      this.di = di;
+      this.ch = ch;
+    }
     this.it = it;
     this.workerInfo = workerInfo;
     if (boardType) {
@@ -7278,7 +7285,7 @@ class GpuBaseBoard extends Board {
     this.lastReportedIters = null;
     this.cpuStatus = null;
     this._readPixelBufferPromise = null;  // Lock for readPixelBuffer
-    this.effort = 10;  // Default for GPU boards (~10× faster than CPU), overridden by subclasses
+    this.effort = 20;  // Default for GPU boards, overridden by subclasses
     this.minBatchIters = 17;  // GPU boards need minimum iterations per batch to amortize overhead
     this.maxBatchIters = 134567;  // Cap to avoid very long batches with few pixels
 
@@ -7718,16 +7725,17 @@ class GpuBaseBoard extends Board {
     this.resultsTotalCount = firstEmpty;
 
     // Enqueue this batch with its pixel count and iteration range [start, end)
+    // Always enqueue, even with 0 GPU results - this ensures previousBatchEndIter
+    // gets updated for precomputed point flushing (batches with 0 results will
+    // immediately complete in flushCompleteBatches)
     const batchPixelCount = firstEmpty - this.previousFirstEmpty;
-    if (batchPixelCount > 0) {
-      this.batchesToReadback.push({
-        startIter: this.pendingBatchStartIter,
-        endIter: this.pendingBatchEndIter,
-        remainingPixelCount: batchPixelCount,
-        originalPixelCount: batchPixelCount  // For invariant checking
-      });
-      this.previousFirstEmpty = firstEmpty;
-    }
+    this.batchesToReadback.push({
+      startIter: this.pendingBatchStartIter,
+      endIter: this.pendingBatchEndIter,
+      remainingPixelCount: batchPixelCount,
+      originalPixelCount: batchPixelCount  // For invariant checking
+    });
+    this.previousFirstEmpty = firstEmpty;
 
     // Process results through the batch-oriented loop
     // (see docs/gpu-results-readback-design.md "Results Processing Loop Structure")
@@ -8063,7 +8071,7 @@ class GpuBoard extends GpuBaseBoard {
 
   constructor(k, size, re, im, config, id, inheritedData = null) {
     super(k, size, re, im, config, id, inheritedData);
-    this.effort = 5;
+    this.effort = 10;  // Doubled to reduce batch sizes after GPU readback improvements
 
     const pix = this.pixelSize;
     this.epsilon = pix / 10;
@@ -8431,7 +8439,10 @@ class GpuBoard extends GpuBaseBoard {
         const targetWork = 333337;
         iterationsPerBatch = Math.max(17, Math.floor(targetWork / Math.max(this.un, 1)));
       }
-
+      // Cap first batch for faster first paint
+      if (this._baseIt === 1) {
+        iterationsPerBatch = Math.min(iterationsPerBatch, 11);
+      }
       const numWorkgroups = Math.ceil(this.activeCount / workgroupSize);
       const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
       const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
@@ -8787,7 +8798,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
 
   constructor(k, size, re, im, config, id, inheritedData = null) {
     super(k, size, re, im, config, id, inheritedData);
-    this.effort = 9;  // Benchmarked: 0.4 ns/px-iter, 11× faster than CPU
+    this.effort = 18;  // Doubled to reduce batch sizes after GPU readback improvements
 
     // Initialize DD reference orbit (refC, refOrbit, threading, etc.)
     const refRe = Array.isArray(re) ? re : toDD(re);
@@ -9727,7 +9738,6 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     } else {
       iterationsPerBatch = Math.max(17, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
     }
-
     // Extend reference orbit to exactly what this batch needs
     const currentNeed = this.it + iterationsPerBatch;
     const targetRefIterations = Math.min(currentNeed, THREADING_CAPACITY);
@@ -10053,7 +10063,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
 
   constructor(k, size, re, im, config, id, inheritedData = null) {
     super(k, size, re, im, config, id, inheritedData);
-    this.effort = 10;  // Benchmarked: 0.4 ns/px-iter, 10× faster than CPU
+    this.effort = 20;  // Doubled to reduce batch sizes after GPU readback improvements
 
     // Initialize QD reference orbit (refC_qd, qdRefOrbit, threading, etc.)
     const refReQD = toQD(re);
@@ -11052,7 +11062,6 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       } else {
         iterationsPerBatch = Math.max(17, Math.floor(333337 / Math.max(pixelsToIterate, 1)));
       }
-
       // Extend reference orbit to exactly what this batch needs
       const currentNeed = this.it + iterationsPerBatch;
       const targetRefIterations = Math.min(currentNeed, THREADING_CAPACITY);
@@ -11654,12 +11663,16 @@ class FractalWorker {
         }
       }
       const now = (new Date()).getTime();
-      // Only send if there are changes to report (updateSize > 0) or board is finished
-      // This prevents sending empty changeList with stale un values during GPU batch processing
-      if ((board.updateSize > 0 || !board.unfinished()) &&
-          (this.focusedBoardK == board.k ?
-          (board.updateSize >= 1429 || now - board.lastTime >= 100) :
-          (board.updateSize >= 4673 || now - board.lastTime >= 500))) {
+      const timeSinceUpdate = now - board.lastTime;
+      const isFocused = this.focusedBoardK == board.k;
+      const hasChanges = board.updateSize > 0 || !board.unfinished();
+      const enoughChanges = isFocused ?
+        (board.updateSize >= 1429 || timeSinceUpdate >= 100) :
+        (board.updateSize >= 4673 || timeSinceUpdate >= 500);
+      // Also send iteration-only updates every 200ms to show progress
+      const iterOnlyUpdate = timeSinceUpdate >= 200;
+
+      if ((hasChanges && enoughChanges) || iterOnlyUpdate) {
         const boardEffort = board.un * board.effort;
         const remainingWork = pri.map(b => b.un * b.effort).reduce((a, b) => a + b, 0);
         const workerInfo = `${this.name}: ` + (board.unfinished() ?
