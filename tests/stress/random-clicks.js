@@ -24,7 +24,7 @@ class SeededRandom {
   }
 }
 
-async function runFuzzTest(runNumber, seed) {
+async function runFuzzTest(runNumber, seed, totalRuns = 30) {
   const rng = new SeededRandom(seed);
 
   // Random board size: 700-1000 width, 350-1000 height
@@ -45,7 +45,7 @@ async function runFuzzTest(runNumber, seed) {
   }
 
   const config = { seed, width, height, numClicks, clicks };
-  console.log(`\n=== Run ${runNumber}/30 ===`);
+  console.log(`\n=== Run ${runNumber}/${totalRuns} ===`);
   console.log(`Config: seed=${seed}, dims=${width}x${height}, clicks=${numClicks}`);
   console.log(`Click positions: ${clicks.map(c => `(${(c.xFrac*100).toFixed(0)}%, ${(c.yFrac*100).toFixed(0)}%) +${(c.delayMs/1000).toFixed(1)}s`).join(', ')}`);
 
@@ -153,17 +153,24 @@ async function runFuzzTest(runNumber, seed) {
   const results = [];
   const baseSeed = Date.now();
 
-  for (let i = 1; i <= 30; i++) {
+  const totalRuns = parseInt(process.env.STRESS_RUNS) || 30;
+  for (let i = 1; i <= totalRuns; i++) {
     const seed = baseSeed + i;
-    const result = await runFuzzTest(i, seed);
+    const result = await runFuzzTest(i, seed, totalRuns);
     results.push(result);
+
+    // Stop early on failure for debugging
+    if (!result.success) {
+      console.log("\n*** STOPPING EARLY DUE TO FAILURE ***\n");
+      break;
+    }
   }
 
   // Summary
   console.log("\n\n========== SUMMARY ==========");
   const failures = results.filter(r => !r.success);
-  console.log(`Total runs: 30`);
-  console.log(`Successes: ${30 - failures.length}`);
+  console.log(`Total runs: ${results.length}`);
+  console.log(`Successes: ${results.length - failures.length}`);
   console.log(`Failures: ${failures.length}`);
 
   if (failures.length > 0) {

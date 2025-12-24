@@ -175,3 +175,60 @@ For quick single-board testing:
 # Run with timing output
 open "index.html?debug=t,w&board=cpu&z=6.25e2&c=-0.06091+0.66869i"
 ```
+
+## Canvas Rendering Performance
+
+### Fast Painting Path (ImageData vs fillRect)
+
+When updating computed pixels on the canvas, two approaches are available:
+
+1. **fillRect**: Draw each pixel individually with `ctx.fillRect(x, y, 1, 1)`
+2. **ImageData**: Get canvas data, set pixel values directly, put data back
+
+The tradeoff:
+- **fillRect** has per-pixel overhead but no fixed cost
+- **ImageData** has fixed overhead (~3ms for getImageData + putImageData) but O(1) per-pixel cost
+
+#### Benchmark Results (1402×1402 canvas)
+
+| Pixels | fillRect | ImageData | Winner |
+|--------|----------|-----------|--------|
+| 100 | 0.0ms | 3.0ms | fillRect |
+| 1,000 | 0.2ms | 3.2ms | fillRect |
+| 10,000 | 1.2ms | 5.5ms | fillRect |
+| 50,000 | 4.0ms | 16.7ms | fillRect |
+| **100,000** | **22.5ms** | **11.9ms** | **ImageData** |
+| 500,000 | 129.2ms | 23.0ms | ImageData |
+
+The crossover point is approximately **100,000 pixels**. At 500k pixels, ImageData is 5.6× faster.
+
+#### Implementation
+
+The `drawchangesFast()` method in the View class uses ImageData when:
+- Update contains >100,000 pixels
+- RGBA color theme functions are available (`colorThemesRGBA`)
+
+```javascript
+// In Grid.updateCanvas()
+if (totalPixels > 100000 && this.config.colorThemesRGBA) {
+  view.drawchangesFast(ctx, data.changeList);
+} else {
+  for (let change of data.changeList) {
+    view.drawchange(ctx, change);
+  }
+}
+```
+
+This optimization reduced startup time to first visible pixels from ~1100ms to ~580ms (median) at 1470×827 viewport—a **~50% improvement**.
+
+#### RGBA Color Themes
+
+The fast path requires `colorThemesRGBA`, which provides color theme functions that return `[r, g, b, a]` arrays instead of CSS color strings. These are defined alongside the standard `colorThemes` and must be kept in sync.
+
+```javascript
+// Standard theme returns CSS string
+colorThemes.warm = (i, frac, ...) => `rgb(${r},${g},${b})`;
+
+// RGBA theme returns array for direct ImageData manipulation
+colorThemesRGBA.warm = (i, frac, ...) => [r, g, b, 255];
+```

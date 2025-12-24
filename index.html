@@ -1609,6 +1609,53 @@ class View {
     }
   }
 
+  // Fast ImageData-based drawing for large changeList updates
+  // Uses RGBA color themes for direct pixel manipulation
+  drawchangesFast(ctx, changeList) {
+    const { dimsWidth, dimsHeight } = this.config;
+    const imageData = ctx.getImageData(0, 0, dimsWidth, dimsHeight);
+    const data = imageData.data;
+    const themeFn = this.config.colorThemesRGBA?.[this.config.theme];
+
+    if (!themeFn) {
+      // Fallback to regular drawing if RGBA theme not available
+      for (let change of changeList) {
+        this.drawchange(ctx, change);
+      }
+      return;
+    }
+
+    for (const change of changeList) {
+      const iter = change.iter;
+      const fracs = View.lookupHistogram(iter, this.hi);
+
+      // Draw diverged pixels
+      if (change.nn?.length) {
+        const rgba = themeFn(iter, fracs.fracK, fracs.fracD, fracs.fracL, this.size);
+        for (const index of change.nn) {
+          const offset = index * 4;
+          data[offset] = rgba[0];
+          data[offset + 1] = rgba[1];
+          data[offset + 2] = rgba[2];
+          data[offset + 3] = rgba[3];
+        }
+      }
+
+      // Draw converged pixels (black)
+      if (change.vv?.length) {
+        for (const v of change.vv) {
+          const offset = v.index * 4;
+          data[offset] = 0;
+          data[offset + 1] = 0;
+          data[offset + 2] = 0;
+          data[offset + 3] = 255;
+        }
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+  }
+
   makecolor(i, histogram = null, scale = null, unknownColor = 'transparent') {
     if (i === 0) return unknownColor;  // Color for uncomputed pixels
     if (i < 0) return 'black';
@@ -2155,8 +2202,19 @@ class Grid {
         }
       }
       if (!redrewComposite) {
-        for (let change of data.changeList) {
-          view.drawchange(ctx, change);
+        // Count total pixels in update
+        let totalPixels = 0;
+        for (const change of data.changeList) {
+          totalPixels += (change.nn?.length || 0) + (change.vv?.length || 0);
+        }
+
+        // Use fast ImageData path for large updates (>100k pixels)
+        if (totalPixels > 100000 && this.config.colorThemesRGBA) {
+          view.drawchangesFast(ctx, data.changeList);
+        } else {
+          for (let change of data.changeList) {
+            view.drawchange(ctx, change);
+          }
         }
       }
     }
