@@ -11966,22 +11966,46 @@ class FractalWorker {
              `boards {${[...this.boards.keys()]}}, work: ${remainingWork}` :
              `board finished`);
 
-        // Send one message per iteration, in sorted order
-        const sortedIters = board.changeMap ?
-          Array.from(board.changeMap.keys()).sort((a, b) => a - b) : [];
-
-        for (const iter of sortedIters) {
-          const change = board.changeMap.get(iter);
+        // For GPU boards with changeMap: send one message per iteration in sorted order.
+        // For CPU boards without changeMap: send changeList as a single message (original behavior).
+        if (board.changeMap && board.changeMap.size > 0) {
+          const sortedIters = Array.from(board.changeMap.keys()).sort((a, b) => a - b);
+          for (const iter of sortedIters) {
+            const change = board.changeMap.get(iter);
+            this.sendToScheduler({
+              type: 'iterations',
+              data: {
+                k: board.k,
+                id: board.id,
+                it: board.it,
+                un: change.un,  // Per-iteration un
+                di: board.di,
+                ch: board.ch,
+                changeList: [change],  // Single iteration's changes
+                boardEffort,
+                remainingWork,
+                workerInfo,
+                boardType: board.constructor.name,
+                compactionCount: board.compactionCount || 0,
+                activeCount: board.activeCount || board.config.dimsArea,
+                resultsReadbackBytes: board.resultsReadbackBytes || 0,
+                resultsReadbackBatches: board.resultsReadbackBatches || 0,
+                lastResultsCount: board.lastResultsCount || 0
+              }
+            });
+          }
+        } else if (board.changeList.length > 0) {
+          // CPU boards: send all changes in one message (original behavior)
           this.sendToScheduler({
             type: 'iterations',
             data: {
               k: board.k,
               id: board.id,
               it: board.it,
-              un: change.un,  // Per-iteration un
+              un: board.un,
               di: board.di,
               ch: board.ch,
-              changeList: [change],  // Single iteration's changes
+              changeList: board.changeList,
               boardEffort,
               remainingWork,
               workerInfo,
