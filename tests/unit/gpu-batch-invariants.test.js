@@ -125,10 +125,9 @@ describe('GPU Batch Processing Invariants', () => {
       outOfOrder: window._outOfOrder
     }));
 
-    // Note: Out of order IS expected in the current architecture because
-    // different pixels reach different iterations at different times.
-    // The key invariant is: for a GIVEN PIXEL, we shouldn't see iteration N
-    // after we've already seen iteration N+1 for that same pixel.
+    // Iterations should arrive in monotonic order - batch processing ensures
+    // we never send results from iteration N after results from iteration N+1
+    expect(result.outOfOrder).toHaveLength(0);
   }, 60000);
 
   test('view.un and actual unknown pixel count should match', async () => {
