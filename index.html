@@ -7813,7 +7813,7 @@ class GpuBaseBoard extends Board {
           if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
         } else if (status === 2) {  // Converged
           this.nn[origIndex] = -iters;
-          this.pp[origIndex] = period + 1;
+          this.pp[origIndex] = period;  // Use GPU period directly (matches CpuBoard convention)
           if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
         }
 
