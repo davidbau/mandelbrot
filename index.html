@@ -1217,8 +1217,13 @@ class View {
         changedIndices.push(index);
       }
       this.di += nn.length;
-      // Use per-change un if available (GPU boards), fall back to global un for CPU boards
-      this.updateHistogram(changeUn !== undefined ? changeUn : un, this.di, iter);
+      // For GPU boards, use per-change un. For CPU boards, decrement this.un incrementally.
+      if (changeUn !== undefined) {
+        this.updateHistogram(changeUn, this.di, iter);
+      } else {
+        this.un -= nn.length + vv.length;
+        this.updateHistogram(this.un, this.di, iter);
+      }
     }
     this.un = un;
     this.di = di;
