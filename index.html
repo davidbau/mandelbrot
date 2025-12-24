@@ -1203,8 +1203,7 @@ class View {
 
     const changedIndices = [];
 
-    // changeList arrives sorted by iteration from worker
-    for (const { nn, vv, iter, un: changeUn } of changeList) {
+    for (const { nn, vv, iter } of changeList) {
       // nn and vv contain both GPU-computed and precomputed pixels (merged in GpuBoard)
       for (const index of nn) {
         this.nn[index] = iter;
@@ -1217,13 +1216,8 @@ class View {
         changedIndices.push(index);
       }
       this.di += nn.length;
-      // For GPU boards, use per-change un. For CPU boards, decrement this.un incrementally.
-      if (changeUn !== undefined) {
-        this.updateHistogram(changeUn, this.di, iter);
-      } else {
-        this.un -= nn.length + vv.length;
-        this.updateHistogram(this.un, this.di, iter);
-      }
+      this.un -= nn.length + vv.length;
+      this.updateHistogram(this.un, this.di, iter);
     }
     this.un = un;
     this.di = di;
@@ -7885,18 +7879,6 @@ class GpuBaseBoard extends Board {
         this.updateSize += change.nn.length + change.vv.length;
       }
 
-      // Compute un for each iteration group (changeList is in iteration order)
-      const pendingPrecomputed = this.precomputed ? this.precomputed.getPendingCount() : 0;
-      let runningUn = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed;
-      // Walk changeList backwards to compute un at each iteration
-      for (let i = this.changeList.length - 1; i >= 0; i--) {
-        const entry = this.changeList[i];
-        if (entry.un === undefined) {
-          entry.un = runningUn;
-        }
-        runningUn += entry.nn.length + entry.vv.length;
-      }
-
       // Clear for next batch
       this.batchResultsRead.length = 0;
       this.previousBatchEndIter = batch.endIter;
@@ -11966,61 +11948,27 @@ class FractalWorker {
              `boards {${[...this.boards.keys()]}}, work: ${remainingWork}` :
              `board finished`);
 
-        // Check if entries have per-iteration un (GPU boards set this, CPU boards don't)
-        const firstChange = board.changeMap?.values().next().value;
-        const hasPerIterUn = firstChange && firstChange.un !== undefined;
-
-        if (hasPerIterUn) {
-          // GPU boards: send one message per iteration in sorted order with per-iteration un
-          const sortedIters = Array.from(board.changeMap.keys()).sort((a, b) => a - b);
-          for (const iter of sortedIters) {
-            const change = board.changeMap.get(iter);
-            this.sendToScheduler({
-              type: 'iterations',
-              data: {
-                k: board.k,
-                id: board.id,
-                it: board.it,
-                un: change.un,  // Per-iteration un
-                di: board.di,
-                ch: board.ch,
-                changeList: [change],  // Single iteration's changes
-                boardEffort,
-                remainingWork,
-                workerInfo,
-                boardType: board.constructor.name,
-                compactionCount: board.compactionCount || 0,
-                activeCount: board.activeCount || board.config.dimsArea,
-                resultsReadbackBytes: board.resultsReadbackBytes || 0,
-                resultsReadbackBatches: board.resultsReadbackBatches || 0,
-                lastResultsCount: board.lastResultsCount || 0
-              }
-            });
+        this.sendToScheduler({
+          type: 'iterations',
+          data: {
+            k: board.k,
+            id: board.id,
+            it: board.it,
+            un: board.un,
+            di: board.di,
+            ch: board.ch,
+            changeList: board.changeList,
+            boardEffort,
+            remainingWork,
+            workerInfo,
+            boardType: board.constructor.name,
+            compactionCount: board.compactionCount || 0,
+            activeCount: board.activeCount || board.config.dimsArea,
+            resultsReadbackBytes: board.resultsReadbackBytes || 0,
+            resultsReadbackBatches: board.resultsReadbackBatches || 0,
+            lastResultsCount: board.lastResultsCount || 0
           }
-        } else if (board.changeList.length > 0) {
-          // CPU boards: send all changes in one message (original behavior)
-          this.sendToScheduler({
-            type: 'iterations',
-            data: {
-              k: board.k,
-              id: board.id,
-              it: board.it,
-              un: board.un,
-              di: board.di,
-              ch: board.ch,
-              changeList: board.changeList,
-              boardEffort,
-              remainingWork,
-              workerInfo,
-              boardType: board.constructor.name,
-              compactionCount: board.compactionCount || 0,
-              activeCount: board.activeCount || board.config.dimsArea,
-              resultsReadbackBytes: board.resultsReadbackBytes || 0,
-              resultsReadbackBatches: board.resultsReadbackBatches || 0,
-              lastResultsCount: board.lastResultsCount || 0
-            }
-          });
-        }
+        });
         board.lastTime = now;
         board.updateSize = 0;
         board.changeList = [];
