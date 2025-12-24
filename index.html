@@ -7696,19 +7696,21 @@ class GpuBaseBoard extends Board {
     this.resultsRecordBytes = recordBytes;
     this.resultsHeaderBytes = 32;  // 8 u32 fields: count, lastStaged, active_count, start_iter, iterations_per_batch, pad x3
     this.resultsMaxCount = safeMax;
-    // 1% chunk size means ~100 reads to drain all results
-    // The staging shader supports multiple workgroups for larger chunks
+    // Chunk size for incremental readback
     this.resultsReadbackMaxRecords = Math.max(256, Math.floor(safeMax * 0.01));
 
     // Pre-staging area layout (written by staging shader, copied to staging buffer):
     // - Header: 16 bytes (firstEmpty, countInChunk, chunkStartIndex, reserved)
     // - Records: chunkSize * recordBytes
+    // Two pre-staging areas (one per staging buffer) to prevent race conditions
+    // when command buffers overlap in execution.
     this.preStagingHeaderBytes = 16;
     this.preStagingSize = this.preStagingHeaderBytes + (recordBytes * this.resultsReadbackMaxRecords);
-    this.preStagingOffset = this.resultsHeaderBytes + (recordBytes * safeMax);
+    const preStagingBase = this.resultsHeaderBytes + (recordBytes * safeMax);
+    this.preStagingOffsets = [preStagingBase, preStagingBase + this.preStagingSize];
 
-    // Total results buffer: header + main records + pre-staging area
-    this.resultsBufferSize = this.preStagingOffset + this.preStagingSize;
+    // Total results buffer: header + main records + TWO pre-staging areas
+    this.resultsBufferSize = preStagingBase + (this.preStagingSize * 2);
 
     // Staging buffer matches pre-staging area size
     this.resultsReadbackBufferSize = this.preStagingSize;
@@ -7844,46 +7846,66 @@ class GpuBaseBoard extends Board {
       label: 'Staging pipeline'
     });
 
-    // Create staging params buffer
-    this.buffers.stagingParams = this.device.createBuffer({
-      size: 16,  // 4 u32s
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      label: 'Staging params'
-    });
+    // Create two staging params buffers (one per pre-staging area)
+    this.buffers.stagingParams = [
+      this.device.createBuffer({
+        size: 16,  // 4 u32s
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        label: 'Staging params 0'
+      }),
+      this.device.createBuffer({
+        size: 16,  // 4 u32s
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        label: 'Staging params 1'
+      })
+    ];
 
-    // Write staging params
-    const stagingParamsData = new Uint32Array([
-      chunkSize,
-      this.resultsMaxCount,
-      recordU32s,
-      this.preStagingOffset
-    ]);
-    this.device.queue.writeBuffer(this.buffers.stagingParams, 0, stagingParamsData);
+    // Write staging params for each pre-staging area
+    for (let i = 0; i < 2; i++) {
+      const stagingParamsData = new Uint32Array([
+        chunkSize,
+        this.resultsMaxCount,
+        recordU32s,
+        this.preStagingOffsets[i]
+      ]);
+      this.device.queue.writeBuffer(this.buffers.stagingParams[i], 0, stagingParamsData);
+    }
 
-    // Create staging bind group
-    this.stagingBindGroup = this.device.createBindGroup({
-      layout: this.stagingPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.buffers.stagingParams } },
-        { binding: 1, resource: { buffer: this.buffers.results } }
-      ],
-      label: 'Staging bind group'
-    });
+    // Create two staging bind groups (one per pre-staging area)
+    this.stagingBindGroups = [
+      this.device.createBindGroup({
+        layout: this.stagingPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.buffers.stagingParams[0] } },
+          { binding: 1, resource: { buffer: this.buffers.results } }
+        ],
+        label: 'Staging bind group 0'
+      }),
+      this.device.createBindGroup({
+        layout: this.stagingPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.buffers.stagingParams[1] } },
+          { binding: 1, resource: { buffer: this.buffers.results } }
+        ],
+        label: 'Staging bind group 1'
+      })
+    ];
   }
 
   queueResultsReadback(commandEncoder, index) {
     // Run staging shader to copy results to pre-staging area
+    // Use index-specific bind group to write to the correct pre-staging area
     const stagingPass = commandEncoder.beginComputePass({ label: 'Staging pass' });
     stagingPass.setPipeline(this.stagingPipeline);
-    stagingPass.setBindGroup(0, this.stagingBindGroup);
+    stagingPass.setBindGroup(0, this.stagingBindGroups[index]);
     // Dispatch enough workgroups to cover chunkSize threads
     const workgroups = Math.ceil(this.resultsReadbackMaxRecords / 256);
     stagingPass.dispatchWorkgroups(workgroups);
     stagingPass.end();
 
-    // Copy pre-staging area to staging buffer (fixed size, fixed offset)
+    // Copy pre-staging area to staging buffer (each index uses its own pre-staging area)
     commandEncoder.copyBufferToBuffer(
-      this.buffers.results, this.preStagingOffset,
+      this.buffers.results, this.preStagingOffsets[index],
       this.buffers.resultsStaging[index], 0,
       this.preStagingSize
     );
@@ -7931,6 +7953,7 @@ class GpuBaseBoard extends Board {
     // gets updated for precomputed point flushing (batches with 0 results will
     // immediately complete in flushCompleteBatches)
     const batchPixelCount = firstEmpty - this.previousFirstEmpty;
+
     this.batchesToReadback.push({
       startIter: this.pendingBatchStartIter,
       endIter: this.pendingBatchEndIter,
@@ -7969,6 +7992,7 @@ class GpuBaseBoard extends Board {
     const STRIDE = 8;  // 8 u32s per record for GpuBoard
     const pixelU32 = new Uint32Array(data);
     const pixelF32 = new Float32Array(data);
+    const debugReadback = hasDebugFlag(this.config, 'rb');
 
     // Update readback stats
     this.lastResultsCount = count;
@@ -7996,23 +8020,21 @@ class GpuBaseBoard extends Board {
         const zr = pixelF32[idx8 + 4];
         const zi = pixelF32[idx8 + 5];
 
-        // INVARIANT: Results buffer should only contain finished pixels
-        if (status === 0) {
-          console.error(`INVARIANT VIOLATION: status=0 in results buffer at origIndex=${origIndex}`);
-        }
-
-        // INVARIANT: Should not see duplicates - each pixel finishes exactly once
-        if (this.nn[origIndex] !== 0) {
-          console.error(`INVARIANT VIOLATION: Duplicate result for pixel ${origIndex}, already has nn=${this.nn[origIndex]}`);
-        }
-
-        // INVARIANT: Result must be within valid iteration range [startIter, endIter)
-        // Half-open interval: iter >= startIter && iter < endIter
-        if (iters < batch.startIter) {
-          console.error(`INVARIANT VIOLATION: iter=${iters} < batchStart=${batch.startIter}`);
-        }
-        if (iters >= batch.endIter) {
-          console.error(`INVARIANT VIOLATION: Future result! iter=${iters} >= batchEnd=${batch.endIter}`);
+        // INVARIANT checks (gated by debug=rb flag)
+        if (debugReadback) {
+          if (status === 0) {
+            console.error(`INVARIANT VIOLATION: status=0 in results buffer at origIndex=${origIndex}`);
+          }
+          if (this.nn[origIndex] !== 0) {
+            const same = this.nn[origIndex] === iters ? ' (SAME VALUE)' : ' (DIFFERENT VALUE)';
+            console.error(`INVARIANT VIOLATION: Duplicate result for pixel ${origIndex}, existing nn=${this.nn[origIndex]}, new iters=${iters}${same}`);
+          }
+          if (iters < batch.startIter) {
+            console.error(`INVARIANT VIOLATION: iter=${iters} < batchStart=${batch.startIter}`);
+          }
+          if (iters >= batch.endIter) {
+            console.error(`INVARIANT VIOLATION: Future result! iter=${iters} >= batchEnd=${batch.endIter}`);
+          }
         }
 
         // Update board state
@@ -9240,6 +9262,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     const STRIDE = GpuZhuoranBoard.STRIDE;
     const pixelU32 = new Uint32Array(data);
     const pixelF32 = new Float32Array(data);
+    const debugReadback = hasDebugFlag(this.config, 'rb');
 
     this.lastResultsCount = count;
     this.resultsReadbackBatches += 1;
@@ -9266,8 +9289,14 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         const status = pixelU32[idx + INT_STATUS];
         const period = pixelU32[idx + INT_PERIOD];
 
+        const iters = pixelU32[idx + INT_ITER];
+
         // Skip already processed pixels (shouldn't happen, but defensive)
         if (this.nn[origIndex] !== 0) {
+          if (debugReadback) {
+            const same = this.nn[origIndex] === iters ? ' (SAME VALUE)' : ' (DIFFERENT VALUE)';
+            console.error(`INVARIANT VIOLATION: Duplicate result for pixel ${origIndex}, existing nn=${this.nn[origIndex]}, new iters=${iters}${same}`);
+          }
           dataIndex++;
           continue;
         }
@@ -9277,8 +9306,6 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
           dataIndex++;
           continue;
         }
-
-        const iters = pixelU32[idx + INT_ITER];
 
         if (status === 1) {
           // Diverged
@@ -10598,6 +10625,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     const STRIDE = AdaptiveGpuBoard.STRIDE;
     const pixelsI32 = new Int32Array(data);
     const pixelsF32 = new Float32Array(data);
+    const debugReadback = hasDebugFlag(this.config, 'rb');
 
     this.lastResultsCount = count;
     this.resultsReadbackBatches += 1;
@@ -10624,8 +10652,14 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         const status = pixelsI32[idx + P_STATUS];
         const period = pixelsI32[idx + P_PERIOD];
 
+        const iters = pixelsI32[idx + P_ITER];
+
         // Skip already processed pixels (shouldn't happen, but defensive)
         if (this.nn[origIndex] !== 0) {
+          if (debugReadback) {
+            const same = this.nn[origIndex] === iters ? ' (SAME VALUE)' : ' (DIFFERENT VALUE)';
+            console.error(`INVARIANT VIOLATION: Duplicate result for pixel ${origIndex}, existing nn=${this.nn[origIndex]}, new iters=${iters}${same}`);
+          }
           dataIndex++;
           continue;
         }
@@ -10635,8 +10669,6 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
           dataIndex++;
           continue;
         }
-
-        const iters = pixelsI32[idx + P_ITER];
 
         if (status === 1) {
           // Diverged
