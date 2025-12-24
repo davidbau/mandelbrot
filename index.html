@@ -8212,14 +8212,14 @@ class GpuBoard extends GpuBaseBoard {
         workgroups_x: u32,
         start_iter: u32,
         checkpoint_count: u32,
-        ckpt0: u32,
-        ckpt1: u32,
-        ckpt2: u32,
-        ckpt3: u32,
-        ckpt4: u32,
-        ckpt5: u32,
-        ckpt6: u32,
-        ckpt7: u32,
+        ckpt0: u32, ckpt1: u32, ckpt2: u32, ckpt3: u32,
+        ckpt4: u32, ckpt5: u32, ckpt6: u32, ckpt7: u32,
+        ckpt8: u32, ckpt9: u32, ckpt10: u32, ckpt11: u32,
+        ckpt12: u32, ckpt13: u32, ckpt14: u32, ckpt15: u32,
+        ckpt16: u32, ckpt17: u32, ckpt18: u32, ckpt19: u32,
+        ckpt20: u32, ckpt21: u32, ckpt22: u32, ckpt23: u32,
+        ckpt24: u32, ckpt25: u32, ckpt26: u32, ckpt27: u32,
+        ckpt28: u32, ckpt29: u32, ckpt30: u32, ckpt31: u32,
       }
 
       struct PixelState {
@@ -8319,6 +8319,30 @@ class GpuBoard extends GpuBaseBoard {
               case 5u: { checkpoint_offset = params.ckpt5; }
               case 6u: { checkpoint_offset = params.ckpt6; }
               case 7u: { checkpoint_offset = params.ckpt7; }
+              case 8u: { checkpoint_offset = params.ckpt8; }
+              case 9u: { checkpoint_offset = params.ckpt9; }
+              case 10u: { checkpoint_offset = params.ckpt10; }
+              case 11u: { checkpoint_offset = params.ckpt11; }
+              case 12u: { checkpoint_offset = params.ckpt12; }
+              case 13u: { checkpoint_offset = params.ckpt13; }
+              case 14u: { checkpoint_offset = params.ckpt14; }
+              case 15u: { checkpoint_offset = params.ckpt15; }
+              case 16u: { checkpoint_offset = params.ckpt16; }
+              case 17u: { checkpoint_offset = params.ckpt17; }
+              case 18u: { checkpoint_offset = params.ckpt18; }
+              case 19u: { checkpoint_offset = params.ckpt19; }
+              case 20u: { checkpoint_offset = params.ckpt20; }
+              case 21u: { checkpoint_offset = params.ckpt21; }
+              case 22u: { checkpoint_offset = params.ckpt22; }
+              case 23u: { checkpoint_offset = params.ckpt23; }
+              case 24u: { checkpoint_offset = params.ckpt24; }
+              case 25u: { checkpoint_offset = params.ckpt25; }
+              case 26u: { checkpoint_offset = params.ckpt26; }
+              case 27u: { checkpoint_offset = params.ckpt27; }
+              case 28u: { checkpoint_offset = params.ckpt28; }
+              case 29u: { checkpoint_offset = params.ckpt29; }
+              case 30u: { checkpoint_offset = params.ckpt30; }
+              case 31u: { checkpoint_offset = params.ckpt31; }
               default: {}
             }
             if (i == checkpoint_offset) {
@@ -8421,7 +8445,7 @@ class GpuBoard extends GpuBaseBoard {
 
     // Uniform buffer for parameters
     this.buffers.params = this.device.createBuffer({
-      size: 128,
+      size: 256,  // 14 fields + 32 checkpoints = 184 bytes, rounded to 256
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: 'Parameters buffer'
     });
@@ -8608,9 +8632,9 @@ class GpuBoard extends GpuBaseBoard {
       for (let i = 0; i < iterationsPerBatch; i++) {
         if (fibonacciPeriod(bufferIter + i) === 1) checkpointOffsets.push(i);
       }
-      const checkpointCount = Math.min(checkpointOffsets.length, 8);
+      const checkpointCount = Math.min(checkpointOffsets.length, 32);
 
-      const paramsBuffer = new ArrayBuffer(128);
+      const paramsBuffer = new ArrayBuffer(256);
       const paramsF32 = new Float32Array(paramsBuffer);
       const paramsU32 = new Uint32Array(paramsBuffer);
 
@@ -8628,7 +8652,7 @@ class GpuBoard extends GpuBaseBoard {
       paramsU32[11] = workgroupsX * workgroupSize;
       paramsU32[12] = bufferIter;
       paramsU32[13] = checkpointCount;
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 32; i++) {
         paramsU32[14 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
       }
 
@@ -9171,7 +9195,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
 
     // Uniform buffer for parameters
     this.buffers.params = this.device.createBuffer({
-      size: 128,
+      size: 256,  // Increased to hold 32 checkpoint slots
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: 'Params buffer'
     });
@@ -9503,14 +9527,14 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         workgroups_x: u32,
         start_iter: u32,
         checkpoint_count: u32,
-        ckpt0: u32,
-        ckpt1: u32,
-        ckpt2: u32,
-        ckpt3: u32,
-        ckpt4: u32,
-        ckpt5: u32,
-        ckpt6: u32,
-        ckpt7: u32,
+        ckpt0: u32, ckpt1: u32, ckpt2: u32, ckpt3: u32,
+        ckpt4: u32, ckpt5: u32, ckpt6: u32, ckpt7: u32,
+        ckpt8: u32, ckpt9: u32, ckpt10: u32, ckpt11: u32,
+        ckpt12: u32, ckpt13: u32, ckpt14: u32, ckpt15: u32,
+        ckpt16: u32, ckpt17: u32, ckpt18: u32, ckpt19: u32,
+        ckpt20: u32, ckpt21: u32, ckpt22: u32, ckpt23: u32,
+        ckpt24: u32, ckpt25: u32, ckpt26: u32, ckpt27: u32,
+        ckpt28: u32, ckpt29: u32, ckpt30: u32, ckpt31: u32,
         loop_enabled: u32,      // 1 if loop enabled, 0 otherwise
         loop_threshold: u32,    // ref_iter threshold to trigger loop
         loop_jump: u32,         // Amount to subtract from ref_iter
@@ -9761,6 +9785,30 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
               case 5u: { checkpoint_offset = params.ckpt5; }
               case 6u: { checkpoint_offset = params.ckpt6; }
               case 7u: { checkpoint_offset = params.ckpt7; }
+              case 8u: { checkpoint_offset = params.ckpt8; }
+              case 9u: { checkpoint_offset = params.ckpt9; }
+              case 10u: { checkpoint_offset = params.ckpt10; }
+              case 11u: { checkpoint_offset = params.ckpt11; }
+              case 12u: { checkpoint_offset = params.ckpt12; }
+              case 13u: { checkpoint_offset = params.ckpt13; }
+              case 14u: { checkpoint_offset = params.ckpt14; }
+              case 15u: { checkpoint_offset = params.ckpt15; }
+              case 16u: { checkpoint_offset = params.ckpt16; }
+              case 17u: { checkpoint_offset = params.ckpt17; }
+              case 18u: { checkpoint_offset = params.ckpt18; }
+              case 19u: { checkpoint_offset = params.ckpt19; }
+              case 20u: { checkpoint_offset = params.ckpt20; }
+              case 21u: { checkpoint_offset = params.ckpt21; }
+              case 22u: { checkpoint_offset = params.ckpt22; }
+              case 23u: { checkpoint_offset = params.ckpt23; }
+              case 24u: { checkpoint_offset = params.ckpt24; }
+              case 25u: { checkpoint_offset = params.ckpt25; }
+              case 26u: { checkpoint_offset = params.ckpt26; }
+              case 27u: { checkpoint_offset = params.ckpt27; }
+              case 28u: { checkpoint_offset = params.ckpt28; }
+              case 29u: { checkpoint_offset = params.ckpt29; }
+              case 30u: { checkpoint_offset = params.ckpt30; }
+              case 31u: { checkpoint_offset = params.ckpt31; }
               default: {}
             }
 
@@ -10054,14 +10102,14 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     for (let i = 0; i < iterationsPerBatch; i++) {
       if (fibonacciPeriod(bufferIter + i) === 1) checkpointOffsets.push(i);
     }
-    const checkpointCount = Math.min(checkpointOffsets.length, 8);
+    const checkpointCount = Math.min(checkpointOffsets.length, 32);
 
     const workgroupSize = 64;
     const numWorkgroups = Math.ceil(this.activeCount / workgroupSize);
     const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
     const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
 
-    const paramsBuffer = new ArrayBuffer(128);
+    const paramsBuffer = new ArrayBuffer(256);
     const paramsU32 = new Uint32Array(paramsBuffer);
     const paramsF32 = new Float32Array(paramsBuffer);
     paramsU32[0] = this.config.dimsWidth;
@@ -10074,19 +10122,19 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     paramsU32[7] = bufferIter;
     paramsU32[8] = checkpointCount;
 
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 32; i++) {
       paramsU32[9 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
     }
 
     const loop = this.refOrbitLoop || { enabled: false };
-    paramsU32[17] = loop.enabled ? 1 : 0;
-    paramsU32[18] = loop.threshold || 0;
-    paramsU32[19] = loop.jumpAmount || 0;
-    paramsU32[20] = 0;
-    paramsF32[21] = pixelSize;
-    paramsF32[22] = this.config.aspectRatio;
-    paramsF32[23] = loop.deltaR || 0;
-    paramsF32[24] = loop.deltaI || 0;
+    paramsU32[41] = loop.enabled ? 1 : 0;
+    paramsU32[42] = loop.threshold || 0;
+    paramsU32[43] = loop.jumpAmount || 0;
+    paramsU32[44] = 0;
+    paramsF32[45] = pixelSize;
+    paramsF32[46] = this.config.aspectRatio;
+    paramsF32[47] = loop.deltaR || 0;
+    paramsF32[48] = loop.deltaI || 0;
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
@@ -10564,7 +10612,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     }
     this.buffers = {
       params: this.device.createBuffer({
-        size: 128,
+        size: 256,  // Increased to hold 32 checkpoint slots
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
       }),
       pixels: this.device.createBuffer({
@@ -10796,14 +10844,14 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         workgroups_x: u32,
         start_iter: u32,
         checkpoint_count: u32,
-        ckpt0: u32,
-        ckpt1: u32,
-        ckpt2: u32,
-        ckpt3: u32,
-        ckpt4: u32,
-        ckpt5: u32,
-        ckpt6: u32,
-        ckpt7: u32,
+        ckpt0: u32, ckpt1: u32, ckpt2: u32, ckpt3: u32,
+        ckpt4: u32, ckpt5: u32, ckpt6: u32, ckpt7: u32,
+        ckpt8: u32, ckpt9: u32, ckpt10: u32, ckpt11: u32,
+        ckpt12: u32, ckpt13: u32, ckpt14: u32, ckpt15: u32,
+        ckpt16: u32, ckpt17: u32, ckpt18: u32, ckpt19: u32,
+        ckpt20: u32, ckpt21: u32, ckpt22: u32, ckpt23: u32,
+        ckpt24: u32, ckpt25: u32, ckpt26: u32, ckpt27: u32,
+        ckpt28: u32, ckpt29: u32, ckpt30: u32, ckpt31: u32,
         loop_enabled: u32,
         loop_threshold: u32,
         loop_jump: u32,
@@ -11008,6 +11056,30 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
               case 5u: { checkpoint_offset = params.ckpt5; }
               case 6u: { checkpoint_offset = params.ckpt6; }
               case 7u: { checkpoint_offset = params.ckpt7; }
+              case 8u: { checkpoint_offset = params.ckpt8; }
+              case 9u: { checkpoint_offset = params.ckpt9; }
+              case 10u: { checkpoint_offset = params.ckpt10; }
+              case 11u: { checkpoint_offset = params.ckpt11; }
+              case 12u: { checkpoint_offset = params.ckpt12; }
+              case 13u: { checkpoint_offset = params.ckpt13; }
+              case 14u: { checkpoint_offset = params.ckpt14; }
+              case 15u: { checkpoint_offset = params.ckpt15; }
+              case 16u: { checkpoint_offset = params.ckpt16; }
+              case 17u: { checkpoint_offset = params.ckpt17; }
+              case 18u: { checkpoint_offset = params.ckpt18; }
+              case 19u: { checkpoint_offset = params.ckpt19; }
+              case 20u: { checkpoint_offset = params.ckpt20; }
+              case 21u: { checkpoint_offset = params.ckpt21; }
+              case 22u: { checkpoint_offset = params.ckpt22; }
+              case 23u: { checkpoint_offset = params.ckpt23; }
+              case 24u: { checkpoint_offset = params.ckpt24; }
+              case 25u: { checkpoint_offset = params.ckpt25; }
+              case 26u: { checkpoint_offset = params.ckpt26; }
+              case 27u: { checkpoint_offset = params.ckpt27; }
+              case 28u: { checkpoint_offset = params.ckpt28; }
+              case 29u: { checkpoint_offset = params.ckpt29; }
+              case 30u: { checkpoint_offset = params.ckpt30; }
+              case 31u: { checkpoint_offset = params.ckpt31; }
               default: {}
             }
 
@@ -11341,7 +11413,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
           checkpointOffsets.push(i);
         }
       }
-      const checkpointCount = Math.min(checkpointOffsets.length, 8);
+      const checkpointCount = Math.min(checkpointOffsets.length, 32);
 
       const size_scalar = this.size;
       const pixelSize = size_scalar / this.config.dimsWidth;
@@ -11351,7 +11423,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
       const workgroupsY = Math.ceil(numWorkgroups / workgroupsX);
 
-      const paramsBuffer = new ArrayBuffer(128);
+      const paramsBuffer = new ArrayBuffer(256);
       const paramsU32 = new Uint32Array(paramsBuffer);
       const paramsI32 = new Int32Array(paramsBuffer);
       const paramsF32 = new Float32Array(paramsBuffer);
@@ -11366,19 +11438,19 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       paramsU32[7] = bufferIter;
       paramsU32[8] = checkpointCount;
 
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 32; i++) {
         paramsU32[9 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
       }
 
       const loop = this.refOrbitLoop || { enabled: false };
-      paramsU32[17] = loop.enabled ? 1 : 0;
-      paramsU32[18] = loop.threshold || 0;
-      paramsU32[19] = loop.jumpAmount || 0;
-      paramsI32[20] = this.initialScale;
-      paramsF32[21] = pixelSize;
-      paramsF32[22] = this.config.aspectRatio;
-      paramsF32[23] = loop.deltaR || 0;
-      paramsF32[24] = loop.deltaI || 0;
+      paramsU32[41] = loop.enabled ? 1 : 0;
+      paramsU32[42] = loop.threshold || 0;
+      paramsU32[43] = loop.jumpAmount || 0;
+      paramsI32[44] = this.initialScale;
+      paramsF32[45] = pixelSize;
+      paramsF32[46] = this.config.aspectRatio;
+      paramsF32[47] = loop.deltaR || 0;
+      paramsF32[48] = loop.deltaI || 0;
 
       this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
@@ -11939,14 +12011,20 @@ class FractalWorker {
         }
       }
       const now = (new Date()).getTime();
-      if (this.focusedBoardK == board.k ?
+      // Only send if there are changes to report (updateSize > 0) or board is finished
+      // This prevents sending empty changeList with stale un values during GPU batch processing
+      if ((board.updateSize > 0 || !board.unfinished()) &&
+          (this.focusedBoardK == board.k ?
           (board.updateSize >= 1429 || now - board.lastTime >= 100) :
-          (board.updateSize >= 4673 || now - board.lastTime >= 500)) {
+          (board.updateSize >= 4673 || now - board.lastTime >= 500))) {
         const boardEffort = board.un * board.effort;
         const remainingWork = pri.map(b => b.un * b.effort).reduce((a, b) => a + b, 0);
         const workerInfo = `${this.name}: ` + (board.unfinished() ?
              `boards {${[...this.boards.keys()]}}, work: ${remainingWork}` :
              `board finished`);
+
+        // Sort changeList by iteration for consistent histogram construction
+        board.changeList.sort((a, b) => a.iter - b.iter);
 
         this.sendToScheduler({
           type: 'iterations',
