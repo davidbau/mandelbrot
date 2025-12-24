@@ -8544,19 +8544,21 @@ class GpuBoard extends GpuBaseBoard {
 
     // Pixel state buffer (compacted - excludes precomputed pixels)
     // Each pixel carries its orig_index, so no separate mapping buffer needed
+    // Use mappedAtCreation to avoid separate writeBuffer call
+    const tb0 = performance.now();
     this.buffers.pixels = this.device.createBuffer({
       size: pixelBufferSize,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Pixel state buffer'
+      label: 'Pixel state buffer',
+      mappedAtCreation: true
     });
+    const tb1 = performance.now();
 
     // Note: stagingPixels buffers are created on-demand in readPixelBuffer() for serialization
     // This saves ~2x pixel buffer size in GPU memory during normal operation
 
-    // Initialize only non-precomputed pixels (8 fields per pixel)
-    // ArrayBuffer is zero-initialized by default, so we only need to set orig_index
-    const pixelData = new ArrayBuffer(pixelBufferSize);
-    const pixelU32 = new Uint32Array(pixelData);
+    // Initialize directly into the mapped buffer (avoids separate CPU buffer + writeBuffer)
+    const pixelU32 = new Uint32Array(this.buffers.pixels.getMappedRange());
 
     let activeIdx = 0;
     if (this.precomputed) {
@@ -8574,7 +8576,10 @@ class GpuBoard extends GpuBaseBoard {
       }
       activeIdx = dimsArea;
     }
-    this.device.queue.writeBuffer(this.buffers.pixels, 0, pixelData);
+    const tb2 = performance.now();
+    this.buffers.pixels.unmap();
+    const tb3 = performance.now();
+    console.log(`[buffer-init] create=${(tb1-tb0).toFixed(0)}ms loop=${(tb2-tb1).toFixed(0)}ms unmap=${(tb3-tb2).toFixed(0)}ms total=${(tb3-tb0).toFixed(0)}ms`);
 
     this.activeCount = activePixelCount;
     // Note: don't adjust this.un here - it will be decremented by flushUpToIteration
