@@ -7263,6 +7263,12 @@ class GpuBaseBoard extends Board {
     this.effort = 10;  // Default for GPU boards (~10× faster than CPU), overridden by subclasses
     this.minBatchIters = 17;  // GPU boards need minimum iterations per batch to amortize overhead
     this.maxBatchIters = 134567;  // Cap to avoid very long batches with few pixels
+
+    // Initialize batch tracking state (will be fully setup in initResultsReadback)
+    // This ensures batchesToReadback is defined for precomputed points processed before GPU init.
+    // When empty, queueChanges() uses the fallback path that adds directly to changeList.
+    this.batchesToReadback = [];
+    this.previousCompletedIterNumber = 0;
   }
 
   checkSpike(size, re, im) {
@@ -7471,13 +7477,27 @@ class GpuBaseBoard extends Board {
   initResultsReadback(recordBytes, maxCount) {
     const safeMax = Math.max(1, maxCount);
     this.resultsRecordBytes = recordBytes;
-    this.resultsHeaderBytes = 16;
+    this.resultsHeaderBytes = 32;  // 8 u32 fields: count, lastStaged, active_count, start_iter, iterations_per_batch, pad x3
     this.resultsMaxCount = safeMax;
-    this.resultsBufferSize = this.resultsHeaderBytes + (recordBytes * safeMax);
-    this.resultsReadbackMaxRecords = Math.max(1, Math.floor(safeMax * 0.01));
-    this.resultsReadbackBufferSize =
-      this.resultsHeaderBytes + (recordBytes * this.resultsReadbackMaxRecords);
-    this._resultsCounterReset = new Uint32Array([0, 0, 0, 0]);
+    // 1% chunk size means ~100 reads to drain all results
+    // The staging shader supports multiple workgroups for larger chunks
+    this.resultsReadbackMaxRecords = Math.max(256, Math.floor(safeMax * 0.01));
+
+    // Pre-staging area layout (written by staging shader, copied to staging buffer):
+    // - Header: 16 bytes (firstEmpty, countInChunk, chunkStartIndex, reserved)
+    // - Records: chunkSize * recordBytes
+    this.preStagingHeaderBytes = 16;
+    this.preStagingSize = this.preStagingHeaderBytes + (recordBytes * this.resultsReadbackMaxRecords);
+    this.preStagingOffset = this.resultsHeaderBytes + (recordBytes * safeMax);
+
+    // Total results buffer: header + main records + pre-staging area
+    this.resultsBufferSize = this.preStagingOffset + this.preStagingSize;
+
+    // Staging buffer matches pre-staging area size
+    this.resultsReadbackBufferSize = this.preStagingSize;
+
+    // Reset buffer: 8 u32s for header (count=0, lastStaged=0, others don't matter)
+    this._resultsCounterReset = new Uint32Array([0, 0, 0, 0, 0, 0, 0, 0]);
 
     if (this.buffers.results) {
       this.buffers.results.destroy();
@@ -7512,125 +7532,301 @@ class GpuBaseBoard extends Board {
     this.resultsTotalCount = 0;
     this.readbackBufferIndex = 0;
     this.pendingReadbackIndex = null;
-    this.pendingReadbackStart = 0;
-    this.pendingReadbackCount = 0;
     this.pendingReadbackPromise = null;
     this.hasPendingResults = false;
     this.resultsReadbackBytes = 0;
     this.resultsReadbackBatches = 0;
     this.lastResultsCount = 0;
 
+    // Batch tracking for ordered results (see docs/gpu-results-readback-design.md)
+    this.batchesToReadback = [];  // Queue of {completedIterNumber, remainingPixelCount, accumulatedChanges}
+    this.previousCompletedIterNumber = 0;
+    this.previousFirstEmpty = 0;  // Track firstEmpty for batch size computation
+
     this.device.queue.writeBuffer(this.buffers.results, 0, this._resultsCounterReset);
+
+    // Create staging shader pipeline (see docs/gpu-results-readback-design.md)
+    this.createStagingPipeline();
   }
 
-  queueResultsReadback(commandEncoder, index, readStart, readCount) {
-    const recordsToRead = Math.max(0, Math.min(readCount, this.resultsMaxCount - readStart));
-    const bytesToRead = recordsToRead * this.resultsRecordBytes;
+  createStagingPipeline() {
+    const chunkSize = this.resultsReadbackMaxRecords;
+    const recordBytes = this.resultsRecordBytes;
+    const recordU32s = recordBytes / 4;
+
+    // Staging shader: copies results from main area to pre-staging area
+    // Supports multiple workgroups by having each thread read header values directly.
+    // Thread 0 of workgroup 0 writes the pre-staging header and updates lastStaged.
+    const stagingShaderCode = `
+      struct StagingParams {
+        chunkSize: u32,
+        maxResults: u32,
+        recordU32s: u32,
+        preStagingOffset: u32,
+      }
+
+      @group(0) @binding(0) var<uniform> params: StagingParams;
+      @group(0) @binding(1) var<storage, read_write> buffer: array<u32>;
+
+      // Buffer layout:
+      // [0]: count (firstEmpty)
+      // [1]: lastStaged
+      // [2..7]: other header fields
+      // [8..]: main records
+      // [preStagingOffset/4..]: pre-staging header + records
+
+      @compute @workgroup_size(256)
+      fn staging_main(@builtin(local_invocation_id) local_id: vec3<u32>,
+                      @builtin(workgroup_id) workgroup_id: vec3<u32>) {
+        // Each thread reads header values directly (same for all threads)
+        let firstEmpty = buffer[0];
+        let lastStaged = buffer[1];
+        let available = firstEmpty - lastStaged;
+        let countInChunk = min(available, params.chunkSize);
+
+        // Global thread ID
+        let tid = local_id.x + workgroup_id.x * 256u;
+
+        // Only thread 0 of workgroup 0 writes header and updates lastStaged
+        if (tid == 0u) {
+          let headerBase = params.preStagingOffset / 4u;
+          buffer[headerBase + 0u] = firstEmpty;
+          buffer[headerBase + 1u] = countInChunk;
+          buffer[headerBase + 2u] = lastStaged;
+          buffer[headerBase + 3u] = 0u;  // reserved
+
+          // Update lastStaged for next batch
+          buffer[1] = lastStaged + countInChunk;
+        }
+
+        // Each thread copies one record (if within valid range)
+        if (tid < countInChunk) {
+          let srcRecordStart = 8u + (lastStaged + tid) * params.recordU32s;
+          let dstRecordStart = (params.preStagingOffset / 4u) + 4u + tid * params.recordU32s;
+
+          for (var i = 0u; i < params.recordU32s; i++) {
+            buffer[dstRecordStart + i] = buffer[srcRecordStart + i];
+          }
+        }
+      }
+    `;
+
+    const stagingModule = this.device.createShaderModule({
+      code: stagingShaderCode,
+      label: 'Staging shader'
+    });
+
+    this.stagingPipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: {
+        module: stagingModule,
+        entryPoint: 'staging_main'
+      },
+      label: 'Staging pipeline'
+    });
+
+    // Create staging params buffer
+    this.buffers.stagingParams = this.device.createBuffer({
+      size: 16,  // 4 u32s
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      label: 'Staging params'
+    });
+
+    // Write staging params
+    const stagingParamsData = new Uint32Array([
+      chunkSize,
+      this.resultsMaxCount,
+      recordU32s,
+      this.preStagingOffset
+    ]);
+    this.device.queue.writeBuffer(this.buffers.stagingParams, 0, stagingParamsData);
+
+    // Create staging bind group
+    this.stagingBindGroup = this.device.createBindGroup({
+      layout: this.stagingPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.buffers.stagingParams } },
+        { binding: 1, resource: { buffer: this.buffers.results } }
+      ],
+      label: 'Staging bind group'
+    });
+  }
+
+  queueResultsReadback(commandEncoder, index) {
+    // Run staging shader to copy results to pre-staging area
+    const stagingPass = commandEncoder.beginComputePass({ label: 'Staging pass' });
+    stagingPass.setPipeline(this.stagingPipeline);
+    stagingPass.setBindGroup(0, this.stagingBindGroup);
+    // Dispatch enough workgroups to cover chunkSize threads
+    const workgroups = Math.ceil(this.resultsReadbackMaxRecords / 256);
+    stagingPass.dispatchWorkgroups(workgroups);
+    stagingPass.end();
+
+    // Copy pre-staging area to staging buffer (fixed size, fixed offset)
     commandEncoder.copyBufferToBuffer(
-      this.buffers.results, 0, this.buffers.resultsStaging[index], 0, this.resultsHeaderBytes);
-    if (bytesToRead > 0) {
-      commandEncoder.copyBufferToBuffer(
-        this.buffers.results,
-        this.resultsHeaderBytes + (readStart * this.resultsRecordBytes),
-        this.buffers.resultsStaging[index],
-        this.resultsHeaderBytes,
-        bytesToRead
-      );
-    }
-    return { recordsToRead };
+      this.buffers.results, this.preStagingOffset,
+      this.buffers.resultsStaging[index], 0,
+      this.preStagingSize
+    );
   }
 
-  async readResultsChunk(index, readStart, readCount, skipRecords = 0) {
+  async readResultsChunk(index) {
+    // Read staging buffer which contains pre-staging header + records
+    // Header: firstEmpty (u32), countInChunk (u32), chunkStartIndex (u32), reserved (u32)
     const staging = this.buffers.resultsStaging[index];
-    const bytesToMap = this.resultsHeaderBytes + (readCount * this.resultsRecordBytes);
-    await staging.mapAsync(GPUMapMode.READ, 0, bytesToMap);
-    const mapped = staging.getMappedRange(0, bytesToMap);
+    await staging.mapAsync(GPUMapMode.READ, 0, this.preStagingSize);
+    const mapped = staging.getMappedRange(0, this.preStagingSize);
+
+    // Parse header
     const headerView = new Uint32Array(mapped, 0, 4);
-    const totalCount = Math.min(headerView[0], this.resultsMaxCount);
-    const available = Math.max(0, totalCount - readStart);
-    const usable = Math.max(0, Math.min(readCount, available));
-    const skip = Math.min(skipRecords, usable);
-    const toProcess = Math.max(0, usable - skip);
+    const firstEmpty = Math.min(headerView[0], this.resultsMaxCount);
+    const countInChunk = headerView[1];
+    const chunkStartIndex = headerView[2];
+
+    // Copy records data
     let data = null;
-    if (toProcess > 0) {
-      const dataBytes = toProcess * this.resultsRecordBytes;
+    if (countInChunk > 0) {
+      const dataBytes = countInChunk * this.resultsRecordBytes;
       data = new ArrayBuffer(dataBytes);
-      const src = new Uint8Array(
-        mapped,
-        this.resultsHeaderBytes + (skip * this.resultsRecordBytes),
-        dataBytes
-      );
+      const src = new Uint8Array(mapped, this.preStagingHeaderBytes, dataBytes);
       new Uint8Array(data).set(src);
     }
+
     staging.unmap();
-    return { totalCount, data, toProcess };
+    return { firstEmpty, countInChunk, chunkStartIndex, data };
   }
 
   async processPendingReadback() {
     if (this.pendingReadbackIndex === null) return;
     await this.pendingReadbackPromise;
-    const skip = Math.max(0, this.resultsReadIndex - this.pendingReadbackStart);
-    const { totalCount, data, toProcess } = await this.readResultsChunk(
-      this.pendingReadbackIndex,
-      this.pendingReadbackStart,
-      this.pendingReadbackCount,
-      skip
+
+    // Read chunk from staging buffer (see docs/gpu-results-readback-design.md)
+    const { firstEmpty, countInChunk, chunkStartIndex, data } = await this.readResultsChunk(
+      this.pendingReadbackIndex
     );
-    this.resultsTotalCount = totalCount;
-    this.pendingIterationsPerBatch = this.pendingReadbackIterations;
-    if (toProcess > 0 && data) {
-      this.processResultsData(data, toProcess);
-      this.resultsReadIndex = Math.min(this.resultsReadIndex + toProcess, this.resultsMaxCount);
-    } else {
-      this.processResultsData(null, 0);
+
+    this.resultsTotalCount = firstEmpty;
+
+    // Enqueue this batch with its end boundary (batchEndIndex = firstEmpty at this batch's completion)
+    const batchPixelCount = firstEmpty - this.previousFirstEmpty;
+
+    // Only create a new batch entry if there are new results for this batch
+    if (batchPixelCount > 0) {
+      this.batchesToReadback.push({
+        completedIterNumber: this.pendingBatchCompletedIterNumber,
+        batchStartIndex: this.previousFirstEmpty,  // Buffer positions [batchStartIndex, batchEndIndex) belong to this batch
+        batchEndIndex: firstEmpty,
+        remainingPixelCount: batchPixelCount,
+        accumulatedChanges: []
+      });
+      this.previousFirstEmpty = firstEmpty;
     }
-    this.hasPendingResults = this.resultsReadIndex < totalCount;
+
+    // Process chunk data with position-aware batch attribution
+    // The chunk contains results at buffer positions [chunkStartIndex, chunkStartIndex+countInChunk)
+    // We need to attribute each result to the correct batch based on its buffer position
+    if (countInChunk > 0 && data) {
+      this.processResultsDataWithBatches(data, countInChunk, chunkStartIndex);
+    }
+
+    // Flush any complete batches after processing
+    this.flushCompleteBatches();
+
+    this.hasPendingResults = false;
     this.pendingReadbackIndex = null;
     this.pendingReadbackPromise = null;
-    this.pendingReadbackStart = 0;
-    this.pendingReadbackCount = 0;
-    this.pendingReadbackIterations = 0;
+    this.pendingBatchCompletedIterNumber = 0;
   }
 
-  async drainResultsBacklog(bufferIndex, maxChunks = 1) {
-    if (!this.resultsTotalCount || this.resultsReadIndex >= this.resultsTotalCount) {
-      this.hasPendingResults = false;
-      return;
-    }
-    const prevIterations = this.pendingIterationsPerBatch;
-    this.pendingIterationsPerBatch = 0;
-    for (let i = 0; i < maxChunks; i++) {
-      if (!this.resultsTotalCount || this.resultsReadIndex >= this.resultsTotalCount) {
-        this.hasPendingResults = false;
-        break;
+  /**
+   * Process results data with position-aware batch attribution.
+   * Each result is attributed to a batch based on its buffer position.
+   */
+  processResultsDataWithBatches(data, count, chunkStartIndex) {
+    // First, process results into board state (nn, pp, di, un updates)
+    // and collect changes grouped by batch
+    const STRIDE = 8;  // 8 u32s per record for GpuBoard
+    const pixelU32 = new Uint32Array(data);
+    const pixelF32 = new Float32Array(data);
+
+    // Group results by batch based on buffer position
+    // Each batch owns positions [prevBatchEnd, batchEndIndex)
+    const changesByBatch = new Map();  // batchIndex -> Map(iter -> {nn, vv})
+
+    for (let i = 0; i < count; i++) {
+      const bufferPosition = chunkStartIndex + i;
+      const idx8 = i * STRIDE;
+      const origIndex = pixelU32[idx8 + 0];
+      const iters = pixelU32[idx8 + 1];
+      const status = pixelU32[idx8 + 2];
+      const period = pixelU32[idx8 + 3];
+      const zr = pixelF32[idx8 + 4];
+      const zi = pixelF32[idx8 + 5];
+
+      if (status === 0) continue;  // Still computing
+      if (this.nn[origIndex] !== 0) continue;  // Already processed
+
+      // Find which batch this result belongs to based on buffer position
+      let batchIndex = -1;
+      for (let b = 0; b < this.batchesToReadback.length; b++) {
+        const batch = this.batchesToReadback[b];
+        if (bufferPosition >= batch.batchStartIndex && bufferPosition < batch.batchEndIndex) {
+          batchIndex = b;
+          break;
+        }
       }
-      const readStart = this.resultsReadIndex;
-      const readCount = this.resultsReadbackMaxRecords;
-      const commandEncoder = this.device.createCommandEncoder({ label: 'GpuBoard readback catch-up' });
-      const { recordsToRead } = this.queueResultsReadback(
-        commandEncoder,
-        bufferIndex,
-        readStart,
-        readCount
-      );
-      this.device.queue.submit([commandEncoder.finish()]);
-      await this.device.queue.onSubmittedWorkDone();
-      const { totalCount, data, toProcess } = await this.readResultsChunk(
-        bufferIndex,
-        readStart,
-        recordsToRead
-      );
-      this.resultsTotalCount = totalCount;
-      if (toProcess > 0 && data) {
-        this.processResultsData(data, toProcess);
-        this.resultsReadIndex = Math.min(this.resultsReadIndex + toProcess, this.resultsMaxCount);
-      } else {
-        this.processResultsData(null, 0);
+
+      if (batchIndex < 0) continue;  // Position doesn't belong to any known batch
+
+      // Update board state
+      if (status === 1) {  // Diverged
+        this.nn[origIndex] = iters;
+        this.pp[origIndex] = 1;
+        this.di++;
+        if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
+      } else if (status === 2) {  // Converged
+        this.nn[origIndex] = -iters;
+        this.pp[origIndex] = period + 1;
+        if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
       }
-      this.hasPendingResults = this.resultsReadIndex < totalCount;
+
+      // Group by batch and iteration
+      if (!changesByBatch.has(batchIndex)) {
+        changesByBatch.set(batchIndex, new Map());
+      }
+      const batchChanges = changesByBatch.get(batchIndex);
+      if (!batchChanges.has(iters)) {
+        batchChanges.set(iters, { nn: [], vv: [] });
+      }
+      const changes = batchChanges.get(iters);
+      if (status === 1) {
+        changes.nn.push(origIndex);
+      } else if (status === 2) {
+        changes.vv.push({ index: origIndex, z: [zr, zi], p: this.pp[origIndex] });
+      }
     }
-    this.pendingIterationsPerBatch = prevIterations;
+
+    // Add changes to their respective batches and update counts
+    for (const [batchIndex, iterChanges] of changesByBatch) {
+      const batch = this.batchesToReadback[batchIndex];
+      for (const [iter, changes] of iterChanges) {
+        const pixelCount = changes.nn.length + changes.vv.length;
+        batch.accumulatedChanges.push({ iter, nn: changes.nn, vv: changes.vv });
+        batch.remainingPixelCount -= pixelCount;
+        this.updateSize += pixelCount;
+      }
+    }
+
+    // Update un count
+    this.deadSinceCompaction += count;
+    const pendingPrecomputed = this.precomputed ? this.precomputed.getPendingCount() : 0;
+    this.un = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed;
   }
+
+
+  // Note: drainResultsBacklog is no longer needed.
+  // The staging shader automatically handles backlog via the lastStaged counter,
+  // ensuring each batch reads the next chunk of unprocessed results.
 
   /**
    * Return iteration count for submitted GPU batches.
@@ -7641,6 +7837,75 @@ class GpuBaseBoard extends Board {
 
   set it(value) {
     this._baseIt = value;
+  }
+
+  /**
+   * Override queueChanges to add directly to changeList.
+   * GPU results go through processResultsDataWithBatches for proper batch tracking.
+   * This method is used for precomputed/cached points which are already ordered.
+   */
+  queueChanges(changes) {
+    if (changes === null) return;
+
+    const pixelCount = changes.nn.length + changes.vv.length;
+    this.updateSize += pixelCount;
+
+    // Add directly to changeList (same as base Board class)
+    if (!this.changeMap) this.changeMap = new Map();
+    const existing = this.changeMap.get(changes.iter);
+    if (existing) {
+      existing.nn.push(...changes.nn);
+      existing.vv.push(...changes.vv);
+    } else {
+      this.changeList.push(changes);
+      this.changeMap.set(changes.iter, changes);
+    }
+  }
+
+  /**
+   * Flush complete batches: sort, verify invariants, and move to changeList.
+   * A batch is "complete" when remainingPixelCount <= 0 (all its results received).
+   *
+   * INVARIANT: All pixels in batch N finished iterating during batch N's iteration range:
+   *   previousCompletedIterNumber < iter <= completedIterNumber
+   * This must hold because a pixel can only finish (escape/converge) during the
+   * iterations that batch N actually ran.
+   * (see docs/gpu-results-readback-design.md)
+   */
+  flushCompleteBatches() {
+    while (this.batchesToReadback && this.batchesToReadback.length > 0 &&
+           this.batchesToReadback[0].remainingPixelCount <= 0) {
+      const batch = this.batchesToReadback.shift();
+
+      // Sort accumulated changes by iteration for correct ordering
+      batch.accumulatedChanges.sort((a, b) => a.iter - b.iter);
+
+      // INVARIANT: All changes must have iter <= batch.completedIterNumber
+      // INVARIANT: All changes must have iter > previousCompletedIterNumber
+      for (const change of batch.accumulatedChanges) {
+        if (change.iter > batch.completedIterNumber) {
+          console.error(`[INVARIANT FLUSH] Change iter ${change.iter} > batch.completedIterNumber ${batch.completedIterNumber}`);
+        }
+        if (change.iter <= this.previousCompletedIterNumber) {
+          console.error(`[INVARIANT FLUSH] Change iter ${change.iter} <= previousCompletedIterNumber ${this.previousCompletedIterNumber}`);
+        }
+      }
+
+      // Move changes to changeList for sending to view
+      if (!this.changeMap) this.changeMap = new Map();
+      for (const change of batch.accumulatedChanges) {
+        const existing = this.changeMap.get(change.iter);
+        if (existing) {
+          existing.nn.push(...change.nn);
+          existing.vv.push(...change.vv);
+        } else {
+          this.changeList.push(change);
+          this.changeMap.set(change.iter, change);
+        }
+      }
+
+      this.previousCompletedIterNumber = batch.completedIterNumber;
+    }
   }
 
   /**
@@ -7859,11 +8124,23 @@ class GpuBoard extends GpuBaseBoard {
         base_i: f32,
       }
 
+      // Results buffer header: 32 bytes (8 u32 fields)
+      // Offset 0:  count (atomic) - firstEmpty, next write slot
+      // Offset 4:  lastStaged (atomic) - last staged index
+      // Offset 8:  active_count
+      // Offset 12: start_iter
+      // Offset 16: iterations_per_batch
+      // Offset 20-28: padding
+      // Offset 32: records[0..N]
       struct Results {
         count: atomic<u32>,
+        lastStaged: atomic<u32>,
         active_count: u32,
         start_iter: u32,
         iterations_per_batch: u32,
+        _pad0: u32,
+        _pad1: u32,
+        _pad2: u32,
         records: array<PixelState>,
       }
 
@@ -8404,39 +8681,29 @@ class GpuBoard extends GpuBaseBoard {
       passEncoder.end();
 
       const readbackIndex = this.readbackBufferIndex;
-      const readStart = this.resultsReadIndex;
-      const readCount = this.resultsReadbackMaxRecords;
-      const { recordsToRead } = this.queueResultsReadback(
-        commandEncoder,
-        readbackIndex,
-        readStart,
-        readCount
-      );
+
+      // Queue staging shader pass and copy to staging buffer
+      // (see docs/gpu-results-readback-design.md)
+      this.queueResultsReadback(commandEncoder, readbackIndex);
 
       this.device.queue.submit([commandEncoder.finish()]);
       this._baseIt += iterationsPerBatch;
       const currentPromise = this.device.queue.onSubmittedWorkDone();
       // GPU is now computing in parallel!
 
-      // Note: precomputed points are merged with GPU results below, not flushed separately
-
       // STEP 3: Process pending results from PREVIOUS batch (overlaps with GPU work)
       if (this.pendingReadbackIndex !== null) {
         await this.processPendingReadback();
       }
-      const backlog = this.resultsTotalCount - this.resultsReadIndex;
-      if (backlog > this.resultsReadbackMaxRecords * 2) {
-        await this.drainResultsBacklog(1 - readbackIndex, 1);
-      }
 
+      // Set up state for THIS batch (to be processed next frame)
       this.pendingReadbackIndex = readbackIndex;
-      this.pendingReadbackStart = readStart;
-      this.pendingReadbackCount = recordsToRead;
-      this.pendingReadbackIterations = iterationsPerBatch;
       this.pendingReadbackPromise = currentPromise;
       this.readbackBufferIndex = 1 - readbackIndex;
       this.pendingIterationsPerBatch = iterationsPerBatch;
       this.hasPendingResults = true;
+      // Batch tracking: pendingBatchCompletedIterNumber = iteration count after this batch
+      this.pendingBatchCompletedIterNumber = this._baseIt;
 
     } catch (error) {
       console.error(`GpuBoard.compute() ERROR:`, error);
@@ -8488,34 +8755,12 @@ class GpuBoard extends GpuBaseBoard {
     // Process pending results from the staging buffer without starting a new batch
     if (!this.hasPendingResults) return;
 
+    // Process the pending batch if there is one
     if (this.pendingReadbackIndex !== null) {
       await this.processPendingReadback();
     }
-    const backlog = this.resultsTotalCount - this.resultsReadIndex;
-    if (backlog > this.resultsReadbackMaxRecords * 2) {
-      await this.drainResultsBacklog(1 - readbackIndex, 1);
-    }
-
-    while (this.hasPendingResults) {
-      const readbackIndex = this.readbackBufferIndex;
-      const readStart = this.resultsReadIndex;
-      const readCount = this.resultsReadbackMaxRecords;
-      const commandEncoder = this.device.createCommandEncoder({ label: 'GpuBoard readback' });
-      const { recordsToRead } = this.queueResultsReadback(
-        commandEncoder,
-        readbackIndex,
-        readStart,
-        readCount
-      );
-      this.device.queue.submit([commandEncoder.finish()]);
-      this.pendingReadbackIndex = readbackIndex;
-      this.pendingReadbackStart = readStart;
-      this.pendingReadbackCount = recordsToRead;
-      this.pendingReadbackIterations = 0;
-      this.pendingReadbackPromise = this.device.queue.onSubmittedWorkDone();
-      this.readbackBufferIndex = 1 - readbackIndex;
-      await this.processPendingReadback();
-    }
+    // Note: With the staging shader design, backlog is handled automatically.
+    // Each batch's staging pass reads the next chunk of unprocessed results.
   }
 
   async readCompactedPixelBuffer() {
@@ -9911,6 +10156,9 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     this.readbackBufferIndex = 1 - readbackIndex;
     this.pendingIterationsPerBatch = iterationsPerBatch;
     this.hasPendingResults = true;
+    // Batch tracking: record state for THIS batch (see docs/gpu-results-readback-design.md)
+    this.pendingBatchCompletedIterNumber = this._baseIt;
+    this.pendingBatchStartResultIndex = this.batchStartResultIndex;
 
     } catch (error) {
       console.error(`GpuZhuoranBoard.compute() ERROR:`, error);
@@ -11202,6 +11450,9 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       this.readbackBufferIndex = 1 - readbackIndex;
       this.pendingIterationsPerBatch = iterationsPerBatch;
       this.hasPendingResults = true;
+      // Batch tracking: record state for THIS batch (see docs/gpu-results-readback-design.md)
+      this.pendingBatchCompletedIterNumber = this._baseIt;
+      this.pendingBatchStartResultIndex = this.batchStartResultIndex;
 
     } catch (error) {
       console.error('AdaptiveGpuBoard.compute() ERROR:',
