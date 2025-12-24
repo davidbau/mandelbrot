@@ -7766,19 +7766,7 @@ class GpuBaseBoard extends Board {
       if (status === 0) continue;  // Still computing
       if (this.nn[origIndex] !== 0) continue;  // Already processed
 
-      // Find which batch this result belongs to based on buffer position
-      let batchIndex = -1;
-      for (let b = 0; b < this.batchesToReadback.length; b++) {
-        const batch = this.batchesToReadback[b];
-        if (bufferPosition >= batch.batchStartIndex && bufferPosition < batch.batchEndIndex) {
-          batchIndex = b;
-          break;
-        }
-      }
-
-      if (batchIndex < 0) continue;  // Position doesn't belong to any known batch
-
-      // Update board state
+      // Update board state first (always, regardless of batch attribution)
       if (status === 1) {  // Diverged
         this.nn[origIndex] = iters;
         this.pp[origIndex] = 1;
@@ -7788,6 +7776,42 @@ class GpuBaseBoard extends Board {
         this.nn[origIndex] = -iters;
         this.pp[origIndex] = period + 1;
         if (this.inSpike && this.inSpike[origIndex] && this.ch > 0) this.ch -= 1;
+      }
+
+      // Find which batch this result belongs to based on ITERATION NUMBER
+      // Results are written to buffer in non-deterministic order (GPU scheduling), so we can't
+      // use buffer position for batch attribution. Instead, use the iteration bounds:
+      // A result with iter N belongs to the batch where previousCompleted < N <= completedIterNumber
+      // Use this.previousCompletedIterNumber as the base, since earlier batches may have been flushed
+      let batchIndex = -1;
+      let prevCompleted = this.previousCompletedIterNumber;
+      for (let b = 0; b < this.batchesToReadback.length; b++) {
+        const batch = this.batchesToReadback[b];
+        if (iters > prevCompleted && iters <= batch.completedIterNumber) {
+          batchIndex = b;
+          break;
+        }
+        prevCompleted = batch.completedIterNumber;
+      }
+
+      // If iter <= previousCompletedIterNumber, the result belongs to an already-flushed batch.
+      // Add directly to changeList (bypassing batch tracking) so the view still receives the update.
+      if (batchIndex < 0) {
+        // Late result from flushed batch - add directly to changeList
+        if (!this.changeMap) this.changeMap = new Map();
+        const existing = this.changeMap.get(iters);
+        if (existing) {
+          if (status === 1) existing.nn.push(origIndex);
+          else if (status === 2) existing.vv.push({ index: origIndex, z: [zr, zi], p: this.pp[origIndex] });
+        } else {
+          const change = status === 1
+            ? { iter: iters, nn: [origIndex], vv: [] }
+            : { iter: iters, nn: [], vv: [{ index: origIndex, z: [zr, zi], p: this.pp[origIndex] }] };
+          this.changeList.push(change);
+          this.changeMap.set(iters, change);
+        }
+        this.updateSize++;
+        continue;
       }
 
       // Group by batch and iteration
@@ -7879,17 +7903,6 @@ class GpuBaseBoard extends Board {
 
       // Sort accumulated changes by iteration for correct ordering
       batch.accumulatedChanges.sort((a, b) => a.iter - b.iter);
-
-      // INVARIANT: All changes must have iter <= batch.completedIterNumber
-      // INVARIANT: All changes must have iter > previousCompletedIterNumber
-      for (const change of batch.accumulatedChanges) {
-        if (change.iter > batch.completedIterNumber) {
-          console.error(`[INVARIANT FLUSH] Change iter ${change.iter} > batch.completedIterNumber ${batch.completedIterNumber}`);
-        }
-        if (change.iter <= this.previousCompletedIterNumber) {
-          console.error(`[INVARIANT FLUSH] Change iter ${change.iter} <= previousCompletedIterNumber ${this.previousCompletedIterNumber}`);
-        }
-      }
 
       // Move changes to changeList for sending to view
       if (!this.changeMap) this.changeMap = new Map();
@@ -8348,7 +8361,7 @@ class GpuBoard extends GpuBaseBoard {
 
       const idx8 = activeIdx * 8;
       pixelU32[idx8 + 0] = i;  // orig_index (each pixel knows its original position)
-      pixelU32[idx8 + 1] = 0;  // iter
+      pixelU32[idx8 + 1] = 1;  // iter (start at 1 so minimum finished iter is 1, matching GpuZhuoranBoard)
       pixelU32[idx8 + 2] = 0;  // status
       pixelU32[idx8 + 3] = 0;  // period
       pixelF32[idx8 + 4] = 0;  // zr
@@ -8759,8 +8772,52 @@ class GpuBoard extends GpuBaseBoard {
     if (this.pendingReadbackIndex !== null) {
       await this.processPendingReadback();
     }
-    // Note: With the staging shader design, backlog is handled automatically.
-    // Each batch's staging pass reads the next chunk of unprocessed results.
+
+    // Continue draining results until all are read
+    // The staging shader reads from lastStaged which advances each time we read a chunk
+    let moreData = true;
+    while (moreData) {
+      // Run another staging shader pass and copy to staging buffer
+      const readbackIndex = this.readbackBufferIndex;
+      const commandEncoder = this.device.createCommandEncoder({ label: 'Drain readback' });
+      this.queueResultsReadback(commandEncoder, readbackIndex);
+      this.device.queue.submit([commandEncoder.finish()]);
+      await this.device.queue.onSubmittedWorkDone();
+
+      // Read and process the chunk
+      const { firstEmpty, countInChunk, chunkStartIndex, data } = await this.readResultsChunk(readbackIndex);
+
+      if (countInChunk === 0) {
+        moreData = false;  // No more results to read
+      } else if (data) {
+        this.processResultsDataWithBatches(data, countInChunk, chunkStartIndex);
+      }
+
+      this.flushCompleteBatches();
+      this.readbackBufferIndex = 1 - readbackIndex;
+    }
+
+    // Force-flush any remaining batches - all results have been read
+    // Their remainingPixelCount may not be zero due to iteration-based attribution
+    while (this.batchesToReadback.length > 0) {
+      const batch = this.batchesToReadback.shift();
+      batch.accumulatedChanges.sort((a, b) => a.iter - b.iter);
+
+      // Move changes to changeList for sending to view
+      if (!this.changeMap) this.changeMap = new Map();
+      for (const change of batch.accumulatedChanges) {
+        const existing = this.changeMap.get(change.iter);
+        if (existing) {
+          existing.nn.push(...change.nn);
+          existing.vv.push(...change.vv);
+        } else {
+          this.changeList.push(change);
+          this.changeMap.set(change.iter, change);
+        }
+      }
+
+      this.previousCompletedIterNumber = batch.completedIterNumber;
+    }
   }
 
   async readCompactedPixelBuffer() {
