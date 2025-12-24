@@ -1021,6 +1021,56 @@ class Config {
       // Add more color themes here
     };
     this.colorThemes.all = Object.keys(this.colorThemes);
+
+    // RGBA versions of color themes for ImageData optimization
+    // Each returns [r, g, b, 255] instead of "rgb(r,g,b)" string
+    this.colorThemesRGBA = {
+      warm: (i, frac, fracD, fracL, s) => {
+        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
+        let hue = (Math.log(i + 20) * 200) % 360;
+        let chroma = 100;
+        let light = 15 * frac + 85 * frac ** 5;
+        let [r, g, b] = hclToRGB(hue, chroma, light);
+        return [r, g, b, 255];
+      },
+      neon: (i, frac, fracD, fracL, s) => {
+        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
+        let angle = (Math.log(i + 10) * 0.8) * Math.PI;
+        let r = Math.abs(Math.sin(angle));
+        let g = Math.abs(Math.sin(angle + Math.PI * 2/3));
+        let b = Math.abs(Math.sin(angle + Math.PI * 4/3));
+        let minChannel = Math.min(r, g, b);
+        r = Math.max(0, r - minChannel * 2/3);
+        g = Math.max(0, g - minChannel * 2/3);
+        b = Math.max(0, b - minChannel * 2/3);
+        let maxChannel = Math.max(r, g, b);
+        if (maxChannel > 0) { r /= maxChannel; g /= maxChannel; b /= maxChannel; }
+        let brightness = 0.5 + 0.4 * frac;
+        return [intcolorRGBA(r * brightness), intcolorRGBA(g * brightness), intcolorRGBA(b * brightness), 255];
+      },
+      iceblue: (i, frac, fracD, fracL, s) => {
+        let ff = Math.pow(frac, 2);
+        let fr = Math.pow(frac, 0.333);
+        let fg = Math.pow(frac, 3);
+        let g = intcolorRGBA(Math.max(fg, Math.min(fr, i * Math.pow(s, 0.33) / 64)));
+        let r = intcolorRGBA(Math.min(fr, i * Math.pow(s, 0.22) / 64));
+        let b = intcolorRGBA(ff / 3 + 0.667);
+        return [r, g, b, 255];
+      },
+      tiedye: (i, frac, fracD, fracL, s) => {
+        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
+        let hue = (Math.log(i + 20) * 1000) % 360;
+        let chroma = 100;
+        let light = 25 * frac + 75 * frac ** 5;
+        let [r, g, b] = hclToRGB(hue, chroma, light);
+        return [r, g, b, 255];
+      },
+      gray: (i, frac, fracD, fracL, s) => {
+        frac = Math.max(frac, Math.min(0.99, fracD / (Math.max(1e-3, fracL))));
+        let value = intcolorRGBA(0.15 + 0.85 * frac ** 5);
+        return [value, value, value, 255];
+      }
+    };
   }
 
   initSizes() {
@@ -1335,23 +1385,51 @@ class View {
   }
 
   drawLocal(ctx, colorview = null, unknownColor = 'transparent') {
-    // Draw only locally computed pixels
+    // Draw only locally computed pixels using ImageData for performance
     if (colorview === null) {
       colorview = this;
     }
-    const n = this.nn;
-    const msort = n.map((v, i) => i).sort((a, b) => n[a] - n[b]);
-    let prev = null;
-    for (let m of msort) {
-      const x = m % this.config.dimsWidth;
-      const y = (m - x) / this.config.dimsWidth;
-      const cur = n[m];
-      if (prev !== cur) {
-        ctx.fillStyle = colorview.makecolor(cur, null, null, unknownColor);
-        prev = cur;
+
+    const { dimsWidth, dimsHeight } = this.config;
+    const nn = this.nn;
+    const imageData = ctx.createImageData(dimsWidth, dimsHeight);
+    const data = imageData.data;
+
+    // Get RGBA color function for current theme
+    const themeFn = colorview.config.colorThemesRGBA[colorview.config.theme];
+    const hi = colorview.hi;
+    const size = colorview.size;
+
+    // Parse unknownColor to RGBA (for nn === 0)
+    const unknownRGBA = unknownColor === 'transparent' ? [0, 0, 0, 0] : [0, 0, 0, 255];
+    const blackRGBA = [0, 0, 0, 255];
+
+    for (let i = 0; i < nn.length; i++) {
+      const iter = nn[i];
+      let rgba;
+      if (iter === 0) {
+        rgba = unknownRGBA;
+      } else if (iter < 0) {
+        rgba = blackRGBA;
+      } else {
+        const fracs = View.lookupHistogram(iter, hi);
+        rgba = themeFn(iter, fracs.fracK, fracs.fracD, fracs.fracL, size);
       }
-      ctx.fillRect(x, y, 1, 1);
+      const idx = i * 4;
+      data[idx] = rgba[0];
+      data[idx + 1] = rgba[1];
+      data[idx + 2] = rgba[2];
+      data[idx + 3] = rgba[3];
     }
+
+    // Use offscreen canvas + drawImage to respect alpha blending
+    // (putImageData ignores compositing and would overwrite transparent pixels)
+    const offscreen = document.createElement('canvas');
+    offscreen.width = dimsWidth;
+    offscreen.height = dimsHeight;
+    const offCtx = offscreen.getContext('2d');
+    offCtx.putImageData(imageData, 0, 0);
+    ctx.drawImage(offscreen, 0, 0);
   }
 
   // Calculate coordinate mapping from parent to child canvas using QD precision
@@ -5262,6 +5340,29 @@ function intcolor(n) {
   if (n <= 0) { return "0"; }
   if (n >= 1) { return "255"; }
   return (n * 255).toString(10);
+}
+
+// Converts normalized [0,1] float to 8-bit color number (for ImageData).
+function intcolorRGBA(n) {
+  return Math.floor(Math.max(0, Math.min(1, n)) * 255);
+}
+
+// HCL to RGB returning array [r, g, b] for ImageData use
+function hclToRGB(h, c, l) {
+  h = h % 360;
+  if (h < 0) h += 360;
+  c = Math.min(Math.max(c, 0), 100);
+  l = Math.min(Math.max(l, 0), 100);
+
+  const hRad = h * Math.PI / 180;
+  const u = Math.cos(hRad) * c;
+  const v = Math.sin(hRad) * c;
+
+  let r = l + 0.09551990792716 * u + 0.05406649830715 * v;
+  let g = l - 0.03947567534454 * u - 0.01829165033556 * v;
+  let b = l - 0.19638676772419 * u - 0.45388640918783 * v;
+
+  return [r, g, b].map(x => intcolorRGBA(gammaCorrect(x / 100)));
 }
 
 // Lineweaver-Burk estimate for how many pixels will be black
