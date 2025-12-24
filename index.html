@@ -7465,18 +7465,6 @@ class GpuBaseBoard extends Board {
     this.cumulativeWastedReads = 0;
   }
 
-  /**
-   * Check if compaction is worthwhile based on bandwidth cost.
-   * Compaction cost = copying surviving pixels + buffer recreation overhead (~2x)
-   */
-  shouldCompact() {
-    if (this.deadSinceCompaction === 0) return false;
-    const BYTES_PER_PIXEL = this.constructor.BYTES_PER_PIXEL;
-    const survivingPixels = this.activeCount - this.deadSinceCompaction;
-    const compactionCost = survivingPixels * BYTES_PER_PIXEL * 2;
-    return this.wastedBandwidth > compactionCost;
-  }
-
   initResultsReadback(recordBytes, maxCount) {
     const safeMax = Math.max(1, maxCount);
     this.resultsRecordBytes = recordBytes;
@@ -7502,12 +7490,12 @@ class GpuBaseBoard extends Board {
     // Reset buffer: 8 u32s for header (count=0, lastStaged=0, others don't matter)
     this._resultsCounterReset = new Uint32Array([0, 0, 0, 0, 0, 0, 0, 0]);
 
-    if (this.buffers.results) {
+    if (this.buffers.results?.destroy) {
       this.buffers.results.destroy();
     }
     if (this.buffers.resultsStaging) {
       for (const buf of this.buffers.resultsStaging) {
-        buf.destroy();
+        if (buf?.destroy) buf.destroy();
       }
     }
 
@@ -7754,6 +7742,11 @@ class GpuBaseBoard extends Board {
     const STRIDE = 8;  // 8 u32s per record for GpuBoard
     const pixelU32 = new Uint32Array(data);
     const pixelF32 = new Float32Array(data);
+
+    // Update readback stats
+    this.lastResultsCount = count;
+    this.resultsReadbackBatches += 1;
+    this.resultsReadbackBytes += count * this.resultsRecordBytes;
 
     let dataIndex = 0;
 
@@ -8002,75 +7995,6 @@ class GpuBaseBoard extends Board {
     this.un = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed;
   }
 
-  /**
-   * Compact buffers to remove dead pixels.
-   * @param {Uint32Array} pixelU32 - Current pixel data to compact
-   */
-  async compactBuffers(pixelU32) {
-    const BYTES_PER_PIXEL = this.constructor.BYTES_PER_PIXEL;
-    const STRIDE = this.constructor.STRIDE;
-
-    // Build new compacted pixel data
-    const newPixelData = [];
-    const P_STATUS = 2;  // status is at offset 2 (after orig_index, iter)
-
-    for (let i = 0; i < this.activeCount; i++) {
-      const idx = i * STRIDE;
-      const status = pixelU32[idx + P_STATUS];
-
-      if (status === 0) {  // Still computing
-        for (let j = 0; j < STRIDE; j++) {
-          newPixelData.push(pixelU32[idx + j]);
-        }
-      }
-    }
-
-    const newActiveCount = newPixelData.length / STRIDE;
-    if (newActiveCount === 0) {
-      this.activeCount = 0;
-      return;
-    }
-
-    this.activeCount = newActiveCount;
-    this.deadSinceCompaction = 0;
-    this.wastedBandwidth = 0;
-    this.compactionCount++;
-
-    const newPixelBufferSize = newActiveCount * BYTES_PER_PIXEL;
-
-    // Shrink all buffers to save VRAM
-    this.buffers.stagingPixels[0].destroy();
-    this.buffers.stagingPixels[1].destroy();
-    this.buffers.stagingPixels = [
-      this.device.createBuffer({
-        size: newPixelBufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer 0 (compacted)'
-      }),
-      this.device.createBuffer({
-        size: newPixelBufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer 1 (compacted)'
-      })
-    ];
-
-    this.buffers.pixels.destroy();
-    this.buffers.pixels = this.device.createBuffer({
-      size: newPixelBufferSize,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Pixel state buffer (compacted)'
-    });
-
-    // Recreate bind group with new buffer
-    this.createBindGroup();
-
-    // Upload compacted data
-    const compactedPixelData = new Uint32Array(newPixelData);
-    this.device.queue.writeBuffer(this.buffers.pixels, 0, compactedPixelData);
-
-    this.lastBatchCompacted = true;
-  }
-
   // Abstract methods - subclasses must implement these
   async createComputePipeline() {
     throw new Error('createComputePipeline() must be implemented by subclass');
@@ -8090,11 +8014,12 @@ class GpuBaseBoard extends Board {
 
   /**
    * Read the pixels buffer from GPU and return as ArrayBuffer.
-   * Subclasses must have created buffers.pixels and buffers.stagingPixels.
+   * Creates a temporary staging buffer on-demand to avoid persistent memory use.
    * Uses a lock to prevent concurrent mapAsync calls.
    * @returns {Promise<ArrayBuffer>} The pixel buffer data
    */
   async readPixelBuffer() {
+    // Read GPU pixel buffer for serialization - creates temporary staging buffer on-demand
     if (!this.isGPUReady || !this.buffers.pixels) {
       return null;
     }
@@ -8110,28 +8035,28 @@ class GpuBaseBoard extends Board {
       const dimsArea = this.config.dimsWidth * this.config.dimsHeight;
       const bufferSize = dimsArea * bytesPerPixel;
 
-      // Create staging buffer if not present
-      if (!this.buffers.stagingPixels) {
-        this.buffers.stagingPixels = this.device.createBuffer({
-          size: bufferSize,
-          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-          label: 'Staging pixels buffer (serialization)'
-        });
-      }
+      // Create temporary staging buffer (only needed during serialization)
+      const stagingBuffer = this.device.createBuffer({
+        size: bufferSize,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        label: 'Temp staging for serialization'
+      });
 
       // Copy pixels buffer to staging
       const commandEncoder = this.device.createCommandEncoder();
-      commandEncoder.copyBufferToBuffer(
-        this.buffers.pixels, 0, this.buffers.stagingPixels, 0, bufferSize);
+      commandEncoder.copyBufferToBuffer(this.buffers.pixels, 0, stagingBuffer, 0, bufferSize);
       this.device.queue.submit([commandEncoder.finish()]);
       await this.device.queue.onSubmittedWorkDone();
 
       // Read back the data
-      await this.buffers.stagingPixels.mapAsync(GPUMapMode.READ);
+      await stagingBuffer.mapAsync(GPUMapMode.READ);
       const pixelData = new ArrayBuffer(bufferSize);
-      const srcData = this.buffers.stagingPixels.getMappedRange();
+      const srcData = stagingBuffer.getMappedRange();
       new Uint8Array(pixelData).set(new Uint8Array(srcData));
-      this.buffers.stagingPixels.unmap();
+      stagingBuffer.unmap();
+
+      // Destroy temporary buffer immediately
+      stagingBuffer.destroy();
 
       return pixelData;
     };
@@ -8443,19 +8368,8 @@ class GpuBoard extends GpuBaseBoard {
       label: 'Pixel state buffer'
     });
 
-    // Double-buffered staging (compacted - matches pixel buffer size)
-    this.buffers.stagingPixels = [
-      this.device.createBuffer({
-        size: pixelBufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer 0'
-      }),
-      this.device.createBuffer({
-        size: pixelBufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer 1'
-      })
-    ];
+    // Note: stagingPixels buffers are created on-demand in readPixelBuffer() for serialization
+    // This saves ~2x pixel buffer size in GPU memory during normal operation
 
     // Initialize only non-precomputed pixels (8 fields per pixel)
     const pixelData = new ArrayBuffer(pixelBufferSize);
@@ -8502,68 +8416,6 @@ class GpuBoard extends GpuBaseBoard {
   }
 
   // processResultsData inherited from GpuBaseBoard - uses batch tracking
-
-  async compactBuffers(pixelU32) {
-    // pixelU32 is already-read data from compute(), avoid double-read
-    const BYTES_PER_PIXEL = 32;  // 8 fields × 4 bytes
-
-    // Build new compacted pixel data
-    // Each pixel carries its orig_index, so no separate mapping needed
-    const newPixelData = [];
-
-    for (let i = 0; i < this.activeCount; i++) {
-      const idx8 = i * 8;
-      const status = pixelU32[idx8 + 2];  // status is at offset 2
-
-      if (status === 0) {  // Still computing
-        // Copy all 8 u32 values for this pixel (including orig_index)
-        for (let j = 0; j < 8; j++) {
-          newPixelData.push(pixelU32[idx8 + j]);
-        }
-      }
-    }
-
-    const newActiveCount = newPixelData.length / 8;
-    if (newActiveCount === 0) {
-      this.activeCount = 0;
-      return;
-    }
-
-    this.activeCount = newActiveCount;
-    this.deadSinceCompaction = 0;
-
-    const newPixelBufferSize = newActiveCount * BYTES_PER_PIXEL;
-
-    // Shrink all buffers to save VRAM
-    this.buffers.stagingPixels[0].destroy();
-    this.buffers.stagingPixels[1].destroy();
-    this.buffers.stagingPixels = [
-      this.device.createBuffer({
-        size: newPixelBufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer 0 (compacted)'
-      }),
-      this.device.createBuffer({
-        size: newPixelBufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer 1 (compacted)'
-      })
-    ];
-
-    this.buffers.pixels.destroy();
-    this.buffers.pixels = this.device.createBuffer({
-      size: newPixelBufferSize,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Pixel state buffer (compacted)'
-    });
-
-    // Recreate bind group with new buffer
-    this.createBindGroup();
-
-    // Upload compacted data
-    const compactedPixelData = new Uint32Array(newPixelData);
-    this.device.queue.writeBuffer(this.buffers.pixels, 0, compactedPixelData);
-  }
 
   async compute(targetIters = null) {
     if (this.isComputing) return;
@@ -8823,15 +8675,7 @@ class GpuBoard extends GpuBaseBoard {
           board.device.queue.writeBuffer(board.buffers.pixels, 0, new Uint8Array(pixelData));
         }
 
-        // Recreate staging buffers at compacted size
-        for (let i = 0; i < 2; i++) {
-          board.buffers.stagingPixels[i]?.destroy();
-          board.buffers.stagingPixels[i] = board.device.createBuffer({
-            size: bufferSize,
-            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-            label: `Staging pixels buffer ${i} (restored)`
-          });
-        }
+        // Note: stagingPixels are created on-demand in readPixelBuffer() for serialization
 
         board.initResultsReadback(BYTES_PER_PIXEL, board.activeCount);
         // Recreate bind group with restored buffer
@@ -8886,16 +8730,6 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
     this.cumulativeWastedReads = 0;
   }
 
-  // Check if compaction is worthwhile based on bandwidth cost
-  shouldCompact() {
-    if (this.deadSinceCompaction === 0) return false;
-    const BYTES_PER_PIXEL = this.constructor.BYTES_PER_PIXEL;
-    // Compaction cost = copying surviving pixels + buffer recreation overhead (~2x)
-    const survivingPixels = this.activeCount - this.deadSinceCompaction;
-    const compactionCost = survivingPixels * BYTES_PER_PIXEL * 2;
-    return this.wastedBandwidth > compactionCost;
-  }
-
   // Return iteration count for submitted GPU batches (same as GpuBoard)
   get it() {
     return this._baseIt;
@@ -8903,74 +8737,6 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
 
   set it(value) {
     this._baseIt = value;
-  }
-
-  // Compact buffers to remove dead pixels
-  async compactBuffers(pixelU32) {
-    const BYTES_PER_PIXEL = this.constructor.BYTES_PER_PIXEL;
-    const STRIDE = this.constructor.STRIDE;
-
-    // Build new compacted pixel data
-    // Each pixel carries its orig_index, so no separate mapping needed
-    const newPixelData = [];
-    const P_STATUS = 2;  // status is at offset 2 (after orig_index, iter)
-
-    for (let i = 0; i < this.activeCount; i++) {
-      const idx = i * STRIDE;
-      const status = pixelU32[idx + P_STATUS];
-
-      if (status === 0) {  // Still computing
-        // Copy all values for this pixel (including orig_index)
-        for (let j = 0; j < STRIDE; j++) {
-          newPixelData.push(pixelU32[idx + j]);
-        }
-      }
-    }
-
-    const newActiveCount = newPixelData.length / STRIDE;
-    if (newActiveCount === 0) {
-      this.activeCount = 0;
-      return;
-    }
-
-    this.activeCount = newActiveCount;
-    this.deadSinceCompaction = 0;
-    this.wastedBandwidth = 0;  // Reset after compaction
-    this.compactionCount++;
-
-    const newPixelBufferSize = newActiveCount * BYTES_PER_PIXEL;
-
-    // Shrink all buffers to save VRAM
-    this.buffers.stagingPixels[0].destroy();
-    this.buffers.stagingPixels[1].destroy();
-    this.buffers.stagingPixels = [
-      this.device.createBuffer({
-        size: newPixelBufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer 0 (compacted)'
-      }),
-      this.device.createBuffer({
-        size: newPixelBufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer 1 (compacted)'
-      })
-    ];
-
-    this.buffers.pixels.destroy();
-    this.buffers.pixels = this.device.createBuffer({
-      size: newPixelBufferSize,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-      label: 'Pixel state buffer (compacted)'
-    });
-
-    // Recreate bind group with new buffer
-    this.createBindGroup();
-
-    // Upload compacted data
-    const compactedPixelData = new Uint32Array(newPixelData);
-    this.device.queue.writeBuffer(this.buffers.pixels, 0, compactedPixelData);
-
-    this.lastBatchCompacted = true;
   }
 
   async flushPendingResults() {
@@ -9005,7 +8771,7 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
   }
 
   async readPixelBuffer() {
-    // Handle double-buffered staging array for serialization
+    // Read GPU pixel buffer for serialization - creates temporary staging buffer on-demand
     if (!this.isGPUReady || !this.buffers.pixels) {
       return null;
     }
@@ -9013,8 +8779,12 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
     const BYTES_PER_PIXEL = this.constructor.BYTES_PER_PIXEL;
     const bufferSize = this.activeCount * BYTES_PER_PIXEL;
 
-    // Use the first staging buffer for serialization reads
-    const stagingBuffer = this.buffers.stagingPixels[0];
+    // Create temporary staging buffer (only needed during serialization)
+    const stagingBuffer = this.device.createBuffer({
+      size: bufferSize,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      label: 'Temp staging for serialization'
+    });
 
     // Copy pixels buffer to staging
     const commandEncoder = this.device.createCommandEncoder();
@@ -9022,12 +8792,15 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
     this.device.queue.submit([commandEncoder.finish()]);
     await this.device.queue.onSubmittedWorkDone();
 
-    // Read back the data - use getMappedRange with size to only get what we need
+    // Read back the data
     await stagingBuffer.mapAsync(GPUMapMode.READ, 0, bufferSize);
     const pixelData = new ArrayBuffer(bufferSize);
     const srcData = stagingBuffer.getMappedRange(0, bufferSize);
     new Uint8Array(pixelData).set(new Uint8Array(srcData));
     stagingBuffer.unmap();
+
+    // Destroy temporary buffer immediately
+    stagingBuffer.destroy();
 
     return pixelData;
   }
@@ -9186,19 +8959,8 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       label: 'Params buffer'
     });
 
-    // Double-buffered staging for overlapping CPU/GPU work
-    this.buffers.stagingPixels = [
-      this.device.createBuffer({
-        size: pixelBufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer 0'
-      }),
-      this.device.createBuffer({
-        size: pixelBufferSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        label: 'Staging pixels buffer 1'
-      })
-    ];
+    // Note: stagingPixels buffers are created on-demand in readPixelBuffer() for serialization
+    // This saves ~2x pixel buffer size in GPU memory during normal operation
 
     // Initialize pixel state buffer using overlapping typed array views
     // ArrayBuffer holds 60 bytes per pixel (15 x 4 bytes, with orig_index)
@@ -10262,19 +10024,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
           label: 'Pixel state buffer (restored)'
         });
-        board.buffers.stagingPixels?.forEach(buf => buf.destroy());
-        board.buffers.stagingPixels = [
-          board.device.createBuffer({
-            size: bufferSize,
-            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            label: 'Staging pixels buffer 0 (restored)'
-          }),
-          board.device.createBuffer({
-            size: bufferSize,
-            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            label: 'Staging pixels buffer 1 (restored)'
-          })
-        ];
+        // Note: stagingPixels are created on-demand in readPixelBuffer() for serialization
         board.initResultsReadback(GpuZhuoranBoard.BYTES_PER_PIXEL, board.activeCount);
         board.createBindGroup();
       }
@@ -10584,6 +10334,8 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     if (resultsBufferSize > maxBufferSize) {
       throw new Error(`Results buffer size exceeds WebGPU limit`);
     }
+    // Note: stagingPixels buffers are created on-demand in readPixelBuffer() for serialization
+    // This saves ~2x pixel buffer size in GPU memory during normal operation
     this.buffers = {
       params: this.device.createBuffer({
         size: 256,  // Increased to hold 32 checkpoint slots
@@ -10596,20 +10348,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       iters: this.device.createBuffer({
         size: 1024 * ITER_BYTES,  // Start small, will resize as needed
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-      }),
-      // Double-buffered staging for overlapping CPU/GPU work
-      stagingPixels: [
-        this.device.createBuffer({
-          size: pixelBufferSize,
-          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-          label: 'Staging pixels buffer 0'
-        }),
-        this.device.createBuffer({
-          size: pixelBufferSize,
-          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-          label: 'Staging pixels buffer 1'
-        })
-      ]
+      })
     };
 
     // Initialize pixels buffer with overlapping typed array views
@@ -11580,19 +11319,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
           size: bufferSize,
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
         });
-        board.buffers.stagingPixels?.forEach(buf => buf.destroy());
-        board.buffers.stagingPixels = [
-          board.device.createBuffer({
-            size: bufferSize,
-            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            label: 'Staging pixels buffer 0 (restored)'
-          }),
-          board.device.createBuffer({
-            size: bufferSize,
-            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            label: 'Staging pixels buffer 1 (restored)'
-          })
-        ];
+        // Note: stagingPixels are created on-demand in readPixelBuffer() for serialization
         board.initResultsReadback(AdaptiveGpuBoard.BYTES_PER_PIXEL, board.activeCount);
         board.createBindGroup();
       }
