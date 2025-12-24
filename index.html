@@ -1210,6 +1210,12 @@ class View {
     this.sizesQD = [typeof size === 'number' ? size : qdToNumber(size), toQD(re), toQD(im)];
     this.nn = new Array(this.config.dimsArea).fill(0);
     this.un = this.config.dimsArea;
+
+    // ImageData cache for fast incremental updates (avoids getImageData)
+    // Only created on first batch if large enough; once skipped, never created
+    this.imageDataCache = null;
+    this.imageDataCacheSkipped = false;
+    this.imageDataCacheLastUsed = 0;
     this.di = 0;
     this.ch = 0;
     this.it = 0;
@@ -1302,6 +1308,8 @@ class View {
     // Freeze stats timing when board completes (unfinished() === 0 means done)
     if (this.unfinished() === 0 && !this.boardEndTime) {
       this.boardEndTime = Date.now();
+      // Free ImageData cache memory now that computation is complete
+      this.clearImageDataCache();
     }
 
     // Propagate updates to child view
@@ -1610,11 +1618,9 @@ class View {
   }
 
   // Fast ImageData-based drawing for large changeList updates
-  // Uses RGBA color themes for direct pixel manipulation
+  // Uses cached ImageData to avoid getImageData readback
   drawchangesFast(ctx, changeList) {
     const { dimsWidth, dimsHeight } = this.config;
-    const imageData = ctx.getImageData(0, 0, dimsWidth, dimsHeight);
-    const data = imageData.data;
     const themeFn = this.config.colorThemesRGBA?.[this.config.theme];
 
     if (!themeFn) {
@@ -1624,6 +1630,15 @@ class View {
       }
       return;
     }
+
+    // Create or get cached ImageData (avoids getImageData readback)
+    if (!this.imageDataCache) {
+      this.imageDataCache = ctx.createImageData(dimsWidth, dimsHeight);
+      // Initialize with unknown color (transparent)
+      // Uint8ClampedArray is already zeroed, which is [0,0,0,0] = transparent
+    }
+    this.imageDataCacheLastUsed = performance.now();
+    const data = this.imageDataCache.data;
 
     for (const change of changeList) {
       const iter = change.iter;
@@ -1653,7 +1668,12 @@ class View {
       }
     }
 
-    ctx.putImageData(imageData, 0, 0);
+    ctx.putImageData(this.imageDataCache, 0, 0);
+  }
+
+  // Clear the image data cache to free memory
+  clearImageDataCache() {
+    this.imageDataCache = null;
   }
 
   makecolor(i, histogram = null, scale = null, unknownColor = 'transparent') {
@@ -2190,6 +2210,17 @@ class Grid {
   updateCanvas(k, data) {
     const canvas = this.canvas(k);
     if (canvas && data.changeList.length) {
+      // Log first paint timing when debug=t is enabled
+      if (!this._firstPaintLogged && this.config.debug?.includes('t')) {
+        let totalPx = 0;
+        for (const c of data.changeList) {
+          totalPx += (c.nn?.length || 0) + (c.vv?.length || 0);
+        }
+        if (totalPx > 0) {
+          this._firstPaintLogged = true;
+          console.log(`[timing] First paint: ${totalPx} px at ${performance.now().toFixed(0)}ms`);
+        }
+      }
       const ctx = canvas.getContext('2d');
       const view = this.views[k];
       let redrewComposite = false;
@@ -2209,9 +2240,19 @@ class Grid {
         }
 
         // Use fast ImageData path for large updates (>100k pixels)
-        if (totalPixels > 100000 && this.config.colorThemesRGBA) {
+        // Cache must be used from first batch or not at all (late creation would lose earlier pixels)
+        const canUseCache = totalPixels > 100000 && this.config.colorThemesRGBA && !view.imageDataCacheSkipped;
+        if (canUseCache) {
           view.drawchangesFast(ctx, data.changeList);
         } else {
+          // Mark cache as skipped if it was never created
+          if (!view.imageDataCache) {
+            view.imageDataCacheSkipped = true;
+          }
+          // Clear cache only after 100ms of non-use (batch sizes may fluctuate)
+          if (view.imageDataCache && performance.now() - view.imageDataCacheLastUsed > 100) {
+            view.clearImageDataCache();
+          }
           for (let change of data.changeList) {
             view.drawchange(ctx, change);
           }
@@ -8598,9 +8639,15 @@ class GpuBoard extends GpuBaseBoard {
         const targetWork = 333337;
         iterationsPerBatch = Math.max(17, Math.floor(targetWork / Math.max(this.un, 1)));
       }
-      // Cap first batch for faster first paint
-      if (this._baseIt === 1) {
-        iterationsPerBatch = Math.min(iterationsPerBatch, 11);
+      // Accelerating batch sizes for fast first paint at shallow zoom:
+      // - Batch 1: 1 iter, Batch 2: 2 iters, Batch 3: 4 iters, Batch 4: 8 iters
+      // - Only applies at zoom < 30 (size > 0.1) where early escapes are visible
+      const baseIt = this._baseIt;
+      if (this.size > 0.1) {
+        if (baseIt === 1) iterationsPerBatch = 1;
+        else if (baseIt <= 3) iterationsPerBatch = Math.min(iterationsPerBatch, 3 - baseIt + 1);
+        else if (baseIt <= 7) iterationsPerBatch = Math.min(iterationsPerBatch, 7 - baseIt + 1);
+        else if (baseIt <= 15) iterationsPerBatch = Math.min(iterationsPerBatch, 15 - baseIt + 1);
       }
       const numWorkgroups = Math.ceil(this.activeCount / workgroupSize);
       const workgroupsX = Math.ceil(Math.sqrt(numWorkgroups));
@@ -8675,6 +8722,14 @@ class GpuBoard extends GpuBaseBoard {
       // Batch tracking: half-open interval [start, end) for proper invariant checking
       this.pendingBatchStartIter = batchStartIter;
       this.pendingBatchEndIter = batchEndIter;
+
+      // Fast first paint: flush accelerating batches immediately at shallow zoom.
+      // Batches 1-4 (iters 1,2,4,8) end at batchEndIter 2,4,8,16.
+      if (batchEndIter <= 16 && this.size > 0.1) {
+        await this.processPendingReadback();
+        this.hasPendingResults = false;
+        this.pendingReadbackIndex = null;
+      }
 
     } catch (error) {
       console.error(`GpuBoard.compute() ERROR:`, error);
