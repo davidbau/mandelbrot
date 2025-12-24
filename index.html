@@ -7752,6 +7752,7 @@ class GpuBaseBoard extends Board {
     // Group results by batch based on buffer position
     // Each batch owns positions [prevBatchEnd, batchEndIndex)
     const changesByBatch = new Map();  // batchIndex -> Map(iter -> {nn, vv})
+    let newlyDead = 0;  // Count of pixels that actually finished in this chunk
 
     for (let i = 0; i < count; i++) {
       const bufferPosition = chunkStartIndex + i;
@@ -7765,6 +7766,8 @@ class GpuBaseBoard extends Board {
 
       if (status === 0) continue;  // Still computing
       if (this.nn[origIndex] !== 0) continue;  // Already processed
+
+      newlyDead++;  // This pixel just finished
 
       // Update board state first (always, regardless of batch attribution)
       if (status === 1) {  // Diverged
@@ -7841,8 +7844,8 @@ class GpuBaseBoard extends Board {
       }
     }
 
-    // Update un count
-    this.deadSinceCompaction += count;
+    // Update un count based on actual newly-dead pixels (not chunk count)
+    this.deadSinceCompaction += newlyDead;
     const pendingPrecomputed = this.precomputed ? this.precomputed.getPendingCount() : 0;
     this.un = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed;
   }
