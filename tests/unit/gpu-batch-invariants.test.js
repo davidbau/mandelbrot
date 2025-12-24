@@ -129,11 +129,6 @@ describe('GPU Batch Processing Invariants', () => {
     // different pixels reach different iterations at different times.
     // The key invariant is: for a GIVEN PIXEL, we shouldn't see iteration N
     // after we've already seen iteration N+1 for that same pixel.
-    // This test just logs for now.
-    console.log('Iteration order:', result.iterations.join(', '));
-    if (result.outOfOrder.length > 0) {
-      console.log('Out of order:', result.outOfOrder);
-    }
   }, 60000);
 
   test('view.un and actual unknown pixel count should match', async () => {
