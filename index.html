@@ -4757,6 +4757,7 @@ class Scheduler {
     }
 
     try {
+      const t0 = performance.now();
       const workerNum = this.workers.length;
       let worker;
 
@@ -4767,10 +4768,14 @@ class Scheduler {
       } else {
         // Create real web worker
         const workerCode = this.assembleWorkerCode();
+        const t1 = performance.now();
         const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
         const workerUrl = URL.createObjectURL(workerBlob);
+        const t2 = performance.now();
         worker = new Worker(workerUrl, { name: `Worker ${workerNum}` });
+        const t3 = performance.now();
         URL.revokeObjectURL(workerUrl);
+        console.log(`[worker-init] assemble=${(t1-t0).toFixed(0)}ms blob=${(t2-t1).toFixed(0)}ms new Worker=${(t3-t2).toFixed(0)}ms total=${(t3-t0).toFixed(0)}ms`);
       }
 
       worker.onmessage = this.handleWorkerMessage.bind(this);
@@ -7532,18 +7537,20 @@ class GpuBaseBoard extends Board {
 
   async initGPU() {
     try {
+      const t0 = performance.now();
       // Check WebGPU availability
       if (!navigator.gpu) {
         console.warn('WebGPU not supported');
         return false;
       }
 
-      // Request adapter and device
+      // Request adapter (note: adapters are consumed after creating a device, so can't cache)
       const adapter = await navigator.gpu.requestAdapter();
       if (!adapter) {
         console.warn('No WebGPU adapter found');
         return false;
       }
+      const t1 = performance.now();
 
       // Request device with higher buffer limits if supported
       const requiredLimits = {};
@@ -7562,11 +7569,17 @@ class GpuBaseBoard extends Board {
         console.warn('Failed to get WebGPU device');
         return false;
       }
+      const t2 = performance.now();
 
       // Subclass-specific initialization
       await this.createComputePipeline();
+      const t3 = performance.now();
       await this.createBuffers();
+      const t4 = performance.now();
       this.createBindGroup();
+      const t5 = performance.now();
+
+      console.log(`[gpu-init] adapter=${(t1-t0).toFixed(0)}ms device=${(t2-t1).toFixed(0)}ms pipeline=${(t3-t2).toFixed(0)}ms buffers=${(t4-t3).toFixed(0)}ms bindgroup=${(t5-t4).toFixed(0)}ms total=${(t5-t0).toFixed(0)}ms`);
 
       this.isGPUReady = true;
       return true;
@@ -7638,24 +7651,13 @@ class GpuBaseBoard extends Board {
       return GpuBaseBoard.cachedMaxBufferSize;
     }
     try {
+      // Query adapter limits directly - no need to create a device
       const adapter = await navigator.gpu.requestAdapter();
       if (!adapter) return GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER;
 
-      // Request device with higher limits if supported
-      const requiredLimits = {};
-      if (adapter.limits.maxStorageBufferBindingSize > 134217728) {
-        requiredLimits.maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
-      }
-      if (adapter.limits.maxBufferSize > 134217728) {
-        requiredLimits.maxBufferSize = adapter.limits.maxBufferSize;
-      }
-
-      const device = await adapter.requestDevice({
-        requiredLimits: Object.keys(requiredLimits).length > 0 ? requiredLimits : undefined
-      });
       const limit = Math.min(
-        device.limits.maxBufferSize,
-        device.limits.maxStorageBufferBindingSize);
+        adapter.limits.maxBufferSize,
+        adapter.limits.maxStorageBufferBindingSize);
       GpuBaseBoard.cachedMaxBufferSize = Math.floor(limit * 0.9);  // 90% for safety
       return GpuBaseBoard.cachedMaxBufferSize;
     } catch (e) {
@@ -8552,27 +8554,25 @@ class GpuBoard extends GpuBaseBoard {
     // This saves ~2x pixel buffer size in GPU memory during normal operation
 
     // Initialize only non-precomputed pixels (8 fields per pixel)
+    // ArrayBuffer is zero-initialized by default, so we only need to set orig_index
     const pixelData = new ArrayBuffer(pixelBufferSize);
     const pixelU32 = new Uint32Array(pixelData);
-    const pixelF32 = new Float32Array(pixelData);
 
     let activeIdx = 0;
-    for (let i = 0; i < dimsArea; i++) {
-      // Skip precomputed pixels
-      if (this.precomputed && this.precomputed.isPrecomputed(i)) {
-        continue;
+    if (this.precomputed) {
+      // With precomputed pixels, need to skip them
+      for (let i = 0; i < dimsArea; i++) {
+        if (!this.precomputed.isPrecomputed(i)) {
+          pixelU32[activeIdx * 8] = i;  // orig_index only, rest is already 0
+          activeIdx++;
+        }
       }
-
-      const idx8 = activeIdx * 8;
-      pixelU32[idx8 + 0] = i;  // orig_index (each pixel knows its original position)
-      pixelU32[idx8 + 1] = 0;  // iter = 0 means "not initialized yet"
-      pixelU32[idx8 + 2] = 0;  // status
-      pixelU32[idx8 + 3] = 0;  // period
-      pixelF32[idx8 + 4] = 0;  // zr
-      pixelF32[idx8 + 5] = 0;  // zi
-      pixelF32[idx8 + 6] = 0;  // base_r
-      pixelF32[idx8 + 7] = 0;  // base_i
-      activeIdx++;
+    } else {
+      // No precomputed pixels - fast path: orig_index = sequential index
+      for (let i = 0; i < dimsArea; i++) {
+        pixelU32[i * 8] = i;
+      }
+      activeIdx = dimsArea;
     }
     this.device.queue.writeBuffer(this.buffers.pixels, 0, pixelData);
 
@@ -11615,6 +11615,23 @@ class FractalWorker {
     this.randomBatchMax = 16;
     // Target time per batch in milliseconds (configurable)
     this.batchTimeMs = 100;
+
+    // Fast scheduling using MessageChannel (faster than setTimeout(0))
+    // The message queue has higher priority than the timer queue
+    this._scheduleChannel = new MessageChannel();
+    this._schedulePending = false;
+    this._scheduleChannel.port1.onmessage = () => {
+      this._schedulePending = false;
+      this.iterateBoards();
+    };
+  }
+
+  // Schedule next iteration using MessageChannel (faster than setTimeout(0))
+  _scheduleNextIteration() {
+    if (!this._schedulePending) {
+      this._schedulePending = true;
+      this._scheduleChannel.port2.postMessage(null);
+    }
   }
 
   // Record a batch timing sample for benchmarking
@@ -11925,7 +11942,7 @@ class FractalWorker {
       }
       return;
     }
-    this.timer = setTimeout(() => this.iterateBoards(), 0);
+    this._scheduleNextIteration();
   }
 
   // Abstract method to be overridden by subclasses
@@ -14871,9 +14888,13 @@ let LANG_FROM_URL = false;
 </script>
 <!-- END_MP4MUXER_LIBRARY -->
 <script id="startApp">
-// Start the application
+// Start the application with timing markers
+const _t0 = performance.now();
+console.log(`[startup] script execution start: ${_t0.toFixed(0)}ms`);
 window.explorer = new MandelbrotExplorer();
+console.log(`[startup] MandelbrotExplorer constructed: ${(performance.now() - _t0).toFixed(0)}ms`);
 window.explorer.start();
+console.log(`[startup] explorer.start() complete: ${(performance.now() - _t0).toFixed(0)}ms`);
 </script>
 </div> <!-- closes id=text -->
 </body>
