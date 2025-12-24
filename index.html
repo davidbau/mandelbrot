@@ -7859,22 +7859,9 @@ class GpuBaseBoard extends Board {
         if (change.iter >= batch.endIter) {
           console.error(`INVARIANT VIOLATION at flush: iter=${change.iter} >= batchEnd=${batch.endIter}`);
         }
-      }
-
-      // Queue to changeList using changeMap to group by iteration
-      if (!this.changeMap) this.changeMap = new Map();
-
-      for (const change of this.batchResultsRead) {
-        const existing = this.changeMap.get(change.iter);
-        if (existing) {
-          existing.nn.push(...change.nn);
-          existing.vv.push(...change.vv);
-        } else {
-          const entry = { iter: change.iter, nn: [...change.nn], vv: [...change.vv] };
-          this.changeList.push(entry);
-          this.changeMap.set(change.iter, entry);
-        }
-        this.updateSize += change.nn.length + change.vv.length;
+        
+        // Queue to changeList
+        this.queueChanges(change);
       }
 
       // Clear for next batch
@@ -7950,29 +7937,6 @@ class GpuBaseBoard extends Board {
   }
 
   /**
-   * Override queueChanges to add directly to changeList.
-   * GPU results go through processResultsData for proper batch tracking.
-   * This method is used for precomputed/cached points which are already ordered.
-   */
-  queueChanges(changes) {
-    if (changes === null) return;
-
-    const pixelCount = changes.nn.length + changes.vv.length;
-    this.updateSize += pixelCount;
-
-    // Add directly to changeList (same as base Board class)
-    if (!this.changeMap) this.changeMap = new Map();
-    const existing = this.changeMap.get(changes.iter);
-    if (existing) {
-      existing.nn.push(...changes.nn);
-      existing.vv.push(...changes.vv);
-    } else {
-      this.changeList.push(changes);
-      this.changeMap.set(changes.iter, changes);
-    }
-  }
-
-  /**
    * Flush complete batches that have no remaining GPU results expected.
    * Called when no GPU data in chunk but batches may be complete.
    */
@@ -7987,19 +7951,10 @@ class GpuBaseBoard extends Board {
         this.flushPrecomputedIntoResults(batch.endIter - 1);
       }
 
-      // Sort and queue to changeList
-      this.batchResultsRead.sort((a, b) => a.iter - b.iter);
-      if (!this.changeMap) this.changeMap = new Map();
+      // Queue results to changeList
+      // FractalWorker sorts changeList by iteration before sending, so we don't need to sort here
       for (const change of this.batchResultsRead) {
-        const existing = this.changeMap.get(change.iter);
-        if (existing) {
-          existing.nn.push(...change.nn);
-          existing.vv.push(...change.vv);
-        } else {
-          this.changeList.push(change);
-          this.changeMap.set(change.iter, change);
-        }
-        this.updateSize += change.nn.length + change.vv.length;
+        this.queueChanges(change);
       }
 
       this.batchResultsRead.length = 0;
@@ -9152,19 +9107,9 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         this.flushPrecomputedIntoResults(batch.endIter - 1);
       }
 
-      // Queue to changeList using changeMap to group by iteration
-      if (!this.changeMap) this.changeMap = new Map();
-
+      // Queue results to changeList using queueChanges
       for (const change of this.batchResultsRead) {
-        const existing = this.changeMap.get(change.iter);
-        if (existing) {
-          existing.nn.push(...change.nn);
-          existing.vv.push(...change.vv);
-        } else {
-          this.changeList.push(change);
-          this.changeMap.set(change.iter, change);
-        }
-        this.updateSize += change.nn.length + change.vv.length;
+        this.queueChanges(change);
       }
 
       // Clear for next batch
@@ -10521,19 +10466,9 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         this.flushPrecomputedIntoResults(batch.endIter - 1);
       }
 
-      // Queue to changeList using changeMap to group by iteration
-      if (!this.changeMap) this.changeMap = new Map();
-
+      // Queue results to changeList using queueChanges
       for (const change of this.batchResultsRead) {
-        const existing = this.changeMap.get(change.iter);
-        if (existing) {
-          existing.nn.push(...change.nn);
-          existing.vv.push(...change.vv);
-        } else {
-          this.changeList.push(change);
-          this.changeMap.set(change.iter, change);
-        }
-        this.updateSize += change.nn.length + change.vv.length;
+        this.queueChanges(change);
       }
 
       // Clear for next batch
