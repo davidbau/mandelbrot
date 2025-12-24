@@ -69,14 +69,16 @@ The results buffer has three regions:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Header (16 bytes)                                           │
+│ Header (32 bytes)                                           │
 │   Offset 0:  firstEmpty (atomic<u32>) - next write slot     │
 │   Offset 4:  lastStaged (atomic<u32>) - last staged index   │
-│   Offset 8:  reserved (u32)                                 │
-│   Offset 12: reserved (u32)                                 │
+│   Offset 8:  active_count (u32)                             │
+│   Offset 12: start_iter (u32)                               │
+│   Offset 16: iterations_per_batch (u32)                     │
+│   Offset 20-31: reserved                                    │
 ├─────────────────────────────────────────────────────────────┤
 │ Main Results Area                                           │
-│   Offset 16: results[0..maxResults]                         │
+│   Offset 32: results[0..maxResults]                         │
 │   Written by main shader via atomicAdd slot allocation      │
 ├─────────────────────────────────────────────────────────────┤
 │ Pre-Staging Area (fixed size = chunkSize records + header)  │
@@ -90,19 +92,15 @@ The results buffer has three regions:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Where `P = 16 + (maxResults * recordBytes)`.
+Where `P = 32 + (maxResults * recordBytes)`.
 
 ### Staging Shader Design
 
-**Thread count**: `chunkSize + 1` threads in a single workgroup (or multiple workgroups if chunkSize > 256).
-
-**Thread responsibilities**:
-- Thread 0: Write staging header
-- Threads 1..chunkSize: Each copies one record (if within valid range)
+**Thread count**: Multiple workgroups with 256 threads each.
 
 **Algorithm**:
 ```wgsl
-@compute @workgroup_size(CHUNK_SIZE + 1)
+@compute @workgroup_size(256)
 fn staging_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let tid = gid.x;
 
@@ -123,13 +121,12 @@ fn staging_main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
         // Update lastStaged for next batch
         atomicStore(&header.lastStaged, chunkStart + countInChunk);
-    } else {
-        // Threads 1..chunkSize: copy records
-        let recordIndex = tid - 1u;
-        if (recordIndex < countInChunk) {
-            let srcIndex = chunkStart + recordIndex;
-            preStagingRecords[recordIndex] = mainResults[srcIndex];
-        }
+    }
+
+    // All threads: copy records (each handles one record)
+    if (tid < countInChunk) {
+        let srcIndex = chunkStart + tid;
+        preStagingRecords[tid] = mainResults[srcIndex];
     }
 }
 ```
@@ -143,57 +140,6 @@ Size: Header (16 bytes) + chunkSize records.
 - While GPU copies to staging buffer A, CPU reads from staging buffer B
 - After each batch: flip `readbackBufferIndex = 1 - readbackBufferIndex`
 
-```
-Timeline:
-  Batch 1: main shader → staging shader → copy pre-staging to staging[0] → submit
-  Batch 2: main shader → staging shader → copy pre-staging to staging[1] → submit
-           ↳ CPU reads staging[0] header (gets batch 1 metadata)
-           ↳ CPU reads staging[0] records (processes batch 1 chunk)
-  Batch 3: main shader → staging shader → copy pre-staging to staging[0] → submit
-           ↳ CPU reads staging[1] header (gets batch 2 metadata)
-           ↳ CPU reads staging[1] records (processes batch 2 chunk)
-  ...
-```
-
-**Staging buffer layout:**
-```
-Offset 0:  firstEmpty (u32)       - Total results at batch end
-Offset 4:  countInChunk (u32)     - Number of records in this chunk
-Offset 8:  chunkStartIndex (u32)  - Where this chunk starts in results buffer
-Offset 12: reserved (u32)
-Offset 16: records[0..chunkSize-1] - Copied result records
-```
-
-### Command Buffer Structure
-
-Each batch submits a command buffer with:
-```javascript
-const commandEncoder = device.createCommandEncoder();
-
-// 1. Main compute pass
-const mainPass = commandEncoder.beginComputePass();
-mainPass.setPipeline(mainPipeline);
-mainPass.setBindGroup(0, mainBindGroup);
-mainPass.dispatchWorkgroups(workgroupsX, workgroupsY);
-mainPass.end();
-
-// 2. Staging compute pass
-const stagingPass = commandEncoder.beginComputePass();
-stagingPass.setPipeline(stagingPipeline);
-stagingPass.setBindGroup(0, stagingBindGroup);
-stagingPass.dispatchWorkgroups(Math.ceil((chunkSize + 1) / 256));
-stagingPass.end();
-
-// 3. Copy pre-staging to staging buffer (fixed, predetermined)
-commandEncoder.copyBufferToBuffer(
-    resultsBuffer, preStagingOffset,
-    stagingBuffers[readbackIndex], 0,
-    stagingBufferSize
-);
-
-device.queue.submit([commandEncoder.finish()]);
-```
-
 ---
 
 ## Worker-Side Batch Tracking
@@ -204,122 +150,168 @@ device.queue.submit([commandEncoder.finish()]);
 // Queue of batches awaiting complete readback
 batchesToReadback: [
   {
-    completedIterNumber: number,      // Iteration count when this batch completed
-    remainingPixelCount: number,      // Pixels still to receive (decrements toward 0)
-    accumulatedChanges: [],           // PixelState records accumulated so far
+    startIter: number,          // First iteration of this batch
+    endIter: number,            // Last iteration + 1 (half-open interval)
+    remainingPixelCount: number // Pixels still to receive
   },
   ...
 ]
 
+// Accumulated results for current head batch
+batchResultsRead: []
+
 // Tracking state
-previousCompletedIterNumber: number,  // Last completed batch's iteration (for invariants)
+previousBatchEndIter: number,   // Previous batch's end iteration
+previousFirstEmpty: number,     // For computing batch pixel count
 ```
 
-The **head** of the queue is the batch currently being accumulated.
+### Processing Flow (processResultsData)
 
-### Processing Flow
+The core algorithm processes results in a clean nested loop:
 
-When `processPendingReadback()` is called:
-
-1. **Read staging header**: Get batch metadata from staging buffer
-   ```javascript
-   const firstEmpty = headerView[0];      // Total results at batch end
-   const countInChunk = headerView[1];    // Records in this chunk
-   const chunkStartIndex = headerView[2]; // Where this chunk starts
-   ```
-
-2. **Compute batch size and enqueue** (if this is a new batch):
-   ```javascript
-   const batchPixelCount = firstEmpty - previousFirstEmpty;
-   batchesToReadback.push({
-     completedIterNumber: pendingBatchCompletedIterNumber,
-     remainingPixelCount: batchPixelCount,
-     accumulatedChanges: []
-   });
-   previousFirstEmpty = firstEmpty;
-   ```
-
-3. **Process chunk records**:
-   - Convert each record to changelist item
-   - Add to appropriate batch's `accumulatedChanges` via `queueChanges()`
-   - Decrement batch's `remainingPixelCount`
-
-4. **Flush complete batches**:
-   ```javascript
-   while (batchesToReadback.length > 0 &&
-          batchesToReadback[0].remainingPixelCount <= 0) {
-     const batch = batchesToReadback.shift();
-
-     // Sort by iteration
-     batch.accumulatedChanges.sort((a, b) => a.iter - b.iter);
-
-     // Verify invariants
-     assert(all changes have iter <= batch.completedIterNumber);
-     assert(all changes have iter > previousCompletedIterNumber);
-
-     // Move to changeList for sending to view
-     for (const change of batch.accumulatedChanges) {
-       changeList.push(change);
-     }
-
-     previousCompletedIterNumber = batch.completedIterNumber;
-   }
-   ```
-
-### Timing in compute()
-
+**Step 1: Outer Loop - Process Batches in Order**
 ```javascript
-async compute(iterationsPerBatch) {
-  // Dispatch GPU work (main shader + staging shader + copy)
-  this.device.queue.submit([commandEncoder.finish()]);
-  this._baseIt += iterationsPerBatch;
+while (batchesToReadback.length > 0) {
+  const batch = batchesToReadback[0];
 
-  // Process PREVIOUS batch (uses pendingBatch* values set last frame)
-  if (this.pendingReadbackIndex !== null) {
-    await this.processPendingReadback();
+  // Step 2: Flush precomputed points before this batch
+  if (precomputed) {
+    flushPrecomputedUpTo(previousBatchEndIter - 1);
   }
 
-  // Save state for THIS batch (to be processed next frame)
-  this.pendingBatchCompletedIterNumber = this._baseIt;
+  // Step 3: Inner loop - collect results for this batch
+  while (batch.remainingPixelCount > 0 && dataIndex < count) {
+    // Parse result, update board state
+    batchResultsRead.push(change);
+    batch.remainingPixelCount--;
+    dataIndex++;
+  }
+
+  // Step 4: Check if batch complete
+  if (batch.remainingPixelCount > 0) {
+    break;  // Wait for more data
+  }
+
+  // Step 5: Flush and queue complete batch
+  flushPrecomputedUpTo(batch.endIter - 1);
+  mergeSortAndQueue(batchResultsRead, changeList);
+  batchResultsRead = [];
+  previousBatchEndIter = batch.endIter;
+  batchesToReadback.shift();
 }
 ```
+
+---
+
+## Pixel Count Tracking
+
+### `un` (Unknown/Unreported)
+
+Pixels that haven't been sent to the view yet:
+
+```javascript
+un = (activeCount - deadSinceCompaction) + pendingPrecomputed + pendingInBatchResults
+```
+
+Where:
+- `activeCount` = total pixels sent to GPU
+- `deadSinceCompaction` = pixels finished and processed via readback
+- `pendingPrecomputed` = precomputed pixels waiting to be flushed
+- `pendingInBatchResults` = results in `batchResultsRead` not yet in changeList
+
+**Note**: The `pendingInBatchResults` term is crucial. Without it, `un` drops prematurely when results are read back but not yet flushed to changeList, causing the view to show incorrect progress.
+
+### Update Timing
+
+`un` is updated in `processResultsData`:
+```javascript
+const pendingPrecomputed = this.precomputed ? this.precomputed.getPendingCount() : 0;
+const pendingInBatchResults = this.batchResultsRead.length;
+this.un = (this.activeCount - this.deadSinceCompaction) + pendingPrecomputed + pendingInBatchResults;
+```
+
+---
+
+## Memory Optimization: On-Demand stagingPixels
+
+The `stagingPixels` buffer (used for serialization/deserialization) is created on-demand rather than pre-allocated:
+
+```javascript
+async readPixelBuffer() {
+  // Create temporary staging buffer only when needed
+  const stagingBuffer = this.device.createBuffer({
+    size: bufferSize,
+    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    label: 'Temp staging for serialization'
+  });
+
+  // Copy, map, read...
+
+  // Destroy immediately after use
+  stagingBuffer.destroy();
+  return pixelData;
+}
+```
+
+This saves ~2x pixel buffer size in GPU memory during normal operation, since serialization is rare.
+
+---
+
+## Period Encoding
+
+When a pixel converges, the GPU shader stores the iteration at which convergence was first detected. This is used with `fibonacciPeriod()` to compute the actual period.
+
+### Convention
+- GPU shader stores `period = iter` (iteration when convergence detected)
+- CPU uses this value directly for `this.pp[origIndex]`
+- `fibonacciPeriod(pp)` computes actual period based on Fibonacci checkpoint structure
+
+### Board-Specific Notes
+- **GpuBoard**: Uses `period` directly (was incorrectly using `period + 1`, fixed)
+- **GpuZhuoranBoard/AdaptiveGpuBoard**: Use `period - 1` because their convergence check tests the *previous* iteration's state
+
+All boards should produce identical `rawP` values for the same pixel, validated by the `converged-z-position` test.
 
 ---
 
 ## Invariants
 
 1. **Batch ordering**: Results in buffer at indices `[batchStart, batchEnd)` all belong to one batch
-2. **Iteration bounds**: All results from batch B have `iter <= B.completedIterNumber` and `iter > B-1.completedIterNumber`
+2. **Iteration bounds**: All results from batch B have `iter >= B.startIter` and `iter < B.endIter`
 3. **Monotonic sends**: View receives changes sorted by iteration, never out of order
 4. **Complete batches only**: Worker never sends partial batch to view
 5. **Staging coherence**: Staging shader sees all writes from main shader (same command buffer)
+6. **No late results**: Once a batch is flushed, no results from that batch's iteration range should appear later
+7. **No duplicate pixels**: Each pixel index appears exactly once in results (validated by test)
 
 ---
 
-## Implementation Checklist
+## Implementation Status
 
 ### GPU/Shader
 - [x] Main shader: write results via atomicAdd on `firstEmpty`
-- [ ] Add `lastStaged` atomic counter to header
-- [ ] Create staging shader (chunkSize + 1 threads)
-- [ ] Staging shader: read counters, copy chunk, write staging header
-- [ ] Add pre-staging area to results buffer
-- [ ] Queue staging pass after main pass
-- [ ] Fixed copyBufferToBuffer from pre-staging to staging
+- [x] Add `lastStaged` atomic counter to header
+- [x] Create staging shader
+- [x] Staging shader: read counters, copy chunk, write staging header
+- [x] Add pre-staging area to results buffer
+- [x] Queue staging pass after main pass
+- [x] Fixed copyBufferToBuffer from pre-staging to staging
 
 ### Worker Changes
 - [x] Add `batchesToReadback` queue
-- [ ] Parse new staging header fields (firstEmpty, countInChunk, chunkStartIndex)
+- [x] Parse staging header fields (firstEmpty, countInChunk, chunkStartIndex)
 - [x] Enqueue batch with computed size
-- [x] Accumulate changes per batch via `queueChanges()`
+- [x] Accumulate changes per batch via `batchResultsRead`
 - [x] Flush complete batches (remainingPixelCount <= 0)
 - [x] Sort before sending
 - [x] Verify iteration bounds (debug mode)
-- [ ] Remove drainResultsBacklog (no longer needed with explicit staging)
+- [x] Correct `un` calculation including `pendingInBatchResults`
+- [x] On-demand stagingPixels (memory optimization)
+- [x] Remove dead compactBuffers code
 
 ### Testing
-- [ ] Verify staging shader copies correct range
-- [ ] Verify no out-of-order iterations received by view
-- [ ] Verify no visual stripes
-- [ ] Test with varying batch sizes and pixel counts
-- [ ] Test rapid batch completion (multiple batches in one readback)
+- [x] Verify no duplicate pixel indices (gpu-batch-invariants test)
+- [x] Verify iterations in monotonic order (gpu-batch-invariants test)
+- [x] Verify view.un matches actual unknown count
+- [x] Verify period encoding matches CpuBoard (converged-z-position test)
+- [x] Test GpuBoard, GpuZhuoranBoard, AdaptiveGpuBoard all pass
