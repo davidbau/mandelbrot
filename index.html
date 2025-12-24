@@ -5969,17 +5969,30 @@ class QDCpuBoard extends Board {
     // Use toQDMul instead of toQDScale to capture error terms at deep zoom
     const aspectRecipQD = toQD(1 / this.config.aspectRatio);
     const sizeOverAspect = toQDMul(this.size, aspectRecipQD);
+    
+    // Temps for loop to avoid allocation
+    const tempQD = new Array(4);
+    const jQD = new Array(4);
+    const rQD = new Array(4);
+
     // Initialize board: cc = c values (8 floats per pixel), zz = current z (8 floats per pixel)
     // bb = checkpoint z, ss = active pixel indices
     // Format: [r0, r1, r2, r3, i0, i1, i2, i3] for each complex number
     for (let y = 0; y < this.config.dimsHeight; y++) {
       const jFrac = (0.5 - (y / this.config.dimsHeight));
-      // Use toQDMul instead of toQDScale to capture error terms
-      const jQD = toQDAdd(imQD, toQDMul(sizeOverAspect, toQD(jFrac)));
+      // Use ArqdMul instead of toQDScale to capture error terms
+      // jFrac is treated as QD [jFrac, 0, 0, 0]
+      ArqdMul(tempQD, 0, sizeOverAspect[0], sizeOverAspect[1], sizeOverAspect[2], sizeOverAspect[3], jFrac, 0, 0, 0);
+      ArqdAdd(jQD, 0, imQD[0], imQD[1], imQD[2], imQD[3], tempQD[0], tempQD[1], tempQD[2], tempQD[3]);
+      
       for (let x = 0; x < this.config.dimsWidth; x++) {
         const rFrac = ((x / this.config.dimsWidth) - 0.5);
-        // Use toQDMul instead of toQDScale to capture error terms
-        const rQD = toQDAdd(reQD, toQDMul(this.size, toQD(rFrac)));
+        // Use ArqdMul instead of toQDScale to capture error terms
+        // size (if double) is [size, 0, 0, 0] as QD
+        const sz = this.size;
+        ArqdMul(tempQD, 0, sz, 0, 0, 0, rFrac, 0, 0, 0);
+        ArqdAdd(rQD, 0, reQD[0], reQD[1], reQD[2], reQD[3], tempQD[0], tempQD[1], tempQD[2], tempQD[3]);
+
         // Store c as 8 floats: [r0, r1, r2, r3, i0, i1, i2, i3]
         this.cc.push(rQD[0], rQD[1], rQD[2], rQD[3], jQD[0], jQD[1], jQD[2], jQD[3]);
         const r = rQD[0] + rQD[1] + rQD[2] + rQD[3];
@@ -6541,9 +6554,11 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
   // Compute z = ref + dz in native DDc format (4 elements)
   refDzNative(ref, dzr, dzi) {
     // ref is DD: [r_hi, r_lo, i_hi, i_lo], returns DDc with proper DD addition
-    const zr = toDDAdd([ref[0], ref[1]], dzr);
-    const zi = toDDAdd([ref[2], ref[3]], dzi);
-    return [zr[0], zr[1], zi[0], zi[1]];
+    // Optimized to avoid allocations
+    const out = new Array(4);
+    ArddAdd(out, 0, ref[0], ref[1], dzr, 0);
+    ArddAdd(out, 2, ref[2], ref[3], dzi, 0);
+    return out;
   }
 
   // Extend reference orbit by one iteration in DD precision
@@ -6649,9 +6664,11 @@ const QDReferenceOrbitMixin = (Base) => class extends Base {
   // Compute z = ref + dz in native QDc format (8 elements)
   refDzNative(ref, dzr, dzi) {
     // ref is QD: [r0,r1,r2,r3, i0,i1,i2,i3], returns QDc
-    const zrQD = toQDAdd([ref[0], ref[1], ref[2], ref[3]], [dzr, 0, 0, 0]);
-    const ziQD = toQDAdd([ref[4], ref[5], ref[6], ref[7]], [dzi, 0, 0, 0]);
-    return [...zrQD, ...ziQD];
+    // Optimized to avoid allocations
+    const out = new Array(8);
+    ArqdAdd(out, 0, ref[0], ref[1], ref[2], ref[3], dzr, 0, 0, 0);
+    ArqdAdd(out, 4, ref[4], ref[5], ref[6], ref[7], dzi, 0, 0, 0);
+    return out;
   }
 
   // Extend reference orbit by one iteration in QD precision
@@ -8866,7 +8883,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       const yFrac = (dimsHeight / 2 - y) / dimsHeight;
 
       // ci_dd = im_dd + yFrac * sizeY_dd (in DD precision)
-      ArddMul(temp, 0, toDD(yFrac)[0], toDD(yFrac)[1], sizeY_dd[0], sizeY_dd[1]);
+      ArddMul(temp, 0, yFrac, 0, sizeY_dd[0], sizeY_dd[1]);
       ArddAdd(ci_dd, 0, im_dd[0], im_dd[1], temp[0], temp[1]);
 
       // dci_dd = ci_dd - refC_imag
@@ -8877,7 +8894,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         const xFrac = (x - dimsWidth / 2) / dimsWidth;
 
         // cr_dd = re_dd + xFrac * size_dd (in DD precision)
-        ArddMul(temp, 0, toDD(xFrac)[0], toDD(xFrac)[1], size_dd[0], size_dd[1]);
+        ArddMul(temp, 0, xFrac, 0, size_dd[0], size_dd[1]);
         ArddAdd(cr_dd, 0, re_dd[0], re_dd[1], temp[0], temp[1]);
 
         // dcr_dd = cr_dd - refC_real
@@ -9108,14 +9125,12 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
           const dzi = pixelF32[idx + FLOAT_DZI];
 
           const ref = this.refOrbit[Math.min(nextRefIter, this.refOrbit.length - 1)];
-          const zr = toDDAdd([ref[0], ref[1]], dzr);
-          const zi = toDDAdd([ref[2], ref[3]], dzi);
-
+          
           // Accumulate into batchResultsRead
           this.batchResultsRead.push({
             iter: iters,
             nn: [],
-            vv: [{ index: origIndex, z: [zr[0], zr[1], zi[0], zi[1]], p: this.pp[origIndex] }]
+            vv: [{ index: origIndex, z: this.refDzNative(ref, dzr, dzi), p: this.pp[origIndex] }]
           });
         }
 
@@ -10479,14 +10494,12 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
           const dzi = pixelsF32[idx + P_DZI] * Math.pow(2, scale);
 
           const ref = this.qdRefOrbit[Math.min(refIter, this.qdRefOrbit.length - 1)];
-          const zrQD = toQDAdd([ref[0], ref[1], ref[2], ref[3]], [dzr, 0, 0, 0]);
-          const ziQD = toQDAdd([ref[4], ref[5], ref[6], ref[7]], [dzi, 0, 0, 0]);
 
           // Accumulate into batchResultsRead
           this.batchResultsRead.push({
             iter: iters,
             nn: [],
-            vv: [{ index: origIndex, z: [...zrQD, ...ziQD], p: this.pp[origIndex] }]
+            vv: [{ index: origIndex, z: this.refDzNative(ref, dzr, dzi), p: this.pp[origIndex] }]
           });
         }
 
