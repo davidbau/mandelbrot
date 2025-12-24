@@ -232,3 +232,113 @@ colorThemes.warm = (i, frac, ...) => `rgb(${r},${g},${b})`;
 // RGBA theme returns array for direct ImageData manipulation
 colorThemesRGBA.warm = (i, frac, ...) => [r, g, b, 255];
 ```
+
+## Startup Performance
+
+Detailed breakdown of time-to-first-paint and full completion for GPU rendering.
+
+### Test Configuration
+
+- **Viewport:** 1470×827 pixels
+- **Grid:** 1402×1402 computed pixels (1.97M pixels)
+- **Board:** GpuBoard
+- **Platform:** macOS, headless Chrome via Puppeteer
+
+### First Paint Timeline (~285ms)
+
+| Phase | Time | Cumulative | Notes |
+|-------|------|------------|-------|
+| **DOM & Script** | | | |
+| DOM parsing | 32ms | 32ms | HTML parsed |
+| Script execution start | 30ms | 62ms | `<script>` begins |
+| MandelbrotExplorer() | 2ms | 64ms | Create Grid, Scheduler |
+| explorer.start() | 30ms | 94ms | URL parse, updateLayout |
+| **Worker Setup** | | | |
+| Worker assemble | 0ms | 94ms | Collect script tags |
+| Worker blob + new | 2ms | 96ms | Create blob URL, spawn |
+| Worker startup | ~92ms | 188ms | Thread init, parse JS |
+| **GPU Init** | | | |
+| GPU adapter | 2ms | 190ms | requestAdapter() |
+| GPU device | 1ms | 191ms | requestDevice() |
+| Pipeline | 0ms | 191ms | createComputePipeline() |
+| Buffer init | 16ms | 207ms | mappedAtCreation + loop |
+| Bind group | 0ms | 207ms | createBindGroup() |
+| **GPU Compute** | | | |
+| Batch 1 (1 iter) | 1ms | 208ms | Warm-up |
+| Batch 2 (2 iters) | 37ms | 245ms | **Shader JIT compile** |
+| Batch 3-8 | ~23ms | 268ms | Accelerating batches |
+| **Render** | | | |
+| Result processing | 5ms | 273ms | Process GPU results |
+| Canvas drawing | 8ms | 281ms | Draw to canvas |
+| **First paint** | | **~285ms** | 137K pixels visible |
+
+### Full Completion Breakdown (~1170ms)
+
+| Component | Time | % of Total |
+|-----------|------|------------|
+| DOM load | 113ms | 10% |
+| Worker startup | ~92ms | 8% |
+| GPU init | 21ms | 2% |
+| GPU batches (107 total) | 647ms | 55% |
+| Shader JIT | ~40ms | 3% |
+| Result processing | 103ms | 9% |
+| Canvas drawing | 68ms | 6% |
+| Other overhead | ~83ms | 7% |
+
+### Accelerating Batch Sizes
+
+To minimize time-to-first-paint, the first 8 batches use accelerating iteration counts:
+
+| Batch | Iterations | Pixels | Time | Notes |
+|-------|-----------|--------|------|-------|
+| 1 | 1 | 1.97M | 1ms | Warm-up, no escapes at z=1 |
+| 2 | 2 | 1.97M | 38ms | Shader JIT compilation |
+| 3 | 4 | 1.97M | 8ms | |
+| 4 | 8 | 1.97M | 2ms | |
+| 5-8 | 25 each | 1.97M | 2-3ms | First escapes detected |
+
+After batch 8 (115 total iterations), pixels start escaping and the first paint occurs.
+
+### Startup Optimizations Applied
+
+| Optimization | Before | After | Saved |
+|-------------|--------|-------|-------|
+| Buffer init: skip zeros | 83ms | 55ms | 28ms |
+| mappedAtCreation | 55ms | 16ms | 39ms |
+| queryMaxBufferSize: use adapter.limits | +1ms | 0ms | 1ms |
+| MessageChannel scheduler | setTimeout(0) | MessageChannel | minor |
+| Accelerating batch sizes | 25 iters | 1,2,4,8,25 | ~550ms to first paint |
+| ImageData fast path | fillRect | ImageData | ~50% canvas time |
+
+### Key Insights
+
+1. **Worker startup is unavoidable** (~92ms): JavaScript parsing in the worker thread dominates. The worker code is ~400KB of embedded JS.
+
+2. **Shader JIT is one-time** (~37ms): First real compute batch triggers WGSL→GPU compilation. Subsequent batches are fast.
+
+3. **Buffer init uses mappedAtCreation**: Writing directly to GPU-visible memory avoids a 63MB CPU→GPU copy. This saved 39ms.
+
+4. **Accelerating batches are critical**: Without them, first paint would require waiting for a 25-iteration batch to complete before any pixels escape—adding ~550ms.
+
+5. **GPU adapter can't be cached**: Each `GPUAdapter` becomes "consumed" after calling `requestDevice()`, so each board needs a fresh adapter (~2ms).
+
+### Remaining Bottlenecks
+
+| Bottleneck | Time | Potential Fix |
+|------------|------|---------------|
+| Worker startup | 92ms | Minimal - inherent JS parsing cost |
+| Shader JIT | 37ms | Pre-compile shader (complex, browser-specific) |
+| DOM parsing | 32ms | Minify HTML (marginal gain) |
+
+### Debug Scripts
+
+```bash
+# Detailed startup timeline
+node tests/debug-detailed-startup.js
+
+# Buffer init breakdown
+node tests/debug-all-console.js
+
+# Full timing report
+node tests/debug-timing-report.js
+```
