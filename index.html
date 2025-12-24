@@ -7688,8 +7688,6 @@ class GpuBaseBoard extends Board {
     const countInChunk = headerView[1];
     const chunkStartIndex = headerView[2];
 
-    console.log(`CHUNK READ: firstEmpty=${firstEmpty}, countInChunk=${countInChunk}, chunkStartIndex=${chunkStartIndex}`);
-
     // Copy records data
     let data = null;
     if (countInChunk > 0) {
@@ -7716,7 +7714,6 @@ class GpuBaseBoard extends Board {
 
     // Enqueue this batch with its pixel count and iteration range [start, end)
     const batchPixelCount = firstEmpty - this.previousFirstEmpty;
-    console.log(`BATCH ENQUEUE: [${this.pendingBatchStartIter}, ${this.pendingBatchEndIter}), pixelCount=${batchPixelCount}, firstEmpty=${firstEmpty}, previousFirstEmpty=${this.previousFirstEmpty}, queueLen=${this.batchesToReadback.length}`);
     if (batchPixelCount > 0) {
       this.batchesToReadback.push({
         startIter: this.pendingBatchStartIter,
@@ -7763,7 +7760,6 @@ class GpuBaseBoard extends Board {
     // OUTER LOOP: Process batches in order (Step 1)
     while (this.batchesToReadback.length > 0) {
       const batch = this.batchesToReadback[0];
-      console.log(`BATCH PROCESS: [${batch.startIter}, ${batch.endIter}), remaining=${batch.remainingPixelCount}, accumulated=${this.batchResultsRead.length}, previousEnd=${this.previousBatchEndIter}`);
 
       // Step 2: Flush precomputed points before this batch's iteration range
       if (this.precomputed) {
@@ -7840,14 +7836,6 @@ class GpuBaseBoard extends Board {
       if (this.precomputed) {
         this.flushPrecomputedIntoResults(batch.endIter - 1);
       }
-
-      // Log batch flush details (changeMap will group by iteration)
-      const iterCounts = {};
-      for (const change of this.batchResultsRead) {
-        iterCounts[change.iter] = (iterCounts[change.iter] || 0) + change.nn.length + change.vv.length;
-      }
-      const topIters = Object.entries(iterCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-      console.log(`BATCH FLUSH: [${batch.startIter}, ${batch.endIter}), resultsCount=${this.batchResultsRead.length}, previousEnd=${this.previousBatchEndIter}, topIters=${JSON.stringify(topIters)}`);
 
       // INVARIANT CHECK: All results must be in half-open interval [startIter, endIter)
       // AND iter >= previousBatchEndIter (no late results from earlier batches)
