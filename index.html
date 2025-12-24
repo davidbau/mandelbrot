@@ -11966,9 +11966,12 @@ class FractalWorker {
              `boards {${[...this.boards.keys()]}}, work: ${remainingWork}` :
              `board finished`);
 
-        // For GPU boards with changeMap: send one message per iteration in sorted order.
-        // For CPU boards without changeMap: send changeList as a single message (original behavior).
-        if (board.changeMap && board.changeMap.size > 0) {
+        // Check if entries have per-iteration un (GPU boards set this, CPU boards don't)
+        const firstChange = board.changeMap?.values().next().value;
+        const hasPerIterUn = firstChange && firstChange.un !== undefined;
+
+        if (hasPerIterUn) {
+          // GPU boards: send one message per iteration in sorted order with per-iteration un
           const sortedIters = Array.from(board.changeMap.keys()).sort((a, b) => a - b);
           for (const iter of sortedIters) {
             const change = board.changeMap.get(iter);
