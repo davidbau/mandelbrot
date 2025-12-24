@@ -1200,6 +1200,7 @@ class View {
       resultsReadbackBatches,
       lastResultsCount
     } = data;
+
     const changedIndices = [];
 
     for (const { nn, vv, iter } of changeList) {
@@ -1215,8 +1216,9 @@ class View {
         changedIndices.push(index);
       }
       this.di += nn.length;
-      this.un -= nn.length + vv.length;
-      this.updateHistogram(this.un, this.di, iter);
+      // Use worker's un for histogram, not this.un. The worker's un is authoritative
+      // and using this.un would cause histogram corruption when changeList is batched.
+      this.updateHistogram(un, this.di, iter);
     }
     this.un = un;
     this.di = di;
