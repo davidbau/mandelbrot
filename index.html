@@ -1619,7 +1619,7 @@ class View {
 
   // Fast ImageData-based drawing for large changeList updates
   // Uses cached ImageData to avoid getImageData readback
-  drawchangesFast(ctx, changeList) {
+  drawchangesFast(ctx, changeList, keepAlive = true) {
     const { dimsWidth, dimsHeight } = this.config;
     const themeFn = this.config.colorThemesRGBA?.[this.config.theme];
 
@@ -1642,7 +1642,9 @@ class View {
         this.imageDataCache = ctx.createImageData(dimsWidth, dimsHeight);
       }
     }
-    this.imageDataCacheLastUsed = performance.now();
+    if (keepAlive) {
+      this.imageDataCacheLastUsed = performance.now();
+    }
     const data = this.imageDataCache.data;
 
     for (const change of changeList) {
@@ -2246,16 +2248,18 @@ class Grid {
 
         // Use fast ImageData path for large updates (>100k pixels)
         // Cache must be used from first batch or not at all (late creation would lose earlier pixels)
-        const canUseCache = totalPixels > 100000 && this.config.colorThemesRGBA && !view.imageDataCacheSkipped;
+        const largeUpdate = totalPixels > 100000;
+        const cacheIsActive = view.imageDataCache && (performance.now() - view.imageDataCacheLastUsed <= 500);
+        const canUseCache = (largeUpdate || cacheIsActive) && this.config.colorThemesRGBA && !view.imageDataCacheSkipped;
         if (canUseCache) {
-          view.drawchangesFast(ctx, data.changeList);
+          view.drawchangesFast(ctx, data.changeList, largeUpdate);
         } else {
           // Mark cache as skipped if it was never created
           if (!view.imageDataCache) {
             view.imageDataCacheSkipped = true;
           }
           // Clear cache only after 500ms of non-use (batch sizes may fluctuate)
-          if (view.imageDataCache && performance.now() - view.imageDataCacheLastUsed > 500) {
+          if (view.imageDataCache) {
             view.clearImageDataCache();
           }
           for (let change of data.changeList) {
@@ -9145,11 +9149,12 @@ class GlBoard extends Board {
         float zr = state.r;
         float zi = state.g;
         float iter = state.b;
-        float status = state.a;  // 0=active, 1=escaped, 2=converged
+        float pixelIndex = state.a;  // Grid index (static)
 
         float cp_zr = checkpoint.r;
         float cp_zi = checkpoint.g;
         float period = checkpoint.b;
+        float status = checkpoint.a;  // 0=active, 1=escaped, 2=converged
 
         // c from pixel position
         vec2 c = mix(u_cMin, u_cMax, v_texCoord);
@@ -9231,17 +9236,18 @@ class GlBoard extends Board {
           }
         }
 
-        outState = vec4(zr, zi, iter, status);
-        outCheckpoint = vec4(cp_zr, cp_zi, period, 0.0);
+        outState = vec4(zr, zi, iter, pixelIndex);
+        outCheckpoint = vec4(cp_zr, cp_zi, period, status);
       }
     `;
 
     // Fragment shader for Level 0 → Level 1 reduction (tile summary)
     // Tracks both escaped (status=1) and converged (status=2) pixels
+    // Status is now in checkpoint.a (not state.a)
     const fsReduction1Source = `#version 300 es
       precision highp float;
 
-      uniform sampler2D u_state;
+      uniform sampler2D u_checkpoint;
       uniform sampler2D u_prevTiles;
       uniform vec2 u_stateSize;
       uniform vec2 u_tileSize;
@@ -9261,8 +9267,8 @@ class GlBoard extends Board {
           for (int dx = 0; dx < 16; dx++) {
             ivec2 pixel = basePixel + ivec2(dx, dy);
             if (pixel.x < int(u_stateSize.x) && pixel.y < int(u_stateSize.y)) {
-              vec4 state = texelFetch(u_state, pixel, 0);
-              if (state.a > 0.0) {  // Escaped (1.0) or Converged (2.0)
+              vec4 checkpoint = texelFetch(u_checkpoint, pixel, 0);
+              if (checkpoint.a > 0.0) {  // Escaped (1.0) or Converged (2.0)
                 finishedCount += 1.0;
                 hasFinished = 1.0;
               }
@@ -9379,7 +9385,7 @@ class GlBoard extends Board {
 
     gl.useProgram(this.reduction1Program);
     this.reduction1Uniforms = {
-      u_state: gl.getUniformLocation(this.reduction1Program, 'u_state'),
+      u_checkpoint: gl.getUniformLocation(this.reduction1Program, 'u_checkpoint'),
       u_prevTiles: gl.getUniformLocation(this.reduction1Program, 'u_prevTiles'),
       u_stateSize: gl.getUniformLocation(this.reduction1Program, 'u_stateSize'),
       u_tileSize: gl.getUniformLocation(this.reduction1Program, 'u_tileSize')
@@ -9515,23 +9521,41 @@ class GlBoard extends Board {
     this.cMinIm = imDD[0] - halfHeight;
     this.cMaxIm = imDD[0] + halfHeight;
 
-    // Initialize state texture: z=0, iter=0, status=0 (active)
+    // Initialize state texture: z=0, iter=0, index=gridIndex
+    // State layout: (zr, zi, iter, index) - index is the View's grid index
+    // WebGL y=0 is at bottom, but View y=0 is at top, so flip Y
     const stateData = new Float32Array(this.texWidth * this.texHeight * 4);
-    // All zeros is the correct initial state (z=0, iter=0, status=0)
+    // Set grid index in state.a for each pixel
+    for (let texY = 0; texY < this.texHeight; texY++) {
+      for (let x = 0; x < this.texWidth; x++) {
+        const texOffset = (texY * this.texWidth + x) * 4;
+        // Flip Y: texture y=0 (bottom) -> grid y=height-1, texture y=height-1 (top) -> grid y=0
+        const gridY = this.texHeight - 1 - texY;
+        const gridIndex = gridY * this.texWidth + x;
+        // stateData[texOffset + 0] = 0;  // zr = 0
+        // stateData[texOffset + 1] = 0;  // zi = 0
+        // stateData[texOffset + 2] = 0;  // iter = 0
+        stateData[texOffset + 3] = gridIndex;  // index = View's grid index
+      }
+    }
 
     gl.bindTexture(gl.TEXTURE_2D, this.pingStateTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.texWidth, this.texHeight,
                      gl.RGBA, gl.FLOAT, stateData);
 
     // Initialize checkpoint texture with sentinel values
+    // Checkpoint layout: (checkpoint_zr, checkpoint_zi, period, status)
     // checkpoint_z must be far from any valid z value to prevent false convergence
     // on the first iterations (before the first Fibonacci checkpoint is set)
+    // status=0 means active pixel
     const checkpointData = new Float32Array(this.texWidth * this.texHeight * 4);
     // Fast initialization: build pattern then copy with doubling
     const sentinel = 1e30;
     // Start with one pixel pattern
     checkpointData[0] = sentinel;  // checkpoint_zr
     checkpointData[1] = sentinel;  // checkpoint_zi
+    // checkpointData[2] = 0;      // period = 0
+    // checkpointData[3] = 0;      // status = 0 (active)
     // Copy doubling: 1->2->4->8->... pixels at a time
     let filled = 4;  // 1 pixel = 4 floats
     while (filled < checkpointData.length) {
@@ -9669,8 +9693,8 @@ class GlBoard extends Board {
     gl.bindVertexArray(this.quadVAO);
 
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, readTextures.state);
-    gl.uniform1i(this.reduction1Uniforms.u_state, 0);
+    gl.bindTexture(gl.TEXTURE_2D, readTextures.checkpoint);
+    gl.uniform1i(this.reduction1Uniforms.u_checkpoint, 0);
 
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.prevLevel1Tex);
@@ -9788,95 +9812,62 @@ class GlBoard extends Board {
     const stateReadFB = this.createReadFB(readTextures.state);
     const checkpointReadFB = this.createReadFB(readTextures.checkpoint);
 
-    // Read state texture for active tiles
-    gl.bindFramebuffer(gl.FRAMEBUFFER, stateReadFB);
-
-    // Collect converged pixel locations for checkpoint read
-    const convergedPixels = [];
-
+    // Read both state and checkpoint textures for active tiles
+    // State: (zr, zi, iter, index), Checkpoint: (cp_zr, cp_zi, period, status)
     for (const tile of activeTiles) {
       const x0 = tile.x * GlBoard.TILE_SIZE;
       const y0 = tile.y * GlBoard.TILE_SIZE;
       const w = Math.min(GlBoard.TILE_SIZE, this.texWidth - x0);
       const h = Math.min(GlBoard.TILE_SIZE, this.texHeight - y0);
 
-      const pixels = new Float32Array(w * h * 4);
-      gl.readPixels(x0, y0, w, h, gl.RGBA, gl.FLOAT, pixels);
+      // Read state texture (zr, zi, iter, index)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, stateReadFB);
+      const statePixels = new Float32Array(w * h * 4);
+      gl.readPixels(x0, y0, w, h, gl.RGBA, gl.FLOAT, statePixels);
+
+      // Read checkpoint texture (cp_zr, cp_zi, period, status)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, checkpointReadFB);
+      const checkpointPixels = new Float32Array(w * h * 4);
+      gl.readPixels(x0, y0, w, h, gl.RGBA, gl.FLOAT, checkpointPixels);
 
       for (let py = 0; py < h; py++) {
         for (let px = 0; px < w; px++) {
           const localIdx = (py * w + px) * 4;
-          const status = pixels[localIdx + 3];
-          const globalX = x0 + px;
-          const globalY = y0 + py;
-          // Flip Y: WebGL y=0 is bottom, View y=0 is top
-          const flippedY = this.texHeight - 1 - globalY;
-          const globalIdx = flippedY * this.texWidth + globalX;
+          const status = checkpointPixels[localIdx + 3];  // status in checkpoint.a
+          const pixelIndex = Math.round(statePixels[localIdx + 3]);  // index in state.a
 
-          if (this.reported[globalIdx]) continue;
+          if (this.reported[pixelIndex]) continue;
 
           if (status === 1.0) {  // Escaped
-            const iter = Math.round(pixels[localIdx + 2]);
-            const zr = pixels[localIdx];
-            const zi = pixels[localIdx + 1];
-            this.nn[globalIdx] = iter;
-            this.reported[globalIdx] = 1;
+            const iter = Math.round(statePixels[localIdx + 2]);
+            this.nn[pixelIndex] = iter;
+            this.reported[pixelIndex] = 1;
             this.un--;
             this.di++;
 
             if (!escapedByIter.has(iter)) {
               escapedByIter.set(iter, []);
             }
-            escapedByIter.get(iter).push(globalIdx);
+            escapedByIter.get(iter).push(pixelIndex);
           } else if (status === 2.0) {  // Converged
-            const iter = Math.round(pixels[localIdx + 2]);
-            const zr = pixels[localIdx];
-            const zi = pixels[localIdx + 1];
-            convergedPixels.push({ globalIdx, iter, zr, zi, tileX: x0, tileY: y0, px, py });
+            const iter = Math.round(statePixels[localIdx + 2]);
+            const zr = statePixels[localIdx];
+            const zi = statePixels[localIdx + 1];
+            const period = Math.round(checkpointPixels[localIdx + 2]);
+
+            this.nn[pixelIndex] = -iter;  // Negative for converged
+            this.reported[pixelIndex] = 1;
+            this.un--;
+
+            if (!convergedByIter.has(iter)) {
+              convergedByIter.set(iter, []);
+            }
+            convergedByIter.get(iter).push({
+              index: pixelIndex,
+              z: [zr, zi],
+              p: period
+            });
           }
-        }
-      }
-    }
-
-    // Read checkpoint texture for converged pixels to get period
-    if (convergedPixels.length > 0) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, checkpointReadFB);
-
-      // Group by tile for efficient reads
-      const pixelsByTile = new Map();
-      for (const cp of convergedPixels) {
-        const key = `${cp.tileX},${cp.tileY}`;
-        if (!pixelsByTile.has(key)) {
-          pixelsByTile.set(key, { tileX: cp.tileX, tileY: cp.tileY, pixels: [] });
-        }
-        pixelsByTile.get(key).pixels.push(cp);
-      }
-
-      for (const [, tileInfo] of pixelsByTile) {
-        const x0 = tileInfo.tileX;
-        const y0 = tileInfo.tileY;
-        const w = Math.min(GlBoard.TILE_SIZE, this.texWidth - x0);
-        const h = Math.min(GlBoard.TILE_SIZE, this.texHeight - y0);
-
-        const checkpointData = new Float32Array(w * h * 4);
-        gl.readPixels(x0, y0, w, h, gl.RGBA, gl.FLOAT, checkpointData);
-
-        for (const cp of tileInfo.pixels) {
-          const localIdx = (cp.py * w + cp.px) * 4;
-          const period = Math.round(checkpointData[localIdx + 2]);
-
-          this.nn[cp.globalIdx] = -cp.iter;  // Negative for converged
-          this.reported[cp.globalIdx] = 1;
-          this.un--;
-
-          if (!convergedByIter.has(cp.iter)) {
-            convergedByIter.set(cp.iter, []);
-          }
-          convergedByIter.get(cp.iter).push({
-            index: cp.globalIdx,
-            z: [cp.zr, cp.zi],
-            p: period
-          });
         }
       }
     }
@@ -9918,64 +9909,49 @@ class GlBoard extends Board {
     const stateReadFB = this.createReadFB(readTextures.state);
     const checkpointReadFB = this.createReadFB(readTextures.checkpoint);
 
-    // Read full state texture
+    // Read both full textures
+    // State: (zr, zi, iter, index), Checkpoint: (cp_zr, cp_zi, period, status)
     gl.bindFramebuffer(gl.FRAMEBUFFER, stateReadFB);
     const statePixels = new Float32Array(this.texWidth * this.texHeight * 4);
     gl.readPixels(0, 0, this.texWidth, this.texHeight, gl.RGBA, gl.FLOAT, statePixels);
 
-    // Collect converged pixel indices for checkpoint read
-    const convergedIndices = [];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, checkpointReadFB);
+    const checkpointPixels = new Float32Array(this.texWidth * this.texHeight * 4);
+    gl.readPixels(0, 0, this.texWidth, this.texHeight, gl.RGBA, gl.FLOAT, checkpointPixels);
 
     for (let i = 0; i < this.texWidth * this.texHeight; i++) {
-      // Convert WebGL index (y=0 at bottom) to View index (y=0 at top)
-      const glX = i % this.texWidth;
-      const glY = Math.floor(i / this.texWidth);
-      const flippedY = this.texHeight - 1 - glY;
-      const viewIdx = flippedY * this.texWidth + glX;
+      const status = checkpointPixels[i * 4 + 3];  // status in checkpoint.a
+      const pixelIndex = Math.round(statePixels[i * 4 + 3]);  // index in state.a
 
-      if (this.reported[viewIdx]) continue;
-
-      const status = statePixels[i * 4 + 3];
+      if (this.reported[pixelIndex]) continue;
 
       if (status === 1.0) {  // Escaped
         const iter = Math.round(statePixels[i * 4 + 2]);
-        this.nn[viewIdx] = iter;
-        this.reported[viewIdx] = 1;
+        this.nn[pixelIndex] = iter;
+        this.reported[pixelIndex] = 1;
         this.un--;
         this.di++;
 
         if (!escapedByIter.has(iter)) {
           escapedByIter.set(iter, []);
         }
-        escapedByIter.get(iter).push(viewIdx);
+        escapedByIter.get(iter).push(pixelIndex);
       } else if (status === 2.0) {  // Converged
         const iter = Math.round(statePixels[i * 4 + 2]);
         const zr = statePixels[i * 4];
         const zi = statePixels[i * 4 + 1];
-        convergedIndices.push({ index: viewIdx, glIndex: i, iter, zr, zi });
-      }
-    }
+        const period = Math.round(checkpointPixels[i * 4 + 2]);
 
-    // Read checkpoint texture for converged pixels to get period
-    if (convergedIndices.length > 0) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, checkpointReadFB);
-      const checkpointPixels = new Float32Array(this.texWidth * this.texHeight * 4);
-      gl.readPixels(0, 0, this.texWidth, this.texHeight, gl.RGBA, gl.FLOAT, checkpointPixels);
-
-      for (const cp of convergedIndices) {
-        // Use glIndex to read from WebGL buffer, index for View arrays
-        const period = Math.round(checkpointPixels[cp.glIndex * 4 + 2]);
-
-        this.nn[cp.index] = -cp.iter;  // Negative for converged
-        this.reported[cp.index] = 1;
+        this.nn[pixelIndex] = -iter;  // Negative for converged
+        this.reported[pixelIndex] = 1;
         this.un--;
 
-        if (!convergedByIter.has(cp.iter)) {
-          convergedByIter.set(cp.iter, []);
+        if (!convergedByIter.has(iter)) {
+          convergedByIter.set(iter, []);
         }
-        convergedByIter.get(cp.iter).push({
-          index: cp.index,
-          z: [cp.zr, cp.zi],
+        convergedByIter.get(iter).push({
+          index: pixelIndex,
+          z: [zr, zi],
           p: period
         });
       }
