@@ -1631,11 +1631,16 @@ class View {
       return;
     }
 
-    // Create or get cached ImageData (avoids getImageData readback)
+    // Create or get cached ImageData
     if (!this.imageDataCache) {
-      this.imageDataCache = ctx.createImageData(dimsWidth, dimsHeight);
-      // Initialize with unknown color (transparent)
-      // Uint8ClampedArray is already zeroed, which is [0,0,0,0] = transparent
+      if (this.parentView) {
+        // For child views, initialize from canvas (which has parent composite drawn)
+        // This is a one-time getImageData cost to capture the parent background
+        this.imageDataCache = ctx.getImageData(0, 0, dimsWidth, dimsHeight);
+      } else {
+        // For root views, create empty ImageData (avoids getImageData readback)
+        this.imageDataCache = ctx.createImageData(dimsWidth, dimsHeight);
+      }
     }
     this.imageDataCacheLastUsed = performance.now();
     const data = this.imageDataCache.data;
@@ -4775,7 +4780,9 @@ class Scheduler {
         worker = new Worker(workerUrl, { name: `Worker ${workerNum}` });
         const t3 = performance.now();
         URL.revokeObjectURL(workerUrl);
-        console.log(`[worker-init] assemble=${(t1-t0).toFixed(0)}ms blob=${(t2-t1).toFixed(0)}ms new Worker=${(t3-t2).toFixed(0)}ms total=${(t3-t0).toFixed(0)}ms`);
+        if (hasDebugFlag(this.grid.config, 't')) {
+          console.log(`[worker-init] assemble=${(t1-t0).toFixed(0)}ms blob=${(t2-t1).toFixed(0)}ms new Worker=${(t3-t2).toFixed(0)}ms total=${(t3-t0).toFixed(0)}ms`);
+        }
       }
 
       worker.onmessage = this.handleWorkerMessage.bind(this);
@@ -7579,7 +7586,9 @@ class GpuBaseBoard extends Board {
       this.createBindGroup();
       const t5 = performance.now();
 
-      console.log(`[gpu-init] adapter=${(t1-t0).toFixed(0)}ms device=${(t2-t1).toFixed(0)}ms pipeline=${(t3-t2).toFixed(0)}ms buffers=${(t4-t3).toFixed(0)}ms bindgroup=${(t5-t4).toFixed(0)}ms total=${(t5-t0).toFixed(0)}ms`);
+      if (hasDebugFlag(this.config, 't')) {
+        console.log(`[gpu-init] adapter=${(t1-t0).toFixed(0)}ms device=${(t2-t1).toFixed(0)}ms pipeline=${(t3-t2).toFixed(0)}ms buffers=${(t4-t3).toFixed(0)}ms bindgroup=${(t5-t4).toFixed(0)}ms total=${(t5-t0).toFixed(0)}ms`);
+      }
 
       this.isGPUReady = true;
       return true;
@@ -8601,7 +8610,9 @@ class GpuBoard extends GpuBaseBoard {
     const tb2 = performance.now();
     this.buffers.pixels.unmap();
     const tb3 = performance.now();
-    console.log(`[buffer-init] create=${(tb1-tb0).toFixed(0)}ms loop=${(tb2-tb1).toFixed(0)}ms unmap=${(tb3-tb2).toFixed(0)}ms total=${(tb3-tb0).toFixed(0)}ms`);
+    if (hasDebugFlag(this.config, 't')) {
+      console.log(`[buffer-init] create=${(tb1-tb0).toFixed(0)}ms loop=${(tb2-tb1).toFixed(0)}ms unmap=${(tb3-tb2).toFixed(0)}ms total=${(tb3-tb0).toFixed(0)}ms`);
+    }
 
     this.activeCount = activePixelCount;
     // Note: don't adjust this.un here - it will be decremented by flushUpToIteration
