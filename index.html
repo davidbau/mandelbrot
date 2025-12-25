@@ -3421,7 +3421,7 @@ class URLHandler {
         parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
           const validTypes = [
-            'cpu', 'ddz', 'qdz', 'gpu', 'gpuz', 'adaptive', 'qdcpu'
+            'cpu', 'ddz', 'qdz', 'gpu', 'gl', 'gpuz', 'adaptive', 'qdcpu'
           ];
           if (validTypes.includes(boardType)) {
             configUpdates.forceBoard = boardType;
@@ -5910,6 +5910,7 @@ class Board {
       ['DDZhuoranBoard', DDZhuoranBoard],
       ['QDZhuoranBoard', QDZhuoranBoard],
       ['GpuBoard', GpuBoard],
+      ['GlBoard', GlBoard],
       ['GpuZhuoranBoard', GpuZhuoranBoard],
       ['AdaptiveGpuBoard', AdaptiveGpuBoard]
     ]);
@@ -8967,6 +8968,1114 @@ class GpuBoard extends GpuBaseBoard {
   }
 }
 
+// WebGL2 board using fragment shaders for gap-free GPU iteration.
+// Unlike WebGPU, WebGL's driver manages cross-command synchronization,
+// allowing continuous GPU pipelining without CPU round-trips between batches.
+// See docs/webgl-pingpong-design.md for detailed design rationale.
+class GlBoard extends Board {
+  static TILE_SIZE = 16;  // Tile size for hierarchical reduction
+
+  constructor(k, size, re, im, config, id, inheritedData = null) {
+    super(k, size, re, im, config, id, inheritedData);
+    this.effort = 10;  // Similar to GpuBoard
+    // Cap iterations per batch - can do up to 327680 in a single draw call
+    this.maxBatchIters = 327680;
+
+    // WebGL state
+    this.gl = null;
+    this.canvas = null;
+    this.iterProgram = null;
+    this.reduction1Program = null;
+    this.reduction2Program = null;
+
+    // Ping-pong state textures (MRT: state + checkpoint)
+    // State texture: (zr, zi, iter, status)
+    // Checkpoint texture: (checkpoint_zr, checkpoint_zi, period, reserved)
+    this.pingStateTex = null;
+    this.pingCheckpointTex = null;
+    this.pongStateTex = null;
+    this.pongCheckpointTex = null;
+    this.pingFB = null;
+    this.pongFB = null;
+    this.isPingRead = true;
+
+    // Hierarchy textures for sparse readback
+    this.level1Tex = null;
+    this.level1FB = null;
+    this.prevLevel1Tex = null;
+    this.prevLevel1FB = null;
+    this.level2Tex = null;
+    this.level2FB = null;
+
+    // Dimensions
+    this.texWidth = config.dimsWidth;
+    this.texHeight = config.dimsHeight;
+    this.level1Width = Math.ceil(this.texWidth / GlBoard.TILE_SIZE);
+    this.level1Height = Math.ceil(this.texHeight / GlBoard.TILE_SIZE);
+    this.level2Width = Math.ceil(this.level1Width / GlBoard.TILE_SIZE);
+    this.level2Height = Math.ceil(this.level1Height / GlBoard.TILE_SIZE);
+
+    // Track reported pixels to avoid duplicates
+    this.reported = new Uint8Array(config.dimsArea);
+
+    // Convergence detection thresholds (like CpuBoard)
+    this.epsilon = this.pix / 10;    // Final convergence threshold
+    this.epsilon2 = this.pix * 10;   // "Getting close" threshold
+
+    // Fibonacci sequence for checkpoint updates
+    this.fibCache = [1, 2];
+    this.nextFibIndex = 2;
+
+    // Full-screen quad VAO
+    this.quadVAO = null;
+
+    // Uniform locations (cached after shader compilation)
+    this.iterUniforms = {};
+    this.reduction1Uniforms = {};
+    this.reduction2Uniforms = {};
+
+    // Complex plane bounds (set in start())
+    this.cMinRe = 0;
+    this.cMinIm = 0;
+    this.cMaxRe = 0;
+    this.cMaxIm = 0;
+
+    // Initialize WebGL
+    this.glInitPromise = this.initWebGL();
+  }
+
+  // Check if iteration is a Fibonacci number (checkpoint point)
+  isFibonacci(n) {
+    // Extend cache if needed
+    while (this.fibCache[this.fibCache.length - 1] < n) {
+      const len = this.fibCache.length;
+      this.fibCache.push(this.fibCache[len - 1] + this.fibCache[len - 2]);
+    }
+    // Binary search
+    let lo = 0, hi = this.fibCache.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.fibCache[mid] === n) return true;
+      if (this.fibCache[mid] < n) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    return false;
+  }
+
+  async initWebGL() {
+    // Create offscreen canvas for WebGL context
+    this.canvas = new OffscreenCanvas(this.texWidth, this.texHeight);
+    this.gl = this.canvas.getContext('webgl2', {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      powerPreference: 'high-performance',
+      preserveDrawingBuffer: true
+    });
+
+    if (!this.gl) {
+      throw new Error('WebGL2 not available');
+    }
+
+    const gl = this.gl;
+
+    // Required extension for float textures as render targets
+    const ext = gl.getExtension('EXT_color_buffer_float');
+    if (!ext) {
+      throw new Error('EXT_color_buffer_float not available');
+    }
+
+    // Initialize shaders
+    this.initShaders();
+
+    // Initialize textures and framebuffers
+    this.initPingPongBuffers();
+    this.initHierarchyBuffers();
+
+    // Initialize full-screen quad
+    this.initQuad();
+
+    // Initialize state texture with starting values
+    this.initStateTexture();
+  }
+
+  initShaders() {
+    const gl = this.gl;
+
+    // Vertex shader (shared by all passes)
+    const vsSource = `#version 300 es
+      in vec2 a_position;
+      out vec2 v_texCoord;
+      void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+        v_texCoord = (a_position + 1.0) * 0.5;
+      }
+    `;
+
+    // Fragment shader for Mandelbrot iteration with convergence detection
+    // Uses MRT: output 0 = state (zr, zi, iter, status)
+    //           output 1 = checkpoint (checkpoint_zr, checkpoint_zi, period, reserved)
+    const fsIterSource = `#version 300 es
+      precision highp float;
+
+      uniform sampler2D u_state;
+      uniform sampler2D u_checkpoint;
+      uniform vec2 u_resolution;
+      uniform vec2 u_cMin;
+      uniform vec2 u_cMax;
+      uniform int u_iterations;
+      uniform float u_escapeRadius;
+      uniform int u_exponent;
+      uniform float u_epsilon;      // Final convergence threshold
+      uniform float u_epsilon2;     // "Getting close" threshold
+      uniform int u_startIter;      // Global iteration at batch start
+      // Fibonacci info for checkpoint updates
+      uniform int u_fibPrev;        // Previous Fibonacci number <= startIter
+      uniform int u_fibCurr;        // Current Fibonacci number > startIter
+
+      in vec2 v_texCoord;
+      layout(location = 0) out vec4 outState;
+      layout(location = 1) out vec4 outCheckpoint;
+
+      void main() {
+        vec4 state = texture(u_state, v_texCoord);
+        vec4 checkpoint = texture(u_checkpoint, v_texCoord);
+
+        float zr = state.r;
+        float zi = state.g;
+        float iter = state.b;
+        float status = state.a;  // 0=active, 1=escaped, 2=converged
+
+        float cp_zr = checkpoint.r;
+        float cp_zi = checkpoint.g;
+        float period = checkpoint.b;
+
+        // c from pixel position
+        vec2 c = mix(u_cMin, u_cMax, v_texCoord);
+
+        // Track Fibonacci for checkpoint updates
+        int fibPrev = u_fibPrev;
+        int fibCurr = u_fibCurr;
+
+        if (status == 0.0) {  // Active pixel
+          for (int i = 0; i < 327680; i++) {  // Max iterations per draw call
+            if (i >= u_iterations) break;
+
+            int globalIter = u_startIter + i + 1;
+
+            // z = z^n + c (support exponent 2-5)
+            float zr2, zi2;
+            if (u_exponent == 2) {
+              zr2 = zr * zr - zi * zi + c.x;
+              zi2 = 2.0 * zr * zi + c.y;
+            } else if (u_exponent == 3) {
+              float zr_sq = zr * zr;
+              float zi_sq = zi * zi;
+              zr2 = zr * (zr_sq - 3.0 * zi_sq) + c.x;
+              zi2 = zi * (3.0 * zr_sq - zi_sq) + c.y;
+            } else if (u_exponent == 4) {
+              float zr_sq = zr * zr;
+              float zi_sq = zi * zi;
+              float zr_4 = zr_sq * zr_sq;
+              float zi_4 = zi_sq * zi_sq;
+              zr2 = zr_4 - 6.0 * zr_sq * zi_sq + zi_4 + c.x;
+              zi2 = 4.0 * zr * zi * (zr_sq - zi_sq) + c.y;
+            } else {
+              // Fallback for exponent 5+
+              float r = sqrt(zr * zr + zi * zi);
+              float theta = atan(zi, zr);
+              float rn = pow(r, float(u_exponent));
+              float ntheta = float(u_exponent) * theta;
+              zr2 = rn * cos(ntheta) + c.x;
+              zi2 = rn * sin(ntheta) + c.y;
+            }
+
+            zr = zr2;
+            zi = zi2;
+            iter += 1.0;
+
+            // Check for escape
+            if (zr * zr + zi * zi > u_escapeRadius) {
+              status = 1.0;  // Escaped
+              break;
+            }
+
+            // Check for Fibonacci checkpoint update
+            if (globalIter == fibCurr) {
+              // Update checkpoint: save current z, reset period
+              cp_zr = zr;
+              cp_zi = zi;
+              period = 0.0;
+              // Advance Fibonacci sequence
+              int nextFib = fibPrev + fibCurr;
+              fibPrev = fibCurr;
+              fibCurr = nextFib;
+              // Skip convergence check this iteration - checkpoint was just set
+              // (z == checkpoint trivially when we just set checkpoint = z)
+            } else {
+              // Check for convergence (compare to checkpoint)
+              float dist = abs(zr - cp_zr) + abs(zi - cp_zi);
+              if (dist <= u_epsilon2) {
+                // Getting close - record period if not already set
+                if (period == 0.0) {
+                  period = iter;
+                }
+                if (dist <= u_epsilon) {
+                  // Converged!
+                  status = 2.0;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        outState = vec4(zr, zi, iter, status);
+        outCheckpoint = vec4(cp_zr, cp_zi, period, 0.0);
+      }
+    `;
+
+    // Fragment shader for Level 0 → Level 1 reduction (tile summary)
+    // Tracks both escaped (status=1) and converged (status=2) pixels
+    const fsReduction1Source = `#version 300 es
+      precision highp float;
+
+      uniform sampler2D u_state;
+      uniform sampler2D u_prevTiles;
+      uniform vec2 u_stateSize;
+      uniform vec2 u_tileSize;
+
+      in vec2 v_texCoord;
+      out vec4 tileInfo;
+
+      void main() {
+        ivec2 tileCoord = ivec2(gl_FragCoord.xy);
+        ivec2 basePixel = tileCoord * 16;
+
+        float finishedCount = 0.0;  // Both escaped and converged
+        float hasFinished = 0.0;
+
+        // Sample all 256 pixels in this 16x16 tile
+        for (int dy = 0; dy < 16; dy++) {
+          for (int dx = 0; dx < 16; dx++) {
+            ivec2 pixel = basePixel + ivec2(dx, dy);
+            if (pixel.x < int(u_stateSize.x) && pixel.y < int(u_stateSize.y)) {
+              vec4 state = texelFetch(u_state, pixel, 0);
+              if (state.a > 0.0) {  // Escaped (1.0) or Converged (2.0)
+                finishedCount += 1.0;
+                hasFinished = 1.0;
+              }
+            }
+          }
+        }
+
+        // Compare with previous count to find newly finished
+        vec4 prev = texelFetch(u_prevTiles, tileCoord, 0);
+        float newlyFinished = finishedCount - prev.r;
+
+        tileInfo = vec4(finishedCount, newlyFinished, 0.0, hasFinished);
+      }
+    `;
+
+    // Fragment shader for Level 1 → Level 2 reduction (super-tile summary)
+    const fsReduction2Source = `#version 300 es
+      precision highp float;
+
+      uniform sampler2D u_tiles;
+      uniform vec2 u_tilesSize;
+
+      in vec2 v_texCoord;
+      out vec4 superTileInfo;
+
+      void main() {
+        ivec2 superCoord = ivec2(gl_FragCoord.xy);
+        ivec2 baseTile = superCoord * 16;
+
+        float totalFinished = 0.0;
+        float totalNew = 0.0;
+        float hasFinished = 0.0;
+
+        // Sample all 256 tiles in this 16x16 super-tile
+        for (int dy = 0; dy < 16; dy++) {
+          for (int dx = 0; dx < 16; dx++) {
+            ivec2 tile = baseTile + ivec2(dx, dy);
+            if (tile.x < int(u_tilesSize.x) && tile.y < int(u_tilesSize.y)) {
+              vec4 tileData = texelFetch(u_tiles, tile, 0);
+              totalFinished += tileData.r;
+              totalNew += tileData.g;
+              if (tileData.a > 0.0) hasFinished = 1.0;
+            }
+          }
+        }
+
+        superTileInfo = vec4(totalFinished, totalNew, 0.0, hasFinished);
+      }
+    `;
+
+    // Compile shaders
+    this.iterProgram = this.compileProgram(vsSource, fsIterSource);
+    this.reduction1Program = this.compileProgram(vsSource, fsReduction1Source);
+    this.reduction2Program = this.compileProgram(vsSource, fsReduction2Source);
+
+    // Cache uniform locations
+    this.cacheIterUniforms();
+    this.cacheReductionUniforms();
+  }
+
+  compileProgram(vsSource, fsSource) {
+    const gl = this.gl;
+
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs, vsSource);
+    gl.compileShader(vs);
+    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+      throw new Error('Vertex shader compile error: ' + gl.getShaderInfoLog(vs));
+    }
+
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs, fsSource);
+    gl.compileShader(fs);
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+      throw new Error('Fragment shader compile error: ' + gl.getShaderInfoLog(fs));
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      throw new Error('Program link error: ' + gl.getProgramInfoLog(program));
+    }
+
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+
+    return program;
+  }
+
+  cacheIterUniforms() {
+    const gl = this.gl;
+    gl.useProgram(this.iterProgram);
+    this.iterUniforms = {
+      u_state: gl.getUniformLocation(this.iterProgram, 'u_state'),
+      u_checkpoint: gl.getUniformLocation(this.iterProgram, 'u_checkpoint'),
+      u_resolution: gl.getUniformLocation(this.iterProgram, 'u_resolution'),
+      u_cMin: gl.getUniformLocation(this.iterProgram, 'u_cMin'),
+      u_cMax: gl.getUniformLocation(this.iterProgram, 'u_cMax'),
+      u_iterations: gl.getUniformLocation(this.iterProgram, 'u_iterations'),
+      u_escapeRadius: gl.getUniformLocation(this.iterProgram, 'u_escapeRadius'),
+      u_exponent: gl.getUniformLocation(this.iterProgram, 'u_exponent'),
+      u_epsilon: gl.getUniformLocation(this.iterProgram, 'u_epsilon'),
+      u_epsilon2: gl.getUniformLocation(this.iterProgram, 'u_epsilon2'),
+      u_startIter: gl.getUniformLocation(this.iterProgram, 'u_startIter'),
+      u_fibPrev: gl.getUniformLocation(this.iterProgram, 'u_fibPrev'),
+      u_fibCurr: gl.getUniformLocation(this.iterProgram, 'u_fibCurr')
+    };
+  }
+
+  cacheReductionUniforms() {
+    const gl = this.gl;
+
+    gl.useProgram(this.reduction1Program);
+    this.reduction1Uniforms = {
+      u_state: gl.getUniformLocation(this.reduction1Program, 'u_state'),
+      u_prevTiles: gl.getUniformLocation(this.reduction1Program, 'u_prevTiles'),
+      u_stateSize: gl.getUniformLocation(this.reduction1Program, 'u_stateSize'),
+      u_tileSize: gl.getUniformLocation(this.reduction1Program, 'u_tileSize')
+    };
+
+    gl.useProgram(this.reduction2Program);
+    this.reduction2Uniforms = {
+      u_tiles: gl.getUniformLocation(this.reduction2Program, 'u_tiles'),
+      u_tilesSize: gl.getUniformLocation(this.reduction2Program, 'u_tilesSize')
+    };
+  }
+
+  createTexture(width, height, internalFormat = null) {
+    const gl = this.gl;
+    internalFormat = internalFormat || gl.RGBA32F;
+
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
+  createFramebuffer(texture) {
+    const gl = this.gl;
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error('Framebuffer incomplete: ' + status);
+    }
+
+    return fb;
+  }
+
+  initPingPongBuffers() {
+    const gl = this.gl;
+
+    // Create state and checkpoint textures for ping-pong
+    this.pingStateTex = this.createTexture(this.texWidth, this.texHeight);
+    this.pingCheckpointTex = this.createTexture(this.texWidth, this.texHeight);
+    this.pongStateTex = this.createTexture(this.texWidth, this.texHeight);
+    this.pongCheckpointTex = this.createTexture(this.texWidth, this.texHeight);
+
+    // Create MRT framebuffers (2 color attachments each)
+    this.pingFB = this.createMRTFramebuffer(this.pingStateTex, this.pingCheckpointTex);
+    this.pongFB = this.createMRTFramebuffer(this.pongStateTex, this.pongCheckpointTex);
+
+    // Start with ping as read, pong as write
+    this.isPingRead = true;
+  }
+
+  createMRTFramebuffer(stateTex, checkpointTex) {
+    const gl = this.gl;
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+
+    // Attach state texture to COLOR_ATTACHMENT0
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, stateTex, 0);
+    // Attach checkpoint texture to COLOR_ATTACHMENT1
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, checkpointTex, 0);
+
+    // Enable both attachments for MRT
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error('MRT Framebuffer incomplete: ' + status);
+    }
+
+    return fb;
+  }
+
+  initHierarchyBuffers() {
+    // Level 1: tile summaries
+    this.level1Tex = this.createTexture(this.level1Width, this.level1Height);
+    this.prevLevel1Tex = this.createTexture(this.level1Width, this.level1Height);
+    this.level1FB = this.createFramebuffer(this.level1Tex);
+    this.prevLevel1FB = this.createFramebuffer(this.prevLevel1Tex);
+
+    // Level 2: super-tile summaries
+    this.level2Tex = this.createTexture(this.level2Width, this.level2Height);
+    this.level2FB = this.createFramebuffer(this.level2Tex);
+
+    // Clear BOTH level1 textures to avoid garbage values after swap
+    const gl = this.gl;
+    gl.clearColor(0, 0, 0, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.level1FB);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.prevLevel1FB);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+
+  initQuad() {
+    const gl = this.gl;
+
+    // Full-screen quad vertices
+    const positions = new Float32Array([
+      -1, -1,  1, -1,  -1, 1,
+      -1,  1,  1, -1,   1, 1
+    ]);
+
+    this.quadVAO = gl.createVertexArray();
+    gl.bindVertexArray(this.quadVAO);
+
+    const posBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+    const posLoc = gl.getAttribLocation(this.iterProgram, 'a_position');
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    gl.bindVertexArray(null);
+  }
+
+  initStateTexture() {
+    const gl = this.gl;
+    const sizeScalar = this.size;
+    const reDD = qdToDD(this.re);
+    const imDD = qdToDD(this.im);
+
+    // Calculate complex plane bounds
+    const halfWidth = sizeScalar / 2;
+    const halfHeight = halfWidth / this.config.aspectRatio;
+    this.cMinRe = reDD[0] - halfWidth;
+    this.cMaxRe = reDD[0] + halfWidth;
+    this.cMinIm = imDD[0] - halfHeight;
+    this.cMaxIm = imDD[0] + halfHeight;
+
+    // Initialize state texture: z=0, iter=0, status=0 (active)
+    const stateData = new Float32Array(this.texWidth * this.texHeight * 4);
+    // All zeros is the correct initial state (z=0, iter=0, status=0)
+
+    gl.bindTexture(gl.TEXTURE_2D, this.pingStateTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.texWidth, this.texHeight,
+                     gl.RGBA, gl.FLOAT, stateData);
+
+    // Initialize checkpoint texture with sentinel values
+    // checkpoint_z must be far from any valid z value to prevent false convergence
+    // on the first iterations (before the first Fibonacci checkpoint is set)
+    const checkpointData = new Float32Array(this.texWidth * this.texHeight * 4);
+    // Fast initialization: build pattern then copy with doubling
+    const sentinel = 1e30;
+    // Start with one pixel pattern
+    checkpointData[0] = sentinel;  // checkpoint_zr
+    checkpointData[1] = sentinel;  // checkpoint_zi
+    // Copy doubling: 1->2->4->8->... pixels at a time
+    let filled = 4;  // 1 pixel = 4 floats
+    while (filled < checkpointData.length) {
+      const copyLen = Math.min(filled, checkpointData.length - filled);
+      checkpointData.copyWithin(filled, 0, copyLen);
+      filled += copyLen;
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, this.pingCheckpointTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.texWidth, this.texHeight,
+                     gl.RGBA, gl.FLOAT, checkpointData);
+  }
+
+  swapPingPong() {
+    this.isPingRead = !this.isPingRead;
+  }
+
+  // Helper to get current read textures
+  getReadTextures() {
+    return this.isPingRead
+      ? { state: this.pingStateTex, checkpoint: this.pingCheckpointTex }
+      : { state: this.pongStateTex, checkpoint: this.pongCheckpointTex };
+  }
+
+  // Helper to get current write framebuffer
+  getWriteFB() {
+    return this.isPingRead ? this.pongFB : this.pingFB;
+  }
+
+  // Main entry point for scheduler - matches GpuBoard interface
+  async iterate(targetIters = null) {
+    // Wait for WebGL initialization
+    await this.glInitPromise;
+
+    if (this.un <= 0) return;
+
+    // Calculate iterations based on effort if not specified
+    if (targetIters === null) {
+      const pixels = this.texWidth * this.texHeight;
+      const effort = Math.max(this.effort, 1);
+      targetIters = Math.max(1, Math.floor(100000 / (pixels * effort)));
+    }
+
+    // Run GPU iterations
+    this.doGpuIterations(targetIters);
+
+    // Read results (queues changes directly to changeList)
+    this.readResults();
+  }
+
+  // Find Fibonacci numbers around a given iteration
+  // Returns { prev, curr } where prev <= iter < curr
+  getFibonacciBounds(iter) {
+    // Extend cache if needed
+    while (this.fibCache[this.fibCache.length - 1] <= iter) {
+      const len = this.fibCache.length;
+      this.fibCache.push(this.fibCache[len - 1] + this.fibCache[len - 2]);
+    }
+    // Find the first Fibonacci > iter
+    let i = 0;
+    while (this.fibCache[i] <= iter) i++;
+    return {
+      prev: i > 0 ? this.fibCache[i - 1] : 1,
+      curr: this.fibCache[i]
+    };
+  }
+
+  // Queue n iterations (non-blocking - driver pipelines internally)
+  // Batches up to 327680 iterations per draw call (shader loop limit)
+  doGpuIterations(n) {
+    const gl = this.gl;
+    const MAX_SHADER_ITERS = 327680;  // Shader's internal loop limit
+
+    gl.useProgram(this.iterProgram);
+    gl.bindVertexArray(this.quadVAO);
+
+    // Set static uniforms
+    gl.uniform2f(this.iterUniforms.u_resolution, this.texWidth, this.texHeight);
+    gl.uniform2f(this.iterUniforms.u_cMin, this.cMinRe, this.cMinIm);
+    gl.uniform2f(this.iterUniforms.u_cMax, this.cMaxRe, this.cMaxIm);
+    gl.uniform1f(this.iterUniforms.u_escapeRadius, 4.0);
+    gl.uniform1i(this.iterUniforms.u_exponent, this.config.exponent);
+    gl.uniform1f(this.iterUniforms.u_epsilon, this.epsilon);
+    gl.uniform1f(this.iterUniforms.u_epsilon2, this.epsilon2);
+
+    // Batch iterations - shader handles up to 256 per draw call
+    let remaining = n;
+    while (remaining > 0) {
+      const batchSize = Math.min(remaining, MAX_SHADER_ITERS);
+      const startIter = this.it;
+      const { prev: fibPrev, curr: fibCurr } = this.getFibonacciBounds(startIter);
+
+      // Set per-batch uniforms
+      gl.uniform1i(this.iterUniforms.u_startIter, startIter);
+      gl.uniform1i(this.iterUniforms.u_fibPrev, fibPrev);
+      gl.uniform1i(this.iterUniforms.u_fibCurr, fibCurr);
+      gl.uniform1i(this.iterUniforms.u_iterations, batchSize);
+
+      // Get current read textures
+      const readTextures = this.getReadTextures();
+
+      // Bind state texture to TEXTURE0
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, readTextures.state);
+      gl.uniform1i(this.iterUniforms.u_state, 0);
+
+      // Bind checkpoint texture to TEXTURE1
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, readTextures.checkpoint);
+      gl.uniform1i(this.iterUniforms.u_checkpoint, 1);
+
+      // Bind write framebuffer (MRT with both state and checkpoint attachments)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.getWriteFB());
+      gl.viewport(0, 0, this.texWidth, this.texHeight);
+
+      // Draw full-screen quad
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+      // Swap and advance
+      this.swapPingPong();
+      this.it += batchSize;
+      remaining -= batchSize;
+    }
+
+    gl.bindVertexArray(null);
+  }
+
+  // Run reduction passes (GPU-side, pipelined)
+  runReductionPasses() {
+    const gl = this.gl;
+    const readTextures = this.getReadTextures();
+
+    // Pass 1: State → Level 1
+    gl.useProgram(this.reduction1Program);
+    gl.bindVertexArray(this.quadVAO);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, readTextures.state);
+    gl.uniform1i(this.reduction1Uniforms.u_state, 0);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.prevLevel1Tex);
+    gl.uniform1i(this.reduction1Uniforms.u_prevTiles, 1);
+
+    gl.uniform2f(this.reduction1Uniforms.u_stateSize, this.texWidth, this.texHeight);
+    gl.uniform2f(this.reduction1Uniforms.u_tileSize, GlBoard.TILE_SIZE, GlBoard.TILE_SIZE);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.level1FB);
+    gl.viewport(0, 0, this.level1Width, this.level1Height);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // Pass 2: Level 1 → Level 2
+    gl.useProgram(this.reduction2Program);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.level1Tex);
+    gl.uniform1i(this.reduction2Uniforms.u_tiles, 0);
+
+    gl.uniform2f(this.reduction2Uniforms.u_tilesSize, this.level1Width, this.level1Height);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.level2FB);
+    gl.viewport(0, 0, this.level2Width, this.level2Height);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    gl.bindVertexArray(null);
+  }
+
+  // Read results using hierarchical adaptive readback
+  readResults() {
+    const gl = this.gl;
+
+    // Run reduction passes
+    this.runReductionPasses();
+
+    // Read Level 2 (tiny - always read all)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.level2FB);
+    const superTiles = new Float32Array(this.level2Width * this.level2Height * 4);
+    gl.readPixels(0, 0, this.level2Width, this.level2Height, gl.RGBA, gl.FLOAT, superTiles);
+
+    // Find super-tiles with new escapes
+    const activeSuperTiles = [];
+    let totalNew = 0;
+    for (let sy = 0; sy < this.level2Height; sy++) {
+      for (let sx = 0; sx < this.level2Width; sx++) {
+        const idx = (sy * this.level2Width + sx) * 4;
+        const newlyEscaped = superTiles[idx + 1];
+        if (newlyEscaped > 0) {
+          activeSuperTiles.push({ x: sx, y: sy, count: newlyEscaped });
+          totalNew += newlyEscaped;
+        }
+      }
+    }
+
+    if (activeSuperTiles.length === 0) {
+      // No new escapes - swap buffers and return empty
+      this.swapLevel1Buffers();
+      return null;
+    }
+
+    // Adaptive: if >10% escapes, just read full texture
+    const totalPixels = this.texWidth * this.texHeight;
+    if (totalNew > totalPixels * 0.1) {
+      return this.readFullTexture();
+    }
+
+    // Hierarchical read
+    return this.readHierarchical(activeSuperTiles);
+  }
+
+  // Create a temporary framebuffer for reading a single texture
+  createReadFB(texture) {
+    const gl = this.gl;
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    return fb;
+  }
+
+  readHierarchical(activeSuperTiles) {
+    const gl = this.gl;
+
+    // Group results: escaped by iteration, converged separately
+    const escapedByIter = new Map();
+    const convergedByIter = new Map();
+
+    // Read Level 1 for active super-tiles
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.level1FB);
+    const activeTiles = [];
+
+    for (const st of activeSuperTiles) {
+      const x0 = st.x * GlBoard.TILE_SIZE;
+      const y0 = st.y * GlBoard.TILE_SIZE;
+      const w = Math.min(GlBoard.TILE_SIZE, this.level1Width - x0);
+      const h = Math.min(GlBoard.TILE_SIZE, this.level1Height - y0);
+
+      const tileData = new Float32Array(w * h * 4);
+      gl.readPixels(x0, y0, w, h, gl.RGBA, gl.FLOAT, tileData);
+
+      for (let ty = 0; ty < h; ty++) {
+        for (let tx = 0; tx < w; tx++) {
+          const idx = (ty * w + tx) * 4;
+          const newlyFinished = tileData[idx + 1];
+          if (newlyFinished > 0) {
+            activeTiles.push({ x: x0 + tx, y: y0 + ty, count: newlyFinished });
+          }
+        }
+      }
+    }
+
+    // Get read textures
+    const readTextures = this.getReadTextures();
+
+    // Create temporary read framebuffers for state and checkpoint
+    const stateReadFB = this.createReadFB(readTextures.state);
+    const checkpointReadFB = this.createReadFB(readTextures.checkpoint);
+
+    // Read state texture for active tiles
+    gl.bindFramebuffer(gl.FRAMEBUFFER, stateReadFB);
+
+    // Collect converged pixel locations for checkpoint read
+    const convergedPixels = [];
+
+    for (const tile of activeTiles) {
+      const x0 = tile.x * GlBoard.TILE_SIZE;
+      const y0 = tile.y * GlBoard.TILE_SIZE;
+      const w = Math.min(GlBoard.TILE_SIZE, this.texWidth - x0);
+      const h = Math.min(GlBoard.TILE_SIZE, this.texHeight - y0);
+
+      const pixels = new Float32Array(w * h * 4);
+      gl.readPixels(x0, y0, w, h, gl.RGBA, gl.FLOAT, pixels);
+
+      for (let py = 0; py < h; py++) {
+        for (let px = 0; px < w; px++) {
+          const localIdx = (py * w + px) * 4;
+          const status = pixels[localIdx + 3];
+          const globalX = x0 + px;
+          const globalY = y0 + py;
+          // Flip Y: WebGL y=0 is bottom, View y=0 is top
+          const flippedY = this.texHeight - 1 - globalY;
+          const globalIdx = flippedY * this.texWidth + globalX;
+
+          if (this.reported[globalIdx]) continue;
+
+          if (status === 1.0) {  // Escaped
+            const iter = Math.round(pixels[localIdx + 2]);
+            const zr = pixels[localIdx];
+            const zi = pixels[localIdx + 1];
+            this.nn[globalIdx] = iter;
+            this.reported[globalIdx] = 1;
+            this.un--;
+            this.di++;
+
+            if (!escapedByIter.has(iter)) {
+              escapedByIter.set(iter, []);
+            }
+            escapedByIter.get(iter).push(globalIdx);
+          } else if (status === 2.0) {  // Converged
+            const iter = Math.round(pixels[localIdx + 2]);
+            const zr = pixels[localIdx];
+            const zi = pixels[localIdx + 1];
+            convergedPixels.push({ globalIdx, iter, zr, zi, tileX: x0, tileY: y0, px, py });
+          }
+        }
+      }
+    }
+
+    // Read checkpoint texture for converged pixels to get period
+    if (convergedPixels.length > 0) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, checkpointReadFB);
+
+      // Group by tile for efficient reads
+      const pixelsByTile = new Map();
+      for (const cp of convergedPixels) {
+        const key = `${cp.tileX},${cp.tileY}`;
+        if (!pixelsByTile.has(key)) {
+          pixelsByTile.set(key, { tileX: cp.tileX, tileY: cp.tileY, pixels: [] });
+        }
+        pixelsByTile.get(key).pixels.push(cp);
+      }
+
+      for (const [, tileInfo] of pixelsByTile) {
+        const x0 = tileInfo.tileX;
+        const y0 = tileInfo.tileY;
+        const w = Math.min(GlBoard.TILE_SIZE, this.texWidth - x0);
+        const h = Math.min(GlBoard.TILE_SIZE, this.texHeight - y0);
+
+        const checkpointData = new Float32Array(w * h * 4);
+        gl.readPixels(x0, y0, w, h, gl.RGBA, gl.FLOAT, checkpointData);
+
+        for (const cp of tileInfo.pixels) {
+          const localIdx = (cp.py * w + cp.px) * 4;
+          const period = Math.round(checkpointData[localIdx + 2]);
+
+          this.nn[cp.globalIdx] = -cp.iter;  // Negative for converged
+          this.reported[cp.globalIdx] = 1;
+          this.un--;
+
+          if (!convergedByIter.has(cp.iter)) {
+            convergedByIter.set(cp.iter, []);
+          }
+          convergedByIter.get(cp.iter).push({
+            index: cp.globalIdx,
+            z: [cp.zr, cp.zi],
+            p: period
+          });
+        }
+      }
+    }
+
+    // Clean up temporary framebuffers
+    gl.deleteFramebuffer(stateReadFB);
+    gl.deleteFramebuffer(checkpointReadFB);
+
+    // Swap level1 buffers for next "newly finished" tracking
+    this.swapLevel1Buffers();
+
+    // Queue changes grouped by iteration
+    if (escapedByIter.size === 0 && convergedByIter.size === 0) return null;
+
+    // Merge and sort by iteration
+    const allIters = new Set([...escapedByIter.keys(), ...convergedByIter.keys()]);
+    const sortedIters = Array.from(allIters).sort((a, b) => a - b);
+
+    for (const iter of sortedIters) {
+      const escaped = escapedByIter.get(iter) || [];
+      const converged = convergedByIter.get(iter) || [];
+      this.queueChanges({ iter, nn: escaped, vv: converged });
+    }
+
+    return { queued: true };
+  }
+
+  readFullTexture() {
+    const gl = this.gl;
+
+    // Group results: escaped by iteration, converged separately
+    const escapedByIter = new Map();
+    const convergedByIter = new Map();
+
+    // Get read textures
+    const readTextures = this.getReadTextures();
+
+    // Create temporary read framebuffers
+    const stateReadFB = this.createReadFB(readTextures.state);
+    const checkpointReadFB = this.createReadFB(readTextures.checkpoint);
+
+    // Read full state texture
+    gl.bindFramebuffer(gl.FRAMEBUFFER, stateReadFB);
+    const statePixels = new Float32Array(this.texWidth * this.texHeight * 4);
+    gl.readPixels(0, 0, this.texWidth, this.texHeight, gl.RGBA, gl.FLOAT, statePixels);
+
+    // Collect converged pixel indices for checkpoint read
+    const convergedIndices = [];
+
+    for (let i = 0; i < this.texWidth * this.texHeight; i++) {
+      // Convert WebGL index (y=0 at bottom) to View index (y=0 at top)
+      const glX = i % this.texWidth;
+      const glY = Math.floor(i / this.texWidth);
+      const flippedY = this.texHeight - 1 - glY;
+      const viewIdx = flippedY * this.texWidth + glX;
+
+      if (this.reported[viewIdx]) continue;
+
+      const status = statePixels[i * 4 + 3];
+
+      if (status === 1.0) {  // Escaped
+        const iter = Math.round(statePixels[i * 4 + 2]);
+        this.nn[viewIdx] = iter;
+        this.reported[viewIdx] = 1;
+        this.un--;
+        this.di++;
+
+        if (!escapedByIter.has(iter)) {
+          escapedByIter.set(iter, []);
+        }
+        escapedByIter.get(iter).push(viewIdx);
+      } else if (status === 2.0) {  // Converged
+        const iter = Math.round(statePixels[i * 4 + 2]);
+        const zr = statePixels[i * 4];
+        const zi = statePixels[i * 4 + 1];
+        convergedIndices.push({ index: viewIdx, glIndex: i, iter, zr, zi });
+      }
+    }
+
+    // Read checkpoint texture for converged pixels to get period
+    if (convergedIndices.length > 0) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, checkpointReadFB);
+      const checkpointPixels = new Float32Array(this.texWidth * this.texHeight * 4);
+      gl.readPixels(0, 0, this.texWidth, this.texHeight, gl.RGBA, gl.FLOAT, checkpointPixels);
+
+      for (const cp of convergedIndices) {
+        // Use glIndex to read from WebGL buffer, index for View arrays
+        const period = Math.round(checkpointPixels[cp.glIndex * 4 + 2]);
+
+        this.nn[cp.index] = -cp.iter;  // Negative for converged
+        this.reported[cp.index] = 1;
+        this.un--;
+
+        if (!convergedByIter.has(cp.iter)) {
+          convergedByIter.set(cp.iter, []);
+        }
+        convergedByIter.get(cp.iter).push({
+          index: cp.index,
+          z: [cp.zr, cp.zi],
+          p: period
+        });
+      }
+    }
+
+    // Clean up temporary framebuffers
+    gl.deleteFramebuffer(stateReadFB);
+    gl.deleteFramebuffer(checkpointReadFB);
+
+    // Swap level1 buffers
+    this.swapLevel1Buffers();
+
+    // Queue changes grouped by iteration
+    if (escapedByIter.size === 0 && convergedByIter.size === 0) return null;
+
+    // Merge and sort by iteration
+    const allIters = new Set([...escapedByIter.keys(), ...convergedByIter.keys()]);
+    const sortedIters = Array.from(allIters).sort((a, b) => a - b);
+
+    for (const iter of sortedIters) {
+      const escaped = escapedByIter.get(iter) || [];
+      const converged = convergedByIter.get(iter) || [];
+      this.queueChanges({ iter, nn: escaped, vv: converged });
+    }
+
+    return { queued: true };
+  }
+
+  swapLevel1Buffers() {
+    [this.level1FB, this.prevLevel1FB] = [this.prevLevel1FB, this.level1FB];
+    [this.level1Tex, this.prevLevel1Tex] = [this.prevLevel1Tex, this.level1Tex];
+  }
+
+  // Serialization support
+  async serialize() {
+    const base = await super.serialize();
+    // GlBoard-specific state
+    return {
+      ...base,
+      type: 'GlBoard',
+      reported: Array.from(this.reported),
+      cMinRe: this.cMinRe,
+      cMinIm: this.cMinIm,
+      cMaxRe: this.cMaxRe,
+      cMaxIm: this.cMaxIm
+    };
+  }
+
+  static fromSerialized(serialized) {
+    const board = new GlBoard(
+      serialized.k,
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
+      serialized.config,
+      serialized.id
+    );
+
+    board.glInitPromise = board.glInitPromise.then(() => {
+      board.it = serialized.it;
+      board.un = serialized.un;
+      board.di = serialized.di;
+      board.ch = serialized.ch || 0;
+
+      if (serialized.reported) {
+        board.reported = new Uint8Array(serialized.reported);
+      }
+
+      board.cMinRe = serialized.cMinRe;
+      board.cMinIm = serialized.cMinIm;
+      board.cMaxRe = serialized.cMaxRe;
+      board.cMaxIm = serialized.cMaxIm;
+
+      // Restore nn array
+      board.nn = new Array(serialized.config.dimsArea).fill(0);
+      if (serialized.completedIndexes) {
+        for (let i = 0; i < serialized.completedIndexes.length; i++) {
+          board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+        }
+      }
+    });
+
+    return board;
+  }
+
+  // Check if WebGL2 is available
+  static isAvailable() {
+    if (typeof OffscreenCanvas === 'undefined') return false;
+    try {
+      const canvas = new OffscreenCanvas(1, 1);
+      const gl = canvas.getContext('webgl2');
+      if (!gl) return false;
+      const ext = gl.getExtension('EXT_color_buffer_float');
+      return !!ext;
+    } catch (e) {
+      return false;
+    }
+  }
+}
+
 // Base class for double-buffered GPU perturbation boards (GpuZhuoranBoard, AdaptiveGpuBoard)
 // Provides shared double-buffering infrastructure and result processing
 class GpuZhuoranBaseBoard extends GpuBaseBoard {
@@ -11621,10 +12730,23 @@ const forcedBoardTypes = {
     'ddz': DDZhuoranBoard,
     'qdz': QDZhuoranBoard,
     'gpu': GpuBoard,
+    'gl': GlBoard,
     'gpuz': GpuZhuoranBoard,
     'adaptive': AdaptiveGpuBoard,
     'qdcpu': QDCpuBoard
 };
+
+// Cache WebGL2 availability check
+let glBoardAvailable = null;
+function isGlBoardAvailable() {
+  if (glBoardAvailable === null) {
+    glBoardAvailable = GlBoard.isAvailable();
+    if (glBoardAvailable) {
+      console.log('WebGL2 available - GlBoard will be used for shallow zooms');
+    }
+  }
+  return glBoardAvailable;
+}
 
 function selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard) {
   if (forceBoard) {
@@ -11636,7 +12758,14 @@ function selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard) {
     }
   }
 
-  // First, try to select a GPU board.
+  // For shallow zooms, prefer GlBoard (WebGL2) for gap-free GPU pipelining
+  // GlBoard uses fragment shaders with driver-managed synchronization,
+  // which eliminates GPU idle gaps between batches.
+  if (pixelSize > 1e-7 && isGlBoardAvailable()) {
+    return GlBoard;
+  }
+
+  // For medium/deep zooms, or if WebGL2 not available, use WebGPU boards
   if (gpuMaxBufferSize) {
     // Select board type based on zoom level and float32 precision limits
     // Float32 has ~7 decimal digits, so direct iteration works to ~1e-7 pixel size
