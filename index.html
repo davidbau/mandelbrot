@@ -9647,15 +9647,9 @@ class GlBoard extends Board {
     // Wait for WebGL initialization
     await this.glInitPromise;
 
-    // Try to process pending readback first
-    if (this.pendingReadback) {
-      this.waitForPendingReadback();
-      // If still pending (GPU not ready yet), skip this iteration
-      // to avoid overwriting the pending state
-      if (this.pendingReadback) {
-        return;
-      }
-    }
+    // Process any pending readback from previous iteration
+    // This blocks until complete, but allows OTHER boards to work in parallel
+    this.waitForPendingReadback();
 
     if (this.un <= 0) return;
 
@@ -9666,30 +9660,26 @@ class GlBoard extends Board {
       targetIters = Math.max(1, Math.floor(100000 / (pixels * effort)));
     }
 
-    // Track iteration range for this batch (for precomputed flushing)
-    const batchStartIter = this.it;
-
     // Run GPU iterations
     this.doGpuIterations(targetIters);
 
     // Store end iteration for precomputed flushing when readback completes
     this.pendingBatchEndIter = this.it;
 
-    // Start async readback (non-blocking) - results processed next iterate()
+    // Start async readback - results processed at start of next iterate()
     this.startAsyncReadback();
-
-    // DON'T flush precomputed here - flush when readback completes
-    // to keep precomputed and GPU results for same iteration range together
   }
 
-  // Start async readback using PBO to avoid blocking
+  // Start async readback using PBO
+  // The PBO read is async - GPU copies data in background
+  // getBufferSubData() will block until complete
   startAsyncReadback() {
     const gl = this.gl;
 
-    // Run reduction passes (GPU work, non-blocking)
+    // Run reduction passes
     this.runReductionPasses();
 
-    // Use ping-pong PBOs: write to one while reading from the other
+    // Use ping-pong PBOs
     const pboIndex = this.currentPBOIndex;
     this.currentPBOIndex = 1 - this.currentPBOIndex;
 
@@ -9701,46 +9691,31 @@ class GlBoard extends Board {
       gl.bufferData(gl.PIXEL_PACK_BUFFER, this.level2Size, gl.STREAM_READ);
     }
 
-    // Async read level2 into PBO (returns immediately)
+    // Async read level2 into PBO
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.level2FB);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.level2PBOs[pboIndex]);
     gl.readPixels(0, 0, this.level2Width, this.level2Height, gl.RGBA, gl.FLOAT, 0);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
 
-    // Create fence sync to track completion
-    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-
     // Flush to ensure commands are submitted
     gl.flush();
 
-    // Store pending state with PBO index
-    this.pendingReadback = { sync, pboIndex };
+    // Store pending PBO index
+    this.pendingReadback = { pboIndex };
   }
 
-  // Wait for pending readback to complete (may block briefly)
+  // Wait for pending readback to complete
   waitForPendingReadback() {
     const gl = this.gl;
     const pending = this.pendingReadback;
 
     if (!pending) return;
 
-    // Wait for GPU work to complete using clientWaitSync with timeout 0
-    // This is allowed (only large timeouts cause INVALID_OPERATION)
-    // Using timeout 0 properly polls the GPU status
-    const result = gl.clientWaitSync(pending.sync, gl.SYNC_FLUSH_COMMANDS_BIT, 0);
-
-    if (result === gl.TIMEOUT_EXPIRED) {
-      // GPU work not complete yet - leave pending for next iterate() call
-      return;
-    }
-
-    // GPU work is complete (ALREADY_SIGNALED or CONDITION_SATISFIED)
-    gl.deleteSync(pending.sync);
     const batchEndIter = this.pendingBatchEndIter;
     this.pendingReadback = null;
     this.pendingBatchEndIter = null;
 
-    // Read level2 data from the correct PBO (sync is complete, so this won't stall)
+    // getBufferSubData() blocks until the PBO read is complete
     const level2Data = new Float32Array(this.level2Width * this.level2Height * 4);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.level2PBOs[pending.pboIndex]);
     gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, level2Data);
