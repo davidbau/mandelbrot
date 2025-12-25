@@ -5893,8 +5893,9 @@ class Board {
       if (!this.changeMap) this.changeMap = new Map();
       const existing = this.changeMap.get(changes.iter);
       if (existing) {
-        existing.nn.push(...changes.nn);
-        existing.vv.push(...changes.vv);
+        // Use loop instead of spread to avoid stack overflow with large arrays
+        for (const item of changes.nn) existing.nn.push(item);
+        for (const item of changes.vv) existing.vv.push(item);
       } else {
         this.changeList.push(changes);
         this.changeMap.set(changes.iter, changes);
@@ -9565,11 +9566,12 @@ class GlBoard extends Board {
     if (this.precomputed) {
       const precomputedCount = this.precomputed.getPrecomputedCount();
       if (precomputedCount > 0) {
+        const pp = this.precomputed;
         // Iterate through all precomputed pixels
-        for (const [iter, data] of this.precomputed.rangeMap) {
+        for (const [iter, range] of pp.rangeMap) {
           // Mark diverged pixels
-          for (let i = 0; i < data.divergedCount; i++) {
-            const gridIndex = data.divergedIndices[i];
+          for (let i = 0; i < range.dCount; i++) {
+            const gridIndex = pp.dIndices[range.dStart + i];
             // Convert grid index to texture offset (flip Y)
             const gridY = Math.floor(gridIndex / this.texWidth);
             const gridX = gridIndex % this.texWidth;
@@ -9579,8 +9581,8 @@ class GlBoard extends Board {
             this.reported[gridIndex] = 1;  // Mark as reported so we don't read it back
           }
           // Mark converged pixels
-          for (let i = 0; i < data.convergedCount; i++) {
-            const gridIndex = data.convergedIndices[i];
+          for (let i = 0; i < range.cCount; i++) {
+            const gridIndex = pp.cIndices[range.cStart + i];
             const gridY = Math.floor(gridIndex / this.texWidth);
             const gridX = gridIndex % this.texWidth;
             const texY = this.texHeight - 1 - gridY;
@@ -9589,14 +9591,24 @@ class GlBoard extends Board {
             this.reported[gridIndex] = 1;  // Mark as reported
           }
         }
-        // Note: don't adjust un here - it will be decremented by flushAtIteration
+        // Note: don't adjust un here - it will be decremented by flushUpToIteration
         // when precomputed points are flushed, which properly updates di/un together
       }
     }
 
+    // Initialize BOTH ping and pong checkpoint textures with the same data
+    // This ensures precomputed pixels have status=4 regardless of which buffer is read first
     gl.bindTexture(gl.TEXTURE_2D, this.pingCheckpointTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.texWidth, this.texHeight,
                      gl.RGBA, gl.FLOAT, checkpointData);
+    gl.bindTexture(gl.TEXTURE_2D, this.pongCheckpointTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.texWidth, this.texHeight,
+                     gl.RGBA, gl.FLOAT, checkpointData);
+
+    // Also initialize both state textures with pixel indices
+    gl.bindTexture(gl.TEXTURE_2D, this.pongStateTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.texWidth, this.texHeight,
+                     gl.RGBA, gl.FLOAT, stateData);
   }
 
   swapPingPong() {
@@ -9636,8 +9648,9 @@ class GlBoard extends Board {
     this.readResults();
 
     // Flush precomputed points up to current iteration
+    // Use flushUpToIteration since we process batches of iterations at once
     if (this.precomputed) {
-      this.precomputed.flushAtIteration(this.it, this);
+      this.precomputed.flushUpToIteration(this.it, this);
     }
   }
 
