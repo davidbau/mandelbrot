@@ -7785,8 +7785,8 @@ class GpuBaseBoard extends Board {
     const recordU32s = recordBytes / 4;
 
     // Staging shader: copies results from main area to pre-staging area
-    // Supports multiple workgroups by having each thread read header values directly.
-    // Thread 0 of workgroup 0 writes the pre-staging header and updates lastStaged.
+    // All threads copy records in parallel, then atomicMin finds first not-ready record.
+    // This handles the race where atomicAdd claims a slot before data is written.
     const stagingShaderCode = `
       struct StagingParams {
         chunkSize: u32,
@@ -7802,41 +7802,64 @@ class GpuBaseBoard extends Board {
       // [0]: count (firstEmpty)
       // [1]: lastStaged
       // [2..7]: other header fields
-      // [8..]: main records
+      // [8..]: main records (status at offset 2 within each record)
       // [preStagingOffset/4..]: pre-staging header + records
 
+      const STATUS_OFFSET: u32 = 2u;
+
+      var<workgroup> sharedFirstEmpty: u32;
+      var<workgroup> sharedLastStaged: u32;
+      var<workgroup> sharedMaxToCheck: u32;
+      var<workgroup> firstNotReady: atomic<u32>;
+
       @compute @workgroup_size(256)
-      fn staging_main(@builtin(local_invocation_id) local_id: vec3<u32>,
-                      @builtin(workgroup_id) workgroup_id: vec3<u32>) {
-        // Each thread reads header values directly (same for all threads)
-        let firstEmpty = buffer[0];
-        let lastStaged = buffer[1];
-        let available = firstEmpty - lastStaged;
-        let countInChunk = min(available, params.chunkSize);
+      fn staging_main(@builtin(local_invocation_id) local_id: vec3<u32>) {
+        let tid = local_id.x;
 
-        // Global thread ID
-        let tid = local_id.x + workgroup_id.x * 256u;
-
-        // Only thread 0 of workgroup 0 writes header and updates lastStaged
+        // Thread 0 reads header and initializes shared state
         if (tid == 0u) {
-          let headerBase = params.preStagingOffset / 4u;
-          buffer[headerBase + 0u] = firstEmpty;
-          buffer[headerBase + 1u] = countInChunk;
-          buffer[headerBase + 2u] = lastStaged;
-          buffer[headerBase + 3u] = 0u;  // reserved
-
-          // Update lastStaged for next batch
-          buffer[1] = lastStaged + countInChunk;
+          sharedFirstEmpty = buffer[0];
+          sharedLastStaged = buffer[1];
+          sharedMaxToCheck = min(sharedFirstEmpty - sharedLastStaged, params.chunkSize);
+          atomicStore(&firstNotReady, sharedMaxToCheck);  // "all ready" sentinel
         }
 
-        // Each thread copies one record (if within valid range)
-        if (tid < countInChunk) {
-          let srcRecordStart = 8u + (lastStaged + tid) * params.recordU32s;
-          let dstRecordStart = (params.preStagingOffset / 4u) + 4u + tid * params.recordU32s;
+        workgroupBarrier();
 
-          for (var i = 0u; i < params.recordU32s; i++) {
-            buffer[dstRecordStart + i] = buffer[srcRecordStart + i];
+        let lastStaged = sharedLastStaged;
+        let maxToCheck = sharedMaxToCheck;
+
+        // Each thread copies multiple records (strided) and checks status
+        for (var i = tid; i < maxToCheck; i = i + 256u) {
+          let srcRecordStart = 8u + (lastStaged + i) * params.recordU32s;
+          let dstRecordStart = (params.preStagingOffset / 4u) + 4u + i * params.recordU32s;
+
+          // Copy the record
+          for (var j = 0u; j < params.recordU32s; j++) {
+            buffer[dstRecordStart + j] = buffer[srcRecordStart + j];
           }
+
+          // Check status - if not ready, atomicMin to find earliest not-ready
+          let status = buffer[srcRecordStart + STATUS_OFFSET];
+          if (status == 0u) {
+            atomicMin(&firstNotReady, i);
+          }
+        }
+
+        workgroupBarrier();
+
+        // Thread 0 writes header with actual count and updates lastStaged
+        if (tid == 0u) {
+          let actualCount = atomicLoad(&firstNotReady);
+
+          let headerBase = params.preStagingOffset / 4u;
+          buffer[headerBase + 0u] = sharedFirstEmpty;
+          buffer[headerBase + 1u] = actualCount;
+          buffer[headerBase + 2u] = lastStaged;
+          buffer[headerBase + 3u] = 0u;
+
+          // Update lastStaged (only advance by ready records)
+          buffer[1] = lastStaged + actualCount;
         }
       }
     `;
@@ -7907,9 +7930,8 @@ class GpuBaseBoard extends Board {
     const stagingPass = commandEncoder.beginComputePass({ label: 'Staging pass' });
     stagingPass.setPipeline(this.stagingPipeline);
     stagingPass.setBindGroup(0, this.stagingBindGroups[index]);
-    // Dispatch enough workgroups to cover chunkSize threads
-    const workgroups = Math.ceil(this.resultsReadbackMaxRecords / 256);
-    stagingPass.dispatchWorkgroups(workgroups);
+    // Single workgroup - each thread handles multiple records via strided loop
+    stagingPass.dispatchWorkgroups(1);
     stagingPass.end();
 
     // Copy pre-staging area to staging buffer (each index uses its own pre-staging area)
@@ -8029,15 +8051,27 @@ class GpuBaseBoard extends Board {
         const zr = pixelF32[idx8 + 4];
         const zi = pixelF32[idx8 + 5];
 
+        // Skip already processed pixels (can happen with staging overlap race)
+        if (this.nn[origIndex] !== 0) {
+          if (debugReadback) {
+            const same = this.nn[origIndex] === iters ? ' (SAME VALUE)' : ' (DIFFERENT VALUE)';
+            console.error(`Duplicate result for pixel ${origIndex}, existing nn=${this.nn[origIndex]}, new iters=${iters}${same}`);
+          }
+          dataIndex++;
+          continue;
+        }
+
+        // Skip non-finished pixels (status 0 = record not ready due to race)
+        if (status === 0) {
+          if (debugReadback) {
+            console.error(`status=0 in results buffer at origIndex=${origIndex}`);
+          }
+          dataIndex++;
+          continue;
+        }
+
         // INVARIANT checks (gated by debug=rb flag)
         if (debugReadback) {
-          if (status === 0) {
-            console.error(`INVARIANT VIOLATION: status=0 in results buffer at origIndex=${origIndex}`);
-          }
-          if (this.nn[origIndex] !== 0) {
-            const same = this.nn[origIndex] === iters ? ' (SAME VALUE)' : ' (DIFFERENT VALUE)';
-            console.error(`INVARIANT VIOLATION: Duplicate result for pixel ${origIndex}, existing nn=${this.nn[origIndex]}, new iters=${iters}${same}`);
-          }
           if (iters < batch.startIter) {
             console.error(`INVARIANT VIOLATION: iter=${iters} < batchStart=${batch.startIter}`);
           }
