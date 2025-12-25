@@ -9046,6 +9046,7 @@ class GlBoard extends Board {
     // Async readback state (PBO-based to avoid blocking)
     // Double-buffered PBOs to avoid write-before-read warnings
     this.pendingReadback = null;  // { sync, pboIndex }
+    this.pendingBatchEndIter = null;  // End iteration for pending batch (for precomputed flushing)
     this.level2PBOs = [null, null];  // Ping-pong PBOs
     this.currentPBOIndex = 0;
 
@@ -9665,17 +9666,20 @@ class GlBoard extends Board {
       targetIters = Math.max(1, Math.floor(100000 / (pixels * effort)));
     }
 
+    // Track iteration range for this batch (for precomputed flushing)
+    const batchStartIter = this.it;
+
     // Run GPU iterations
     this.doGpuIterations(targetIters);
+
+    // Store end iteration for precomputed flushing when readback completes
+    this.pendingBatchEndIter = this.it;
 
     // Start async readback (non-blocking) - results processed next iterate()
     this.startAsyncReadback();
 
-    // Flush precomputed points up to current iteration
-    // Use flushUpToIteration since we process batches of iterations at once
-    if (this.precomputed) {
-      this.precomputed.flushUpToIteration(this.it, this);
-    }
+    // DON'T flush precomputed here - flush when readback completes
+    // to keep precomputed and GPU results for same iteration range together
   }
 
   // Start async readback using PBO to avoid blocking
@@ -9732,7 +9736,9 @@ class GlBoard extends Board {
 
     // GPU work is complete (ALREADY_SIGNALED or CONDITION_SATISFIED)
     gl.deleteSync(pending.sync);
+    const batchEndIter = this.pendingBatchEndIter;
     this.pendingReadback = null;
+    this.pendingBatchEndIter = null;
 
     // Read level2 data from the correct PBO (sync is complete, so this won't stall)
     const level2Data = new Float32Array(this.level2Width * this.level2Height * 4);
@@ -9740,8 +9746,14 @@ class GlBoard extends Board {
     gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, level2Data);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
 
-    // Process level2 data
+    // Process level2 data (queues GPU results)
     this.processLevel2Results(level2Data);
+
+    // Flush precomputed points for this batch's iteration range
+    // This ensures precomputed and GPU results go in the same message
+    if (this.precomputed && batchEndIter) {
+      this.precomputed.flushUpToIteration(batchEndIter, this);
+    }
   }
 
   // Process level2 results and trigger hierarchical readback if needed
