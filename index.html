@@ -2254,8 +2254,8 @@ class Grid {
           if (!view.imageDataCache) {
             view.imageDataCacheSkipped = true;
           }
-          // Clear cache only after 100ms of non-use (batch sizes may fluctuate)
-          if (view.imageDataCache && performance.now() - view.imageDataCacheLastUsed > 100) {
+          // Clear cache only after 500ms of non-use (batch sizes may fluctuate)
+          if (view.imageDataCache && performance.now() - view.imageDataCacheLastUsed > 500) {
             view.clearImageDataCache();
           }
           for (let change of data.changeList) {
@@ -4780,7 +4780,7 @@ class Scheduler {
         worker = new Worker(workerUrl, { name: `Worker ${workerNum}` });
         const t3 = performance.now();
         URL.revokeObjectURL(workerUrl);
-        if (hasDebugFlag(this.grid.config, 't')) {
+        if (this.grid.config.hasDebugFlag('t')) {
           console.log(`[worker-init] assemble=${(t1-t0).toFixed(0)}ms blob=${(t2-t1).toFixed(0)}ms new Worker=${(t3-t2).toFixed(0)}ms total=${(t3-t0).toFixed(0)}ms`);
         }
       }
@@ -5517,7 +5517,7 @@ function estimateLimit(data) {
 var lastScriptLineNumber = navigator.webdriver ? 0 :
   new Error().stack.match(/:(\d+)/)[1] | 0;
 </script>
-<script id="workerCode">
+<script id="workerCode" type="text/webworker">
 // Constants
 const MAX_CHAOTIC_ITERATIONS = 100000;
 
@@ -12022,256 +12022,6 @@ self.onmessage = async function(e) {
 };
 
 </script>
-<script id="debugCode">
-// Debug flag 'w': Define MockWorker for main thread debugging
-// FractalWorker class is always available on main thread now (workerCode is a regular script)
-if (location.search.includes('debug=')) {
-  const debugValue = decodeURIComponent(location.search.match(/[?&]debug=([^&]*)/)?.[1] || '');
-  if (debugValue.split(',').includes('w')) {
-    // Define MockWorker class that extends FractalWorker
-    window.MockWorker = class MockWorker extends FractalWorker {
-      constructor(workerNumber) {
-        super(workerNumber, `MockWorker ${workerNumber}`);
-        this.onmessage = null;  // Callback for sending messages back to Scheduler
-
-        // Step mode support (debug=s flag)
-        this.stepMode = false;
-        this.stepsRequested = 0;
-      }
-
-      // Override to add step mode support
-      async iterateBoards() {
-        this.timer = null;
-
-        // Step mode: only iterate if steps are requested
-        if (this.stepMode && this.stepsRequested === 0) {
-          // Wait for step() to be called
-          this.timer = setTimeout(() => this.iterateBoards(), 100);
-          return;
-        }
-
-        // Call parent implementation (it will check stepsRequested and decrement if needed)
-        await super.iterateBoards();
-      }
-
-      // Handle incoming messages from Scheduler (when Scheduler calls worker.postMessage())
-      // Real Workers receive messages via self.onmessage, but MockWorker receives via this method
-      postMessage(msg) {
-        // Schedule handleMessage asynchronously to match real Worker behavior
-        setTimeout(async () => {
-          const { type, data } = msg;
-          await this.handleMessage(type, data);
-        }, 0);
-      }
-
-      // Override abstract method to send messages back to Scheduler
-      sendToScheduler(msg) {
-        if (this.onmessage) {
-          this.onmessage({ data: msg });
-        }
-      }
-    };
-
-    console.log('MockWorker class defined for main thread debugging');
-
-    // Enable step mode if 's' flag is set
-    if (debugValue.split(',').includes('s')) {
-      // Set step mode flag on MockWorker initialization
-      const originalConstructor = window.MockWorker;
-      window.MockWorker = class extends originalConstructor {
-        constructor(workerNumber) {
-          super(workerNumber);
-          this.stepMode = true;
-          console.log(`MockWorker ${workerNumber} created in step mode`);
-        }
-      };
-
-      // Helper functions for stepping through iterations
-      window.step = function(n = 1, workerIndex = 0, callback = null) {
-        if (typeof workerIndex === 'function') {
-          callback = workerIndex;
-          workerIndex = 0;
-        }
-
-        const worker = window[`worker${workerIndex}`];
-        if (!worker || !worker.stepMode) {
-          console.log(`Step mode not active for worker${workerIndex}. Load page with ?debug=w,s`);
-          return;
-        }
-
-        worker.stepCallback = callback;
-        worker.stepsRequested += n;
-
-        if (!callback) {
-          console.log(`Stepping worker${workerIndex} ${n} iteration(s)...`);
-        }
-        return worker.boards;
-      };
-
-      window.stepAll = function(workerIndex = 0) {
-        const worker = window[`worker${workerIndex}`];
-        if (!worker) {
-          console.log(`No worker${workerIndex} available`);
-          return;
-        }
-
-        worker.stepMode = false;
-        worker.stepsRequested = 1; // Queue one step to trigger continuous iteration
-        console.log(`Resuming continuous iteration for worker${workerIndex}...`);
-      };
-
-      window.pause = function(workerIndex = 0) {
-        const worker = window[`worker${workerIndex}`];
-        if (!worker) {
-          console.log(`No worker${workerIndex} available`);
-          return;
-        }
-
-        worker.stepMode = true;
-        worker.stepsRequested = 0; // Clear any pending steps
-        console.log(`Paused worker${workerIndex}. Use step() or step(n) to continue.`);
-      };
-
-      window.inspectBoard = function(k = 0, workerIndex = 0) {
-        const worker = window[`worker${workerIndex}`];
-        if (!worker || !worker.boards.has(k)) {
-          console.log(`Board ${k} not found on worker${workerIndex}. Available:`, Array.from(worker?.boards?.keys() || []));
-          return null;
-        }
-
-        const board = worker.boards.get(k);
-        console.log(`Board ${k} on worker${workerIndex} (${board.constructor.name}):`);
-        console.log(`  Iteration: ${board.it}`);
-        console.log(`  Unfinished pixels: ${board.un}`);
-        console.log(`  Diverged: ${board.di}`);
-        console.log(`  Converged: ${board.ch}`);
-
-        return board;
-      };
-
-      window.tracePixel = async function(k, pixelIndex, workerIndex = 0) {
-        const worker = window[`worker${workerIndex}`];
-        if (!worker || !worker.boards.has(k)) {
-          console.log(`Board ${k} not found on worker${workerIndex}`);
-          return null;
-        }
-
-        const board = worker.boards.get(k);
-        const info = {
-          boardType: board.constructor.name,
-          iteration: board.it,
-          nn: board.nn[pixelIndex]
-        };
-
-        // For Adaptive boards, read GPU state
-        if (board.constructor.name === 'AdaptiveGpuBoard') {
-          const pixelData = await board.readBuffer(board.buffers.pixels, Uint8Array);
-          const offset = pixelIndex * 60;
-          const pixelU32 = new Uint32Array(pixelData.buffer, offset, 15);
-          const pixelF32 = new Float32Array(pixelData.buffer, offset, 15);
-
-          info.status = new Int32Array([pixelU32[0]])[0];
-          info.refIter = pixelU32[2];
-          info.scale = new Int32Array([pixelU32[4]])[0];
-          info.dzr = pixelF32[7];
-          info.dzi = pixelF32[8];
-          info.dzr_scaled = info.dzr * Math.pow(2, info.scale);
-          info.dzi_scaled = info.dzi * Math.pow(2, info.scale);
-        }
-
-        // For QDZ boards, read CPU state
-        if (board.constructor.name === 'QDZhuoranBoard') {
-          info.refIter = board.refIter[pixelIndex];
-          info.dzr = board.dz[pixelIndex * 2];
-          info.dzi = board.dz[pixelIndex * 2 + 1];
-        }
-
-        console.table(info);
-        return info;
-      };
-
-      // Analyze batch timings collected with debug=b
-      // In step mode, each batch does 1 iteration, so we can only measure:
-      //   time = overhead + perPixel × pixels
-      // For multi-iteration batches (non-step mode), we could separate:
-      //   time = perBatch + perIter × iters + perPixelIter × pixels × iters
-      window.analyzeBatchTimings = function(k = 0) {
-        const worker = window.worker0;
-        if (!worker) {
-          console.log('No worker available');
-          return null;
-        }
-
-        const timings = worker.getBatchTimings(k);
-        if (timings.length < 4) {
-          console.log(`Not enough timing data (${timings.length} samples). Run more iterations with debug=b,w,s`);
-          return null;
-        }
-
-        const board = worker.boards.get(k);
-        const boardName = board?.constructor.name || 'Unknown';
-        const n = timings.length;
-
-        // Check if we have iteration variation
-        const uniqueIters = [...new Set(timings.map(t => t.iters))];
-        const hasIterVariation = uniqueIters.length > 1;
-
-        // Simple linear regression: time = overhead + perPixel × pixels
-        let sum_p = 0, sum_y = 0, sum_pp = 0, sum_py = 0;
-        for (const t of timings) {
-          const p = t.pixels;
-          const y = t.timeMs * 1000; // μs
-          sum_p += p; sum_y += y; sum_pp += p*p; sum_py += p*y;
-        }
-
-        const det = n * sum_pp - sum_p * sum_p;
-        const perPixelUs = det !== 0 ? (n * sum_py - sum_p * sum_y) / det : 0;
-        const overheadUs = (sum_y - perPixelUs * sum_p) / n;
-
-        // Pixel count range
-        const minPixels = Math.min(...timings.map(t => t.pixels));
-        const maxPixels = Math.max(...timings.map(t => t.pixels));
-
-        console.log(`\nBatch Timing Analysis for Board ${k} (${boardName}):`);
-        console.log(`  Samples: ${n}`);
-        console.log(`  Pixel range: ${minPixels} - ${maxPixels}`);
-        console.log(`  Model: time = ${overheadUs.toFixed(1)} μs + ${perPixelUs.toFixed(4)} μs × pixels`);
-        console.log(`  Per-pixel cost: ${Math.max(0, perPixelUs).toFixed(4)} μs/pixel`);
-        console.log(`  Overhead: ${Math.max(0, overheadUs).toFixed(1)} μs/batch`);
-
-        if (!hasIterVariation) {
-          console.log(`\n  Note: In step mode, each batch does 1 iteration.`);
-          console.log(`  The per-pixel cost is actually per-pixel-iteration.`);
-        }
-
-        // Show sample data
-        console.log(`\n  Sample data (first 10):`);
-        console.table(timings.slice(0, 10).map(t => ({
-          pixels: t.pixels,
-          iters: t.iters,
-          timeMs: t.timeMs.toFixed(2),
-          'μs/pixel': (t.timeMs * 1000 / t.pixels).toFixed(3)
-        })));
-
-        return { perPixelUs: Math.max(0, perPixelUs), overheadUs: Math.max(0, overheadUs), samples: n };
-      };
-
-      window.clearBatchTimings = function(k) {
-        const worker = window.worker0;
-        if (worker) {
-          worker.clearBatchTimings(k);
-          console.log(k !== undefined ? `Cleared timings for board ${k}` : 'Cleared all timings');
-        }
-      };
-
-      console.log('Step mode enabled. Use step(), step(n), pause(), stepAll(), inspectBoard(k), tracePixel(k, pixelIndex)');
-      if (window.worker0?.collectBatchTimings) {
-        console.log('Batch timing enabled (debug=b). Use analyzeBatchTimings(k), clearBatchTimings(k)');
-      }
-    }
-  }
-}
-</script>
 <script id="mathCode">
 //////////// DD (double-double) precision utilities ///////////
 
@@ -12884,6 +12634,264 @@ function catmullRomSplineQD(p0, p1, p2, p3, t) {
   ];
 }
 
+</script>
+<script id="debugCode">
+// Debug flag 'w': Define MockWorker for main thread debugging
+// workerCode has type="text/webworker" so it's not parsed; eval it when needed for MockWorker
+if (location.search.includes('debug=')) {
+  const debugValue = decodeURIComponent(location.search.match(/[?&]debug=([^&]*)/)?.[1] || '');
+  if (debugValue.split(',').includes('w')) {
+    // Insert workerCode as a script element to make all classes available in global scope
+    // (Using a script element instead of eval because class declarations are block-scoped in eval)
+    const workerCodeEl = document.getElementById('workerCode');
+    if (workerCodeEl) {
+      const script = document.createElement('script');
+      script.textContent = workerCodeEl.textContent;
+      document.head.appendChild(script);
+    }
+    // Define MockWorker class that extends FractalWorker
+    window.MockWorker = class MockWorker extends FractalWorker {
+      constructor(workerNumber) {
+        super(workerNumber, `MockWorker ${workerNumber}`);
+        this.onmessage = null;  // Callback for sending messages back to Scheduler
+
+        // Step mode support (debug=s flag)
+        this.stepMode = false;
+        this.stepsRequested = 0;
+      }
+
+      // Override to add step mode support
+      async iterateBoards() {
+        this.timer = null;
+
+        // Step mode: only iterate if steps are requested
+        if (this.stepMode && this.stepsRequested === 0) {
+          // Wait for step() to be called
+          this.timer = setTimeout(() => this.iterateBoards(), 100);
+          return;
+        }
+
+        // Call parent implementation (it will check stepsRequested and decrement if needed)
+        await super.iterateBoards();
+      }
+
+      // Handle incoming messages from Scheduler (when Scheduler calls worker.postMessage())
+      // Real Workers receive messages via self.onmessage, but MockWorker receives via this method
+      postMessage(msg) {
+        // Schedule handleMessage asynchronously to match real Worker behavior
+        setTimeout(async () => {
+          const { type, data } = msg;
+          await this.handleMessage(type, data);
+        }, 0);
+      }
+
+      // Override abstract method to send messages back to Scheduler
+      sendToScheduler(msg) {
+        if (this.onmessage) {
+          this.onmessage({ data: msg });
+        }
+      }
+    };
+
+    console.log('MockWorker class defined for main thread debugging');
+
+    // Enable step mode if 's' flag is set
+    if (debugValue.split(',').includes('s')) {
+      // Set step mode flag on MockWorker initialization
+      const originalConstructor = window.MockWorker;
+      window.MockWorker = class extends originalConstructor {
+        constructor(workerNumber) {
+          super(workerNumber);
+          this.stepMode = true;
+          console.log(`MockWorker ${workerNumber} created in step mode`);
+        }
+      };
+
+      // Helper functions for stepping through iterations
+      window.step = function(n = 1, workerIndex = 0, callback = null) {
+        if (typeof workerIndex === 'function') {
+          callback = workerIndex;
+          workerIndex = 0;
+        }
+
+        const worker = window[`worker${workerIndex}`];
+        if (!worker || !worker.stepMode) {
+          console.log(`Step mode not active for worker${workerIndex}. Load page with ?debug=w,s`);
+          return;
+        }
+
+        worker.stepCallback = callback;
+        worker.stepsRequested += n;
+
+        if (!callback) {
+          console.log(`Stepping worker${workerIndex} ${n} iteration(s)...`);
+        }
+        return worker.boards;
+      };
+
+      window.stepAll = function(workerIndex = 0) {
+        const worker = window[`worker${workerIndex}`];
+        if (!worker) {
+          console.log(`No worker${workerIndex} available`);
+          return;
+        }
+
+        worker.stepMode = false;
+        worker.stepsRequested = 1; // Queue one step to trigger continuous iteration
+        console.log(`Resuming continuous iteration for worker${workerIndex}...`);
+      };
+
+      window.pause = function(workerIndex = 0) {
+        const worker = window[`worker${workerIndex}`];
+        if (!worker) {
+          console.log(`No worker${workerIndex} available`);
+          return;
+        }
+
+        worker.stepMode = true;
+        worker.stepsRequested = 0; // Clear any pending steps
+        console.log(`Paused worker${workerIndex}. Use step() or step(n) to continue.`);
+      };
+
+      window.inspectBoard = function(k = 0, workerIndex = 0) {
+        const worker = window[`worker${workerIndex}`];
+        if (!worker || !worker.boards.has(k)) {
+          console.log(`Board ${k} not found on worker${workerIndex}. Available:`, Array.from(worker?.boards?.keys() || []));
+          return null;
+        }
+
+        const board = worker.boards.get(k);
+        console.log(`Board ${k} on worker${workerIndex} (${board.constructor.name}):`);
+        console.log(`  Iteration: ${board.it}`);
+        console.log(`  Unfinished pixels: ${board.un}`);
+        console.log(`  Diverged: ${board.di}`);
+        console.log(`  Converged: ${board.ch}`);
+
+        return board;
+      };
+
+      window.tracePixel = async function(k, pixelIndex, workerIndex = 0) {
+        const worker = window[`worker${workerIndex}`];
+        if (!worker || !worker.boards.has(k)) {
+          console.log(`Board ${k} not found on worker${workerIndex}`);
+          return null;
+        }
+
+        const board = worker.boards.get(k);
+        const info = {
+          boardType: board.constructor.name,
+          iteration: board.it,
+          nn: board.nn[pixelIndex]
+        };
+
+        // For Adaptive boards, read GPU state
+        if (board.constructor.name === 'AdaptiveGpuBoard') {
+          const pixelData = await board.readBuffer(board.buffers.pixels, Uint8Array);
+          const offset = pixelIndex * 60;
+          const pixelU32 = new Uint32Array(pixelData.buffer, offset, 15);
+          const pixelF32 = new Float32Array(pixelData.buffer, offset, 15);
+
+          info.status = new Int32Array([pixelU32[0]])[0];
+          info.refIter = pixelU32[2];
+          info.scale = new Int32Array([pixelU32[4]])[0];
+          info.dzr = pixelF32[7];
+          info.dzi = pixelF32[8];
+          info.dzr_scaled = info.dzr * Math.pow(2, info.scale);
+          info.dzi_scaled = info.dzi * Math.pow(2, info.scale);
+        }
+
+        // For QDZ boards, read CPU state
+        if (board.constructor.name === 'QDZhuoranBoard') {
+          info.refIter = board.refIter[pixelIndex];
+          info.dzr = board.dz[pixelIndex * 2];
+          info.dzi = board.dz[pixelIndex * 2 + 1];
+        }
+
+        console.table(info);
+        return info;
+      };
+
+      // Analyze batch timings collected with debug=b
+      // In step mode, each batch does 1 iteration, so we can only measure:
+      //   time = overhead + perPixel × pixels
+      // For multi-iteration batches (non-step mode), we could separate:
+      //   time = perBatch + perIter × iters + perPixelIter × pixels × iters
+      window.analyzeBatchTimings = function(k = 0) {
+        const worker = window.worker0;
+        if (!worker) {
+          console.log('No worker available');
+          return null;
+        }
+
+        const timings = worker.getBatchTimings(k);
+        if (timings.length < 4) {
+          console.log(`Not enough timing data (${timings.length} samples). Run more iterations with debug=b,w,s`);
+          return null;
+        }
+
+        const board = worker.boards.get(k);
+        const boardName = board?.constructor.name || 'Unknown';
+        const n = timings.length;
+
+        // Check if we have iteration variation
+        const uniqueIters = [...new Set(timings.map(t => t.iters))];
+        const hasIterVariation = uniqueIters.length > 1;
+
+        // Simple linear regression: time = overhead + perPixel × pixels
+        let sum_p = 0, sum_y = 0, sum_pp = 0, sum_py = 0;
+        for (const t of timings) {
+          const p = t.pixels;
+          const y = t.timeMs * 1000; // μs
+          sum_p += p; sum_y += y; sum_pp += p*p; sum_py += p*y;
+        }
+
+        const det = n * sum_pp - sum_p * sum_p;
+        const perPixelUs = det !== 0 ? (n * sum_py - sum_p * sum_y) / det : 0;
+        const overheadUs = (sum_y - perPixelUs * sum_p) / n;
+
+        // Pixel count range
+        const minPixels = Math.min(...timings.map(t => t.pixels));
+        const maxPixels = Math.max(...timings.map(t => t.pixels));
+
+        console.log(`\nBatch Timing Analysis for Board ${k} (${boardName}):`);
+        console.log(`  Samples: ${n}`);
+        console.log(`  Pixel range: ${minPixels} - ${maxPixels}`);
+        console.log(`  Model: time = ${overheadUs.toFixed(1)} μs + ${perPixelUs.toFixed(4)} μs × pixels`);
+        console.log(`  Per-pixel cost: ${Math.max(0, perPixelUs).toFixed(4)} μs/pixel`);
+        console.log(`  Overhead: ${Math.max(0, overheadUs).toFixed(1)} μs/batch`);
+
+        if (!hasIterVariation) {
+          console.log(`\n  Note: In step mode, each batch does 1 iteration.`);
+          console.log(`  The per-pixel cost is actually per-pixel-iteration.`);
+        }
+
+        // Show sample data
+        console.log(`\n  Sample data (first 10):`);
+        console.table(timings.slice(0, 10).map(t => ({
+          pixels: t.pixels,
+          iters: t.iters,
+          timeMs: t.timeMs.toFixed(2),
+          'μs/pixel': (t.timeMs * 1000 / t.pixels).toFixed(3)
+        })));
+
+        return { perPixelUs: Math.max(0, perPixelUs), overheadUs: Math.max(0, overheadUs), samples: n };
+      };
+
+      window.clearBatchTimings = function(k) {
+        const worker = window.worker0;
+        if (worker) {
+          worker.clearBatchTimings(k);
+          console.log(k !== undefined ? `Cleared timings for board ${k}` : 'Cleared all timings');
+        }
+      };
+
+      console.log('Step mode enabled. Use step(), step(n), pause(), stepAll(), inspectBoard(k), tracePixel(k, pixelIndex)');
+      if (window.worker0?.collectBatchTimings) {
+        console.log('Batch timing enabled (debug=b). Use analyzeBatchTimings(k), clearBatchTimings(k)');
+      }
+    }
+  }
+}
 </script>
 <!-- Internationalization: Non-English help text and language detection -->
 <div lang="es" style="display:none">
