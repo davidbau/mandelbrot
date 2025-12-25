@@ -9019,6 +9019,14 @@ class GlBoard extends Board {
     // Track reported pixels to avoid duplicates
     this.reported = new Uint8Array(config.dimsArea);
 
+    // Tile-based dispatch optimization
+    const totalTiles = this.level1Width * this.level1Height;
+    this.activeTileMask = new Uint8Array(totalTiles);  // 1 = active, 0 = inactive
+    this.activeTileMask.fill(1);  // All tiles start active
+    this.activeTileCount = totalTiles;
+    this.useTileDispatch = false;  // Enable after first reduction
+    this.escapedSinceUpdate = 0;  // Track escapes since last tile mask update
+
     // Convergence detection thresholds (like CpuBoard)
     this.epsilon = this.pix / 10;    // Final convergence threshold
     this.epsilon2 = this.pix * 10;   // "Getting close" threshold
@@ -9034,6 +9042,12 @@ class GlBoard extends Board {
     this.iterUniforms = {};
     this.reduction1Uniforms = {};
     this.reduction2Uniforms = {};
+
+    // Async readback state (PBO-based to avoid blocking)
+    // Double-buffered PBOs to avoid write-before-read warnings
+    this.pendingReadback = null;  // { sync, pboIndex }
+    this.level2PBOs = [null, null];  // Ping-pong PBOs
+    this.currentPBOIndex = 0;
 
     // Complex plane bounds (set in start())
     this.cMinRe = 0;
@@ -9632,6 +9646,16 @@ class GlBoard extends Board {
     // Wait for WebGL initialization
     await this.glInitPromise;
 
+    // Try to process pending readback first
+    if (this.pendingReadback) {
+      this.waitForPendingReadback();
+      // If still pending (GPU not ready yet), skip this iteration
+      // to avoid overwriting the pending state
+      if (this.pendingReadback) {
+        return;
+      }
+    }
+
     if (this.un <= 0) return;
 
     // Calculate iterations based on effort if not specified
@@ -9644,14 +9668,122 @@ class GlBoard extends Board {
     // Run GPU iterations
     this.doGpuIterations(targetIters);
 
-    // Read results (queues changes directly to changeList)
-    this.readResults();
+    // Start async readback (non-blocking) - results processed next iterate()
+    this.startAsyncReadback();
 
     // Flush precomputed points up to current iteration
     // Use flushUpToIteration since we process batches of iterations at once
     if (this.precomputed) {
       this.precomputed.flushUpToIteration(this.it, this);
     }
+  }
+
+  // Start async readback using PBO to avoid blocking
+  startAsyncReadback() {
+    const gl = this.gl;
+
+    // Run reduction passes (GPU work, non-blocking)
+    this.runReductionPasses();
+
+    // Use ping-pong PBOs: write to one while reading from the other
+    const pboIndex = this.currentPBOIndex;
+    this.currentPBOIndex = 1 - this.currentPBOIndex;
+
+    // Create PBO if not exists
+    if (!this.level2PBOs[pboIndex]) {
+      this.level2PBOs[pboIndex] = gl.createBuffer();
+      this.level2Size = this.level2Width * this.level2Height * 4 * 4; // RGBA float
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.level2PBOs[pboIndex]);
+      gl.bufferData(gl.PIXEL_PACK_BUFFER, this.level2Size, gl.STREAM_READ);
+    }
+
+    // Async read level2 into PBO (returns immediately)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.level2FB);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.level2PBOs[pboIndex]);
+    gl.readPixels(0, 0, this.level2Width, this.level2Height, gl.RGBA, gl.FLOAT, 0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+
+    // Create fence sync to track completion
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+
+    // Flush to ensure commands are submitted
+    gl.flush();
+
+    // Store pending state with PBO index
+    this.pendingReadback = { sync, pboIndex };
+  }
+
+  // Wait for pending readback to complete (may block briefly)
+  waitForPendingReadback() {
+    const gl = this.gl;
+    const pending = this.pendingReadback;
+
+    if (!pending) return;
+
+    // Wait for GPU work to complete using clientWaitSync with timeout 0
+    // This is allowed (only large timeouts cause INVALID_OPERATION)
+    // Using timeout 0 properly polls the GPU status
+    const result = gl.clientWaitSync(pending.sync, gl.SYNC_FLUSH_COMMANDS_BIT, 0);
+
+    if (result === gl.TIMEOUT_EXPIRED) {
+      // GPU work not complete yet - leave pending for next iterate() call
+      return;
+    }
+
+    // GPU work is complete (ALREADY_SIGNALED or CONDITION_SATISFIED)
+    gl.deleteSync(pending.sync);
+    this.pendingReadback = null;
+
+    // Read level2 data from the correct PBO (sync is complete, so this won't stall)
+    const level2Data = new Float32Array(this.level2Width * this.level2Height * 4);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.level2PBOs[pending.pboIndex]);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, level2Data);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+
+    // Process level2 data
+    this.processLevel2Results(level2Data);
+  }
+
+  // Process level2 results and trigger hierarchical readback if needed
+  processLevel2Results(superTiles) {
+    const gl = this.gl;
+    const totalPixels = this.texWidth * this.texHeight;
+
+    // Find super-tiles with new escapes
+    const activeSuperTiles = [];
+    let totalNew = 0;
+    for (let sy = 0; sy < this.level2Height; sy++) {
+      for (let sx = 0; sx < this.level2Width; sx++) {
+        const idx = (sy * this.level2Width + sx) * 4;
+        const newlyEscaped = superTiles[idx + 1];
+        if (newlyEscaped > 0) {
+          activeSuperTiles.push({ x: sx, y: sy, count: newlyEscaped });
+          totalNew += newlyEscaped;
+        }
+      }
+    }
+
+    // Track cumulative escapes and update tile mask when >10% since last update
+    this.escapedSinceUpdate += totalNew;
+    if (this.escapedSinceUpdate > totalPixels * 0.10) {
+      this.updateActiveTileMask();
+      this.escapedSinceUpdate = 0;
+    }
+
+    if (activeSuperTiles.length === 0) {
+      // No new escapes - swap buffers and return
+      this.swapLevel1Buffers();
+      return;
+    }
+
+    // Adaptive: if >10% escapes, just read full texture
+    if (totalNew > totalPixels * 0.1) {
+      this.readFullTexture();
+      return;
+    }
+
+    // Hierarchical read
+    this.readHierarchical(activeSuperTiles);
   }
 
   // Find Fibonacci numbers around a given iteration
@@ -9673,9 +9805,16 @@ class GlBoard extends Board {
 
   // Queue n iterations (non-blocking - driver pipelines internally)
   // Batches up to 327680 iterations per draw call (shader loop limit)
+  // Uses tile-based dispatch when many tiles are inactive
   doGpuIterations(n) {
     const gl = this.gl;
     const MAX_SHADER_ITERS = 327680;  // Shader's internal loop limit
+    const TILE_SIZE = GlBoard.TILE_SIZE;
+    const totalTiles = this.level1Width * this.level1Height;
+
+    // Decide whether to use tile dispatch
+    // Use tiles if <30% tiles active (overhead of many draws vs savings)
+    const useTiles = this.useTileDispatch && this.activeTileCount < totalTiles * 0.3;
 
     gl.useProgram(this.iterProgram);
     gl.bindVertexArray(this.quadVAO);
@@ -9689,7 +9828,12 @@ class GlBoard extends Board {
     gl.uniform1f(this.iterUniforms.u_epsilon, this.epsilon);
     gl.uniform1f(this.iterUniforms.u_epsilon2, this.epsilon2);
 
-    // Batch iterations - shader handles up to 256 per draw call
+    // Enable scissor test for tile-based dispatch
+    if (useTiles) {
+      gl.enable(gl.SCISSOR_TEST);
+    }
+
+    // Batch iterations - shader handles up to 327680 per draw call
     let remaining = n;
     while (remaining > 0) {
       const batchSize = Math.min(remaining, MAX_SHADER_ITERS);
@@ -9719,8 +9863,25 @@ class GlBoard extends Board {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.getWriteFB());
       gl.viewport(0, 0, this.texWidth, this.texHeight);
 
-      // Draw full-screen quad
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      if (useTiles) {
+        // Tile-based dispatch: only render active tiles using scissor
+        for (let ty = 0; ty < this.level1Height; ty++) {
+          for (let tx = 0; tx < this.level1Width; tx++) {
+            const tileIdx = ty * this.level1Width + tx;
+            if (this.activeTileMask[tileIdx]) {
+              const x = tx * TILE_SIZE;
+              const y = ty * TILE_SIZE;
+              const w = Math.min(TILE_SIZE, this.texWidth - x);
+              const h = Math.min(TILE_SIZE, this.texHeight - y);
+              gl.scissor(x, y, w, h);
+              gl.drawArrays(gl.TRIANGLES, 0, 6);
+            }
+          }
+        }
+      } else {
+        // Full-screen dispatch
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
 
       // Swap and advance
       this.swapPingPong();
@@ -9728,6 +9889,9 @@ class GlBoard extends Board {
       remaining -= batchSize;
     }
 
+    if (useTiles) {
+      gl.disable(gl.SCISSOR_TEST);
+    }
     gl.bindVertexArray(null);
   }
 
@@ -9771,8 +9935,48 @@ class GlBoard extends Board {
     gl.bindVertexArray(null);
   }
 
-  // Read results using hierarchical adaptive readback
-  readResults() {
+  // Update active tile mask based on level1 reduction data
+  // Called periodically to track which tiles are fully finished
+  updateActiveTileMask() {
+    const gl = this.gl;
+    const TILE_SIZE = GlBoard.TILE_SIZE;
+    const PIXELS_PER_TILE = TILE_SIZE * TILE_SIZE;  // 256
+
+    // Read level1 texture to get per-tile finished counts
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.level1FB);
+    const level1Data = new Float32Array(this.level1Width * this.level1Height * 4);
+    gl.readPixels(0, 0, this.level1Width, this.level1Height, gl.RGBA, gl.FLOAT, level1Data);
+
+    // Update active tile mask
+    let newActiveCount = 0;
+    for (let ty = 0; ty < this.level1Height; ty++) {
+      for (let tx = 0; tx < this.level1Width; tx++) {
+        const tileIdx = ty * this.level1Width + tx;
+        const dataIdx = tileIdx * 4;
+        const finishedCount = level1Data[dataIdx];  // .r = finished count
+
+        // Calculate expected pixels in this tile (edge tiles may be smaller)
+        const tileW = Math.min(TILE_SIZE, this.texWidth - tx * TILE_SIZE);
+        const tileH = Math.min(TILE_SIZE, this.texHeight - ty * TILE_SIZE);
+        const tilePixels = tileW * tileH;
+
+        // Tile is inactive if all pixels are finished
+        if (finishedCount >= tilePixels) {
+          this.activeTileMask[tileIdx] = 0;
+        } else {
+          this.activeTileMask[tileIdx] = 1;
+          newActiveCount++;
+        }
+      }
+    }
+
+    this.activeTileCount = newActiveCount;
+    this.useTileDispatch = true;  // Enable tile dispatch after first update
+  }
+
+  // LEGACY: Synchronous readback (replaced by async PBO pipeline)
+  // Kept for reference - use startAsyncReadback() + processPendingReadback() instead
+  readResultsSync() {
     const gl = this.gl;
 
     // Run reduction passes
@@ -9797,6 +10001,14 @@ class GlBoard extends Board {
       }
     }
 
+    // Track cumulative escapes and update tile mask when >10% since last update
+    const totalPixels = this.texWidth * this.texHeight;
+    this.escapedSinceUpdate += totalNew;
+    if (this.escapedSinceUpdate > totalPixels * 0.10) {
+      this.updateActiveTileMask();
+      this.escapedSinceUpdate = 0;
+    }
+
     if (activeSuperTiles.length === 0) {
       // No new escapes - swap buffers and return empty
       this.swapLevel1Buffers();
@@ -9804,7 +10016,6 @@ class GlBoard extends Board {
     }
 
     // Adaptive: if >10% escapes, just read full texture
-    const totalPixels = this.texWidth * this.texHeight;
     if (totalNew > totalPixels * 0.1) {
       return this.readFullTexture();
     }
