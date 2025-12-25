@@ -1633,14 +1633,10 @@ class View {
 
     // Create or get cached ImageData
     if (!this.imageDataCache) {
-      if (this.parentView) {
-        // For child views, initialize from canvas (which has parent composite drawn)
-        // This is a one-time getImageData cost to capture the parent background
-        this.imageDataCache = ctx.getImageData(0, 0, dimsWidth, dimsHeight);
-      } else {
-        // For root views, create empty ImageData (avoids getImageData readback)
-        this.imageDataCache = ctx.createImageData(dimsWidth, dimsHeight);
-      }
+      // Always initialize from canvas to capture any pixels drawn via the slow path
+      // (e.g. small updates that occurred before the first large update).
+      // This incurs a one-time readback cost but prevents data loss.
+      this.imageDataCache = ctx.getImageData(0, 0, dimsWidth, dimsHeight);
     }
     if (keepAlive) {
       this.imageDataCacheLastUsed = performance.now();
@@ -2249,17 +2245,19 @@ class Grid {
         // Use fast ImageData path for large updates (>100k pixels)
         // Cache must be used from first batch or not at all (late creation would lose earlier pixels)
         const largeUpdate = totalPixels > 100000;
-        const cacheIsActive = view.imageDataCache && (performance.now() - view.imageDataCacheLastUsed <= 500);
+        const cacheIsActive = !!(view.imageDataCache && (performance.now() - view.imageDataCacheLastUsed <= 500));
         const canUseCache = (largeUpdate || cacheIsActive) && this.config.colorThemesRGBA && !view.imageDataCacheSkipped;
+
         if (canUseCache) {
           view.drawchangesFast(ctx, data.changeList, largeUpdate);
         } else {
           // Abandon cache if it exists, and mark as skipped so we don't try to
+          // Abandon cache if it exists, and mark as skipped so we don't try to
           // recreate it later (which would wipe the canvas for root views).
-          if (view.imageDataCache) {
+          if (view.imageDataCache && performance.now() - view.imageDataCacheLastUsed > 500) {
             view.clearImageDataCache();
+            view.imageDataCacheSkipped = true;
           }
-          view.imageDataCacheSkipped = true;
 
           for (let change of data.changeList) {
             view.drawchange(ctx, change);
@@ -2277,7 +2275,6 @@ class Grid {
 
     const ctx = canvas.getContext('2d');
     const width = this.config.dimsWidth;
-    const pixelRatio = this.config.pixelRatio || 1;
 
     if (inheritedData.packed) {
       // Draw diverged pixels in hot pink
@@ -2286,7 +2283,7 @@ class Grid {
         const idx = inheritedData.dIndices[i];
         const x = idx % width;
         const y = Math.floor(idx / width);
-        ctx.fillRect(x * pixelRatio, y * pixelRatio, pixelRatio, pixelRatio);
+        ctx.fillRect(x, y, 1, 1);
       }
 
       // Draw converged pixels in magenta (slightly different shade)
@@ -2295,7 +2292,7 @@ class Grid {
         const idx = inheritedData.cIndices[i];
         const x = idx % width;
         const y = Math.floor(idx / width);
-        ctx.fillRect(x * pixelRatio, y * pixelRatio, pixelRatio, pixelRatio);
+        ctx.fillRect(x, y, 1, 1);
       }
       return;
     }
@@ -2305,7 +2302,7 @@ class Grid {
     for (const item of inheritedData.diverged) {
       const x = item.index % width;
       const y = Math.floor(item.index / width);
-      ctx.fillRect(x * pixelRatio, y * pixelRatio, pixelRatio, pixelRatio);
+      ctx.fillRect(x, y, 1, 1);
     }
 
     // Draw converged pixels in magenta (slightly different shade)
@@ -2313,7 +2310,7 @@ class Grid {
     for (const item of inheritedData.converged) {
       const x = item.index % width;
       const y = Math.floor(item.index / width);
-      ctx.fillRect(x * pixelRatio, y * pixelRatio, pixelRatio, pixelRatio);
+      ctx.fillRect(x, y, 1, 1);
     }
   }
 
