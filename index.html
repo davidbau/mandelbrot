@@ -2254,14 +2254,13 @@ class Grid {
         if (canUseCache) {
           view.drawchangesFast(ctx, data.changeList, largeUpdate);
         } else {
-          // Mark cache as skipped if it was never created
-          if (!view.imageDataCache) {
-            view.imageDataCacheSkipped = true;
-          }
-          // Clear cache only after 500ms of non-use (batch sizes may fluctuate)
+          // Abandon cache if it exists, and mark as skipped so we don't try to
+          // recreate it later (which would wipe the canvas for root views).
           if (view.imageDataCache) {
             view.clearImageDataCache();
           }
+          view.imageDataCacheSkipped = true;
+
           for (let change of data.changeList) {
             view.drawchange(ctx, change);
           }
