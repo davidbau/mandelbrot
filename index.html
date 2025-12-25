@@ -9150,7 +9150,7 @@ class GlBoard extends Board {
         float cp_zr = checkpoint.r;
         float cp_zi = checkpoint.g;
         float period = checkpoint.b;
-        float status = checkpoint.a;  // 0=active, 1=escaped, 2=converged
+        float status = checkpoint.a;  // 0=active, 1=escaped, 2=converged, 4=precomputed (skip)
 
         // c from pixel position
         vec2 c = mix(u_cMin, u_cMax, v_texCoord);
@@ -9543,7 +9543,7 @@ class GlBoard extends Board {
     // Checkpoint layout: (checkpoint_zr, checkpoint_zi, period, status)
     // checkpoint_z must be far from any valid z value to prevent false convergence
     // on the first iterations (before the first Fibonacci checkpoint is set)
-    // status=0 means active pixel
+    // status: 0=active, 1=escaped, 2=converged, 4=precomputed
     const checkpointData = new Float32Array(this.texWidth * this.texHeight * 4);
     // Fast initialization: build pattern then copy with doubling
     const sentinel = 1e30;
@@ -9558,6 +9558,40 @@ class GlBoard extends Board {
       const copyLen = Math.min(filled, checkpointData.length - filled);
       checkpointData.copyWithin(filled, 0, copyLen);
       filled += copyLen;
+    }
+
+    // Mark precomputed pixels with status=4 (and mark them as reported)
+    // These pixels won't be computed by the GPU and will be flushed separately
+    if (this.precomputed) {
+      const precomputedCount = this.precomputed.getPrecomputedCount();
+      if (precomputedCount > 0) {
+        // Iterate through all precomputed pixels
+        for (const [iter, data] of this.precomputed.rangeMap) {
+          // Mark diverged pixels
+          for (let i = 0; i < data.divergedCount; i++) {
+            const gridIndex = data.divergedIndices[i];
+            // Convert grid index to texture offset (flip Y)
+            const gridY = Math.floor(gridIndex / this.texWidth);
+            const gridX = gridIndex % this.texWidth;
+            const texY = this.texHeight - 1 - gridY;
+            const texOffset = (texY * this.texWidth + gridX) * 4;
+            checkpointData[texOffset + 3] = 4.0;  // status = precomputed
+            this.reported[gridIndex] = 1;  // Mark as reported so we don't read it back
+          }
+          // Mark converged pixels
+          for (let i = 0; i < data.convergedCount; i++) {
+            const gridIndex = data.convergedIndices[i];
+            const gridY = Math.floor(gridIndex / this.texWidth);
+            const gridX = gridIndex % this.texWidth;
+            const texY = this.texHeight - 1 - gridY;
+            const texOffset = (texY * this.texWidth + gridX) * 4;
+            checkpointData[texOffset + 3] = 4.0;  // status = precomputed
+            this.reported[gridIndex] = 1;  // Mark as reported
+          }
+        }
+        // Note: don't adjust un here - it will be decremented by flushAtIteration
+        // when precomputed points are flushed, which properly updates di/un together
+      }
     }
 
     gl.bindTexture(gl.TEXTURE_2D, this.pingCheckpointTex);
@@ -9600,6 +9634,11 @@ class GlBoard extends Board {
 
     // Read results (queues changes directly to changeList)
     this.readResults();
+
+    // Flush precomputed points up to current iteration
+    if (this.precomputed) {
+      this.precomputed.flushAtIteration(this.it, this);
+    }
   }
 
   // Find Fibonacci numbers around a given iteration
@@ -9833,6 +9872,7 @@ class GlBoard extends Board {
           const pixelIndex = Math.round(statePixels[localIdx + 3]);  // index in state.a
 
           if (this.reported[pixelIndex]) continue;
+          if (status === 4.0) continue;  // Precomputed - handled separately
 
           if (status === 1.0) {  // Escaped
             const iter = Math.round(statePixels[localIdx + 2]);
@@ -9920,6 +9960,7 @@ class GlBoard extends Board {
       const pixelIndex = Math.round(statePixels[i * 4 + 3]);  // index in state.a
 
       if (this.reported[pixelIndex]) continue;
+      if (status === 4.0) continue;  // Precomputed - handled separately
 
       if (status === 1.0) {  // Escaped
         const iter = Math.round(statePixels[i * 4 + 2]);
