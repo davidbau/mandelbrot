@@ -2252,7 +2252,7 @@ class Grid {
         const cacheIsActive = view.imageDataCache && (performance.now() - view.imageDataCacheLastUsed <= 500);
         const canUseCache = (largeUpdate || cacheIsActive) && this.config.colorThemesRGBA && !view.imageDataCacheSkipped;
         if (canUseCache) {
-          view.drawchangesFast(ctx, data.changeList);
+          view.drawchangesFast(ctx, data.changeList, largeUpdate);
         } else {
           // Abandon cache if it exists, and mark as skipped so we don't try to
           // recreate it later (which would wipe the canvas for root views).
