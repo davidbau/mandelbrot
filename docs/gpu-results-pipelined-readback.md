@@ -86,3 +86,9 @@ extension can continue while GPU work runs.
   - Mitigation: single allocation reused for the board lifetime.
 - CPU might lag behind results.
   - Mitigation: fixed chunk reads eventually catch up; queue never overwrites.
+
+## Related Docs
+
+- [gpu-results-readback-design.md](gpu-results-readback-design.md): Full design for ordered results delivery
+- [gpu-batch-locking.md](gpu-batch-locking.md): Prevents race conditions when batches overlap on GPU
+- [GPU-SHADERS.md](GPU-SHADERS.md): WebGPU shader implementation details

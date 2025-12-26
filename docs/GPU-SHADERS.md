@@ -751,3 +751,5 @@ The explorer feature-detects WebGPU and falls back to CPU computation (using `Pe
 - [MATH.md](MATH.md): The DD and QD precision math library used for reference orbits
 - [ALGORITHMS.md](ALGORITHMS.md): Cycle detection and the Zhuoran method in detail
 - [COMPUTATION.md](COMPUTATION.md): How CPU and GPU coordinate
+- [gpu-results-readback-design.md](gpu-results-readback-design.md): GPU-to-CPU results pipeline
+- [gpu-batch-locking.md](gpu-batch-locking.md): Preventing shader race conditions between batches

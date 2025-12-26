@@ -229,3 +229,9 @@ occasional data corruption affecting iteration counts.
   - Compute shader LockBuffer struct and batch_active check
   - Params struct with buffer_index field
   - JavaScript params writing with buffer_index
+
+## Related Docs
+
+- [gpu-results-readback-design.md](gpu-results-readback-design.md): The overall GPU-to-CPU results pipeline that this locking mechanism protects
+- [GPU-SHADERS.md](GPU-SHADERS.md): WebGPU shader implementation details
+- [COMPUTATION.md](COMPUTATION.md): Board coordination and worker architecture

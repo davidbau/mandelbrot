@@ -594,3 +594,9 @@ What IS invariant:
 - [x] Verify view.un matches actual unknown count
 - [x] Verify period encoding matches CpuBoard (converged-z-position test)
 - [x] Test GpuBoard, GpuZhuoranBoard, GpuAdaptiveBoard all pass
+
+## Related Docs
+
+- [gpu-batch-locking.md](gpu-batch-locking.md): Prevents race conditions when batches overlap on GPU
+- [gpu-results-pipelined-readback.md](gpu-results-pipelined-readback.md): Double-buffered staging for continuous readback
+- [GPU-SHADERS.md](GPU-SHADERS.md): WebGPU shader implementation details
