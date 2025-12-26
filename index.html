@@ -1254,7 +1254,9 @@ class View {
       activeCount,
       resultsReadbackBytes,
       resultsReadbackBatches,
-      lastResultsCount
+      lastResultsCount,
+      batchTotalCount,
+      batchCollisionCount
     } = data;
 
     const changedIndices = [];
@@ -1304,6 +1306,12 @@ class View {
     }
     if (lastResultsCount !== undefined) {
       this.lastResultsCount = lastResultsCount;
+    }
+    if (batchTotalCount !== undefined) {
+      this.batchTotalCount = batchTotalCount;
+    }
+    if (batchCollisionCount !== undefined) {
+      this.batchCollisionCount = batchCollisionCount;
     }
     // Freeze stats timing when board completes (unfinished() === 0 means done)
     if (this.unfinished() === 0 && !this.boardEndTime) {
@@ -7908,6 +7916,10 @@ class GpuBaseBoard extends Board {
         maxResults: u32,
         recordU32s: u32,
         preStagingOffset: u32,
+        bufferIndex: u32,  // 0 or 1, for checking batch_active
+        _pad0: u32,
+        _pad1: u32,
+        _pad2: u32,
       }
 
       // Lock buffer layout matches guard shader:
@@ -7936,6 +7948,7 @@ class GpuBaseBoard extends Board {
       var<workgroup> sharedFirstEmpty: u32;
       var<workgroup> sharedLastStaged: u32;
       var<workgroup> sharedMaxToCheck: u32;
+      var<workgroup> sharedBatchSkipped: u32;
       var<workgroup> firstNotReady: atomic<u32>;
 
       @compute @workgroup_size(256)
@@ -7948,6 +7961,15 @@ class GpuBaseBoard extends Board {
           sharedLastStaged = buffer[1];
           sharedMaxToCheck = min(sharedFirstEmpty - sharedLastStaged, params.chunkSize);
           atomicStore(&firstNotReady, sharedMaxToCheck);  // "all ready" sentinel
+
+          // Check if batch was skipped due to collision
+          var batch_active: u32;
+          if (params.bufferIndex == 0u) {
+            batch_active = atomicLoad(&lockBuf.batch_active_0);
+          } else {
+            batch_active = atomicLoad(&lockBuf.batch_active_1);
+          }
+          sharedBatchSkipped = select(0u, 1u, batch_active == 0u);
         }
 
         workgroupBarrier();
@@ -7977,12 +7999,13 @@ class GpuBaseBoard extends Board {
         // Thread 0 writes header, updates lastStaged, and releases lock
         if (tid == 0u) {
           let actualCount = atomicLoad(&firstNotReady);
+          let skipped = sharedBatchSkipped;
 
           let headerBase = params.preStagingOffset / 4u;
           buffer[headerBase + 0u] = sharedFirstEmpty;
           buffer[headerBase + 1u] = actualCount;
           buffer[headerBase + 2u] = lastStaged;
-          buffer[headerBase + 3u] = 0u;  // skipped = 0 (normal batch)
+          buffer[headerBase + 3u] = skipped;  // 1 if batch was skipped due to collision
 
           // Update lastStaged (only advance by ready records)
           buffer[1] = lastStaged + actualCount;
@@ -8010,12 +8033,12 @@ class GpuBaseBoard extends Board {
     // Create two staging params buffers (one per pre-staging area)
     this.buffers.stagingParams = [
       this.device.createBuffer({
-        size: 16,  // 4 u32s
+        size: 32,  // 8 u32s (includes bufferIndex and padding)
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         label: 'Staging params 0'
       }),
       this.device.createBuffer({
-        size: 16,  // 4 u32s
+        size: 32,  // 8 u32s (includes bufferIndex and padding)
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         label: 'Staging params 1'
       })
@@ -8027,7 +8050,11 @@ class GpuBaseBoard extends Board {
         chunkSize,
         this.resultsMaxCount,
         recordU32s,
-        this.preStagingOffsets[i]
+        this.preStagingOffsets[i],
+        i,  // bufferIndex: 0 or 1, for checking batch_active
+        0,  // _pad0
+        0,  // _pad1
+        0   // _pad2
       ]);
       this.device.queue.writeBuffer(this.buffers.stagingParams[i], 0, stagingParamsData);
     }
@@ -15483,7 +15510,9 @@ class FractalWorker {
             activeCount: board.activeCount || board.config.dimsArea,
             resultsReadbackBytes: board.resultsReadbackBytes || 0,
             resultsReadbackBatches: board.resultsReadbackBatches || 0,
-            lastResultsCount: board.lastResultsCount || 0
+            lastResultsCount: board.lastResultsCount || 0,
+            batchTotalCount: board.batchTotalCount || 0,
+            batchCollisionCount: board.batchCollisionCount || 0
           }
         });
         board.lastTime = now;
