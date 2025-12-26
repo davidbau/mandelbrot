@@ -197,10 +197,27 @@ struct Params {
 
 Total: negligible compared to iteration work (thousands of cycles per pixel).
 
+**Empirical measurements (Apple M1, 200x200 viewport, z=1e6):**
+
+| Metric | With Locking | Without Locking |
+|--------|--------------|-----------------|
+| Iterations/sec | ~599,000 | ~597,000 |
+| Variance | ±20,000 | ±80,000 |
+
+The locking mechanism has **no measurable performance impact** (~0.3% difference,
+well within measurement noise). The higher variance without locking may indicate
+occasional data corruption affecting iteration counts.
+
 **Collision frequency:**
 - Rare under normal operation (GPU faster than CPU submit rate)
+- Typical: 0 collisions out of ~6,000 batches in a 10-second run
 - More common during initial ramp-up or on slow GPUs
-- Each collision costs one batch worth of work
+- Each collision costs one batch worth of work (logged to console)
+
+**Monitoring:**
+- Collisions are always logged to console: `Board N: Batch skipped (collision #X/Y)`
+- When collisions occur, they appear in the debug popup (Cmd key): `X/Y batches skipped`
+- Stats available on view object: `batchTotalCount`, `batchCollisionCount`
 
 ## Files Modified
 
