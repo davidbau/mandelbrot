@@ -291,16 +291,13 @@ describe('decimalToQD edge cases', () => {
 });
 
 describe('qdToDecimalString', () => {
-  test('returns absolute value without sign prefix for negative numbers', () => {
-    // This test catches the double-negative URL bug where formatcomplex adds
-    // its own sign prefix, so qdToDecimalString must return unsigned value
+  test('returns signed value for negative numbers', () => {
     const negativeOct = [-1.8, 0, 0, 0];
     const result = qdToDecimalString(negativeOct, 5);
-    expect(result).toBe('1.8');
-    expect(result[0]).not.toBe('-');
+    expect(result).toBe('-1.8');
   });
 
-  test('returns absolute value without sign prefix for positive numbers', () => {
+  test('returns unsigned value for positive numbers', () => {
     const positiveOct = [1.8, 0, 0, 0];
     const result = qdToDecimalString(positiveOct, 5);
     expect(result).toBe('1.8');
@@ -311,7 +308,6 @@ describe('qdToDecimalString', () => {
     // Coordinate from the regression test URL
     const oct = decimalToQD('-1.799999999999999999999999999999999997574325104259492');
     const result = qdToDecimalString(oct, 50);
-    expect(result).not.toMatch(/^-/);  // Must not start with minus
-    expect(result).toMatch(/^1\.799/);  // Should start with the absolute value
+    expect(result).toMatch(/^-1\.799/);  // Should include the negative sign
   });
 });

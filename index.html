@@ -5395,15 +5395,16 @@ function formatcomplex(k, re, im) {
   const reQD = toQD(re);
   const imQD = toQD(im);
 
+  // qdToDecimalString returns signed values (e.g., "-1.8" for negative)
   let rd = qdToDecimalString(reQD, digits);
   let id = qdToDecimalString(imQD, digits);
 
-  let rs = reQD[0] < 0.0 ? '-' : '+';
-  let is = imQD[0] < 0.0 ? '-' : '+';
+  // Add + prefix for positive imaginary part (negative already has -)
+  let is = imQD[0] >= 0.0 ? '+' : '';
 
   // Omit zero terms from complex number
-  return ((rs + rd + is + id + 'i').
-      replace(/\+0i$/, '').replace(/^\+0(?=[-+])/, '').replace(/^\+/, ''));
+  return ((rd + is + id + 'i').
+      replace(/\+0i$/, '').replace(/^0(?=[-+])/, ''));
 }
 
 function formatLargeInt(i) {

@@ -68,7 +68,7 @@ describe('Precomputed inheritance regressions', () => {
   test('CpuBoard flushes precomputed at the correct iteration', async () => {
     const page = await setupPage(browser);
 
-    await page.goto(`file://${indexPath}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`file://${indexPath}?debug=w`, { waitUntil: 'domcontentloaded' });
 
     const result = await page.evaluate(() => {
       const config = {
@@ -92,7 +92,7 @@ describe('Precomputed inheritance regressions', () => {
   test('GpuBoard reports precomputed pixels even when all pixels are inherited', async () => {
     const page = await setupPage(browser);
 
-    await page.goto(`file://${indexPath}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`file://${indexPath}?debug=w`, { waitUntil: 'domcontentloaded' });
 
     const result = await page.evaluate(async () => {
       const config = {
