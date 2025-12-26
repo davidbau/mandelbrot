@@ -246,6 +246,11 @@
     let zoomBehavior = null;
     let overcrowdCheckTimeout = null;
 
+    // Chunked loading state
+    let chunkManifest = null;
+    let loadedChunks = new Map(); // chunkIndex -> data array
+    let chunksRemaining = 0;
+
     // Claude badge SVG for co-authored commits
     const claudeBadge = `<span class="coauthor-icon claude-icon" title="Co-authored with Claude">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="#D97706">
@@ -333,7 +338,48 @@
       }
     }
 
-    // JSONP callback - called when callgraph-data.js loads
+    // JSONP callback for manifest - tells us how many chunks to load
+    function loadCallgraphManifest(manifest) {
+      chunkManifest = manifest;
+      chunksRemaining = manifest.chunkCount;
+      document.getElementById('stats').textContent = `Loading ${manifest.chunkCount} data files...`;
+
+      // Dynamically load each chunk file
+      manifest.files.forEach((filename, index) => {
+        const script = document.createElement('script');
+        script.src = filename;
+        script.onerror = () => {
+          document.getElementById('stats').textContent = `Error loading ${filename}`;
+        };
+        document.head.appendChild(script);
+      });
+    }
+
+    // JSONP callback for each chunk
+    function loadCallgraphChunk(chunkIndex, data) {
+      loadedChunks.set(chunkIndex, data);
+      chunksRemaining--;
+
+      // Update loading progress
+      const loaded = chunkManifest.chunkCount - chunksRemaining;
+      document.getElementById('stats').textContent = `Loading ${loaded}/${chunkManifest.chunkCount} data files...`;
+
+      // When all chunks loaded, combine and initialize
+      if (chunksRemaining === 0) {
+        // Combine chunks in order
+        timeline = [];
+        for (let i = 0; i < chunkManifest.chunkCount; i++) {
+          const chunk = loadedChunks.get(i);
+          if (chunk) {
+            timeline.push(...chunk);
+          }
+        }
+        loadedChunks.clear(); // Free memory
+        requestAnimationFrame(() => requestAnimationFrame(() => initWithData()));
+      }
+    }
+
+    // Legacy JSONP callback - for backward compatibility with single-file format
     function loadCallgraphData(data) {
       timeline = data;
       // Wait for layout to complete before initializing
@@ -807,6 +853,7 @@
     });
   </script>
   <!-- JSONP data load - works with file:// URLs -->
-  <script src="callgraph-data.js" onerror="document.getElementById('stats').textContent='Run: npm run callgraph'"></script>
+  <!-- Load manifest first, which then triggers loading of chunk files -->
+  <script src="callgraph-manifest.js" onerror="document.getElementById('stats').textContent='Run: npm run callgraph'"></script>
 </body>
 </html>

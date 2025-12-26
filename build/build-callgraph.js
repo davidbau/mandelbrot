@@ -604,13 +604,14 @@ function getCoauthorFlags(hash) {
       maxBuffer: 1024 * 1024
     });
 
-    // Helper to check for Co-Authored-By lines that include a name
+    // Helper to check for Co-Authored-By or Signed-off-by lines that include a name
     const hasCoauthor = (name) => {
-      const pattern = new RegExp(`Co-Authored-By[^\\n]*${name}`, 'i');
-      return pattern.test(body);
+      const coauthorPattern = new RegExp(`Co-Authored-By[^\\n]*${name}`, 'i');
+      const signedOffPattern = new RegExp(`Signed-off-by[^\\n]*${name}`, 'i');
+      return coauthorPattern.test(body) || signedOffPattern.test(body);
     };
 
-    // Check if AI is the main author (by email) or a co-author
+    // Check if AI is the main author (by email) or a co-author/signer
     return {
       claude: hasCoauthor('Claude') || authorEmail.includes('anthropic'),
       gemini: hasCoauthor('Gemini') || authorEmail.includes('google'),
@@ -793,11 +794,51 @@ async function main() {
   const htmlDest = path.join(coverageDir, 'callgraph.html');
   fs.copyFileSync(htmlSource, htmlDest);
 
-  // Write output as JSONP (allows loading via file:// URL without server)
-  const outputPath = path.join(coverageDir, 'callgraph-data.js');
-  const jsonp = `loadCallgraphData(${JSON.stringify(timeline, null, 2)});`;
-  fs.writeFileSync(outputPath, jsonp);
-  console.log(`Written to ${outputPath}`);
+  // Split timeline into chunks targeting ~25MB per file (to stay well under 50MB GitHub limit)
+  const TARGET_CHUNK_SIZE = 25 * 1024 * 1024; // 25MB target
+  const chunks = [];
+  let currentChunk = [];
+  let currentSize = 0;
+
+  for (const snapshot of timeline) {
+    const snapshotJson = JSON.stringify(snapshot);
+    const snapshotSize = snapshotJson.length;
+
+    // Start a new chunk if this one would exceed target size
+    if (currentSize + snapshotSize > TARGET_CHUNK_SIZE && currentChunk.length > 0) {
+      chunks.push(currentChunk);
+      currentChunk = [];
+      currentSize = 0;
+    }
+
+    currentChunk.push(snapshot);
+    currentSize += snapshotSize;
+  }
+
+  // Don't forget the last chunk
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+
+  // Write each chunk as a separate JSONP file
+  const chunkFiles = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const filename = `callgraph-data-${i}.js`;
+    const outputPath = path.join(coverageDir, filename);
+    const jsonp = `loadCallgraphChunk(${i}, ${JSON.stringify(chunks[i])});`;
+    fs.writeFileSync(outputPath, jsonp);
+    const sizeMB = (Buffer.byteLength(jsonp) / (1024 * 1024)).toFixed(2);
+    console.log(`Written ${filename}: ${chunks[i].length} snapshots, ${sizeMB}MB`);
+    chunkFiles.push(filename);
+  }
+
+  // Write manifest file that tells the HTML how many chunks to load
+  const manifest = { chunkCount: chunks.length, files: chunkFiles };
+  const manifestPath = path.join(coverageDir, 'callgraph-manifest.js');
+  const manifestJsonp = `loadCallgraphManifest(${JSON.stringify(manifest)});`;
+  fs.writeFileSync(manifestPath, manifestJsonp);
+
+  console.log(`\nTotal: ${chunks.length} chunk files`);
   console.log(`Timeline: ${timeline.length} snapshots`);
   console.log(`Final graph: ${timeline[timeline.length - 1]?.nodeCount} nodes, ${timeline[timeline.length - 1]?.edgeCount} edges`);
 }
