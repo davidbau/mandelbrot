@@ -10608,8 +10608,9 @@ class GlPerturbationBaseBoard extends Board {
     this.refOrbitTex = this.createFloatTexture(this.refOrbitTexWidth, this.refOrbitTexHeight);
 
     // Create framebuffers with MRT for ping-pong
-    this.pingFB = this.createMRTFramebuffer(this.pongStateTex, this.pongCheckpointTex, this.pongLazyTex);
-    this.pongFB = this.createMRTFramebuffer(this.pingStateTex, this.pingCheckpointTex, this.pingLazyTex);
+    // pingFB writes to ping textures, pongFB writes to pong textures
+    this.pingFB = this.createMRTFramebuffer(this.pingStateTex, this.pingCheckpointTex, this.pingLazyTex);
+    this.pongFB = this.createMRTFramebuffer(this.pongStateTex, this.pongCheckpointTex, this.pongLazyTex);
 
     // Hierarchy textures
     this.level1Tex = this.createFloatTexture(this.level1Width, this.level1Height);
@@ -10702,7 +10703,9 @@ class GlPerturbationBaseBoard extends Board {
   async start() {
     await this.glInitPromise;
     this.startTime = Date.now();
-    console.log(`Board ${this.config.index}: ${this.constructor.name} @ c=(${this.re.toFixed(4)}, ${this.im.toFixed(4)}), dims=${this.texWidth}x${this.texHeight}, pixel=${this.pix.toExponential(3)}`);
+    const re = qdToNumber(this.re);
+    const im = qdToNumber(this.im);
+    console.log(`[GL] Board ${this.config.index}: ${this.constructor.name} @ c=(${re.toFixed(4)}, ${im.toFixed(4)}), dims=${this.texWidth}x${this.texHeight}, pixel=${this.pix.toExponential(3)}`);
   }
 
   async iterate(targetIters = null) {
@@ -10776,7 +10779,8 @@ class GlPerturbationBaseBoard extends Board {
     const readState = this.isPingRead ? this.pingStateTex : this.pongStateTex;
     const readCheckpoint = this.isPingRead ? this.pingCheckpointTex : this.pongCheckpointTex;
     const readLazy = this.isPingRead ? this.pingLazyTex : this.pongLazyTex;
-    const writeFB = this.isPingRead ? this.pingFB : this.pongFB;
+    // Write to the OPPOSITE buffer (ping-pong pattern)
+    const writeFB = this.isPingRead ? this.pongFB : this.pingFB;
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, readState);
@@ -10892,16 +10896,23 @@ class GlPerturbationBaseBoard extends Board {
     const gl = this.gl;
     const activeSuperTiles = [];
     let totalNew = 0;
+    let totalFinished = 0;
 
     for (let sy = 0; sy < this.level2Height; sy++) {
       for (let sx = 0; sx < this.level2Width; sx++) {
         const idx = (sy * this.level2Width + sx) * 4;
+        totalFinished += superTiles[idx];
         const newlyEscaped = superTiles[idx + 1];
         if (newlyEscaped > 0) {
           activeSuperTiles.push({ x: sx, y: sy, count: newlyEscaped });
           totalNew += newlyEscaped;
         }
       }
+    }
+
+    // Debug: Log every 5000 iterations
+    if (this.it % 5000 < 100) {
+      console.log(`[GLZ Debug] it=${this.it}, totalFinished=${totalFinished}, totalNew=${totalNew}, activeSuperTiles=${activeSuperTiles.length}`);
     }
 
     if (totalNew === 0) return;
@@ -11377,7 +11388,9 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(GlPerturbationBaseBoard) {
 
     const data = new Float32Array(texWidth * rowsNeeded * 4);
 
-    for (let i = this.lastUploadedRefIter; i < refLen; i++) {
+    // Fill from 0, not lastUploadedRefIter, to avoid overwriting existing data with zeros
+    // when texSubImage2D uploads full rows
+    for (let i = 0; i < refLen; i++) {
       const orbit = this.refOrbit[i];
       const thread = this.threading.getThread(i);
       const texelIdx = i * 2;
@@ -11397,6 +11410,7 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(GlPerturbationBaseBoard) {
 
     gl.bindTexture(gl.TEXTURE_2D, this.refOrbitTex);
 
+    // Upload only new rows (rows that weren't fully uploaded before)
     const startRow = Math.floor(this.lastUploadedRefIter * 2 / texWidth);
     const endRow = Math.ceil(refLen * 2 / texWidth);
 
@@ -11481,6 +11495,8 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
   }
 
   initPixels(size, re, im) {
+    // Adaptive scaling: store dc as mantissa with separate scale exponent
+    // δc_actual = dc_stored × 2^scale, where dc_stored is in range ~[-2, 2]
     const dimsWidth = this.config.dimsWidth;
     const dimsHeight = this.config.dimsHeight;
     const dimsArea = this.config.dimsArea;
@@ -11496,10 +11512,10 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
     // Mantissa factor: 2^(log2(pixelSize) - k) is in [1, 2)
     const mantissa = Math.pow(2, log2_pixelSize - this.initialScale);
 
-    // Per-pixel scale exponent
+    // Per-pixel scale array
     this.pixelScale = new Int32Array(dimsArea);
 
-    // Initialize each pixel with adaptive scaling
+    // Initialize each pixel
     for (let y = 0; y < dimsHeight; y++) {
       const yOffset = dimsHeight / 2 - y;
 
@@ -11509,7 +11525,7 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
         const index = y * dimsWidth + x;
         const index2 = index * 2;
 
-        // δc_stored = mantissa × pixel_offset (normalized to [~-1, ~+1] range)
+        // δc_stored = mantissa × pixel_offset (normalized to range ~[-dimsWidth/2, +dimsWidth/2] * mantissa)
         this.dc[index2] = Math.fround(mantissa * xOffset);
         this.dc[index2 + 1] = Math.fround(mantissa * yOffset);
 
@@ -11523,8 +11539,92 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
     }
   }
 
+  // Override to create additional scale textures
+  createTextures() {
+    const gl = this.gl;
+
+    // Create ping-pong state textures (inherited)
+    this.pingStateTex = this.createFloatTexture(this.texWidth, this.texHeight);
+    this.pingCheckpointTex = this.createFloatTexture(this.texWidth, this.texHeight);
+    this.pingLazyTex = this.createFloatTexture(this.texWidth, this.texHeight);
+    this.pingScaleTex = this.createFloatTexture(this.texWidth, this.texHeight);
+    this.pongStateTex = this.createFloatTexture(this.texWidth, this.texHeight);
+    this.pongCheckpointTex = this.createFloatTexture(this.texWidth, this.texHeight);
+    this.pongLazyTex = this.createFloatTexture(this.texWidth, this.texHeight);
+    this.pongScaleTex = this.createFloatTexture(this.texWidth, this.texHeight);
+
+    // Delta C texture (constant)
+    this.deltaCTex = this.createFloatTexture(this.texWidth, this.texHeight);
+
+    // Reference orbit texture
+    this.refOrbitTex = this.createFloatTexture(this.refOrbitTexWidth, this.refOrbitTexHeight);
+
+    // Create 4-MRT framebuffers for ping-pong
+    this.pingFB = this.createMRTFramebuffer4(this.pingStateTex, this.pingCheckpointTex, this.pingLazyTex, this.pingScaleTex);
+    this.pongFB = this.createMRTFramebuffer4(this.pongStateTex, this.pongCheckpointTex, this.pongLazyTex, this.pongScaleTex);
+
+    // Hierarchy textures
+    this.level1Tex = this.createFloatTexture(this.level1Width, this.level1Height);
+    this.level1FB = this.createFramebuffer(this.level1Tex);
+    this.prevLevel1Tex = this.createFloatTexture(this.level1Width, this.level1Height);
+    this.prevLevel1FB = this.createFramebuffer(this.prevLevel1Tex);
+    this.level2Tex = this.createFloatTexture(this.level2Width, this.level2Height);
+    this.level2FB = this.createFramebuffer(this.level2Tex);
+
+    // Initialize prevLevel1 to zeros
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.prevLevel1FB);
+    gl.viewport(0, 0, this.level1Width, this.level1Height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+
+  createMRTFramebuffer4(stateTex, checkpointTex, lazyTex, scaleTex) {
+    const gl = this.gl;
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, stateTex, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, checkpointTex, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, lazyTex, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT3, gl.TEXTURE_2D, scaleTex, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2, gl.COLOR_ATTACHMENT3]);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error('4-MRT Framebuffer incomplete: ' + status);
+    }
+    return fb;
+  }
+
+  async createShaders() {
+    // Call parent to compile shaders and set up standard uniforms
+    await super.createShaders();
+
+    // Add GlAdaptiveBoard-specific uniforms for scaling
+    const gl = this.gl;
+    gl.useProgram(this.iterProgram);
+    this.iterUniforms.u_scale = gl.getUniformLocation(this.iterProgram, 'u_scale');
+    this.iterUniforms.u_initialScale = gl.getUniformLocation(this.iterProgram, 'u_initialScale');
+  }
+
+  uploadDeltaC() {
+    const gl = this.gl;
+    const w = this.texWidth;
+    const h = this.texHeight;
+    const area = w * h;
+
+    const dcData = new Float32Array(area * 4);
+    for (let i = 0; i < area; i++) {
+      dcData[i * 4 + 0] = this.dc[i * 2];
+      dcData[i * 4 + 1] = this.dc[i * 2 + 1];
+      dcData[i * 4 + 2] = 0.0;  // unused
+      dcData[i * 4 + 3] = 0.0;  // unused
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, this.deltaCTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, dcData);
+  }
+
+  // Adaptive scaling iteration shader - uses ldexp for deep zoom support
   getIterationShaderSource() {
-    // Adaptive scaling shader with per-pixel scale exponent
     return `#version 300 es
       precision highp float;
       precision highp int;
@@ -11532,7 +11632,8 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
       uniform sampler2D u_state;       // (dzr, dzi, iter, status)
       uniform sampler2D u_checkpoint;  // (bbr, bbi, ref_iter, period)
       uniform sampler2D u_lazy;        // (ckpt_refidx, pending_refidx, ckpt_bbr, ckpt_bbi)
-      uniform sampler2D u_deltaC;      // (dcr, dci, scale, 0) - scale is per-pixel
+      uniform sampler2D u_scale;       // (scale, 0, 0, 0)
+      uniform sampler2D u_deltaC;      // (dcr, dci, 0, 0)
       uniform sampler2D u_refOrbit;    // Reference orbit + threading
 
       uniform vec2 u_resolution;
@@ -11556,15 +11657,13 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
       layout(location = 0) out vec4 outState;
       layout(location = 1) out vec4 outCheckpoint;
       layout(location = 2) out vec4 outLazy;
+      layout(location = 3) out vec4 outScale;
 
       in vec2 v_texCoord;
 
-      // GLSL ldexp approximation (x * 2^exp)
-      float ldexp_approx(float x, int exp) {
-        // Use bit manipulation approximation
-        if (exp > 127) return x * 1.7014118e38 * pow(2.0, float(exp - 127));
-        if (exp < -126) return x * 5.8774718e-39 * pow(2.0, float(exp + 126));
-        return x * pow(2.0, float(exp));
+      // ldexp(x, n) = x * 2^n
+      float ldexp(float x, int n) {
+        return x * exp2(float(n));
       }
 
       vec2 getRefOrbit(int idx) {
@@ -11592,6 +11691,7 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
         vec4 state = texelFetch(u_state, coord, 0);
         vec4 checkpoint = texelFetch(u_checkpoint, coord, 0);
         vec4 lazy = texelFetch(u_lazy, coord, 0);
+        vec4 scaleVec = texelFetch(u_scale, coord, 0);
         vec4 dc = texelFetch(u_deltaC, coord, 0);
 
         float dzr = state.r;
@@ -11609,9 +11709,10 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
         float ckpt_bbr = lazy.b;
         float ckpt_bbi = lazy.a;
 
+        int scale = int(scaleVec.r);
+
         float dcr = dc.r;
         float dci = dc.g;
-        int scale = int(dc.b);
 
         int fibPrev = u_fibPrev;
         int fibCurr = u_fibCurr;
@@ -11622,24 +11723,36 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
 
             int globalIter = u_startIter + i + 1;
 
-            // Reconstruct actual values from scaled representation
-            float scale_factor = ldexp_approx(1.0, scale);
-            float actual_dzr = dzr * scale_factor;
-            float actual_dzi = dzi * scale_factor;
+            // Rebase check: compute actual dz and see if rebasing helps
+            float dzr_actual = ldexp(dzr, scale);
+            float dzi_actual = ldexp(dzi, scale);
+            float dz_norm = max(abs(dzr_actual), abs(dzi_actual));
 
-            // Check rebasing before iteration
-            float dz_norm = max(abs(actual_dzr), abs(actual_dzi));
             if (ref_iter > 0 && ref_iter < u_refOrbitLength) {
               vec2 ref_check = getRefOrbit(ref_iter);
-              float total_r = ref_check.x + actual_dzr;
-              float total_i = ref_check.y + actual_dzi;
+              float total_r = ref_check.x + dzr_actual;
+              float total_i = ref_check.y + dzi_actual;
               float total_norm = max(abs(total_r), abs(total_i));
 
               if (total_norm < dz_norm * 2.0) {
-                // Rebase: z = ref + dz becomes new dz at ref_iter=0
-                dzr = total_r / scale_factor;
-                dzi = total_i / scale_factor;
+                // Rebase: dz = Z + dz, reset ref_iter to 0
+                dzr_actual = total_r;
+                dzi_actual = total_i;
                 ref_iter = 0;
+
+                // Renormalize the rebased dz back to scaled form
+                float mag = max(abs(dzr_actual), abs(dzi_actual));
+                if (mag > 0.0 && mag < 1e30) {
+                  int new_scale = int(floor(log2(mag)));
+                  dzr = ldexp(dzr_actual, -new_scale);
+                  dzi = ldexp(dzi_actual, -new_scale);
+                  scale = new_scale;
+                } else {
+                  dzr = dzr_actual;
+                  dzi = dzi_actual;
+                  scale = 0;
+                }
+
                 if (ckpt_refidx >= 0) {
                   pending_refidx = ckpt_refidx;
                   bbr = ckpt_bbr;
@@ -11653,9 +11766,11 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
             float refr = ref_val.x;
             float refi = ref_val.y;
 
-            // Reconstruct for divergence check
-            float curr_r = refr + actual_dzr;
-            float curr_i = refi + actual_dzi;
+            // Escape check using actual values
+            dzr_actual = ldexp(dzr, scale);
+            dzi_actual = ldexp(dzi, scale);
+            float curr_r = refr + dzr_actual;
+            float curr_i = refi + dzi_actual;
             float curr_mag_sq = curr_r * curr_r + curr_i * curr_i;
             if (curr_mag_sq > 4.0 || curr_mag_sq != curr_mag_sq) {
               status = 1.0;
@@ -11665,67 +11780,105 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
             float old_dzr = dzr;
             float old_dzi = dzi;
             int old_ref_iter = ref_iter;
+            int old_scale = scale;
 
-            // Perturbation iteration with adaptive scaling
-            // dz' = 2 * z_ref * dz + dz^2 + dc
+            // === PERTURBATION ITERATION with scaling ===
+            // For z² + c: new_dz = 2*Z*dz + dz² + dc
+            // Linear term (2*Z*dz) stays in scaled coordinates
+            // Quadratic term (dz²) needs ldexp(dz*dz, scale) since (dz*2^s)² = dz²*2^(2s)
+            // dc needs ldexp(dc, initial_scale - scale) to match current scale
+            float new_dzr;
+            float new_dzi;
+            int scale_diff = u_initialScale - scale;
+            float dc_r = ldexp(dcr, scale_diff);
+            float dc_i = ldexp(dci, scale_diff);
+
             if (u_exponent == 2) {
-              // Work in scaled coordinates
-              // dz_actual = dzr * 2^scale, dc_actual = dcr * 2^initialScale
-              // new_dz_actual = 2 * ref * dz_actual + dz_actual^2 + dc_actual
-              float new_dzr = 2.0 * (refr * dzr - refi * dzi) * scale_factor
-                            + dzr * dzr * scale_factor * scale_factor
-                            + dcr * ldexp_approx(1.0, u_initialScale);
-              float new_dzi = 2.0 * (refr * dzi + refi * dzr) * scale_factor
-                            + 2.0 * dzr * dzi * scale_factor * scale_factor
-                            + dci * ldexp_approx(1.0, u_initialScale);
-
-              // Renormalize to maintain precision
-              float new_norm = max(abs(new_dzr), abs(new_dzi));
-              if (new_norm > 0.0) {
-                int exp_adjust = int(floor(log2(new_norm)));
-                if (exp_adjust != 0) {
-                  float adjust = ldexp_approx(1.0, -exp_adjust);
-                  new_dzr *= adjust;
-                  new_dzi *= adjust;
-                  scale += exp_adjust;
-                }
-              }
-
-              dzr = new_dzr;
-              dzi = new_dzi;
+              float linear_r = 2.0 * (refr * dzr - refi * dzi);
+              float linear_i = 2.0 * (refr * dzi + refi * dzr);
+              float dz2_r = ldexp(dzr * dzr - dzi * dzi, scale);
+              float dz2_i = ldexp(2.0 * dzr * dzi, scale);
+              new_dzr = linear_r + dz2_r + dc_r;
+              new_dzi = linear_i + dz2_i + dc_i;
+            } else if (u_exponent == 3) {
+              // z³ + c: 3*Z²*dz + 3*Z*dz² + dz³
+              float ref2_r = refr * refr - refi * refi;
+              float ref2_i = 2.0 * refr * refi;
+              float t1_r = 3.0 * (ref2_r * dzr - ref2_i * dzi);
+              float t1_i = 3.0 * (ref2_r * dzi + ref2_i * dzr);
+              float dz2_r = dzr * dzr - dzi * dzi;
+              float dz2_i = 2.0 * dzr * dzi;
+              float t2_r = ldexp(3.0 * (refr * dz2_r - refi * dz2_i), scale);
+              float t2_i = ldexp(3.0 * (refr * dz2_i + refi * dz2_r), scale);
+              float dz3_r = dzr * dz2_r - dzi * dz2_i;
+              float dz3_i = dzr * dz2_i + dzi * dz2_r;
+              float t3_r = ldexp(dz3_r, scale + scale);
+              float t3_i = ldexp(dz3_i, scale + scale);
+              new_dzr = t1_r + t2_r + t3_r + dc_r;
+              new_dzi = t1_i + t2_i + t3_i + dc_i;
             } else {
-              // General exponent - fall back to unscaled
-              float z_pow_r = refr;
-              float z_pow_i = refi;
-              float coeff = float(u_exponent);
-              float result_r = actual_dzr;
-              float result_i = actual_dzi;
-
-              for (int k = 1; k < 10; k++) {
-                if (k >= u_exponent) break;
-                result_r += coeff * z_pow_r;
-                result_i += coeff * z_pow_i;
-                float temp_r = result_r * actual_dzr - result_i * actual_dzi;
-                result_i = result_r * actual_dzi + result_i * actual_dzr;
-                result_r = temp_r;
-                float new_z_pow_r = z_pow_r * refr - z_pow_i * refi;
-                z_pow_i = z_pow_r * refi + z_pow_i * refr;
-                z_pow_r = new_z_pow_r;
-                coeff *= float(u_exponent - k) / float(k + 1);
+              // Higher exponents: use direct computation
+              float zr = refr + dzr_actual;
+              float zi = refi + dzi_actual;
+              float zn_r = zr;
+              float zn_i = zi;
+              for (int p = 1; p < 10; p++) {
+                if (p >= u_exponent) break;
+                float temp_r = zn_r * zr - zn_i * zi;
+                zn_i = zn_r * zi + zn_i * zr;
+                zn_r = temp_r;
               }
-              dzr = (result_r + dcr * ldexp_approx(1.0, u_initialScale)) / scale_factor;
-              dzi = (result_i + dci * ldexp_approx(1.0, u_initialScale)) / scale_factor;
+              float refn_r = refr;
+              float refn_i = refi;
+              for (int p = 1; p < 10; p++) {
+                if (p >= u_exponent) break;
+                float temp_r = refn_r * refr - refn_i * refi;
+                refn_i = refn_r * refi + refn_i * refr;
+                refn_r = temp_r;
+              }
+              new_dzr = (zn_r - refn_r) + dc_r;
+              new_dzi = (zn_i - refn_i) + dc_i;
             }
 
+            int new_scale = scale;
+
+            // === ADAPTIVE RESCALING ===
+            float dz_mag = max(abs(new_dzr), abs(new_dzi));
+            if (dz_mag > 0.0 && dz_mag < 1e30) {
+              float log2_mag = floor(log2(dz_mag));
+              if (log2_mag >= 1.0) {
+                int steps = int(log2_mag);
+                if (new_scale + steps <= 100) {
+                  new_dzr = ldexp(new_dzr, -steps);
+                  new_dzi = ldexp(new_dzi, -steps);
+                  new_scale = new_scale + steps;
+                }
+              } else if (log2_mag < -1.0 && new_scale > u_initialScale) {
+                int steps = min(int(-log2_mag) - 1, new_scale - u_initialScale);
+                if (steps > 0) {
+                  new_dzr = ldexp(new_dzr, steps);
+                  new_dzi = ldexp(new_dzi, steps);
+                  new_scale = new_scale - steps;
+                }
+              }
+            }
+
+            dzr = new_dzr;
+            dzi = new_dzi;
+            scale = new_scale;
             iter += 1.0;
             ref_iter++;
 
             if (u_loopEnabled != 0 && ref_iter >= u_loopThreshold) {
-              dzr += u_loopDeltaR / ldexp_approx(1.0, scale);
-              dzi += u_loopDeltaI / ldexp_approx(1.0, scale);
+              // Loop delta is in actual units, need to convert to scaled
+              float loop_dzr = ldexp(u_loopDeltaR, -scale);
+              float loop_dzi = ldexp(u_loopDeltaI, -scale);
+              dzr += loop_dzr;
+              dzi += loop_dzi;
               ref_iter -= u_loopJump;
             }
 
+            // Bounding box updates use old values (before this iteration)
             bool just_updated = false;
             if (globalIter == fibCurr) {
               just_updated = true;
@@ -11746,9 +11899,12 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
                 float diff_r = old_dzr - bbr;
                 float diff_i = old_dzi - bbi;
                 float db = max(abs(diff_r), abs(diff_i));
-                if (db <= u_epsilon2) {
+                // Scale epsilon to match the stored scale
+                float eps = ldexp(u_epsilon, -old_scale);
+                float eps2 = ldexp(u_epsilon2, -old_scale);
+                if (db <= eps2) {
                   if (period == 0.0) period = iter;
-                  if (db <= u_epsilon) {
+                  if (db <= eps) {
                     status = 2.0;
                     break;
                   }
@@ -11758,18 +11914,23 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
               if (pending_refidx >= 2584 && pending_refidx < u_refOrbitLength) {
                 vec3 thread = getThread(pending_refidx);
                 if (thread.x >= 0.0 && int(thread.x) == ref_iter) {
-                  float diff_r = old_dzr - bbr + thread.y / ldexp_approx(1.0, scale);
-                  float diff_i = old_dzi - bbi + thread.z / ldexp_approx(1.0, scale);
+                  // Thread deltas are in actual units, convert to old_scale
+                  float thread_r = ldexp(thread.y, -old_scale);
+                  float thread_i = ldexp(thread.z, -old_scale);
+                  float diff_r = old_dzr - bbr + thread_r;
+                  float diff_i = old_dzi - bbi + thread_i;
                   float db = max(abs(diff_r), abs(diff_i));
-                  if (db <= u_epsilon2) {
+                  float eps = ldexp(u_epsilon, -old_scale);
+                  float eps2 = ldexp(u_epsilon2, -old_scale);
+                  if (db <= eps2) {
                     if (period == 0.0) period = iter;
-                    if (db <= u_epsilon) {
+                    if (db <= eps) {
                       status = 2.0;
                       break;
                     }
                   }
-                  bbr -= thread.y / ldexp_approx(1.0, scale);
-                  bbi -= thread.z / ldexp_approx(1.0, scale);
+                  bbr -= thread_r;
+                  bbi -= thread_i;
                   pending_refidx = ref_iter;
                 }
               }
@@ -11780,16 +11941,9 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
         outState = vec4(dzr, dzi, iter, status);
         outCheckpoint = vec4(bbr, bbi, float(ref_iter), period);
         outLazy = vec4(float(ckpt_refidx), float(pending_refidx), ckpt_bbr, ckpt_bbi);
+        outScale = vec4(float(scale), 0.0, 0.0, 0.0);
       }
     `;
-  }
-
-  async createShaders() {
-    // Call parent, then add additional uniform for initial scale
-    await super.createShaders();
-    const gl = this.gl;
-    gl.useProgram(this.iterProgram);
-    this.iterUniforms.u_initialScale = gl.getUniformLocation(this.iterProgram, 'u_initialScale');
   }
 
   initializeStateTextures() {
@@ -11801,12 +11955,13 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
     const stateData = new Float32Array(area * 4);
     const checkpointData = new Float32Array(area * 4);
     const lazyData = new Float32Array(area * 4);
+    const scaleData = new Float32Array(area * 4);
 
     for (let i = 0; i < area; i++) {
       stateData[i * 4 + 0] = this.dz[i * 2];
       stateData[i * 4 + 1] = this.dz[i * 2 + 1];
-      stateData[i * 4 + 2] = 1.0;
-      stateData[i * 4 + 3] = 0.0;
+      stateData[i * 4 + 2] = 1.0;  // iter
+      stateData[i * 4 + 3] = 0.0;  // status
 
       checkpointData[i * 4 + 0] = 0.0;
       checkpointData[i * 4 + 1] = 0.0;
@@ -11817,6 +11972,12 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
       lazyData[i * 4 + 1] = -1.0;
       lazyData[i * 4 + 2] = 0.0;
       lazyData[i * 4 + 3] = 0.0;
+
+      // Scale texture: (scale, 0, 0, 0)
+      scaleData[i * 4 + 0] = this.pixelScale[i];
+      scaleData[i * 4 + 1] = 0.0;
+      scaleData[i * 4 + 2] = 0.0;
+      scaleData[i * 4 + 3] = 0.0;
     }
 
     gl.bindTexture(gl.TEXTURE_2D, this.pingStateTex);
@@ -11825,24 +11986,89 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, checkpointData);
     gl.bindTexture(gl.TEXTURE_2D, this.pingLazyTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, lazyData);
+    gl.bindTexture(gl.TEXTURE_2D, this.pingScaleTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, scaleData);
   }
 
-  uploadDeltaC() {
+  doGpuIterations(targetIters) {
     const gl = this.gl;
-    const w = this.texWidth;
-    const h = this.texHeight;
-    const area = w * h;
 
-    const dcData = new Float32Array(area * 4);
-    for (let i = 0; i < area; i++) {
-      dcData[i * 4 + 0] = this.dc[i * 2];
-      dcData[i * 4 + 1] = this.dc[i * 2 + 1];
-      dcData[i * 4 + 2] = this.pixelScale[i];  // Per-pixel scale
-      dcData[i * 4 + 3] = 0.0;
+    // Get Fibonacci checkpoints
+    while (this.fibCache[this.fibCache.length - 1] < this.it + targetIters + 1000) {
+      const n = this.fibCache.length;
+      this.fibCache.push(this.fibCache[n - 1] + this.fibCache[n - 2]);
     }
+    let fibIdx = 0;
+    while (this.fibCache[fibIdx] <= this.it) fibIdx++;
+    const fibPrev = fibIdx > 0 ? this.fibCache[fibIdx - 1] : 1;
+    const fibCurr = this.fibCache[fibIdx];
 
+    // Bind shader and set uniforms
+    gl.useProgram(this.iterProgram);
+
+    gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, this.deltaCTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, dcData);
+    gl.uniform1i(this.iterUniforms.u_deltaC, 3);
+
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.refOrbitTex);
+    gl.uniform1i(this.iterUniforms.u_refOrbit, 4);
+
+    gl.uniform2f(this.iterUniforms.u_resolution, this.texWidth, this.texHeight);
+    gl.uniform1i(this.iterUniforms.u_iterations, targetIters);
+    gl.uniform1i(this.iterUniforms.u_exponent, this.config.exponent);
+    gl.uniform1f(this.iterUniforms.u_epsilon, this.epsilon);
+    gl.uniform1f(this.iterUniforms.u_epsilon2, this.epsilon2);
+    gl.uniform1f(this.iterUniforms.u_pixelSize, this.pix);
+    gl.uniform1i(this.iterUniforms.u_startIter, this.it);
+    gl.uniform1i(this.iterUniforms.u_refOrbitLength, this.refIterations);
+    gl.uniform1i(this.iterUniforms.u_refOrbitTexWidth, this.refOrbitTexWidth);
+    gl.uniform1i(this.iterUniforms.u_fibPrev, fibPrev);
+    gl.uniform1i(this.iterUniforms.u_fibCurr, fibCurr);
+
+    // Loop parameters
+    gl.uniform1i(this.iterUniforms.u_loopEnabled, this.refOrbitLoop.enabled ? 1 : 0);
+    gl.uniform1i(this.iterUniforms.u_loopThreshold, this.refOrbitLoop.threshold || 0);
+    gl.uniform1i(this.iterUniforms.u_loopJump, this.refOrbitLoop.jumpAmount || 0);
+    gl.uniform1f(this.iterUniforms.u_loopDeltaR, this.refOrbitLoop.deltaR || 0);
+    gl.uniform1f(this.iterUniforms.u_loopDeltaI, this.refOrbitLoop.deltaI || 0);
+
+    // GlAdaptiveBoard-specific: initial scale uniform
+    gl.uniform1i(this.iterUniforms.u_initialScale, this.initialScale);
+
+    // Bind input textures
+    const readState = this.isPingRead ? this.pingStateTex : this.pongStateTex;
+    const readCheckpoint = this.isPingRead ? this.pingCheckpointTex : this.pongCheckpointTex;
+    const readLazy = this.isPingRead ? this.pingLazyTex : this.pongLazyTex;
+    const readScale = this.isPingRead ? this.pingScaleTex : this.pongScaleTex;
+    // Write to the OPPOSITE buffer (ping-pong pattern)
+    const writeFB = this.isPingRead ? this.pongFB : this.pingFB;
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, readState);
+    gl.uniform1i(this.iterUniforms.u_state, 0);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, readCheckpoint);
+    gl.uniform1i(this.iterUniforms.u_checkpoint, 1);
+
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, readLazy);
+    gl.uniform1i(this.iterUniforms.u_lazy, 2);
+
+    // GlAdaptiveBoard-specific: bind scale texture
+    gl.activeTexture(gl.TEXTURE5);
+    gl.bindTexture(gl.TEXTURE_2D, readScale);
+    gl.uniform1i(this.iterUniforms.u_scale, 5);
+
+    // Draw
+    gl.bindFramebuffer(gl.FRAMEBUFFER, writeFB);
+    gl.viewport(0, 0, this.texWidth, this.texHeight);
+    gl.bindVertexArray(this.quadVAO);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    this.isPingRead = !this.isPingRead;
+    this.it += targetIters;
   }
 
   uploadRefOrbit() {
@@ -11862,7 +12088,9 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
 
     const data = new Float32Array(texWidth * rowsNeeded * 4);
 
-    for (let i = this.lastUploadedRefIter; i < refLen; i++) {
+    // Fill from 0, not lastUploadedRefIter, to avoid overwriting existing data with zeros
+    // when texSubImage2D uploads full rows
+    for (let i = 0; i < refLen; i++) {
       const orbit = this.qdRefOrbit[i];
       const thread = this.threading.getThread(i);
       const texelIdx = i * 2;
@@ -11883,6 +12111,7 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
 
     gl.bindTexture(gl.TEXTURE_2D, this.refOrbitTex);
 
+    // Upload only new rows (rows that weren't fully uploaded before)
     const startRow = Math.floor(this.lastUploadedRefIter * 2 / texWidth);
     const endRow = Math.ceil(refLen * 2 / texWidth);
 
@@ -11893,16 +12122,6 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
     }
 
     this.lastUploadedRefIter = refLen;
-  }
-
-  doGpuIterations(targetIters) {
-    // Call parent implementation
-    super.doGpuIterations(targetIters);
-
-    // Set additional uniform for initial scale
-    const gl = this.gl;
-    gl.useProgram(this.iterProgram);
-    gl.uniform1i(this.iterUniforms.u_initialScale, this.initialScale);
   }
 
   async serialize() {
@@ -15330,7 +15549,7 @@ function qdToDecimalString(qd, digits) {
     fracStr = fracStr.replace(/0+$/, '');
     if (fracStr.length > 0) result += '.' + fracStr;
   }
-  return result;
+  return neg ? '-' + result : result;
 }
 
 function fast2Sum(a, b) {
