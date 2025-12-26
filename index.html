@@ -9711,13 +9711,21 @@ class GlBoard extends Board {
 
     if (!pending) return;
 
+    const pbo = this.level2PBOs[pending.pboIndex];
+    if (!pbo) {
+      // PBO was never created or was lost - skip this readback
+      this.pendingReadback = null;
+      this.pendingBatchEndIter = null;
+      return;
+    }
+
     const batchEndIter = this.pendingBatchEndIter;
     this.pendingReadback = null;
     this.pendingBatchEndIter = null;
 
     // getBufferSubData() blocks until the PBO read is complete
     const level2Data = new Float32Array(this.level2Width * this.level2Height * 4);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.level2PBOs[pending.pboIndex]);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
     gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, level2Data);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
 
