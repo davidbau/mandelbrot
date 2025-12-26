@@ -22,7 +22,7 @@ const BOARD_TYPES = [
   { name: 'qdpert', class: 'QDPerturbationBoard', minZoom: 1e15, maxZoom: 1e60 },
   { name: 'qdz', class: 'QDZhuoranBoard', minZoom: 1e15, maxZoom: 1e60 },
   { name: 'qdcpu', class: 'QDCpuBoard', minZoom: 1e15, maxZoom: 1e60 },
-  { name: 'adaptive', class: 'AdaptiveGpuBoard', minZoom: 1e20, maxZoom: 1e60 },
+  { name: 'gpua', class: 'GpuAdaptiveBoard', minZoom: 1e20, maxZoom: 1e60 },
 ];
 
 // Test locations - one for each zoom regime
@@ -73,7 +73,7 @@ async function runBenchmark() {
       for (const viewport of VIEWPORT_SIZES) {
         for (const iters of ITER_COUNTS) {
           // Skip expensive combinations for slow boards
-          const isCpu = !['gpu', 'gpuz', 'adaptive'].includes(boardType.name);
+          const isCpu = !['gpu', 'gpuz', 'gpua'].includes(boardType.name);
           const isLargeViewport = viewport.width >= 640;
           if (isCpu && isLargeViewport && iters > 100) continue;
           if (isCpu && iters > 500) continue;
@@ -318,7 +318,7 @@ function printSummary(allResults) {
   console.log('-'.repeat(80));
 
   const cpuBoards = ['cpu', 'pert', 'ddz', 'qdpert', 'qdz', 'qdcpu'];
-  const gpuBoards = ['gpu', 'gpuz', 'adaptive'];
+  const gpuBoards = ['gpu', 'gpuz', 'gpua'];
 
   // Helper to print board stats
   function printBoardStats(name) {
@@ -330,7 +330,7 @@ function printSummary(allResults) {
     // Notes about what contributes to per-iteration cost
     let notes = '';
     if (['pert', 'ddz', 'gpuz'].includes(name)) notes = 'DD ref orbit';
-    if (['qdpert', 'qdz', 'qdcpu', 'adaptive'].includes(name)) notes = 'QD ref orbit + threading';
+    if (['qdpert', 'qdz', 'qdcpu', 'gpua'].includes(name)) notes = 'QD ref orbit + threading';
 
     console.log(
       `  ${board.class.padEnd(20)} ` +

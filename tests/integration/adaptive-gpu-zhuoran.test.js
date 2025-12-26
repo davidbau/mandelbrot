@@ -1,12 +1,12 @@
 /**
- * Integration tests for AdaptiveGpuBoard
+ * Integration tests for GpuAdaptiveBoard
  * Tests adaptive per-pixel scaling for deep zoom GPU perturbation.
  */
 
 const path = require('path');
 const { TEST_TIMEOUT, setupBrowser, setupPage, closeBrowser } = require('./test-utils');
 
-describe('AdaptiveGpuBoard', () => {
+describe('GpuAdaptiveBoard', () => {
   let browser;
   let page;
 
@@ -80,21 +80,21 @@ describe('AdaptiveGpuBoard', () => {
     await page.close();
     page = await browser.newPage();
 
-    const adaptiveResult = await runBoard('adaptive', '1e20', TEST_CENTER, 200);
+    const adaptiveResult = await runBoard('gpua', '1e20', TEST_CENTER, 200);
     const comparison = compareIterations(adaptiveResult.nn, octResult.nn);
     expect(comparison.within5Rate).toBeGreaterThan(0.95);
   }, 30000);
 
-  test('should be selectable via board=adaptive', async () => {
+  test('should be selectable via board=gpua', async () => {
     const cwd = process.cwd();
-    const url = `file://${path.join(cwd, 'index.html')}?z=1e20&c=${TEST_CENTER}&board=adaptive&grid=20&subpixel=1`;
+    const url = `file://${path.join(cwd, 'index.html')}?z=1e20&c=${TEST_CENTER}&board=gpua&grid=20&subpixel=1`;
 
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
     await new Promise(r => setTimeout(r, 500));
 
     const boardType = await page.evaluate(() => window.explorer?.grid?.views?.[0]?.boardType);
-    expect(boardType).toBe('AdaptiveGpuBoard');
+    expect(boardType).toBe('GpuAdaptiveBoard');
   }, 15000);
 
   test('convergence detection at z=5', async () => {
@@ -106,7 +106,7 @@ describe('AdaptiveGpuBoard', () => {
     await page.close();
     page = await browser.newPage();
 
-    const adaptiveResult = await runBoard('adaptive', '5', CONVERGENT_CENTER, 500);
+    const adaptiveResult = await runBoard('gpua', '5', CONVERGENT_CENTER, 500);
     // Expect reasonable convergence detection
     expect(adaptiveResult.converged).toBeGreaterThan(gpuResult.converged * 0.5);
   }, 60000);
@@ -148,7 +148,7 @@ describe('AdaptiveGpuBoard', () => {
     await page.setViewport({ width: 256, height: 144 });
 
     // Run adaptive board
-    const adaptiveUrl = `file://${path.join(cwd, 'index.html')}?z=${TRAPEZOID_ZOOM}&c=${TRAPEZOID_CENTER}&board=adaptive&grid=1&maxiter=3000&width=256&height=144&a=16:9&pixelratio=1`;
+    const adaptiveUrl = `file://${path.join(cwd, 'index.html')}?z=${TRAPEZOID_ZOOM}&c=${TRAPEZOID_CENTER}&board=gpua&grid=1&maxiter=3000&width=256&height=144&a=16:9&pixelratio=1`;
 
     await page.goto(adaptiveUrl, { waitUntil: 'load' });
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 30000 });

@@ -78,7 +78,7 @@ Results are saved to `tests/benchmark-results/` as JSONL for accumulation across
 - Board memory: 3.9 ns/board-px (28 bytes/pixel buffer)
 - Active-pixel: 19 ns/px (JavaScript processing loop)
 
-**GpuZhuoranBoard / AdaptiveGpuBoard**: Reference orbit + GPU
+**GpuZhuoranBoard / GpuAdaptiveBoard**: Reference orbit + GPU
 - Compute: 0.4 ns/px-iter (11× faster than CPU)
 - Board memory: 14-15 ns/board-px (56-60 bytes/pixel buffer)
 - Iter overhead: 700-812 μs/iter (reference orbit on CPU)
@@ -106,7 +106,7 @@ Based on compute cost relative to CPU (effort=100 baseline):
 |-------|---------------------|--------|
 | GpuBoard | 0.20 | 5 |
 | GpuZhuoranBoard | 0.41 | 9 |
-| AdaptiveGpuBoard | 0.43 | 10 |
+| GpuAdaptiveBoard | 0.43 | 10 |
 | CpuBoard | 4.39 | 100 |
 | DDZhuoranBoard | 19.6 | 450 |
 | QDZhuoranBoard | 21.0 | 480 |

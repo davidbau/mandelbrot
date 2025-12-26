@@ -1,6 +1,6 @@
 # Adaptive Per-Pixel Scaling for Deep Zoom GPU Perturbation
 
-This document describes the adaptive scaling strategy used in `AdaptiveGpuBoard` to enable GPU-accelerated Mandelbrot computation at extreme zoom depths (10^30 and beyond).
+This document describes the adaptive scaling strategy used in `GpuAdaptiveBoard` to enable GPU-accelerated Mandelbrot computation at extreme zoom depths (10^30 and beyond).
 
 ## Problem Statement
 
@@ -15,7 +15,7 @@ Standard GPU perturbation (as in `GpuZhuoranBoard`) uses float32 arithmetic with
 
 ## Solution: Per-Pixel Adaptive Scaling
 
-`AdaptiveGpuBoard` gives each pixel its own scale factor that adjusts dynamically:
+`GpuAdaptiveBoard` gives each pixel its own scale factor that adjusts dynamically:
 
 ```
 δ_actual = δ_stored × 2^(pixel_scale)
@@ -77,7 +77,7 @@ scale → scale + 1
 
 The invariant δ_actual = δ_stored × 2^scale is preserved.
 
-## Implementation in AdaptiveGpuBoard
+## Implementation in GpuAdaptiveBoard
 
 ### Per-Pixel State
 
@@ -135,7 +135,7 @@ The threshold 1e-13 prevents underflow when z² would be too small to represent.
 
 ## Reference Orbit Precision
 
-`AdaptiveGpuBoard` uses QD precision (quad-double) for reference orbits:
+`GpuAdaptiveBoard` uses QD precision (quad-double) for reference orbits:
 - Reference orbit computed at view center in full QD precision (~62 decimal digits)
 - Stored as float64 quad-tuples for GPU upload
 - Sufficient precision for zooms to 10^60
@@ -146,7 +146,7 @@ The threshold 1e-13 prevents underflow when z² would be too small to represent.
 |-------|------------|-----------|-----|
 | GpuBoard | < 10^7 | float32 direct | Yes |
 | GpuZhuoranBoard | 10^7 - 10^30 | float32 perturbation, DD reference | Yes |
-| AdaptiveGpuBoard | > 10^30 | float32 perturbation, QD reference, adaptive scaling | Yes |
+| GpuAdaptiveBoard | > 10^30 | float32 perturbation, QD reference, adaptive scaling | Yes |
 | QDZhuoranBoard | > 10^30 | float64 perturbation, QD reference | No (CPU) |
 
 ## Performance
@@ -172,11 +172,11 @@ expect(closeRate).toBeGreaterThan(0.5);   // >50% within ±1 iteration
 expect(exactRate).toBeGreaterThan(0.3);   // >30% exact match
 ```
 
-The `adaptive-gpu-zhuoran.test.js` test compares AdaptiveGpuBoard against QDZhuoranBoard:
+The `adaptive-gpu-zhuoran.test.js` test compares GpuAdaptiveBoard against QDZhuoranBoard:
 
 ```javascript
 // Compare GPU adaptive vs CPU QD at deep zoom
-const gpu = await runBoard("adaptive", testCase);
+const gpu = await runBoard("gpua", testCase);
 const cpu = await runBoard("qdz", testCase);
 const matchRate = compareIterations(gpu.nn, cpu.nn);
 expect(matchRate).toBeGreaterThan(0.9);  // >90% match

@@ -260,7 +260,7 @@ href="#github-icon"/></svg></a></p>
 //    - QDZhuoranBoard: QD precision with perturbation theory (CPU, deep zoom)
 //    - GpuBoard: WebGPU (shallow zoom)
 //    - GpuZhuoranBoard: WebGPU with DD perturbation (medium zoom)
-//    - AdaptiveGpuBoard: WebGPU with QD perturbation (deep zoom)
+//    - GpuAdaptiveBoard: WebGPU with QD perturbation (deep zoom)
 //
 // UPDATE CYCLE EXAMPLE:
 //
@@ -3421,7 +3421,7 @@ class URLHandler {
         parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
           const validTypes = [
-            'cpu', 'ddz', 'qdz', 'gpu', 'gl', 'glz', 'gla', 'gpuz', 'adaptive', 'qdcpu'
+            'cpu', 'ddz', 'qdz', 'gpu', 'gl', 'glz', 'gla', 'gpuz', 'gpua', 'qdcpu'
           ];
           if (validTypes.includes(boardType)) {
             configUpdates.forceBoard = boardType;
@@ -5914,7 +5914,7 @@ class Board {
       ['GlBoard', GlBoard],
       ['GlZhuoranBoard', GlZhuoranBoard],
       ['GpuZhuoranBoard', GpuZhuoranBoard],
-      ['AdaptiveGpuBoard', AdaptiveGpuBoard],
+      ['GpuAdaptiveBoard', GpuAdaptiveBoard],
       ['GlAdaptiveBoard', GlAdaptiveBoard]
     ]);
     const board = subclasses.get(serialized.type).fromSerialized(serialized);
@@ -6838,7 +6838,7 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
 };
 
 // Mixin that adds QD-precision reference orbit methods to any board class.
-// Used by both QDZhuoranBoard (CPU) and AdaptiveGpuBoard (GPU) to share
+// Used by both QDZhuoranBoard (CPU) and GpuAdaptiveBoard (GPU) to share
 // the reference orbit computation logic.
 const QDReferenceOrbitMixin = (Base) => class extends Base {
   // Initialize QD reference orbit state. Call from constructor after super().
@@ -12163,7 +12163,7 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
   }
 }
 
-// Base class for double-buffered GPU perturbation boards (GpuZhuoranBoard, AdaptiveGpuBoard)
+// Base class for double-buffered GPU perturbation boards (GpuZhuoranBoard, GpuAdaptiveBoard)
 // Provides shared double-buffering infrastructure and result processing
 class GpuZhuoranBaseBoard extends GpuBaseBoard {
   // Subclasses must define: static BYTES_PER_PIXEL, static STRIDE
@@ -13536,7 +13536,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
  * See docs/ADAPTIVE-SCALING.md for full mathematical derivation.
  */
 // Uses QDReferenceOrbitMixin for reference orbit computation
-class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
+class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
   static BYTES_PER_PIXEL = 64;  // 16 × 4 bytes (7 i32 + 8 f32 + 1 i32, with orig_index)
   static STRIDE = 16;           // 16 fields per pixel
 
@@ -13760,13 +13760,13 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
 
   async createBuffers() {
     const dimsArea = this.config.dimsArea;
-    const STRIDE = AdaptiveGpuBoard.STRIDE;  // 16 fields per pixel
+    const STRIDE = GpuAdaptiveBoard.STRIDE;  // 16 fields per pixel
 
     // Consolidated 3-binding layout:
     // 0: params (uniform)
     // 1: pixels (PixelState): 7 i32 + 8 f32 + 1 i32 = 64 bytes per pixel (with orig_index)
     // 2: iters (IterState): 5 f32 = 20 bytes per iteration (refOrbit + threading combined)
-    const PIXEL_BYTES = AdaptiveGpuBoard.BYTES_PER_PIXEL;  // 64 bytes
+    const PIXEL_BYTES = GpuAdaptiveBoard.BYTES_PER_PIXEL;  // 64 bytes
     const ITER_BYTES = 20;   // 5 × 4 bytes
 
     const precomputedCount = this.precomputed ? this.precomputed.getPrecomputedCount() : 0;
@@ -13830,7 +13830,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       pixelsF32[idx + 12] = 0;                   // ckpt_bbi
       pixelsF32[idx + 13] = this.dc[i * 2];     // dcr (scaled by initialScale)
       pixelsF32[idx + 14] = this.dc[i * 2 + 1]; // dci
-      // AdaptiveGpuBoard-specific field at end (index 15)
+      // GpuAdaptiveBoard-specific field at end (index 15)
       pixelsI32[idx + 15] = this.pixelScale[i]; // scale from initPixels
       activeIdx++;
     }
@@ -13863,7 +13863,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
    * preventing out-of-order iteration delivery that causes striping.
    */
   processResultsData(data, count) {
-    const STRIDE = AdaptiveGpuBoard.STRIDE;
+    const STRIDE = GpuAdaptiveBoard.STRIDE;
     const pixelsI32 = new Int32Array(data);
     const pixelsF32 = new Float32Array(data);
     const debugReadback = hasDebugFlag(this.config, 'rb');
@@ -14032,7 +14032,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       //   [12] ckpt_bbi: f32
       //   [13] dcr: f32
       //   [14] dci: f32
-      //   [15] scale: i32  (AdaptiveGpuBoard-specific, at end for layout compatibility)
+      //   [15] scale: i32  (GpuAdaptiveBoard-specific, at end for layout compatibility)
       struct PixelState {
         // Integer fields (7 i32) - orig_index first, then matches GpuZhuoranBoard
         orig_index: i32,
@@ -14051,7 +14051,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         ckpt_bbi: f32,
         dcr: f32,
         dci: f32,
-        // AdaptiveGpuBoard-specific field at end
+        // GpuAdaptiveBoard-specific field at end
         scale: i32,
       }
 
@@ -14458,7 +14458,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     const compilationInfo = await shaderModule.getCompilationInfo();
     for (const msg of compilationInfo.messages) {
       const level = msg.type === 'error' ? 'ERROR' : msg.type === 'warning' ? 'WARN' : 'INFO';
-      console.log(`AdaptiveGpuBoard shader ${level}: ${msg.message} ` +
+      console.log(`GpuAdaptiveBoard shader ${level}: ${msg.message} ` +
         `(line ${msg.lineNum}, col ${msg.linePos})`);
     }
 
@@ -14483,15 +14483,15 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
 
     // GPU required - if device unavailable, computation cannot proceed
     if (!this.device) {
-      console.warn('AdaptiveGpuBoard: GPU device not available, cannot compute');
+      console.warn('GpuAdaptiveBoard: GPU device not available, cannot compute');
       this.isComputing = false;
       return;
     }
 
     try {
       const THREADING_CAPACITY = 1048576;
-      const BYTES_PER_PIXEL = AdaptiveGpuBoard.BYTES_PER_PIXEL;  // 64 bytes
-      const STRIDE = AdaptiveGpuBoard.STRIDE;  // 16 fields
+      const BYTES_PER_PIXEL = GpuAdaptiveBoard.BYTES_PER_PIXEL;  // 64 bytes
+      const STRIDE = GpuAdaptiveBoard.STRIDE;  // 16 fields
 
       // ================================================================
       // STEP 1: Check if done BEFORE submitting new work
@@ -14675,7 +14675,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       this.pendingBatchEndIter = batchEndIter;
 
     } catch (error) {
-      console.error('AdaptiveGpuBoard.compute() ERROR:',
+      console.error('GpuAdaptiveBoard.compute() ERROR:',
         error?.message || error, error?.stack || '');
     } finally {
       this.isComputing = false;
@@ -14737,7 +14737,7 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
   static fromSerialized(serialized) {
     // GPU boards require async initialization, so this returns a board
     // that will continue initializing in the background
-    const board = new AdaptiveGpuBoard(
+    const board = new GpuAdaptiveBoard(
       serialized.k,
       serialized.sizesQD[0],
       serialized.sizesQD[1],
@@ -14754,14 +14754,14 @@ class AdaptiveGpuBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         board.wastedBandwidth = serialized.wastedBandwidth || 0;
         board.pendingActiveCount = board.activeCount;
 
-        const bufferSize = board.activeCount * AdaptiveGpuBoard.BYTES_PER_PIXEL;
+        const bufferSize = board.activeCount * GpuAdaptiveBoard.BYTES_PER_PIXEL;
         board.buffers.pixels?.destroy();
         board.buffers.pixels = board.device.createBuffer({
           size: bufferSize,
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
         });
         // Note: stagingPixels are created on-demand in readPixelBuffer() for serialization
-        board.initResultsReadback(AdaptiveGpuBoard.BYTES_PER_PIXEL, board.activeCount);
+        board.initResultsReadback(GpuAdaptiveBoard.BYTES_PER_PIXEL, board.activeCount);
         board.createBindGroup();
       }
 
@@ -14821,7 +14821,7 @@ const forcedBoardTypes = {
     'glz': GlZhuoranBoard,
     'gla': GlAdaptiveBoard,
     'gpuz': GpuZhuoranBoard,
-    'adaptive': AdaptiveGpuBoard,
+    'gpua': GpuAdaptiveBoard,
     'qdcpu': QDCpuBoard
 };
 
@@ -14853,12 +14853,12 @@ function selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard) {
     // Float32 has ~7 decimal digits, so direct iteration works to ~1e-7 pixel size
     // Shallow zooms (z < ~1e7): GpuBoard with simple float32 iteration
     // Medium zooms (z ~1e7 to ~1e30): GpuZhuoranBoard with quad-precision reference
-    // Deep zooms (z > ~1e30): AdaptiveGpuBoard with QD-precision reference
+    // Deep zooms (z > ~1e30): GpuAdaptiveBoard with QD-precision reference
     //   orbit and adaptive per-pixel scaling for correct escape detection
     const GpuBoardClass = (
         (pixelSize > 1e-7) ? GpuBoard :
         (pixelSize > 1e-30) ? GpuZhuoranBoard :
-        AdaptiveGpuBoard);
+        GpuAdaptiveBoard);
     const largestBufferSize = dimsArea * GpuBoardClass.BYTES_PER_PIXEL;
     if (largestBufferSize <= gpuMaxBufferSize) {
       return GpuBoardClass;
@@ -16047,7 +16047,7 @@ if (location.search.includes('debug=')) {
         };
 
         // For Adaptive boards, read GPU state
-        if (board.constructor.name === 'AdaptiveGpuBoard') {
+        if (board.constructor.name === 'GpuAdaptiveBoard') {
           const pixelData = await board.readBuffer(board.buffers.pixels, Uint8Array);
           const offset = pixelIndex * 60;
           const pixelU32 = new Uint32Array(pixelData.buffer, offset, 15);

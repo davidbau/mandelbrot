@@ -69,7 +69,7 @@ When filtering tests by name:
 
 These guidelines emerged from successful debugging sessions on this codebase:
 
-1. **Use slow-but-correct implementations as ground truth** - Compare fast GPU code against slow CPU implementations (e.g., QDZhuoranBoard vs AdaptiveGpuBoard). When results differ, the simpler implementation is usually right.
+1. **Use slow-but-correct implementations as ground truth** - Compare fast GPU code against slow CPU implementations (e.g., QDZhuoranBoard vs GpuAdaptiveBoard). When results differ, the simpler implementation is usually right.
 
 2. **Understand mathematical invariants** - Know the constraints your data structures must satisfy (e.g., QD limbs must satisfy `|limb[i]| < ulp(limb[i-1])/2`). Violations cause subtle bugs that only appear at extreme zoom.
 

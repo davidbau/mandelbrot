@@ -25,7 +25,7 @@ All board types support precomputed inheritance:
 | QDZhuoranBoard | CPU perturbation | quad-double |
 | GpuBoard | GPU direct | float32 |
 | GpuZhuoranBoard | GPU perturbation | double-double |
-| AdaptiveGpuBoard | GPU perturbation | quad-double |
+| GpuAdaptiveBoard | GPU perturbation | quad-double |
 
 ## 1. Coordinate Mapping
 
@@ -147,7 +147,7 @@ iterate(targetIters) {
 
 ## 5. GPU Board Integration
 
-For GPU boards (`GpuBoard`, `GpuZhuoranBoard`, `AdaptiveGpuBoard`), the flow is more complex:
+For GPU boards (`GpuBoard`, `GpuZhuoranBoard`, `GpuAdaptiveBoard`), the flow is more complex:
 
 ### Buffer Initialization
 ```javascript

@@ -16,7 +16,7 @@ const TESTS = [
   { board: 'qdpert', zoom: '5.96e16', center: '-1.76996758006287504637+0.060848954006235563i', name: 'QDPerturbationBoard' },
   { board: 'qdz', zoom: '5.96e16', center: '-1.76996758006287504637+0.060848954006235563i', name: 'QDZhuoranBoard' },
   { board: 'qdcpu', zoom: '5.96e16', center: '-1.76996758006287504637+0.060848954006235563i', name: 'QDCpuBoard' },
-  { board: 'adaptive', zoom: '1e29', center: '-0.022281337871859783996817861398-0.698493620179801136370805820785i', name: 'AdaptiveGpuBoard' },
+  { board: 'gpua', zoom: '1e29', center: '-0.022281337871859783996817861398-0.698493620179801136370805820785i', name: 'GpuAdaptiveBoard' },
 ];
 
 const VIEWPORT = { width: 640, height: 360 };

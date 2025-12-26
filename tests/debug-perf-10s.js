@@ -90,7 +90,7 @@ async function runBenchmark(boardType) {
 
   const boards = process.argv.slice(2);
   if (boards.length === 0) {
-    boards.push('gpuz', 'adaptive');
+    boards.push('gpuz', 'gpua');
   }
 
   const results = [];

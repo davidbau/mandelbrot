@@ -161,9 +161,9 @@ describe('Precomputed inheritance regressions', () => {
     await page.close();
   }, TEST_TIMEOUT);
 
-  test('AdaptiveGpuBoard applies inherited precomputed points', async () => {
+  test('GpuAdaptiveBoard applies inherited precomputed points', async () => {
     const page = await setupPage(browser);
-    const inheritedCount = await getInheritedLogCount(page, 'adaptive', 'AdaptiveGpuBoard');
+    const inheritedCount = await getInheritedLogCount(page, 'gpua', 'GpuAdaptiveBoard');
     expect(inheritedCount).toBeGreaterThan(0);
     await page.close();
   }, TEST_TIMEOUT);

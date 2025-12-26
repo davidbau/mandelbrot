@@ -88,7 +88,7 @@ async function testExactDims(boardType) {
 
 async function compare() {
   const qdz = await testExactDims('qdz');
-  const adaptive = await testExactDims('adaptive');
+  const adaptive = await testExactDims('gpua');
   
   console.log('\n=== COMPARISON ===');
   console.log(`QDZ: ${qdz.unknown} unknown, ${qdz.diverged} diverged, ${qdz.converged} converged at iter ${qdz.iteration}`);

@@ -1,7 +1,7 @@
 /**
- * Test that AdaptiveGpuBoard correctly rebases when the orbit passes near zero.
+ * Test that GpuAdaptiveBoard correctly rebases when the orbit passes near zero.
  *
- * This test catches a bug where AdaptiveGpuBoard had an extra guard condition
+ * This test catches a bug where GpuAdaptiveBoard had an extra guard condition
  * `z_norm > 1e-13` that prevented rebasing when z was very small. This caused
  * catastrophic false divergence around iteration 9997 at z=1e29 zoom.
  *
@@ -13,7 +13,7 @@ const path = require('path');
 
 const TEST_TIMEOUT = 60000;
 
-describe('AdaptiveGpuBoard rebase behavior', () => {
+describe('GpuAdaptiveBoard rebase behavior', () => {
   let browser;
   let page;
 
@@ -54,7 +54,7 @@ describe('AdaptiveGpuBoard rebase behavior', () => {
     }
   });
 
-  test('AdaptiveGpuBoard rebases correctly when orbit passes near zero', async () => {
+  test('GpuAdaptiveBoard rebases correctly when orbit passes near zero', async () => {
     // This location at z=1e29 causes the reference orbit to pass near zero
     // around iteration 1236. Both boards should rebase at that point.
     const params = new URLSearchParams({
@@ -63,7 +63,7 @@ describe('AdaptiveGpuBoard rebase behavior', () => {
       a: '16:9',
       grid: '40',  // Larger grid = fewer pixels for speed
       pixelratio: '1',
-      board: 'adaptive',
+      board: 'gpua',
       debug: 'w,s,fastload'  // MockWorker + step mode + fast view loading
     });
 
@@ -97,7 +97,7 @@ describe('AdaptiveGpuBoard rebase behavior', () => {
     expect(state.nn).toBe(0);  // Should not have diverged
   }, TEST_TIMEOUT);
 
-  test('AdaptiveGpuBoard matches QDZ refiter sequence', async () => {
+  test('GpuAdaptiveBoard matches QDZ refiter sequence', async () => {
     // Collect refiter sequence for both boards and verify they match
     async function collectRefiterSequence(boardType) {
       const testPage = await browser.newPage();
@@ -125,7 +125,7 @@ describe('AdaptiveGpuBoard rebase behavior', () => {
       // Get the board's current refiter and check for rebase
       const result = await testPage.evaluate(async () => {
         const board = Array.from(window.worker0.boards.values())[0];
-        const isAdaptive = board.constructor.name === 'AdaptiveGpuBoard';
+        const isAdaptive = board.constructor.name === 'GpuAdaptiveBoard';
         let refiter;
         if (isAdaptive) {
           const data = await board.readBuffer(board.buffers.pixels, Uint8Array);
@@ -146,7 +146,7 @@ describe('AdaptiveGpuBoard rebase behavior', () => {
 
     // Run both boards in parallel
     const [adaptiveResult, qdzResult] = await Promise.all([
-      collectRefiterSequence('adaptive'),
+      collectRefiterSequence('gpua'),
       collectRefiterSequence('qdz')
     ]);
 

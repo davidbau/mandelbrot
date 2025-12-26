@@ -27,7 +27,7 @@ async function findMismatch() {
     a: '16:9',
     grid: '20',
     pixelratio: '1',
-    board: 'adaptive',
+    board: 'gpua',
     debug: 'w'
   });
 

@@ -42,7 +42,7 @@ const CPU_BOARD_TYPES = [
 const GPU_BOARD_MAPPINGS = {
   'GpuBoard': 'CpuBoard',
   'GpuZhuoranBoard': 'DDZhuoranBoard',
-  'AdaptiveGpuBoard': 'QDZhuoranBoard',
+  'GpuAdaptiveBoard': 'QDZhuoranBoard',
 };
 
 describe('Board Serialization', () => {
@@ -564,7 +564,7 @@ describe('Board Serialization', () => {
         const gpuBoardClasses = {
           'GpuBoard': typeof GpuBoard !== 'undefined' ? GpuBoard : null,
           'GpuZhuoranBoard': typeof GpuZhuoranBoard !== 'undefined' ? GpuZhuoranBoard : null,
-          'AdaptiveGpuBoard': typeof AdaptiveGpuBoard !== 'undefined' ? AdaptiveGpuBoard : null,
+          'GpuAdaptiveBoard': typeof GpuAdaptiveBoard !== 'undefined' ? GpuAdaptiveBoard : null,
         };
         const cpuBoardClasses = {
           'CpuBoard': typeof CpuBoard !== 'undefined' ? CpuBoard : null,
@@ -780,16 +780,16 @@ describe('Board Serialization', () => {
       expect(result.comparison.bigMismatches).toBeLessThanOrEqual(bigTolerance);
     }, TEST_TIMEOUT);
 
-    test('AdaptiveGpuBoard serialization preserves computation state', async () => {
-      const result = await testGpuBoardSerialization('AdaptiveGpuBoard', 'QDZhuoranBoard');
+    test('GpuAdaptiveBoard serialization preserves computation state', async () => {
+      const result = await testGpuBoardSerialization('GpuAdaptiveBoard', 'QDZhuoranBoard');
 
       if (result.skip) {
-        console.log(`AdaptiveGpuBoard test skipped: ${result.reason}`);
+        console.log(`GpuAdaptiveBoard test skipped: ${result.reason}`);
         return;
       }
 
       if (result.error) {
-        console.log('AdaptiveGpuBoard error:', result.error);
+        console.log('GpuAdaptiveBoard error:', result.error);
       }
       expect(result.error).toBeUndefined();
 
@@ -800,7 +800,7 @@ describe('Board Serialization', () => {
       const tolerance = Math.floor(totalPixels * 0.16); // 16% can differ
       const bigTolerance = Math.ceil(totalPixels * 0.07); // 7% can differ by more than 1 iteration
       if (result.comparison.pixelMismatches > tolerance || result.comparison.bigMismatches > bigTolerance) {
-        console.log('AdaptiveGpuBoard pixel mismatches:', result.comparison.mismatchDetails);
+        console.log('GpuAdaptiveBoard pixel mismatches:', result.comparison.mismatchDetails);
       }
       expect(result.comparison.pixelMismatches).toBeLessThanOrEqual(tolerance);
       expect(result.comparison.bigMismatches).toBeLessThanOrEqual(bigTolerance);
@@ -931,7 +931,7 @@ describe('Board Serialization', () => {
       expect(result.refOrbitLength).toBeGreaterThan(0);
     }, TEST_TIMEOUT);
 
-    test('AdaptiveGpuBoard serialized data contains QD reference orbit', async () => {
+    test('GpuAdaptiveBoard serialized data contains QD reference orbit', async () => {
       const result = await page.evaluate(async (loc, dims) => {
         const config = {
           dimsWidth: dims.width,
@@ -945,11 +945,11 @@ describe('Board Serialization', () => {
         const center_re = [loc.center[0], 0, 0, 0];
         const center_im = [loc.center[1], 0, 0, 0];
 
-        if (typeof AdaptiveGpuBoard === 'undefined') {
-          return { error: 'AdaptiveGpuBoard not defined' };
+        if (typeof GpuAdaptiveBoard === 'undefined') {
+          return { error: 'GpuAdaptiveBoard not defined' };
         }
 
-        const board = new AdaptiveGpuBoard(0, loc.size, center_re, center_im, config);
+        const board = new GpuAdaptiveBoard(0, loc.size, center_re, center_im, config);
 
         try {
           await board.ensureGPUReady();
@@ -990,7 +990,7 @@ describe('Board Serialization', () => {
       expect(result.hasRefC_qd).toBe(true);
       expect(result.hasRefIterations).toBe(true);
       expect(result.hasInitialScale).toBe(true);
-      expect(result.type).toBe('AdaptiveGpuBoard');
+      expect(result.type).toBe('GpuAdaptiveBoard');
       expect(result.qdRefOrbitLength).toBeGreaterThan(0);
     }, TEST_TIMEOUT);
   });

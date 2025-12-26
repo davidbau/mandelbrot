@@ -380,4 +380,4 @@ Zoom < 10^13:        GpuBoard (standard float64)
 Zoom ≥ 10^28:        GlAdaptiveBoard (QD + adaptive scaling)
 ```
 
-When WebGL2 is unavailable, equivalent WebGPU boards (`GpuZhuoranBoard`, `AdaptiveGpuBoard`) are used instead.
+When WebGL2 is unavailable, equivalent WebGPU boards (`GpuZhuoranBoard`, `GpuAdaptiveBoard`) are used instead.

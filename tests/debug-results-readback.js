@@ -5,7 +5,7 @@
  */
 const { setupBrowser, setupPage, closeBrowser } = require('./integration/test-utils');
 
-const BOARD_TYPES = ['gpu', 'gpuz', 'adaptive'];
+const BOARD_TYPES = ['gpu', 'gpuz', 'gpua'];
 const SIZE = 1000;
 const DURATION_MS = 10000;
 const LOCATION = {

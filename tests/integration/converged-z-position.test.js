@@ -22,14 +22,14 @@ describe('Converged z position (red dots)', () => {
     await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
-  test('AdaptiveGpuBoard converged z is on the periodic orbit', async () => {
+  test('GpuAdaptiveBoard converged z is on the periodic orbit', async () => {
     const htmlPath = path.join(__dirname, '..', '..', 'index.html');
     const params = 'a=16:9&pixelratio=1&grid=1';
 
     const page = await setupPage(browser);
     page.setDefaultTimeout(TEST_TIMEOUT);
     await page.setViewport({ width: 160, height: 90 });
-    await page.goto(`file://${htmlPath}?${params}&board=adaptive`, { waitUntil: 'load' });
+    await page.goto(`file://${htmlPath}?${params}&board=gpua`, { waitUntil: 'load' });
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
 
     // Wait for some pixels to converge
@@ -99,7 +99,7 @@ describe('Converged z position (red dots)', () => {
 
     await page.close();
 
-    expect(results.boardType).toBe('AdaptiveGpuBoard');
+    expect(results.boardType).toBe('GpuAdaptiveBoard');
     expect(results.results.length).toBeGreaterThan(0);
 
     // Count valid cycle points

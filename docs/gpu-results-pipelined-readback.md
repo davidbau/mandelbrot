@@ -42,7 +42,7 @@ as are available and keeps a read cursor to catch up later.
 Use the board’s PixelState layout directly:
 - `GpuBoard`: 32 bytes (orig_index, iter, status, period, zr, zi, base_r, base_i)
 - `GpuZhuoranBoard`: 60 bytes (full PixelState)
-- `AdaptiveGpuBoard`: 64 bytes (full PixelState + scale)
+- `GpuAdaptiveBoard`: 64 bytes (full PixelState + scale)
 
 ### GPU-Side Sequencing (per batch)
 1) Thread 0 writes header fields (active_count, start_iter, iterations_per_batch).

@@ -117,7 +117,7 @@ Board (abstract base)
 ├── GpuBaseBoard                       Shared WebGPU infrastructure
 │   ├── GpuBoard                       Float64 GPU, zoom < 10^13
 │   ├── GpuZhuoranBoard                DD GPU perturbation (via DDReferenceOrbitMixin)
-│   └── AdaptiveGpuBoard               QD GPU perturbation (via QDReferenceOrbitMixin)
+│   └── GpuAdaptiveBoard               QD GPU perturbation (via QDReferenceOrbitMixin)
 │
 └── GlPerturbationBaseBoard            Shared WebGL2 perturbation infrastructure
     ├── GlZhuoranBoard                 DD WebGL2 perturbation (via DDReferenceOrbitMixin)
@@ -135,7 +135,7 @@ Two mixins factor out reference orbit computation shared between CPU and GPU boa
 - Storage: `refOrbit` array of 4-element arrays `[r_hi, r_lo, i_hi, i_lo]`
 
 **QDReferenceOrbitMixin** - Quad-double precision (~62 digits):
-- Used by: `QDZhuoranBoard`, `AdaptiveGpuBoard`
+- Used by: `QDZhuoranBoard`, `GpuAdaptiveBoard`
 - Provides: `initQDReferenceOrbit()`, `extendReferenceOrbit()`, `getRefOrbit()`, etc.
 - Storage: `qdRefOrbit` array of 8-element arrays `[re0..re3, im0..im3]`
 
@@ -153,9 +153,9 @@ Both classes inherit identical reference orbit logic while maintaining their res
 |------------|------------|------------|
 | < 10^13    | GpuBoard   | GpuBoard   |
 | 10^13 - 10^28 | GpuZhuoranBoard | GpuZhuoranBoard |
-| > 10^28    | AdaptiveGpuBoard | AdaptiveGpuBoard |
+| > 10^28    | GpuAdaptiveBoard | GpuAdaptiveBoard |
 
-The `AdaptiveGpuBoard` uses per-pixel adaptive scaling to handle extreme zoom depths where standard float32 GPU computation fails. See [ADAPTIVE-SCALING.md](ADAPTIVE-SCALING.md) for the design. It can fall back to CPU computation (`QDZhuoranBoard`) when GPU precision is insufficient.
+The `GpuAdaptiveBoard` uses per-pixel adaptive scaling to handle extreme zoom depths where standard float32 GPU computation fails. See [ADAPTIVE-SCALING.md](ADAPTIVE-SCALING.md) for the design. It can fall back to CPU computation (`QDZhuoranBoard`) when GPU precision is insufficient.
 
 ## State Management and URL Synchronization
 

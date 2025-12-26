@@ -224,7 +224,7 @@ The implementation uses a class hierarchy to handle different precision levels:
 
 - **`SpatialBucket`**: Base class with the core bucketing logic
 - **`DDSpatialBucket`**: For double-double precision reference orbits (used by `GpuZhuoranBoard`, `PerturbationBoard`)
-- **`QDSpatialBucket`**: For quad-double precision reference orbits (used by `QDZhuoranBoard`, `AdaptiveGpuBoard`)
+- **`QDSpatialBucket`**: For quad-double precision reference orbits (used by `QDZhuoranBoard`, `GpuAdaptiveBoard`)
 
 Each subclass implements precision-appropriate distance calculations and bucket key generation while sharing the O(1) lookup strategy.
 
@@ -238,7 +238,7 @@ The `Scheduler` automatically selects the best algorithm for the job:
 | > 1e-15 | No | **CpuBoard** | Simple `float64` iteration on the CPU. |
 | 1e-30 to 1e-7 | Yes | **GpuZhuoranBoard** | GPU perturbation with DD-precision reference orbit, `float32` deltas, and rebasing. |
 | 1e-30 to 1e-15 | No | **PerturbationBoard** | CPU perturbation with DD-precision reference, `float64` deltas. |
-| < 1e-30 | Yes | **AdaptiveGpuBoard** | GPU perturbation with QD-precision reference (~62 digits) and per-pixel adaptive scaling. |
+| < 1e-30 | Yes | **GpuAdaptiveBoard** | GPU perturbation with QD-precision reference (~62 digits) and per-pixel adaptive scaling. |
 | < 1e-30 | No | **QDZhuoranBoard** | CPU perturbation with QD-precision reference (~62 digits). |
 
 ## Unsolved Problems

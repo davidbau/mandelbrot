@@ -8,7 +8,7 @@ const path = require('path');
 async function testBothBoards() {
   console.log('Testing with exact user parameters...\n');
 
-  for (const board of ['qdz', 'adaptive']) {
+  for (const board of ['qdz', 'gpua']) {
     const browser = await puppeteer.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--enable-unsafe-webgpu']

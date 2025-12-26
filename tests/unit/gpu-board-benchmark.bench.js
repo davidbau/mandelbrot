@@ -1,5 +1,5 @@
 /**
- * Benchmark: GpuZhuoranBoard vs AdaptiveGpuBoard
+ * Benchmark: GpuZhuoranBoard vs GpuAdaptiveBoard
  *
  * Measures time to reach 100,000 iterations at:
  * z=2e13, a=16:9, c=+0.1351987480952356+0.672078316539112i
@@ -135,7 +135,7 @@ async function runBenchmark(page, boardType) {
 
 async function main() {
   console.log('='.repeat(60));
-  console.log('Board Benchmark: GpuZhuoranBoard vs AdaptiveGpuBoard');
+  console.log('Board Benchmark: GpuZhuoranBoard vs GpuAdaptiveBoard');
   console.log('='.repeat(60));
   console.log(`Target: ${TARGET_ITERATIONS} iterations`);
   console.log(`Location: c=${CENTER}, z=${ZOOM}`);
@@ -153,11 +153,11 @@ async function main() {
     // Small pause between tests
     await new Promise(r => setTimeout(r, 2000));
 
-    // Run AdaptiveGpuBoard benchmark
+    // Run GpuAdaptiveBoard benchmark
     const page2 = await setupPage(browser);
     page2.setDefaultTimeout(120000);
     await page2.setViewport({ width: 160, height: 90 });
-    const adaptiveResult = await runBenchmark(page2, 'adaptive');
+    const adaptiveResult = await runBenchmark(page2, 'gpua');
     await page2.close();
 
     // Summary
@@ -165,14 +165,14 @@ async function main() {
     console.log('RESULTS SUMMARY');
     console.log('='.repeat(60));
     console.log(`GpuZhuoranBoard: ${(gpuzResult.elapsed / 1000).toFixed(2)}s (${gpuzResult.maxIter} iters)`);
-    console.log(`AdaptiveGpuBoard: ${(adaptiveResult.elapsed / 1000).toFixed(2)}s (${adaptiveResult.maxIter} iters)`);
+    console.log(`GpuAdaptiveBoard: ${(adaptiveResult.elapsed / 1000).toFixed(2)}s (${adaptiveResult.maxIter} iters)`);
 
     if (!gpuzResult.timeout && !adaptiveResult.timeout) {
       const ratio = adaptiveResult.elapsed / gpuzResult.elapsed;
       if (ratio > 1) {
         console.log(`\n→ GpuZhuoranBoard is ${ratio.toFixed(2)}x faster`);
       } else {
-        console.log(`\n→ AdaptiveGpuBoard is ${(1/ratio).toFixed(2)}x faster`);
+        console.log(`\n→ GpuAdaptiveBoard is ${(1/ratio).toFixed(2)}x faster`);
       }
     }
 

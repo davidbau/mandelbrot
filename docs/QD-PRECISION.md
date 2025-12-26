@@ -12,7 +12,7 @@ The explorer automatically selects the appropriate board type based on zoom leve
 |------------|------------------|------------------|-----------|
 | z < 10^7   | GpuBoard         | CpuBoard         | float32/64 direct |
 | 10^7 - 10^30 | GpuZhuoranBoard | PerturbationBoard | float32/64 perturbation, DD reference |
-| > 10^30   | AdaptiveGpuBoard | QDZhuoranBoard  | float32/64 perturbation, QD reference (~62 digits) |
+| > 10^30   | GpuAdaptiveBoard | QDZhuoranBoard  | float32/64 perturbation, QD reference (~62 digits) |
 
 ## The Quad-Double Representation
 

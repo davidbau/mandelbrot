@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs');
 
 // Old boards (excluding perturbation types) + new GPU implementations
-const BOARDS = ['cpu', 'ddz', 'gpuz', 'qdz', 'qdcpu', 'adaptive', 'gpu', 'sparse'];
+const BOARDS = ['cpu', 'ddz', 'gpuz', 'qdz', 'qdcpu', 'gpua', 'gpu', 'sparse'];
 
 // Same shallow zoom locations as benchmark-shallow.js
 const LOCATIONS = [
@@ -102,7 +102,7 @@ async function measureBoard(browser, boardName, location, run) {
   });
 
   // GPU boards use higher pixelratio, CPU boards use 2
-  const isGpuBoard = ['gpu', 'sparse', 'gpuz', 'adaptive'].includes(boardName);
+  const isGpuBoard = ['gpu', 'sparse', 'gpuz', 'gpua'].includes(boardName);
   const pixelratio = isGpuBoard ? String(5 + run) : '2';
 
   const params = new URLSearchParams({

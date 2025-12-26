@@ -9,7 +9,7 @@ const fs = require('fs');
 
 // All 9 board types - run ALL at shallow zoom
 const BOARDS = [
-  'cpu', 'gpu', 'pert', 'ddz', 'gpuz', 'qdpert', 'qdz', 'qdcpu', 'adaptive'
+  'cpu', 'gpu', 'pert', 'ddz', 'gpuz', 'qdpert', 'qdz', 'qdcpu', 'gpua'
 ];
 
 // Shallow zoom locations only
@@ -103,7 +103,7 @@ async function measureBoard(browser, boardName, location, run) {
 
   // GPU boards need more pixels to show their strength; CPU boards are slower
   // Vary pixelratio by run to get better regression data
-  const isGpuBoard = ['gpu', 'gpuz', 'adaptive'].includes(boardName);
+  const isGpuBoard = ['gpu', 'gpuz', 'gpua'].includes(boardName);
   const pixelratio = isGpuBoard ? String(5 + run) : '2';
 
   const params = new URLSearchParams({

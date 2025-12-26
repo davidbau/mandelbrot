@@ -284,7 +284,7 @@ When a pixel converges, the GPU shader stores the iteration at which convergence
 
 ### Board-Specific Notes
 - **GpuBoard**: Uses `period` directly (was incorrectly using `period + 1`, fixed)
-- **GpuZhuoranBoard/AdaptiveGpuBoard**: Use `period - 1` because their convergence check tests the *previous* iteration's state
+- **GpuZhuoranBoard/GpuAdaptiveBoard**: Use `period - 1` because their convergence check tests the *previous* iteration's state
 
 All boards should produce identical `rawP` values for the same pixel, validated by the `converged-z-position` test.
 
@@ -593,4 +593,4 @@ What IS invariant:
 - [x] Verify iterations in monotonic order (gpu-batch-invariants test)
 - [x] Verify view.un matches actual unknown count
 - [x] Verify period encoding matches CpuBoard (converged-z-position test)
-- [x] Test GpuBoard, GpuZhuoranBoard, AdaptiveGpuBoard all pass
+- [x] Test GpuBoard, GpuZhuoranBoard, GpuAdaptiveBoard all pass

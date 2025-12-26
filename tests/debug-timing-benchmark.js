@@ -22,12 +22,12 @@ const BOARD_TYPES = [
   { name: 'qdpert', class: 'QDPerturbationBoard', minZoom: 1e15, maxZoom: 1e60 },
   { name: 'qdz', class: 'QDZhuoranBoard', minZoom: 1e15, maxZoom: 1e60 },
   { name: 'qdcpu', class: 'QDCpuBoard', minZoom: 1e15, maxZoom: 1e60 },
-  { name: 'adaptive', class: 'AdaptiveGpuBoard', minZoom: 1, maxZoom: 1e60 },  // Works at all zooms
+  { name: 'gpua', class: 'GpuAdaptiveBoard', minZoom: 1, maxZoom: 1e60 },  // Works at all zooms
 ];
 
 // Test locations with good variety of divergence iterations
 const TEST_LOCATIONS = [
-  // Shallow zoom locations (z < 1e7) - for CpuBoard, GpuBoard, AdaptiveGpuBoard
+  // Shallow zoom locations (z < 1e7) - for CpuBoard, GpuBoard, GpuAdaptiveBoard
   { zoom: '6.25e2', center: '-0.06091+0.66869i', name: 'shallow-1' },
   { zoom: '1.56e4', center: '0.3179693+0.4910749i', name: 'shallow-2' },
   { zoom: '6.25e2', center: '-0.151298-0.651081i', name: 'shallow-3' },

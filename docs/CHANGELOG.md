@@ -114,10 +114,10 @@ The result: WebGPU support with massive parallelism, plus significant UI enhance
 - **GpuBoard**: WebGPU compute shaders for shallow zooms (pixel size > 10^-7)
 - **GpuZhuoranBoard**: GPU perturbation with DD-precision reference orbits for
   deep zooms up to 10^30
-- **AdaptiveGpuBoard**: GPU perturbation with QD-precision reference for ultra-deep
+- **GpuAdaptiveBoard**: GPU perturbation with QD-precision reference for ultra-deep
   zooms beyond 10^30. Standard GPU perturbation fails at extreme depths because
   float32 can't represent both tiny pixel deltas (~10^-40) and escape magnitudes (~2)
-  with a single global scale. AdaptiveGpuBoard solves this by giving each pixel its
+  with a single global scale. GpuAdaptiveBoard solves this by giving each pixel its
   own scale exponent that adjusts dynamically as the delta grows during iteration.
   See [ADAPTIVE-SCALING.md](ADAPTIVE-SCALING.md) for the full design.
 

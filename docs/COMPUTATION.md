@@ -86,7 +86,7 @@ When you click to zoom, the `Scheduler` picks a worker and sends a `createBoard`
 |------------|------------|-------|-----------|
 | > 1e-7 | < ~10⁷ | `GpuBoard` | float32 (~7 digits) direct iteration |
 | 1e-30 to 1e-7 | ~10⁷ to ~10³⁰ | `GpuZhuoranBoard` | float32 perturbation, DD reference |
-| < 1e-30 | > ~10³⁰ | `AdaptiveGpuBoard` | float32 perturbation, QD reference, adaptive per-pixel scaling |
+| < 1e-30 | > ~10³⁰ | `GpuAdaptiveBoard` | float32 perturbation, QD reference, adaptive per-pixel scaling |
 
 #### CPU Fallback (no GPU available)
 
@@ -96,7 +96,7 @@ When you click to zoom, the `Scheduler` picks a worker and sends a `createBoard`
 | 1e-30 to 1e-15 | ~10¹⁵ to ~10³⁰ | `PerturbationBoard` | float64 perturbation, DD reference |
 | < 1e-30 | > ~10³⁰ | `QDZhuoranBoard` | float64 perturbation, QD reference |
 
-The GPU thresholds are lower than CPU because `float32` has ~7 decimal digits vs `float64`'s ~15 digits. At deep zooms (> 10³⁰), `AdaptiveGpuBoard` uses adaptive per-pixel scaling to correctly detect escape even when the scale exponent exceeds float32's range.
+The GPU thresholds are lower than CPU because `float32` has ~7 decimal digits vs `float64`'s ~15 digits. At deep zooms (> 10³⁰), `GpuAdaptiveBoard` uses adaptive per-pixel scaling to correctly detect escape even when the scale exponent exceeds float32's range.
 
 ## Data Structures
 Each Board maintains several `TypedArray`s for performance. These map directly to GPU buffers and are much faster to iterate than standard JavaScript objects.
@@ -201,7 +201,7 @@ changeList: [
 The `z` value is sent in the board's native format to minimize bandwidth:
 - **CpuBoard, GpuBoard**: float64 pair `[re, im]`
 - **PerturbationBoard, GpuZhuoranBoard, DDZhuoranBoard**: DDc format `[re_hi, re_lo, im_hi, im_lo]`
-- **QDCpuBoard, AdaptiveGpuBoard, QDZhuoranBoard**: QDc format `[re0..re3, im0..im3]`
+- **QDCpuBoard, GpuAdaptiveBoard, QDZhuoranBoard**: QDc format `[re0..re3, im0..im3]`
 
 On the main thread, `View.handleUpdates` normalizes all formats to QDc using `toQDc()` before storing in `convergedData`, so `currentz()` always returns 8-element QDc format.
 

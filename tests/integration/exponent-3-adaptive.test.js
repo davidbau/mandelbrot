@@ -1,5 +1,5 @@
 /**
- * Test: AdaptiveGpuBoard with exponent=3 matches GpuZhuoranBoard
+ * Test: GpuAdaptiveBoard with exponent=3 matches GpuZhuoranBoard
  */
 
 const path = require('path');
@@ -7,7 +7,7 @@ const { setupBrowser, setupPage, closeBrowser } = require('./test-utils');
 
 const TEST_TIMEOUT = 60000;
 
-describe('Exponent 3 - AdaptiveGpuBoard vs GpuZhuoranBoard', () => {
+describe('Exponent 3 - GpuAdaptiveBoard vs GpuZhuoranBoard', () => {
   let browser;
 
   beforeAll(async () => {
@@ -18,7 +18,7 @@ describe('Exponent 3 - AdaptiveGpuBoard vs GpuZhuoranBoard', () => {
     await closeBrowser(browser);
   }, TEST_TIMEOUT);
 
-  test('AdaptiveGpuBoard and GpuZhuoranBoard match at z=1e28, exponent=3', async () => {
+  test('GpuAdaptiveBoard and GpuZhuoranBoard match at z=1e28, exponent=3', async () => {
     const htmlPath = path.join(__dirname, '..', '..', 'index.html');
     const params = 'z=1e28&exponent=3&c=+0.4339460643798616581994852249997-0.0152649376914194242586126998695i&a=16:9&pixelratio=1&grid=1';
 
@@ -57,11 +57,11 @@ describe('Exponent 3 - AdaptiveGpuBoard vs GpuZhuoranBoard', () => {
 
     await page1.close();
 
-    // Test AdaptiveGpuBoard
+    // Test GpuAdaptiveBoard
     const page2 = await setupPage(browser);
     page2.setDefaultTimeout(TEST_TIMEOUT);
     await page2.setViewport({ width: 160, height: 90 });
-    await page2.goto(`file://${htmlPath}?${params}&board=adaptive`, { waitUntil: 'load' });
+    await page2.goto(`file://${htmlPath}?${params}&board=gpua`, { waitUntil: 'load' });
     await page2.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
     await page2.waitForFunction(() => {
       const view = window.explorer?.grid?.views?.[0];
@@ -97,7 +97,7 @@ describe('Exponent 3 - AdaptiveGpuBoard vs GpuZhuoranBoard', () => {
 
     // Both should be using the correct board type
     expect(zhuoran.boardType).toBe('GpuZhuoranBoard');
-    expect(adaptive.boardType).toBe('AdaptiveGpuBoard');
+    expect(adaptive.boardType).toBe('GpuAdaptiveBoard');
 
     // Both should have similar divergence patterns (within 5% tolerance)
     const divergedRatio = adaptive.diverged / zhuoran.diverged;

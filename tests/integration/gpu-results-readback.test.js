@@ -29,7 +29,7 @@ describe('GPU results readback', () => {
   const boards = [
     { key: 'gpu', name: 'GpuBoard' },
     { key: 'gpuz', name: 'GpuZhuoranBoard' },
-    { key: 'adaptive', name: 'AdaptiveGpuBoard' }
+    { key: 'gpua', name: 'GpuAdaptiveBoard' }
   ];
 
   test.each(boards)('readback activity for %s', async ({ key, name }) => {

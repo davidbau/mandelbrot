@@ -132,7 +132,7 @@ You can use the browser's developer console to observe computation progress, wor
 | `?board=gpuz` | GpuZhuoranBoard | DD-precision GPU with Zhuoran rebasing |
 | `?board=qdz` | QDZhuoranBoard | QD-precision CPU with Zhuoran rebasing |
 | `?board=qdcpu` | QDCpuBoard | Simple QD-precision CPU board |
-| `?board=adaptive` | AdaptiveGpuBoard | QD-precision GPU with adaptive per-pixel scaling |
+| `?board=gpua` | GpuAdaptiveBoard | QD-precision GPU with adaptive per-pixel scaling |
 
 ### Main Thread Debugging with MockWorker
 
