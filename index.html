@@ -1215,7 +1215,7 @@ class View {
     // Only created on first batch if large enough; once skipped, never created
     this.imageDataCache = null;
     this.imageDataCacheSkipped = false;
-    this.imageDataCacheLastUsed = 0;
+    this.largeUpdateLastPainted = 0;
     this.di = 0;
     this.ch = 0;
     this.it = 0;
@@ -1647,7 +1647,7 @@ class View {
       this.imageDataCache = ctx.getImageData(0, 0, dimsWidth, dimsHeight);
     }
     if (keepAlive) {
-      this.imageDataCacheLastUsed = performance.now();
+      this.largeUpdateLastPainted = performance.now();
     }
     const data = this.imageDataCache.data;
 
@@ -2241,6 +2241,8 @@ class Grid {
         if (computedFrac >= 0.95) {
           view.parentFadeComplete = true;
           view.drawComposite(ctx);
+          // Clear any stale ImageData cache after re-compositing
+          view.clearImageDataCache();
           redrewComposite = true;
         }
       }
@@ -2254,7 +2256,7 @@ class Grid {
         // Use fast ImageData path for large updates (>100k pixels)
         // Cache must be used from first batch or not at all (late creation would lose earlier pixels)
         const largeUpdate = totalPixels > 100000;
-        const cacheIsActive = !!(view.imageDataCache && (performance.now() - view.imageDataCacheLastUsed <= 500));
+        const cacheIsActive = !!(view.imageDataCache && (performance.now() - view.largeUpdateLastPainted <= 500));
         const canUseCache = (largeUpdate || cacheIsActive) && this.config.colorThemesRGBA && !view.imageDataCacheSkipped;
 
         if (canUseCache) {
@@ -2263,7 +2265,7 @@ class Grid {
           // Abandon cache if it exists, and mark as skipped so we don't try to
           // Abandon cache if it exists, and mark as skipped so we don't try to
           // recreate it later (which would wipe the canvas for root views).
-          if (view.imageDataCache && performance.now() - view.imageDataCacheLastUsed > 500) {
+          if (view.imageDataCache && performance.now() - view.largeUpdateLastPainted > 500) {
             view.clearImageDataCache();
             view.imageDataCacheSkipped = true;
           }
