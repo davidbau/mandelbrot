@@ -1737,6 +1737,7 @@ class View {
            `${this.di} diverged, ${this.un} unfinished, ${this.ch} chaotic\n` +
            `max period ${maxPeriod}, max escape ${maxEscape}\n` +
            `${this.workerInfo}\n` +
+           (this.batchCollisionCount ? `${this.batchCollisionCount}/${this.batchTotalCount} batches skipped\n` : '') +
            `<img src="${debugGraph}" style="width:300px;height:150px">`;
   }
 
