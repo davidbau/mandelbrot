@@ -10910,11 +10910,6 @@ class GlPerturbationBaseBoard extends Board {
       }
     }
 
-    // Debug: Log every 5000 iterations
-    if (this.it % 5000 < 100) {
-      console.log(`[GLZ Debug] it=${this.it}, totalFinished=${totalFinished}, totalNew=${totalNew}, activeSuperTiles=${activeSuperTiles.length}`);
-    }
-
     if (totalNew === 0) return;
 
     // Read level1 tiles for active super-tiles
@@ -11603,24 +11598,6 @@ class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
     gl.useProgram(this.iterProgram);
     this.iterUniforms.u_scale = gl.getUniformLocation(this.iterProgram, 'u_scale');
     this.iterUniforms.u_initialScale = gl.getUniformLocation(this.iterProgram, 'u_initialScale');
-  }
-
-  uploadDeltaC() {
-    const gl = this.gl;
-    const w = this.texWidth;
-    const h = this.texHeight;
-    const area = w * h;
-
-    const dcData = new Float32Array(area * 4);
-    for (let i = 0; i < area; i++) {
-      dcData[i * 4 + 0] = this.dc[i * 2];
-      dcData[i * 4 + 1] = this.dc[i * 2 + 1];
-      dcData[i * 4 + 2] = 0.0;  // unused
-      dcData[i * 4 + 3] = 0.0;  // unused
-    }
-
-    gl.bindTexture(gl.TEXTURE_2D, this.deltaCTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, dcData);
   }
 
   // Adaptive scaling iteration shader - uses ldexp for deep zoom support

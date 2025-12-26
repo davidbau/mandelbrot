@@ -114,10 +114,15 @@ Board (abstract base)
 │   ├── DDZhuoranBoard                 DD precision (via DDReferenceOrbitMixin)
 │   └── QDZhuoranBoard                 QD precision (via QDReferenceOrbitMixin)
 │
-└── GpuBaseBoard                       Shared GPU infrastructure
-    ├── GpuBoard                       Float64 GPU, zoom < 10^13
-    ├── GpuZhuoranBoard                DD GPU perturbation (via DDReferenceOrbitMixin)
-    └── AdaptiveGpuBoard               QD GPU perturbation (via QDReferenceOrbitMixin)
+├── GpuBaseBoard                       Shared WebGPU infrastructure
+│   ├── GpuBoard                       Float64 GPU, zoom < 10^13
+│   ├── GpuZhuoranBoard                DD GPU perturbation (via DDReferenceOrbitMixin)
+│   └── AdaptiveGpuBoard               QD GPU perturbation (via QDReferenceOrbitMixin)
+│
+└── GlPerturbationBaseBoard            Shared WebGL2 perturbation infrastructure
+    ├── GlZhuoranBoard                 DD WebGL2 perturbation (via DDReferenceOrbitMixin)
+    └── GlAdaptiveBoard                QD WebGL2 perturbation (via QDReferenceOrbitMixin)
+                                       + adaptive per-pixel scaling
 ```
 
 #### Reference Orbit Mixins
@@ -229,3 +234,5 @@ The line numbers are approximate and shift as the code evolves. The script IDs a
 - [ALGORITHMS.md](ALGORITHMS.md): The mathematical algorithms.
 - [COLORS.md](COLORS.md): The histogram-based coloring system.
 - [MOVIES.md](MOVIES.md): How smooth animations and videos are generated.
+- [GL-PERTURBATION-BOARDS.md](GL-PERTURBATION-BOARDS.md): WebGL2 perturbation board architecture.
+- [webgl-pingpong-design.md](webgl-pingpong-design.md): WebGL2 ping-pong rendering design.
