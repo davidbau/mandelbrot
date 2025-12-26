@@ -8155,9 +8155,8 @@ class GpuBaseBoard extends Board {
       this.batchCollisionCount++;
       // Skipped batch: no work was done, no results to process
       // Don't update previousFirstEmpty or add to batchesToReadback
-      if (hasDebugFlag(this.config, 'lock')) {
-        console.log(`Board ${this.id}: Batch skipped (collision #${this.batchCollisionCount}/${this.batchTotalCount})`);
-      }
+      // Always log since collisions are rare and indicate GPU backpressure
+      console.log(`Board ${this.id}: Batch skipped (collision #${this.batchCollisionCount}/${this.batchTotalCount})`);
       return;
     }
 
