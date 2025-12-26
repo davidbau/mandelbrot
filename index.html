@@ -3421,7 +3421,7 @@ class URLHandler {
         parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
           const validTypes = [
-            'cpu', 'ddz', 'qdz', 'gpu', 'gl', 'glz', 'gpuz', 'adaptive', 'qdcpu'
+            'cpu', 'ddz', 'qdz', 'gpu', 'gl', 'glz', 'gla', 'gpuz', 'adaptive', 'qdcpu'
           ];
           if (validTypes.includes(boardType)) {
             configUpdates.forceBoard = boardType;
@@ -5914,7 +5914,8 @@ class Board {
       ['GlBoard', GlBoard],
       ['GlZhuoranBoard', GlZhuoranBoard],
       ['GpuZhuoranBoard', GpuZhuoranBoard],
-      ['AdaptiveGpuBoard', AdaptiveGpuBoard]
+      ['AdaptiveGpuBoard', AdaptiveGpuBoard],
+      ['GlAdaptiveBoard', GlAdaptiveBoard]
     ]);
     const board = subclasses.get(serialized.type).fromSerialized(serialized);
     return board;
@@ -10309,15 +10310,15 @@ class GlBoard extends Board {
   }
 }
 
-// WebGL2 perturbation board using Zhuoran's approach (DD precision reference orbit)
-// Fallback for browsers without WebGPU support
-class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
+// Base class for WebGL2 perturbation boards
+// Provides shared WebGL infrastructure for GlZhuoranBoard and GlAdaptiveBoard
+class GlPerturbationBaseBoard extends Board {
   static TILE_SIZE = 16;
 
   constructor(k, size, re, im, config, id, inheritedData = null) {
     super(k, size, re, im, config, id, inheritedData);
     this.effort = 18;
-    this.maxBatchIters = 100000;  // Higher limit for perturbation (fewer actual iterations)
+    this.maxBatchIters = 100000;
 
     // WebGL state
     this.gl = null;
@@ -10327,9 +10328,6 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
     this.reduction2Program = null;
 
     // Ping-pong state textures for perturbation
-    // State: (dzr, dzi, iter, status)
-    // Checkpoint: (bbr, bbi, ref_iter, period)
-    // LazyThread: (ckpt_refidx, pending_refidx, ckpt_bbr, ckpt_bbi)
     this.pingStateTex = null;
     this.pingCheckpointTex = null;
     this.pingLazyTex = null;
@@ -10344,11 +10342,9 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
     this.deltaCTex = null;
 
     // Reference orbit + threading texture
-    // Each iteration: (ref_re, ref_im, thread_next, thread_delta_re, thread_delta_im)
-    // Stored as 2 RGBA texels per iteration (8 values, 5 used)
     this.refOrbitTex = null;
-    this.refOrbitTexWidth = 2048;  // 2 texels × 2048 = 4096 iterations per row
-    this.refOrbitTexHeight = 512;  // Up to 2M iterations
+    this.refOrbitTexWidth = 2048;
+    this.refOrbitTexHeight = 512;
     this.lastUploadedRefIter = 0;
 
     // Hierarchy textures for sparse readback
@@ -10362,10 +10358,10 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
     // Dimensions
     this.texWidth = config.dimsWidth;
     this.texHeight = config.dimsHeight;
-    this.level1Width = Math.ceil(this.texWidth / GlZhuoranBoard.TILE_SIZE);
-    this.level1Height = Math.ceil(this.texHeight / GlZhuoranBoard.TILE_SIZE);
-    this.level2Width = Math.ceil(this.level1Width / GlZhuoranBoard.TILE_SIZE);
-    this.level2Height = Math.ceil(this.level1Height / GlZhuoranBoard.TILE_SIZE);
+    this.level1Width = Math.ceil(this.texWidth / GlPerturbationBaseBoard.TILE_SIZE);
+    this.level1Height = Math.ceil(this.texHeight / GlPerturbationBaseBoard.TILE_SIZE);
+    this.level2Width = Math.ceil(this.level1Width / GlPerturbationBaseBoard.TILE_SIZE);
+    this.level2Height = Math.ceil(this.level1Height / GlPerturbationBaseBoard.TILE_SIZE);
 
     // Track reported pixels
     this.reported = new Uint8Array(config.dimsArea);
@@ -10404,59 +10400,9 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
     this.refOrbitLoop = { enabled: false };
     this.refOrbitLoopConfigured = false;
 
-    // Initialize DD reference orbit
-    const refRe = Array.isArray(re) ? re : toDD(re);
-    const refIm = Array.isArray(im) ? im : toDD(im);
-    this.initDDReferenceOrbit([refRe[0], refRe[1], refIm[0], refIm[1]]);
-
-    // Initialize per-pixel perturbation data
-    this.initPixels(size, re, im);
-
-    // Start GL initialization
-    this.glInitPromise = this.initGL();
-  }
-
-  initPixels(size, re, im) {
-    const dimsWidth = this.config.dimsWidth;
-    const dimsHeight = this.config.dimsHeight;
-    const dimsArea = this.config.dimsArea;
-
-    const re_dd = Array.isArray(re) ? re : toDD(re);
-    const im_dd = Array.isArray(im) ? im : toDD(im);
-    const size_scalar = Array.isArray(size) ? size.reduce((a, b) => a + (b || 0), 0) : size;
-    const size_dd = toDD(size_scalar);
-    const sizeY_dd = toDD(size_scalar / this.config.aspectRatio);
-
-    // Per-pixel delta c and initial dz
-    this.dc = new Float32Array(dimsArea * 2);
-    this.dz = new Float32Array(dimsArea * 2);
-
-    const cr_dd = new Array(4);
-    const ci_dd = new Array(4);
-    const dcr_dd = new Array(4);
-    const dci_dd = new Array(4);
-    const temp = new Array(4);
-
-    for (let y = 0; y < dimsHeight; y++) {
-      const yFrac = (dimsHeight / 2 - y) / dimsHeight;
-      ArddMul(temp, 0, yFrac, 0, sizeY_dd[0], sizeY_dd[1]);
-      ArddAdd(ci_dd, 0, im_dd[0], im_dd[1], temp[0], temp[1]);
-      ArddAdd(dci_dd, 0, ci_dd[0], ci_dd[1], -this.refC[2], -this.refC[3]);
-
-      for (let x = 0; x < dimsWidth; x++) {
-        const xFrac = (x - dimsWidth / 2) / dimsWidth;
-        ArddMul(temp, 0, xFrac, 0, size_dd[0], size_dd[1]);
-        ArddAdd(cr_dd, 0, re_dd[0], re_dd[1], temp[0], temp[1]);
-        ArddAdd(dcr_dd, 0, cr_dd[0], cr_dd[1], -this.refC[0], -this.refC[1]);
-
-        const index = y * dimsWidth + x;
-        const index2 = index * 2;
-        this.dc[index2] = Math.fround(dcr_dd[0] + dcr_dd[1]);
-        this.dc[index2 + 1] = Math.fround(dci_dd[0] + dci_dd[1]);
-        this.dz[index2] = this.dc[index2];
-        this.dz[index2 + 1] = this.dc[index2 + 1];
-      }
-    }
+    // Per-pixel perturbation data
+    this.dc = new Float32Array(config.dimsArea * 2);
+    this.dz = new Float32Array(config.dimsArea * 2);
   }
 
   async initGL() {
@@ -10479,11 +10425,9 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
     this.uploadDeltaC();
   }
 
-  async createShaders() {
-    const gl = this.gl;
-
-    // Vertex shader (shared)
-    const vsSource = `#version 300 es
+  // Vertex shader source (shared by all GL perturbation boards)
+  getVertexShaderSource() {
+    return `#version 300 es
       in vec2 a_position;
       out vec2 v_texCoord;
       void main() {
@@ -10491,242 +10435,11 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
         v_texCoord = (a_position + 1.0) * 0.5;
       }
     `;
+  }
 
-    // Fragment shader for perturbation iteration
-    const fsIterSource = `#version 300 es
-      precision highp float;
-      precision highp int;
-
-      uniform sampler2D u_state;       // (dzr, dzi, iter, status)
-      uniform sampler2D u_checkpoint;  // (bbr, bbi, ref_iter, period)
-      uniform sampler2D u_lazy;        // (ckpt_refidx, pending_refidx, ckpt_bbr, ckpt_bbi)
-      uniform sampler2D u_deltaC;      // (dcr, dci, 0, 0)
-      uniform sampler2D u_refOrbit;    // Reference orbit + threading
-
-      uniform vec2 u_resolution;
-      uniform int u_iterations;
-      uniform int u_exponent;
-      uniform float u_epsilon;
-      uniform float u_epsilon2;
-      uniform float u_pixelSize;
-      uniform int u_startIter;
-      uniform int u_refOrbitLength;
-      uniform int u_refOrbitTexWidth;
-      uniform int u_fibPrev;
-      uniform int u_fibCurr;
-      uniform int u_loopEnabled;
-      uniform int u_loopThreshold;
-      uniform int u_loopJump;
-      uniform float u_loopDeltaR;
-      uniform float u_loopDeltaI;
-
-      layout(location = 0) out vec4 outState;
-      layout(location = 1) out vec4 outCheckpoint;
-      layout(location = 2) out vec4 outLazy;
-
-      in vec2 v_texCoord;
-
-      // Get reference orbit value at iteration idx
-      vec2 getRefOrbit(int idx) {
-        if (idx >= u_refOrbitLength) return vec2(0.0);
-        // Each iteration uses 2 texels: (ref_re, ref_im, thread_next, thread_delta_re) and (thread_delta_im, 0, 0, 0)
-        int texelIdx = idx * 2;
-        int row = texelIdx / u_refOrbitTexWidth;
-        int col = texelIdx - row * u_refOrbitTexWidth;
-        vec4 data = texelFetch(u_refOrbit, ivec2(col, row), 0);
-        return vec2(data.r, data.g);
-      }
-
-      // Get threading data: returns (next, deltaRe, deltaIm)
-      vec3 getThread(int idx) {
-        if (idx >= u_refOrbitLength) return vec3(-1.0, 0.0, 0.0);
-        int texelIdx = idx * 2;
-        int row = texelIdx / u_refOrbitTexWidth;
-        int col = texelIdx - row * u_refOrbitTexWidth;
-        vec4 data1 = texelFetch(u_refOrbit, ivec2(col, row), 0);
-        vec4 data2 = texelFetch(u_refOrbit, ivec2(col + 1, row), 0);
-        return vec3(data1.b, data1.a, data2.r);
-      }
-
-      void main() {
-        ivec2 coord = ivec2(gl_FragCoord.xy);
-
-        vec4 state = texelFetch(u_state, coord, 0);
-        vec4 checkpoint = texelFetch(u_checkpoint, coord, 0);
-        vec4 lazy = texelFetch(u_lazy, coord, 0);
-        vec4 dc = texelFetch(u_deltaC, coord, 0);
-
-        float dzr = state.r;
-        float dzi = state.g;
-        float iter = state.b;
-        float status = state.a;
-
-        float bbr = checkpoint.r;
-        float bbi = checkpoint.g;
-        int ref_iter = int(checkpoint.b);
-        float period = checkpoint.a;
-
-        int ckpt_refidx = int(lazy.r);
-        int pending_refidx = int(lazy.g);
-        float ckpt_bbr = lazy.b;
-        float ckpt_bbi = lazy.a;
-
-        float dcr = dc.r;
-        float dci = dc.g;
-
-        int fibPrev = u_fibPrev;
-        int fibCurr = u_fibCurr;
-
-        if (status == 0.0) {
-          for (int i = 0; i < 100000; i++) {
-            if (i >= u_iterations) break;
-
-            int globalIter = u_startIter + i + 1;
-
-            // Check rebasing before iteration
-            float dz_norm = max(abs(dzr), abs(dzi));
-            if (ref_iter > 0 && ref_iter < u_refOrbitLength) {
-              vec2 ref_check = getRefOrbit(ref_iter);
-              float total_r = ref_check.x + dzr;
-              float total_i = ref_check.y + dzi;
-              float total_norm = max(abs(total_r), abs(total_i));
-
-              if (total_norm < dz_norm * 2.0) {
-                dzr = total_r;
-                dzi = total_i;
-                ref_iter = 0;
-                if (ckpt_refidx >= 0) {
-                  pending_refidx = ckpt_refidx;
-                  bbr = ckpt_bbr;
-                  bbi = ckpt_bbi;
-                }
-              }
-            }
-
-            // Get reference orbit for current ref_iter
-            if (ref_iter >= u_refOrbitLength) break;
-            vec2 ref_val = getRefOrbit(ref_iter);
-            float refr = ref_val.x;
-            float refi = ref_val.y;
-
-            // Check divergence
-            float curr_r = refr + dzr;
-            float curr_i = refi + dzi;
-            float curr_mag_sq = curr_r * curr_r + curr_i * curr_i;
-            if (curr_mag_sq > 4.0 || curr_mag_sq != curr_mag_sq) {
-              status = 1.0;
-              break;
-            }
-
-            // Save old dz for checkpoint
-            float old_dzr = dzr;
-            float old_dzi = dzi;
-            int old_ref_iter = ref_iter;
-
-            // Perturbation iteration: dz' = dz * (n * z_ref^(n-1) + ...) + dc
-            // Simplified for exponent 2: dz' = 2 * z_ref * dz + dz^2 + dc
-            if (u_exponent == 2) {
-              float new_dzr = 2.0 * (refr * dzr - refi * dzi) + dzr * dzr - dzi * dzi + dcr;
-              float new_dzi = 2.0 * (refr * dzi + refi * dzr) + 2.0 * dzr * dzi + dci;
-              dzr = new_dzr;
-              dzi = new_dzi;
-            } else {
-              // General exponent using Horner's method
-              float z_pow_r = refr;
-              float z_pow_i = refi;
-              float coeff = float(u_exponent);
-              float result_r = dzr;
-              float result_i = dzi;
-
-              for (int k = 1; k < 10; k++) {
-                if (k >= u_exponent) break;
-                result_r += coeff * z_pow_r;
-                result_i += coeff * z_pow_i;
-                float temp_r = result_r * dzr - result_i * dzi;
-                result_i = result_r * dzi + result_i * dzr;
-                result_r = temp_r;
-                float new_z_pow_r = z_pow_r * refr - z_pow_i * refi;
-                z_pow_i = z_pow_r * refi + z_pow_i * refr;
-                z_pow_r = new_z_pow_r;
-                coeff *= float(u_exponent - k) / float(k + 1);
-              }
-              dzr = result_r + dcr;
-              dzi = result_i + dci;
-            }
-
-            iter += 1.0;
-            ref_iter++;
-
-            // Reference orbit loop
-            if (u_loopEnabled != 0 && ref_iter >= u_loopThreshold) {
-              dzr += u_loopDeltaR;
-              dzi += u_loopDeltaI;
-              ref_iter -= u_loopJump;
-            }
-
-            // Check Fibonacci checkpoint
-            bool just_updated = false;
-            if (globalIter == fibCurr) {
-              just_updated = true;
-              bbr = old_dzr;
-              bbi = old_dzi;
-              ckpt_bbr = old_dzr;
-              ckpt_bbi = old_dzi;
-              ckpt_refidx = old_ref_iter;
-              pending_refidx = old_ref_iter;
-              period = 0.0;
-              int nextFib = fibPrev + fibCurr;
-              fibPrev = fibCurr;
-              fibCurr = nextFib;
-            }
-
-            // Convergence detection
-            if (ckpt_refidx >= 0 && !just_updated) {
-              // Direct comparison when ref_iter matches checkpoint
-              if (ref_iter == ckpt_refidx) {
-                float diff_r = old_dzr - bbr;
-                float diff_i = old_dzi - bbi;
-                float db = max(abs(diff_r), abs(diff_i));
-                if (db <= u_epsilon2) {
-                  if (period == 0.0) period = iter;
-                  if (db <= u_epsilon) {
-                    status = 2.0;
-                    break;
-                  }
-                }
-              }
-
-              // Lazy threading check
-              if (pending_refidx >= 2584 && pending_refidx < u_refOrbitLength) {
-                vec3 thread = getThread(pending_refidx);
-                if (thread.x >= 0.0 && int(thread.x) == ref_iter) {
-                  float diff_r = old_dzr - bbr + thread.y;
-                  float diff_i = old_dzi - bbi + thread.z;
-                  float db = max(abs(diff_r), abs(diff_i));
-                  if (db <= u_epsilon2) {
-                    if (period == 0.0) period = iter;
-                    if (db <= u_epsilon) {
-                      status = 2.0;
-                      break;
-                    }
-                  }
-                  bbr -= thread.y;
-                  bbi -= thread.z;
-                  pending_refidx = ref_iter;
-                }
-              }
-            }
-          }
-        }
-
-        outState = vec4(dzr, dzi, iter, status);
-        outCheckpoint = vec4(bbr, bbi, float(ref_iter), period);
-        outLazy = vec4(float(ckpt_refidx), float(pending_refidx), ckpt_bbr, ckpt_bbi);
-      }
-    `;
-
-    // Reduction shaders (same as GlBoard but check status in state.a)
-    const fsReduction1Source = `#version 300 es
+  // Reduction shader sources (shared by all GL perturbation boards)
+  getReduction1ShaderSource() {
+    return `#version 300 es
       precision highp float;
       uniform sampler2D u_state;
       uniform sampler2D u_prevTiles;
@@ -10759,8 +10472,10 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
         tileInfo = vec4(finishedCount, newlyFinished, 0.0, hasFinished);
       }
     `;
+  }
 
-    const fsReduction2Source = `#version 300 es
+  getReduction2ShaderSource() {
+    return `#version 300 es
       precision highp float;
       uniform sampler2D u_tiles;
       uniform vec2 u_tilesSize;
@@ -10789,12 +10504,25 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
         superTileInfo = vec4(totalFinished, totalNew, 0.0, hasFinished);
       }
     `;
+  }
+
+  // Abstract method - subclasses must implement
+  getIterationShaderSource() {
+    throw new Error('Subclass must implement getIterationShaderSource()');
+  }
+
+  async createShaders() {
+    const gl = this.gl;
+    const vsSource = this.getVertexShaderSource();
+    const fsIterSource = this.getIterationShaderSource();
+    const fsReduction1Source = this.getReduction1ShaderSource();
+    const fsReduction2Source = this.getReduction2ShaderSource();
 
     this.iterProgram = this.compileProgram(vsSource, fsIterSource);
     this.reduction1Program = this.compileProgram(vsSource, fsReduction1Source);
     this.reduction2Program = this.compileProgram(vsSource, fsReduction2Source);
 
-    // Cache uniform locations
+    // Cache uniform locations for iteration shader
     gl.useProgram(this.iterProgram);
     this.iterUniforms = {
       u_state: gl.getUniformLocation(this.iterProgram, 'u_state'),
@@ -10943,42 +10671,9 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
   }
 
+  // Abstract - subclass should implement
   initializeStateTextures() {
-    const gl = this.gl;
-    const w = this.texWidth;
-    const h = this.texHeight;
-    const area = w * h;
-
-    // State: (dzr, dzi, iter=1, status=0)
-    const stateData = new Float32Array(area * 4);
-    // Checkpoint: (bbr=0, bbi=0, ref_iter=1, period=0)
-    const checkpointData = new Float32Array(area * 4);
-    // Lazy: (ckpt_refidx=-1, pending_refidx=-1, ckpt_bbr=0, ckpt_bbi=0)
-    const lazyData = new Float32Array(area * 4);
-
-    for (let i = 0; i < area; i++) {
-      stateData[i * 4 + 0] = this.dz[i * 2];      // dzr
-      stateData[i * 4 + 1] = this.dz[i * 2 + 1];  // dzi
-      stateData[i * 4 + 2] = 1.0;                  // iter
-      stateData[i * 4 + 3] = 0.0;                  // status
-
-      checkpointData[i * 4 + 0] = 0.0;             // bbr
-      checkpointData[i * 4 + 1] = 0.0;             // bbi
-      checkpointData[i * 4 + 2] = 1.0;             // ref_iter
-      checkpointData[i * 4 + 3] = 0.0;             // period
-
-      lazyData[i * 4 + 0] = -1.0;                  // ckpt_refidx (sentinel)
-      lazyData[i * 4 + 1] = -1.0;                  // pending_refidx
-      lazyData[i * 4 + 2] = 0.0;                   // ckpt_bbr
-      lazyData[i * 4 + 3] = 0.0;                   // ckpt_bbi
-    }
-
-    gl.bindTexture(gl.TEXTURE_2D, this.pingStateTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, stateData);
-    gl.bindTexture(gl.TEXTURE_2D, this.pingCheckpointTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, checkpointData);
-    gl.bindTexture(gl.TEXTURE_2D, this.pingLazyTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, lazyData);
+    throw new Error('Subclass must implement initializeStateTextures()');
   }
 
   uploadDeltaC() {
@@ -10999,67 +10694,19 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, dcData);
   }
 
+  // Abstract - subclass should implement based on DD or QD precision
   uploadRefOrbit() {
-    const gl = this.gl;
-    const refLen = this.refIterations;
-
-    if (refLen <= this.lastUploadedRefIter) return;
-
-    // Pack reference orbit + threading into texture
-    // Each iteration: 2 texels = (ref_re, ref_im, thread_next, thread_delta_re), (thread_delta_im, 0, 0, 0)
-    const texelsNeeded = refLen * 2;
-    const texWidth = this.refOrbitTexWidth;
-    const rowsNeeded = Math.ceil(texelsNeeded / texWidth);
-
-    if (rowsNeeded > this.refOrbitTexHeight) {
-      console.warn('Reference orbit exceeds texture size');
-      return;
-    }
-
-    const data = new Float32Array(texWidth * rowsNeeded * 4);
-
-    for (let i = this.lastUploadedRefIter; i < refLen; i++) {
-      const orbit = this.refOrbit[i];
-      const thread = this.threading.getThread(i);
-      const texelIdx = i * 2;
-
-      const dataIdx1 = texelIdx * 4;
-      data[dataIdx1 + 0] = orbit[0] + orbit[1];  // ref_re (DD sum)
-      data[dataIdx1 + 1] = orbit[2] + orbit[3];  // ref_im (DD sum)
-      data[dataIdx1 + 2] = thread.next;           // thread_next
-      data[dataIdx1 + 3] = thread.deltaRe;        // thread_delta_re
-
-      const dataIdx2 = (texelIdx + 1) * 4;
-      data[dataIdx2 + 0] = thread.deltaIm;        // thread_delta_im
-      data[dataIdx2 + 1] = 0.0;
-      data[dataIdx2 + 2] = 0.0;
-      data[dataIdx2 + 3] = 0.0;
-    }
-
-    gl.bindTexture(gl.TEXTURE_2D, this.refOrbitTex);
-
-    // Upload changed rows
-    const startRow = Math.floor(this.lastUploadedRefIter * 2 / texWidth);
-    const endRow = Math.ceil(refLen * 2 / texWidth);
-
-    for (let row = startRow; row < endRow; row++) {
-      const rowOffset = row * texWidth * 4;
-      const rowData = data.subarray(rowOffset, rowOffset + texWidth * 4);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, texWidth, 1, gl.RGBA, gl.FLOAT, rowData);
-    }
-
-    this.lastUploadedRefIter = refLen;
+    throw new Error('Subclass must implement uploadRefOrbit()');
   }
 
   async start() {
     await this.glInitPromise;
     this.startTime = Date.now();
-    console.log(`Board ${this.config.index}: GlZhuoranBoard @ c=(${this.re.toFixed(4)}, ${this.im.toFixed(4)}), dims=${this.texWidth}x${this.texHeight}, pixel=${this.pix.toExponential(3)}`);
+    console.log(`Board ${this.config.index}: ${this.constructor.name} @ c=(${this.re.toFixed(4)}, ${this.im.toFixed(4)}), dims=${this.texWidth}x${this.texHeight}, pixel=${this.pix.toExponential(3)}`);
   }
 
   async iterate(targetIters = null) {
     await this.glInitPromise;
-
     this.waitForPendingReadback();
 
     if (this.un <= 0) return;
@@ -11337,7 +10984,6 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
 
     // Queue results to changeList, grouped by iteration
     if (results.length > 0) {
-      // Group by absolute iteration value
       const byIter = new Map();
       for (const r of results) {
         this.nn[r.index] = r.iter;
@@ -11349,15 +10995,12 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
         }
         const group = byIter.get(absIter);
         if (r.iter > 0) {
-          // Diverged/escaped - just index
           group.diverged.push(r.index);
         } else {
-          // Converged/periodic - object with index, z, p
           group.converged.push({ index: r.index, z: 0, p: r.period });
         }
       }
 
-      // Queue changes sorted by iteration
       const sortedIters = Array.from(byIter.keys()).sort((a, b) => a - b);
       for (const iter of sortedIters) {
         const group = byIter.get(iter);
@@ -11372,7 +11015,6 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
 
   async serialize() {
     const base = await super.serialize();
-    // Build sparse arrays for completed pixels
     const completedIndexes = [];
     const completedNn = [];
     for (let i = 0; i < this.nn.length; i++) {
@@ -11386,12 +11028,393 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
       reported: Array.from(this.reported),
       completedIndexes,
       completedNn,
-      refC: this.refC,
-      refOrbit: this.refOrbit,
       cMinRe: this.cMinRe,
       cMinIm: this.cMinIm,
       cMaxRe: this.cMaxRe,
       cMaxIm: this.cMaxIm
+    };
+  }
+
+  static isAvailable() {
+    if (typeof OffscreenCanvas === 'undefined') return false;
+    try {
+      const canvas = new OffscreenCanvas(1, 1);
+      const gl = canvas.getContext('webgl2');
+      if (!gl) return false;
+      const ext = gl.getExtension('EXT_color_buffer_float');
+      return !!ext;
+    } catch (e) {
+      return false;
+    }
+  }
+}
+
+// WebGL2 perturbation board using DD precision reference orbit
+// Fallback for browsers without WebGPU support at medium zoom depths
+class GlZhuoranBoard extends DDReferenceOrbitMixin(GlPerturbationBaseBoard) {
+  constructor(k, size, re, im, config, id, inheritedData = null) {
+    super(k, size, re, im, config, id, inheritedData);
+
+    // Initialize DD reference orbit
+    const refRe = Array.isArray(re) ? re : toDD(re);
+    const refIm = Array.isArray(im) ? im : toDD(im);
+    this.initDDReferenceOrbit([refRe[0], refRe[1], refIm[0], refIm[1]]);
+
+    // Initialize per-pixel perturbation data
+    this.initPixels(size, re, im);
+
+    // Start GL initialization
+    this.glInitPromise = this.initGL();
+  }
+
+  initPixels(size, re, im) {
+    const dimsWidth = this.config.dimsWidth;
+    const dimsHeight = this.config.dimsHeight;
+    const dimsArea = this.config.dimsArea;
+
+    const re_dd = Array.isArray(re) ? re : toDD(re);
+    const im_dd = Array.isArray(im) ? im : toDD(im);
+    const size_scalar = Array.isArray(size) ? size.reduce((a, b) => a + (b || 0), 0) : size;
+    const size_dd = toDD(size_scalar);
+    const sizeY_dd = toDD(size_scalar / this.config.aspectRatio);
+
+    const cr_dd = new Array(4);
+    const ci_dd = new Array(4);
+    const dcr_dd = new Array(4);
+    const dci_dd = new Array(4);
+    const temp = new Array(4);
+
+    for (let y = 0; y < dimsHeight; y++) {
+      const yFrac = (dimsHeight / 2 - y) / dimsHeight;
+      ArddMul(temp, 0, yFrac, 0, sizeY_dd[0], sizeY_dd[1]);
+      ArddAdd(ci_dd, 0, im_dd[0], im_dd[1], temp[0], temp[1]);
+      ArddAdd(dci_dd, 0, ci_dd[0], ci_dd[1], -this.refC[2], -this.refC[3]);
+
+      for (let x = 0; x < dimsWidth; x++) {
+        const xFrac = (x - dimsWidth / 2) / dimsWidth;
+        ArddMul(temp, 0, xFrac, 0, size_dd[0], size_dd[1]);
+        ArddAdd(cr_dd, 0, re_dd[0], re_dd[1], temp[0], temp[1]);
+        ArddAdd(dcr_dd, 0, cr_dd[0], cr_dd[1], -this.refC[0], -this.refC[1]);
+
+        const index = y * dimsWidth + x;
+        const index2 = index * 2;
+        this.dc[index2] = Math.fround(dcr_dd[0] + dcr_dd[1]);
+        this.dc[index2 + 1] = Math.fround(dci_dd[0] + dci_dd[1]);
+        this.dz[index2] = this.dc[index2];
+        this.dz[index2 + 1] = this.dc[index2 + 1];
+      }
+    }
+  }
+
+  getIterationShaderSource() {
+    return `#version 300 es
+      precision highp float;
+      precision highp int;
+
+      uniform sampler2D u_state;       // (dzr, dzi, iter, status)
+      uniform sampler2D u_checkpoint;  // (bbr, bbi, ref_iter, period)
+      uniform sampler2D u_lazy;        // (ckpt_refidx, pending_refidx, ckpt_bbr, ckpt_bbi)
+      uniform sampler2D u_deltaC;      // (dcr, dci, 0, 0)
+      uniform sampler2D u_refOrbit;    // Reference orbit + threading
+
+      uniform vec2 u_resolution;
+      uniform int u_iterations;
+      uniform int u_exponent;
+      uniform float u_epsilon;
+      uniform float u_epsilon2;
+      uniform float u_pixelSize;
+      uniform int u_startIter;
+      uniform int u_refOrbitLength;
+      uniform int u_refOrbitTexWidth;
+      uniform int u_fibPrev;
+      uniform int u_fibCurr;
+      uniform int u_loopEnabled;
+      uniform int u_loopThreshold;
+      uniform int u_loopJump;
+      uniform float u_loopDeltaR;
+      uniform float u_loopDeltaI;
+
+      layout(location = 0) out vec4 outState;
+      layout(location = 1) out vec4 outCheckpoint;
+      layout(location = 2) out vec4 outLazy;
+
+      in vec2 v_texCoord;
+
+      vec2 getRefOrbit(int idx) {
+        if (idx >= u_refOrbitLength) return vec2(0.0);
+        int texelIdx = idx * 2;
+        int row = texelIdx / u_refOrbitTexWidth;
+        int col = texelIdx - row * u_refOrbitTexWidth;
+        vec4 data = texelFetch(u_refOrbit, ivec2(col, row), 0);
+        return vec2(data.r, data.g);
+      }
+
+      vec3 getThread(int idx) {
+        if (idx >= u_refOrbitLength) return vec3(-1.0, 0.0, 0.0);
+        int texelIdx = idx * 2;
+        int row = texelIdx / u_refOrbitTexWidth;
+        int col = texelIdx - row * u_refOrbitTexWidth;
+        vec4 data1 = texelFetch(u_refOrbit, ivec2(col, row), 0);
+        vec4 data2 = texelFetch(u_refOrbit, ivec2(col + 1, row), 0);
+        return vec3(data1.b, data1.a, data2.r);
+      }
+
+      void main() {
+        ivec2 coord = ivec2(gl_FragCoord.xy);
+
+        vec4 state = texelFetch(u_state, coord, 0);
+        vec4 checkpoint = texelFetch(u_checkpoint, coord, 0);
+        vec4 lazy = texelFetch(u_lazy, coord, 0);
+        vec4 dc = texelFetch(u_deltaC, coord, 0);
+
+        float dzr = state.r;
+        float dzi = state.g;
+        float iter = state.b;
+        float status = state.a;
+
+        float bbr = checkpoint.r;
+        float bbi = checkpoint.g;
+        int ref_iter = int(checkpoint.b);
+        float period = checkpoint.a;
+
+        int ckpt_refidx = int(lazy.r);
+        int pending_refidx = int(lazy.g);
+        float ckpt_bbr = lazy.b;
+        float ckpt_bbi = lazy.a;
+
+        float dcr = dc.r;
+        float dci = dc.g;
+
+        int fibPrev = u_fibPrev;
+        int fibCurr = u_fibCurr;
+
+        if (status == 0.0) {
+          for (int i = 0; i < 100000; i++) {
+            if (i >= u_iterations) break;
+
+            int globalIter = u_startIter + i + 1;
+
+            float dz_norm = max(abs(dzr), abs(dzi));
+            if (ref_iter > 0 && ref_iter < u_refOrbitLength) {
+              vec2 ref_check = getRefOrbit(ref_iter);
+              float total_r = ref_check.x + dzr;
+              float total_i = ref_check.y + dzi;
+              float total_norm = max(abs(total_r), abs(total_i));
+
+              if (total_norm < dz_norm * 2.0) {
+                dzr = total_r;
+                dzi = total_i;
+                ref_iter = 0;
+                if (ckpt_refidx >= 0) {
+                  pending_refidx = ckpt_refidx;
+                  bbr = ckpt_bbr;
+                  bbi = ckpt_bbi;
+                }
+              }
+            }
+
+            if (ref_iter >= u_refOrbitLength) break;
+            vec2 ref_val = getRefOrbit(ref_iter);
+            float refr = ref_val.x;
+            float refi = ref_val.y;
+
+            float curr_r = refr + dzr;
+            float curr_i = refi + dzi;
+            float curr_mag_sq = curr_r * curr_r + curr_i * curr_i;
+            if (curr_mag_sq > 4.0 || curr_mag_sq != curr_mag_sq) {
+              status = 1.0;
+              break;
+            }
+
+            float old_dzr = dzr;
+            float old_dzi = dzi;
+            int old_ref_iter = ref_iter;
+
+            if (u_exponent == 2) {
+              float new_dzr = 2.0 * (refr * dzr - refi * dzi) + dzr * dzr - dzi * dzi + dcr;
+              float new_dzi = 2.0 * (refr * dzi + refi * dzr) + 2.0 * dzr * dzi + dci;
+              dzr = new_dzr;
+              dzi = new_dzi;
+            } else {
+              float z_pow_r = refr;
+              float z_pow_i = refi;
+              float coeff = float(u_exponent);
+              float result_r = dzr;
+              float result_i = dzi;
+
+              for (int k = 1; k < 10; k++) {
+                if (k >= u_exponent) break;
+                result_r += coeff * z_pow_r;
+                result_i += coeff * z_pow_i;
+                float temp_r = result_r * dzr - result_i * dzi;
+                result_i = result_r * dzi + result_i * dzr;
+                result_r = temp_r;
+                float new_z_pow_r = z_pow_r * refr - z_pow_i * refi;
+                z_pow_i = z_pow_r * refi + z_pow_i * refr;
+                z_pow_r = new_z_pow_r;
+                coeff *= float(u_exponent - k) / float(k + 1);
+              }
+              dzr = result_r + dcr;
+              dzi = result_i + dci;
+            }
+
+            iter += 1.0;
+            ref_iter++;
+
+            if (u_loopEnabled != 0 && ref_iter >= u_loopThreshold) {
+              dzr += u_loopDeltaR;
+              dzi += u_loopDeltaI;
+              ref_iter -= u_loopJump;
+            }
+
+            bool just_updated = false;
+            if (globalIter == fibCurr) {
+              just_updated = true;
+              bbr = old_dzr;
+              bbi = old_dzi;
+              ckpt_bbr = old_dzr;
+              ckpt_bbi = old_dzi;
+              ckpt_refidx = old_ref_iter;
+              pending_refidx = old_ref_iter;
+              period = 0.0;
+              int nextFib = fibPrev + fibCurr;
+              fibPrev = fibCurr;
+              fibCurr = nextFib;
+            }
+
+            if (ckpt_refidx >= 0 && !just_updated) {
+              if (ref_iter == ckpt_refidx) {
+                float diff_r = old_dzr - bbr;
+                float diff_i = old_dzi - bbi;
+                float db = max(abs(diff_r), abs(diff_i));
+                if (db <= u_epsilon2) {
+                  if (period == 0.0) period = iter;
+                  if (db <= u_epsilon) {
+                    status = 2.0;
+                    break;
+                  }
+                }
+              }
+
+              if (pending_refidx >= 2584 && pending_refidx < u_refOrbitLength) {
+                vec3 thread = getThread(pending_refidx);
+                if (thread.x >= 0.0 && int(thread.x) == ref_iter) {
+                  float diff_r = old_dzr - bbr + thread.y;
+                  float diff_i = old_dzi - bbi + thread.z;
+                  float db = max(abs(diff_r), abs(diff_i));
+                  if (db <= u_epsilon2) {
+                    if (period == 0.0) period = iter;
+                    if (db <= u_epsilon) {
+                      status = 2.0;
+                      break;
+                    }
+                  }
+                  bbr -= thread.y;
+                  bbi -= thread.z;
+                  pending_refidx = ref_iter;
+                }
+              }
+            }
+          }
+        }
+
+        outState = vec4(dzr, dzi, iter, status);
+        outCheckpoint = vec4(bbr, bbi, float(ref_iter), period);
+        outLazy = vec4(float(ckpt_refidx), float(pending_refidx), ckpt_bbr, ckpt_bbi);
+      }
+    `;
+  }
+
+  initializeStateTextures() {
+    const gl = this.gl;
+    const w = this.texWidth;
+    const h = this.texHeight;
+    const area = w * h;
+
+    const stateData = new Float32Array(area * 4);
+    const checkpointData = new Float32Array(area * 4);
+    const lazyData = new Float32Array(area * 4);
+
+    for (let i = 0; i < area; i++) {
+      stateData[i * 4 + 0] = this.dz[i * 2];
+      stateData[i * 4 + 1] = this.dz[i * 2 + 1];
+      stateData[i * 4 + 2] = 1.0;
+      stateData[i * 4 + 3] = 0.0;
+
+      checkpointData[i * 4 + 0] = 0.0;
+      checkpointData[i * 4 + 1] = 0.0;
+      checkpointData[i * 4 + 2] = 1.0;
+      checkpointData[i * 4 + 3] = 0.0;
+
+      lazyData[i * 4 + 0] = -1.0;
+      lazyData[i * 4 + 1] = -1.0;
+      lazyData[i * 4 + 2] = 0.0;
+      lazyData[i * 4 + 3] = 0.0;
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, this.pingStateTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, stateData);
+    gl.bindTexture(gl.TEXTURE_2D, this.pingCheckpointTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, checkpointData);
+    gl.bindTexture(gl.TEXTURE_2D, this.pingLazyTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, lazyData);
+  }
+
+  uploadRefOrbit() {
+    const gl = this.gl;
+    const refLen = this.refIterations;
+
+    if (refLen <= this.lastUploadedRefIter) return;
+
+    const texelsNeeded = refLen * 2;
+    const texWidth = this.refOrbitTexWidth;
+    const rowsNeeded = Math.ceil(texelsNeeded / texWidth);
+
+    if (rowsNeeded > this.refOrbitTexHeight) {
+      console.warn('Reference orbit exceeds texture size');
+      return;
+    }
+
+    const data = new Float32Array(texWidth * rowsNeeded * 4);
+
+    for (let i = this.lastUploadedRefIter; i < refLen; i++) {
+      const orbit = this.refOrbit[i];
+      const thread = this.threading.getThread(i);
+      const texelIdx = i * 2;
+
+      const dataIdx1 = texelIdx * 4;
+      data[dataIdx1 + 0] = orbit[0] + orbit[1];
+      data[dataIdx1 + 1] = orbit[2] + orbit[3];
+      data[dataIdx1 + 2] = thread.next;
+      data[dataIdx1 + 3] = thread.deltaRe;
+
+      const dataIdx2 = (texelIdx + 1) * 4;
+      data[dataIdx2 + 0] = thread.deltaIm;
+      data[dataIdx2 + 1] = 0.0;
+      data[dataIdx2 + 2] = 0.0;
+      data[dataIdx2 + 3] = 0.0;
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, this.refOrbitTex);
+
+    const startRow = Math.floor(this.lastUploadedRefIter * 2 / texWidth);
+    const endRow = Math.ceil(refLen * 2 / texWidth);
+
+    for (let row = startRow; row < endRow; row++) {
+      const rowOffset = row * texWidth * 4;
+      const rowData = data.subarray(rowOffset, rowOffset + texWidth * 4);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, texWidth, 1, gl.RGBA, gl.FLOAT, rowData);
+    }
+
+    this.lastUploadedRefIter = refLen;
+  }
+
+  async serialize() {
+    const base = await super.serialize();
+    return {
+      ...base,
+      refC: this.refC,
+      refOrbit: this.refOrbit
     };
   }
 
@@ -11420,7 +11443,6 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
       board.cMaxRe = serialized.cMaxRe;
       board.cMaxIm = serialized.cMaxIm;
 
-      // Restore reference orbit if present
       if (serialized.refC) {
         board.refC = serialized.refC;
       }
@@ -11429,7 +11451,6 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
         board.refIter = serialized.refOrbit.length / 2;
       }
 
-      // Restore nn array
       board.nn = new Array(serialized.config.dimsArea).fill(0);
       if (serialized.completedIndexes) {
         for (let i = 0; i < serialized.completedIndexes.length; i++) {
@@ -11440,35 +11461,509 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(Board) {
 
     return board;
   }
-
-  static isAvailable() {
-    if (typeof OffscreenCanvas === 'undefined') return false;
-    try {
-      const canvas = new OffscreenCanvas(1, 1);
-      const gl = canvas.getContext('webgl2');
-      if (!gl) return false;
-      const ext = gl.getExtension('EXT_color_buffer_float');
-      return !!ext;
-    } catch (e) {
-      return false;
-    }
-  }
 }
-
 // WebGL2 adaptive perturbation board using QD precision reference orbit
 // For extreme deep zoom when DD precision is insufficient
-class GlAdaptiveBoard extends QDReferenceOrbitMixin(Board) {
-  // TODO: Implement GlAdaptiveBoard similar to GlZhuoranBoard but with:
-  // - QD precision reference orbit (from QDReferenceOrbitMixin)
-  // - Per-pixel adaptive scaling
-  // - ldexp/frexp for scale management
-  // For now, delegate to GlZhuoranBoard
-  constructor(...args) {
-    throw new Error('GlAdaptiveBoard not yet implemented - use GlZhuoranBoard');
+class GlAdaptiveBoard extends QDReferenceOrbitMixin(GlPerturbationBaseBoard) {
+  constructor(k, size, re, im, config, id, inheritedData = null) {
+    super(k, size, re, im, config, id, inheritedData);
+
+    // Initialize QD reference orbit
+    const refReQD = toQD(re);
+    const refImQD = toQD(im);
+    this.initQDReferenceOrbit([...refReQD, ...refImQD]);
+
+    // Initialize per-pixel perturbation data with adaptive scaling
+    this.initPixels(size, re, im);
+
+    // Start GL initialization
+    this.glInitPromise = this.initGL();
   }
 
-  static isAvailable() {
-    return GlZhuoranBoard.isAvailable();
+  initPixels(size, re, im) {
+    const dimsWidth = this.config.dimsWidth;
+    const dimsHeight = this.config.dimsHeight;
+    const dimsArea = this.config.dimsArea;
+
+    // Convert size to scalar if it's a QD array
+    const size_scalar = Array.isArray(size) ? size.reduce((a, b) => a + (b || 0), 0) : size;
+    const pixelSize = size_scalar / dimsWidth;
+
+    // Compute initial scale: k = floor(log2(pixelSize))
+    const log2_pixelSize = Math.log2(pixelSize);
+    this.initialScale = Math.floor(log2_pixelSize);
+
+    // Mantissa factor: 2^(log2(pixelSize) - k) is in [1, 2)
+    const mantissa = Math.pow(2, log2_pixelSize - this.initialScale);
+
+    // Per-pixel scale exponent
+    this.pixelScale = new Int32Array(dimsArea);
+
+    // Initialize each pixel with adaptive scaling
+    for (let y = 0; y < dimsHeight; y++) {
+      const yOffset = dimsHeight / 2 - y;
+
+      for (let x = 0; x < dimsWidth; x++) {
+        const xOffset = x - dimsWidth / 2;
+
+        const index = y * dimsWidth + x;
+        const index2 = index * 2;
+
+        // δc_stored = mantissa × pixel_offset (normalized to [~-1, ~+1] range)
+        this.dc[index2] = Math.fround(mantissa * xOffset);
+        this.dc[index2 + 1] = Math.fround(mantissa * yOffset);
+
+        // Start with dz = dc
+        this.dz[index2] = this.dc[index2];
+        this.dz[index2 + 1] = this.dc[index2 + 1];
+
+        // All pixels start with the same scale
+        this.pixelScale[index] = this.initialScale;
+      }
+    }
+  }
+
+  getIterationShaderSource() {
+    // Adaptive scaling shader with per-pixel scale exponent
+    return `#version 300 es
+      precision highp float;
+      precision highp int;
+
+      uniform sampler2D u_state;       // (dzr, dzi, iter, status)
+      uniform sampler2D u_checkpoint;  // (bbr, bbi, ref_iter, period)
+      uniform sampler2D u_lazy;        // (ckpt_refidx, pending_refidx, ckpt_bbr, ckpt_bbi)
+      uniform sampler2D u_deltaC;      // (dcr, dci, scale, 0) - scale is per-pixel
+      uniform sampler2D u_refOrbit;    // Reference orbit + threading
+
+      uniform vec2 u_resolution;
+      uniform int u_iterations;
+      uniform int u_exponent;
+      uniform float u_epsilon;
+      uniform float u_epsilon2;
+      uniform float u_pixelSize;
+      uniform int u_startIter;
+      uniform int u_refOrbitLength;
+      uniform int u_refOrbitTexWidth;
+      uniform int u_fibPrev;
+      uniform int u_fibCurr;
+      uniform int u_loopEnabled;
+      uniform int u_loopThreshold;
+      uniform int u_loopJump;
+      uniform float u_loopDeltaR;
+      uniform float u_loopDeltaI;
+      uniform int u_initialScale;
+
+      layout(location = 0) out vec4 outState;
+      layout(location = 1) out vec4 outCheckpoint;
+      layout(location = 2) out vec4 outLazy;
+
+      in vec2 v_texCoord;
+
+      // GLSL ldexp approximation (x * 2^exp)
+      float ldexp_approx(float x, int exp) {
+        // Use bit manipulation approximation
+        if (exp > 127) return x * 1.7014118e38 * pow(2.0, float(exp - 127));
+        if (exp < -126) return x * 5.8774718e-39 * pow(2.0, float(exp + 126));
+        return x * pow(2.0, float(exp));
+      }
+
+      vec2 getRefOrbit(int idx) {
+        if (idx >= u_refOrbitLength) return vec2(0.0);
+        int texelIdx = idx * 2;
+        int row = texelIdx / u_refOrbitTexWidth;
+        int col = texelIdx - row * u_refOrbitTexWidth;
+        vec4 data = texelFetch(u_refOrbit, ivec2(col, row), 0);
+        return vec2(data.r, data.g);
+      }
+
+      vec3 getThread(int idx) {
+        if (idx >= u_refOrbitLength) return vec3(-1.0, 0.0, 0.0);
+        int texelIdx = idx * 2;
+        int row = texelIdx / u_refOrbitTexWidth;
+        int col = texelIdx - row * u_refOrbitTexWidth;
+        vec4 data1 = texelFetch(u_refOrbit, ivec2(col, row), 0);
+        vec4 data2 = texelFetch(u_refOrbit, ivec2(col + 1, row), 0);
+        return vec3(data1.b, data1.a, data2.r);
+      }
+
+      void main() {
+        ivec2 coord = ivec2(gl_FragCoord.xy);
+
+        vec4 state = texelFetch(u_state, coord, 0);
+        vec4 checkpoint = texelFetch(u_checkpoint, coord, 0);
+        vec4 lazy = texelFetch(u_lazy, coord, 0);
+        vec4 dc = texelFetch(u_deltaC, coord, 0);
+
+        float dzr = state.r;
+        float dzi = state.g;
+        float iter = state.b;
+        float status = state.a;
+
+        float bbr = checkpoint.r;
+        float bbi = checkpoint.g;
+        int ref_iter = int(checkpoint.b);
+        float period = checkpoint.a;
+
+        int ckpt_refidx = int(lazy.r);
+        int pending_refidx = int(lazy.g);
+        float ckpt_bbr = lazy.b;
+        float ckpt_bbi = lazy.a;
+
+        float dcr = dc.r;
+        float dci = dc.g;
+        int scale = int(dc.b);
+
+        int fibPrev = u_fibPrev;
+        int fibCurr = u_fibCurr;
+
+        if (status == 0.0) {
+          for (int i = 0; i < 100000; i++) {
+            if (i >= u_iterations) break;
+
+            int globalIter = u_startIter + i + 1;
+
+            // Reconstruct actual values from scaled representation
+            float scale_factor = ldexp_approx(1.0, scale);
+            float actual_dzr = dzr * scale_factor;
+            float actual_dzi = dzi * scale_factor;
+
+            // Check rebasing before iteration
+            float dz_norm = max(abs(actual_dzr), abs(actual_dzi));
+            if (ref_iter > 0 && ref_iter < u_refOrbitLength) {
+              vec2 ref_check = getRefOrbit(ref_iter);
+              float total_r = ref_check.x + actual_dzr;
+              float total_i = ref_check.y + actual_dzi;
+              float total_norm = max(abs(total_r), abs(total_i));
+
+              if (total_norm < dz_norm * 2.0) {
+                // Rebase: z = ref + dz becomes new dz at ref_iter=0
+                dzr = total_r / scale_factor;
+                dzi = total_i / scale_factor;
+                ref_iter = 0;
+                if (ckpt_refidx >= 0) {
+                  pending_refidx = ckpt_refidx;
+                  bbr = ckpt_bbr;
+                  bbi = ckpt_bbi;
+                }
+              }
+            }
+
+            if (ref_iter >= u_refOrbitLength) break;
+            vec2 ref_val = getRefOrbit(ref_iter);
+            float refr = ref_val.x;
+            float refi = ref_val.y;
+
+            // Reconstruct for divergence check
+            float curr_r = refr + actual_dzr;
+            float curr_i = refi + actual_dzi;
+            float curr_mag_sq = curr_r * curr_r + curr_i * curr_i;
+            if (curr_mag_sq > 4.0 || curr_mag_sq != curr_mag_sq) {
+              status = 1.0;
+              break;
+            }
+
+            float old_dzr = dzr;
+            float old_dzi = dzi;
+            int old_ref_iter = ref_iter;
+
+            // Perturbation iteration with adaptive scaling
+            // dz' = 2 * z_ref * dz + dz^2 + dc
+            if (u_exponent == 2) {
+              // Work in scaled coordinates
+              // dz_actual = dzr * 2^scale, dc_actual = dcr * 2^initialScale
+              // new_dz_actual = 2 * ref * dz_actual + dz_actual^2 + dc_actual
+              float new_dzr = 2.0 * (refr * dzr - refi * dzi) * scale_factor
+                            + dzr * dzr * scale_factor * scale_factor
+                            + dcr * ldexp_approx(1.0, u_initialScale);
+              float new_dzi = 2.0 * (refr * dzi + refi * dzr) * scale_factor
+                            + 2.0 * dzr * dzi * scale_factor * scale_factor
+                            + dci * ldexp_approx(1.0, u_initialScale);
+
+              // Renormalize to maintain precision
+              float new_norm = max(abs(new_dzr), abs(new_dzi));
+              if (new_norm > 0.0) {
+                int exp_adjust = int(floor(log2(new_norm)));
+                if (exp_adjust != 0) {
+                  float adjust = ldexp_approx(1.0, -exp_adjust);
+                  new_dzr *= adjust;
+                  new_dzi *= adjust;
+                  scale += exp_adjust;
+                }
+              }
+
+              dzr = new_dzr;
+              dzi = new_dzi;
+            } else {
+              // General exponent - fall back to unscaled
+              float z_pow_r = refr;
+              float z_pow_i = refi;
+              float coeff = float(u_exponent);
+              float result_r = actual_dzr;
+              float result_i = actual_dzi;
+
+              for (int k = 1; k < 10; k++) {
+                if (k >= u_exponent) break;
+                result_r += coeff * z_pow_r;
+                result_i += coeff * z_pow_i;
+                float temp_r = result_r * actual_dzr - result_i * actual_dzi;
+                result_i = result_r * actual_dzi + result_i * actual_dzr;
+                result_r = temp_r;
+                float new_z_pow_r = z_pow_r * refr - z_pow_i * refi;
+                z_pow_i = z_pow_r * refi + z_pow_i * refr;
+                z_pow_r = new_z_pow_r;
+                coeff *= float(u_exponent - k) / float(k + 1);
+              }
+              dzr = (result_r + dcr * ldexp_approx(1.0, u_initialScale)) / scale_factor;
+              dzi = (result_i + dci * ldexp_approx(1.0, u_initialScale)) / scale_factor;
+            }
+
+            iter += 1.0;
+            ref_iter++;
+
+            if (u_loopEnabled != 0 && ref_iter >= u_loopThreshold) {
+              dzr += u_loopDeltaR / ldexp_approx(1.0, scale);
+              dzi += u_loopDeltaI / ldexp_approx(1.0, scale);
+              ref_iter -= u_loopJump;
+            }
+
+            bool just_updated = false;
+            if (globalIter == fibCurr) {
+              just_updated = true;
+              bbr = old_dzr;
+              bbi = old_dzi;
+              ckpt_bbr = old_dzr;
+              ckpt_bbi = old_dzi;
+              ckpt_refidx = old_ref_iter;
+              pending_refidx = old_ref_iter;
+              period = 0.0;
+              int nextFib = fibPrev + fibCurr;
+              fibPrev = fibCurr;
+              fibCurr = nextFib;
+            }
+
+            if (ckpt_refidx >= 0 && !just_updated) {
+              if (ref_iter == ckpt_refidx) {
+                float diff_r = old_dzr - bbr;
+                float diff_i = old_dzi - bbi;
+                float db = max(abs(diff_r), abs(diff_i));
+                if (db <= u_epsilon2) {
+                  if (period == 0.0) period = iter;
+                  if (db <= u_epsilon) {
+                    status = 2.0;
+                    break;
+                  }
+                }
+              }
+
+              if (pending_refidx >= 2584 && pending_refidx < u_refOrbitLength) {
+                vec3 thread = getThread(pending_refidx);
+                if (thread.x >= 0.0 && int(thread.x) == ref_iter) {
+                  float diff_r = old_dzr - bbr + thread.y / ldexp_approx(1.0, scale);
+                  float diff_i = old_dzi - bbi + thread.z / ldexp_approx(1.0, scale);
+                  float db = max(abs(diff_r), abs(diff_i));
+                  if (db <= u_epsilon2) {
+                    if (period == 0.0) period = iter;
+                    if (db <= u_epsilon) {
+                      status = 2.0;
+                      break;
+                    }
+                  }
+                  bbr -= thread.y / ldexp_approx(1.0, scale);
+                  bbi -= thread.z / ldexp_approx(1.0, scale);
+                  pending_refidx = ref_iter;
+                }
+              }
+            }
+          }
+        }
+
+        outState = vec4(dzr, dzi, iter, status);
+        outCheckpoint = vec4(bbr, bbi, float(ref_iter), period);
+        outLazy = vec4(float(ckpt_refidx), float(pending_refidx), ckpt_bbr, ckpt_bbi);
+      }
+    `;
+  }
+
+  async createShaders() {
+    // Call parent, then add additional uniform for initial scale
+    await super.createShaders();
+    const gl = this.gl;
+    gl.useProgram(this.iterProgram);
+    this.iterUniforms.u_initialScale = gl.getUniformLocation(this.iterProgram, 'u_initialScale');
+  }
+
+  initializeStateTextures() {
+    const gl = this.gl;
+    const w = this.texWidth;
+    const h = this.texHeight;
+    const area = w * h;
+
+    const stateData = new Float32Array(area * 4);
+    const checkpointData = new Float32Array(area * 4);
+    const lazyData = new Float32Array(area * 4);
+
+    for (let i = 0; i < area; i++) {
+      stateData[i * 4 + 0] = this.dz[i * 2];
+      stateData[i * 4 + 1] = this.dz[i * 2 + 1];
+      stateData[i * 4 + 2] = 1.0;
+      stateData[i * 4 + 3] = 0.0;
+
+      checkpointData[i * 4 + 0] = 0.0;
+      checkpointData[i * 4 + 1] = 0.0;
+      checkpointData[i * 4 + 2] = 1.0;
+      checkpointData[i * 4 + 3] = 0.0;
+
+      lazyData[i * 4 + 0] = -1.0;
+      lazyData[i * 4 + 1] = -1.0;
+      lazyData[i * 4 + 2] = 0.0;
+      lazyData[i * 4 + 3] = 0.0;
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, this.pingStateTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, stateData);
+    gl.bindTexture(gl.TEXTURE_2D, this.pingCheckpointTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, checkpointData);
+    gl.bindTexture(gl.TEXTURE_2D, this.pingLazyTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, lazyData);
+  }
+
+  uploadDeltaC() {
+    const gl = this.gl;
+    const w = this.texWidth;
+    const h = this.texHeight;
+    const area = w * h;
+
+    const dcData = new Float32Array(area * 4);
+    for (let i = 0; i < area; i++) {
+      dcData[i * 4 + 0] = this.dc[i * 2];
+      dcData[i * 4 + 1] = this.dc[i * 2 + 1];
+      dcData[i * 4 + 2] = this.pixelScale[i];  // Per-pixel scale
+      dcData[i * 4 + 3] = 0.0;
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, this.deltaCTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, dcData);
+  }
+
+  uploadRefOrbit() {
+    const gl = this.gl;
+    const refLen = this.refIterations;
+
+    if (refLen <= this.lastUploadedRefIter) return;
+
+    const texelsNeeded = refLen * 2;
+    const texWidth = this.refOrbitTexWidth;
+    const rowsNeeded = Math.ceil(texelsNeeded / texWidth);
+
+    if (rowsNeeded > this.refOrbitTexHeight) {
+      console.warn('Reference orbit exceeds texture size');
+      return;
+    }
+
+    const data = new Float32Array(texWidth * rowsNeeded * 4);
+
+    for (let i = this.lastUploadedRefIter; i < refLen; i++) {
+      const orbit = this.qdRefOrbit[i];
+      const thread = this.threading.getThread(i);
+      const texelIdx = i * 2;
+
+      const dataIdx1 = texelIdx * 4;
+      // Sum QD components to get f32 value for ref orbit
+      data[dataIdx1 + 0] = orbit ? orbit[0] + orbit[1] + orbit[2] + orbit[3] : 0;
+      data[dataIdx1 + 1] = orbit ? orbit[4] + orbit[5] + orbit[6] + orbit[7] : 0;
+      data[dataIdx1 + 2] = thread.next;
+      data[dataIdx1 + 3] = thread.deltaRe;
+
+      const dataIdx2 = (texelIdx + 1) * 4;
+      data[dataIdx2 + 0] = thread.deltaIm;
+      data[dataIdx2 + 1] = 0.0;
+      data[dataIdx2 + 2] = 0.0;
+      data[dataIdx2 + 3] = 0.0;
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, this.refOrbitTex);
+
+    const startRow = Math.floor(this.lastUploadedRefIter * 2 / texWidth);
+    const endRow = Math.ceil(refLen * 2 / texWidth);
+
+    for (let row = startRow; row < endRow; row++) {
+      const rowOffset = row * texWidth * 4;
+      const rowData = data.subarray(rowOffset, rowOffset + texWidth * 4);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, texWidth, 1, gl.RGBA, gl.FLOAT, rowData);
+    }
+
+    this.lastUploadedRefIter = refLen;
+  }
+
+  doGpuIterations(targetIters) {
+    // Call parent implementation
+    super.doGpuIterations(targetIters);
+
+    // Set additional uniform for initial scale
+    const gl = this.gl;
+    gl.useProgram(this.iterProgram);
+    gl.uniform1i(this.iterUniforms.u_initialScale, this.initialScale);
+  }
+
+  async serialize() {
+    const base = await super.serialize();
+    return {
+      ...base,
+      refC_qd: this.refC_qd,
+      qdRefOrbit: this.qdRefOrbit,
+      initialScale: this.initialScale,
+      pixelScale: Array.from(this.pixelScale)
+    };
+  }
+
+  static fromSerialized(serialized) {
+    const board = new GlAdaptiveBoard(
+      serialized.k,
+      serialized.sizesQD[0],
+      serialized.sizesQD[1],
+      serialized.sizesQD[2],
+      serialized.config,
+      serialized.id
+    );
+
+    board.glInitPromise = board.glInitPromise.then(() => {
+      board.it = serialized.it;
+      board.un = serialized.un;
+      board.di = serialized.di;
+      board.ch = serialized.ch || 0;
+
+      if (serialized.reported) {
+        board.reported = new Uint8Array(serialized.reported);
+      }
+
+      board.cMinRe = serialized.cMinRe;
+      board.cMinIm = serialized.cMinIm;
+      board.cMaxRe = serialized.cMaxRe;
+      board.cMaxIm = serialized.cMaxIm;
+
+      if (serialized.refC_qd) {
+        board.refC_qd = serialized.refC_qd;
+      }
+      if (serialized.qdRefOrbit) {
+        board.qdRefOrbit = serialized.qdRefOrbit;
+        board.refIterations = serialized.qdRefOrbit.length;
+      }
+      if (serialized.initialScale !== undefined) {
+        board.initialScale = serialized.initialScale;
+      }
+      if (serialized.pixelScale) {
+        board.pixelScale = new Int32Array(serialized.pixelScale);
+      }
+
+      board.nn = new Array(serialized.config.dimsArea).fill(0);
+      if (serialized.completedIndexes) {
+        for (let i = 0; i < serialized.completedIndexes.length; i++) {
+          board.nn[serialized.completedIndexes[i]] = serialized.completedNn[i];
+        }
+      }
+    });
+
+    return board;
   }
 }
 
@@ -14128,6 +14623,7 @@ const forcedBoardTypes = {
     'gpu': GpuBoard,
     'gl': GlBoard,
     'glz': GlZhuoranBoard,
+    'gla': GlAdaptiveBoard,
     'gpuz': GpuZhuoranBoard,
     'adaptive': AdaptiveGpuBoard,
     'qdcpu': QDCpuBoard
@@ -14155,14 +14651,7 @@ function selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard) {
     }
   }
 
-  // For shallow zooms, prefer GlBoard (WebGL2) for gap-free GPU pipelining
-  // GlBoard uses fragment shaders with driver-managed synchronization,
-  // which eliminates GPU idle gaps between batches.
-  if (pixelSize > 1e-7 && isGlBoardAvailable()) {
-    return GlBoard;
-  }
-
-  // For medium/deep zooms, or if WebGL2 not available, use WebGPU boards
+  // Prefer WebGPU boards when available
   if (gpuMaxBufferSize) {
     // Select board type based on zoom level and float32 precision limits
     // Float32 has ~7 decimal digits, so direct iteration works to ~1e-7 pixel size
@@ -14182,18 +14671,28 @@ function selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard) {
       const limitMB = (gpuMaxBufferSize / (1024*1024)).toFixed(0);
       console.log(
         `${GpuBoardClass}: dimsArea=${dimsArea} too large for GPU ` +
-            `(buffer size ${bufferSizeMB} MB > ${limitMB} MB), using CPU`);
+            `(buffer size ${bufferSizeMB} MB > ${limitMB} MB)`);
+      // Fall through to try WebGL2 boards
     }
   }
 
-  // WebGPU not available - try WebGL2 with perturbation (GlZhuoranBoard)
-  // for medium zooms where standard GlBoard precision is insufficient
-  if (pixelSize <= 1e-7 && pixelSize > 1e-30 && isGlBoardAvailable() &&
-      GlZhuoranBoard.isAvailable()) {
-    return GlZhuoranBoard;
+  // WebGPU not available or buffer too large - try WebGL2 boards as fallback
+  if (isGlBoardAvailable()) {
+    // Shallow zooms: GlBoard with simple float32 iteration
+    if (pixelSize > 1e-7) {
+      return GlBoard;
+    }
+    // Medium zooms: GlZhuoranBoard with DD-precision reference orbit
+    if (pixelSize > 1e-30 && GlZhuoranBoard.isAvailable()) {
+      return GlZhuoranBoard;
+    }
+    // Deep zooms: GlAdaptiveBoard with QD-precision reference orbit
+    if (GlAdaptiveBoard.isAvailable()) {
+      return GlAdaptiveBoard;
+    }
   }
 
-  // If GPU is not available, select a CPU board
+  // No GPU available - fall back to CPU boards
   const CpuBoardClass = (
       (pixelSize > 1e-15) ? CpuBoard :
       (pixelSize > 1e-30) ? DDZhuoranBoard :
