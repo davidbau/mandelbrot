@@ -7678,7 +7678,11 @@ class GpuBaseBoard extends Board {
     try {
       // Query adapter limits directly - no need to create a device
       const adapter = await navigator.gpu.requestAdapter();
-      if (!adapter) return GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER;
+      if (!adapter) {
+        console.warn('WebGPU adapter not available, falling back to CPU/WebGL2');
+        GpuBaseBoard.cachedMaxBufferSize = null;
+        return null;
+      }
 
       const limit = Math.min(
         adapter.limits.maxBufferSize,
@@ -7686,8 +7690,9 @@ class GpuBaseBoard extends Board {
       GpuBaseBoard.cachedMaxBufferSize = Math.floor(limit * 0.9);  // 90% for safety
       return GpuBaseBoard.cachedMaxBufferSize;
     } catch (e) {
-      GpuBaseBoard.cachedMaxBufferSize = GpuBaseBoard.GPU_DEFAULT_MAX_BUFFER;
-      return GpuBaseBoard.cachedMaxBufferSize;
+      console.warn('WebGPU query failed, falling back to CPU/WebGL2:', e.message || e);
+      GpuBaseBoard.cachedMaxBufferSize = null;
+      return null;
     }
   }
 
