@@ -7780,6 +7780,25 @@ class GpuBaseBoard extends Board {
 
     this.device.queue.writeBuffer(this.buffers.results, 0, this._resultsCounterReset);
 
+    // Batch locking buffer (see docs/gpu-batch-locking.md)
+    // Layout: lock(u32), batch_active(u32), collision_count(u32), reserved(u32)
+    // Used to prevent shader race conditions between overlapping batches
+    if (this.buffers.lock?.destroy) {
+      this.buffers.lock.destroy();
+    }
+    this.buffers.lock = this.device.createBuffer({
+      size: 16,  // 4 u32s
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      label: 'Batch lock buffer'
+    });
+    // Initialize: lock=0 (unlocked), batch_active=0, collision_count=0, reserved=0
+    this._lockBufferReset = new Uint32Array([0, 0, 0, 0]);
+    this.device.queue.writeBuffer(this.buffers.lock, 0, this._lockBufferReset);
+
+    // Collision stats tracking (CPU-side)
+    this.batchCollisionCount = 0;
+    this.batchTotalCount = 0;
+
     // Create staging shader pipeline (see docs/gpu-results-readback-design.md)
     this.createStagingPipeline();
   }
@@ -7789,9 +7808,100 @@ class GpuBaseBoard extends Board {
     const recordBytes = this.resultsRecordBytes;
     const recordU32s = recordBytes / 4;
 
+    // Guard shader: tries to acquire batch lock (see docs/gpu-batch-locking.md)
+    // Uses atomicCompareExchange to prevent race conditions between overlapping batches
+    // Uses per-buffer-index batch_active to avoid race between Guard2 overwriting batch_active
+    // before Compute1 reads it (see design doc for details)
+    const guardShaderCode = `
+      struct GuardParams {
+        buffer_index: u32,  // 0 or 1, matches double-buffering index
+      }
+
+      // Lock buffer layout:
+      // [0]=lock, [1]=batch_active[0], [2]=batch_active[1], [3]=collision_count
+      struct LockBuffer {
+        lock: atomic<u32>,
+        batch_active_0: atomic<u32>,
+        batch_active_1: atomic<u32>,
+        collision_count: atomic<u32>,
+      }
+
+      @group(0) @binding(0) var<uniform> params: GuardParams;
+      @group(0) @binding(1) var<storage, read_write> lockBuf: LockBuffer;
+
+      @compute @workgroup_size(1)
+      fn guard_main() {
+        // Try to acquire lock: atomicCompareExchange(expected=0, desired=1)
+        let prev = atomicCompareExchangeWeak(&lockBuf.lock, 0u, 1u).old_value;
+        let is_active = select(0u, 1u, prev == 0u);
+
+        // Write to per-buffer-index batch_active to avoid cross-batch race
+        if (params.buffer_index == 0u) {
+          atomicStore(&lockBuf.batch_active_0, is_active);
+        } else {
+          atomicStore(&lockBuf.batch_active_1, is_active);
+        }
+
+        if (prev != 0u) {
+          atomicAdd(&lockBuf.collision_count, 1u);
+        }
+      }
+    `;
+
+    const guardModule = this.device.createShaderModule({
+      code: guardShaderCode,
+      label: 'Guard shader'
+    });
+
+    this.guardPipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: {
+        module: guardModule,
+        entryPoint: 'guard_main'
+      },
+      label: 'Guard pipeline'
+    });
+
+    // Create guard params buffers for each buffer index
+    this.buffers.guardParams = [
+      this.device.createBuffer({
+        size: 4,  // 1 u32
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        label: 'Guard params 0'
+      }),
+      this.device.createBuffer({
+        size: 4,  // 1 u32
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        label: 'Guard params 1'
+      })
+    ];
+    this.device.queue.writeBuffer(this.buffers.guardParams[0], 0, new Uint32Array([0]));
+    this.device.queue.writeBuffer(this.buffers.guardParams[1], 0, new Uint32Array([1]));
+
+    // Create guard bind groups for each buffer index
+    this.guardBindGroups = [
+      this.device.createBindGroup({
+        layout: this.guardPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.buffers.guardParams[0] } },
+          { binding: 1, resource: { buffer: this.buffers.lock } }
+        ],
+        label: 'Guard bind group 0'
+      }),
+      this.device.createBindGroup({
+        layout: this.guardPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.buffers.guardParams[1] } },
+          { binding: 1, resource: { buffer: this.buffers.lock } }
+        ],
+        label: 'Guard bind group 1'
+      })
+    ];
+
     // Staging shader: copies results from main area to pre-staging area
     // All threads copy records in parallel, then atomicMin finds first not-ready record.
     // This handles the race where atomicAdd claims a slot before data is written.
+    // Also handles batch locking: releases lock after copying, marks skipped batches.
     const stagingShaderCode = `
       struct StagingParams {
         chunkSize: u32,
@@ -7800,8 +7910,18 @@ class GpuBaseBoard extends Board {
         preStagingOffset: u32,
       }
 
+      // Lock buffer layout matches guard shader:
+      // [0]=lock, [1]=batch_active[0], [2]=batch_active[1], [3]=collision_count
+      struct LockBuffer {
+        lock: atomic<u32>,
+        batch_active_0: atomic<u32>,
+        batch_active_1: atomic<u32>,
+        collision_count: atomic<u32>,
+      }
+
       @group(0) @binding(0) var<uniform> params: StagingParams;
       @group(0) @binding(1) var<storage, read_write> buffer: array<u32>;
+      @group(0) @binding(2) var<storage, read_write> lockBuf: LockBuffer;
 
       // Buffer layout:
       // [0]: count (firstEmpty)
@@ -7809,6 +7929,7 @@ class GpuBaseBoard extends Board {
       // [2..7]: other header fields
       // [8..]: main records (status at offset 2 within each record)
       // [preStagingOffset/4..]: pre-staging header + records
+      //   Pre-staging header: [0]=firstEmpty, [1]=countInChunk, [2]=chunkStartIndex, [3]=skipped
 
       const STATUS_OFFSET: u32 = 2u;
 
@@ -7853,7 +7974,7 @@ class GpuBaseBoard extends Board {
 
         workgroupBarrier();
 
-        // Thread 0 writes header with actual count and updates lastStaged
+        // Thread 0 writes header, updates lastStaged, and releases lock
         if (tid == 0u) {
           let actualCount = atomicLoad(&firstNotReady);
 
@@ -7861,10 +7982,13 @@ class GpuBaseBoard extends Board {
           buffer[headerBase + 0u] = sharedFirstEmpty;
           buffer[headerBase + 1u] = actualCount;
           buffer[headerBase + 2u] = lastStaged;
-          buffer[headerBase + 3u] = 0u;
+          buffer[headerBase + 3u] = 0u;  // skipped = 0 (normal batch)
 
           // Update lastStaged (only advance by ready records)
           buffer[1] = lastStaged + actualCount;
+
+          // Release the batch lock (atomic provides memory ordering)
+          atomicStore(&lockBuf.lock, 0u);
         }
       }
     `;
@@ -7909,12 +8033,14 @@ class GpuBaseBoard extends Board {
     }
 
     // Create two staging bind groups (one per pre-staging area)
+    // Each includes the lock buffer for batch collision handling
     this.stagingBindGroups = [
       this.device.createBindGroup({
         layout: this.stagingPipeline.getBindGroupLayout(0),
         entries: [
           { binding: 0, resource: { buffer: this.buffers.stagingParams[0] } },
-          { binding: 1, resource: { buffer: this.buffers.results } }
+          { binding: 1, resource: { buffer: this.buffers.results } },
+          { binding: 2, resource: { buffer: this.buffers.lock } }
         ],
         label: 'Staging bind group 0'
       }),
@@ -7922,16 +8048,29 @@ class GpuBaseBoard extends Board {
         layout: this.stagingPipeline.getBindGroupLayout(0),
         entries: [
           { binding: 0, resource: { buffer: this.buffers.stagingParams[1] } },
-          { binding: 1, resource: { buffer: this.buffers.results } }
+          { binding: 1, resource: { buffer: this.buffers.results } },
+          { binding: 2, resource: { buffer: this.buffers.lock } }
         ],
         label: 'Staging bind group 1'
       })
     ];
   }
 
+  queueGuardPass(commandEncoder, bufferIndex) {
+    // Guard pass: try to acquire batch lock (see docs/gpu-batch-locking.md)
+    // Must run before compute pass to set batch_active[bufferIndex] flag
+    // Using per-buffer-index prevents Guard2 from corrupting Compute1's batch_active
+    const guardPass = commandEncoder.beginComputePass({ label: 'Guard pass' });
+    guardPass.setPipeline(this.guardPipeline);
+    guardPass.setBindGroup(0, this.guardBindGroups[bufferIndex]);
+    guardPass.dispatchWorkgroups(1);
+    guardPass.end();
+  }
+
   queueResultsReadback(commandEncoder, index) {
     // Run staging shader to copy results to pre-staging area
     // Use index-specific bind group to write to the correct pre-staging area
+    // Staging shader also releases the batch lock after copying
     const stagingPass = commandEncoder.beginComputePass({ label: 'Staging pass' });
     stagingPass.setPipeline(this.stagingPipeline);
     stagingPass.setBindGroup(0, this.stagingBindGroups[index]);
@@ -7949,7 +8088,7 @@ class GpuBaseBoard extends Board {
 
   async readResultsChunk(index) {
     // Read staging buffer which contains pre-staging header + records
-    // Header: firstEmpty (u32), countInChunk (u32), chunkStartIndex (u32), reserved (u32)
+    // Header: firstEmpty (u32), countInChunk (u32), chunkStartIndex (u32), skipped (u32)
     const staging = this.buffers.resultsStaging[index];
     await staging.mapAsync(GPUMapMode.READ, 0, this.preStagingSize);
     const mapped = staging.getMappedRange(0, this.preStagingSize);
@@ -7959,10 +8098,11 @@ class GpuBaseBoard extends Board {
     const firstEmpty = Math.min(headerView[0], this.resultsMaxCount);
     const countInChunk = headerView[1];
     const chunkStartIndex = headerView[2];
+    const skipped = headerView[3] !== 0;  // Batch collision flag (see docs/gpu-batch-locking.md)
 
-    // Copy records data
+    // Copy records data (only if not skipped)
     let data = null;
-    if (countInChunk > 0) {
+    if (countInChunk > 0 && !skipped) {
       const dataBytes = countInChunk * this.resultsRecordBytes;
       data = new ArrayBuffer(dataBytes);
       const src = new Uint8Array(mapped, this.preStagingHeaderBytes, dataBytes);
@@ -7970,7 +8110,7 @@ class GpuBaseBoard extends Board {
     }
 
     staging.unmap();
-    return { firstEmpty, countInChunk, chunkStartIndex, data };
+    return { firstEmpty, countInChunk, chunkStartIndex, skipped, data };
   }
 
   async processPendingReadback() {
@@ -7978,9 +8118,21 @@ class GpuBaseBoard extends Board {
     await this.pendingReadbackPromise;
 
     // Read chunk from staging buffer (see docs/gpu-results-readback-design.md)
-    const { firstEmpty, countInChunk, chunkStartIndex, data } = await this.readResultsChunk(
+    const { firstEmpty, countInChunk, chunkStartIndex, skipped, data } = await this.readResultsChunk(
       this.pendingReadbackIndex
     );
+
+    // Track collision stats (see docs/gpu-batch-locking.md)
+    this.batchTotalCount++;
+    if (skipped) {
+      this.batchCollisionCount++;
+      // Skipped batch: no work was done, no results to process
+      // Don't update previousFirstEmpty or add to batchesToReadback
+      if (hasDebugFlag(this.config, 'lock')) {
+        console.log(`Board ${this.id}: Batch skipped (collision #${this.batchCollisionCount}/${this.batchTotalCount})`);
+      }
+      return;
+    }
 
     this.resultsTotalCount = firstEmpty;
 
@@ -8374,6 +8526,8 @@ class GpuBoard extends GpuBaseBoard {
         workgroups_x: u32,
         start_iter: u32,
         checkpoint_count: u32,
+        buffer_index: u32,  // 0 or 1, for per-buffer batch_active
+        _pad_bi: u32,       // padding to maintain alignment
         ckpt0: u32, ckpt1: u32, ckpt2: u32, ckpt3: u32,
         ckpt4: u32, ckpt5: u32, ckpt6: u32, ckpt7: u32,
         ckpt8: u32, ckpt9: u32, ckpt10: u32, ckpt11: u32,
@@ -8415,12 +8569,34 @@ class GpuBoard extends GpuBaseBoard {
         records: array<PixelState>,
       }
 
+      // Lock buffer for batch collision prevention (see docs/gpu-batch-locking.md)
+      // Uses per-buffer-index batch_active to avoid cross-batch race conditions
+      struct LockBuffer {
+        lock: atomic<u32>,
+        batch_active_0: atomic<u32>,
+        batch_active_1: atomic<u32>,
+        collision_count: atomic<u32>,
+      }
+
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
       @group(0) @binding(2) var<storage, read_write> results: Results;
+      @group(0) @binding(3) var<storage, read_write> lockBuf: LockBuffer;
 
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+        // Check per-buffer-index batch_active - skip if guard didn't acquire lock
+        // Using buffer_index avoids race where Guard2 overwrites before Compute1 reads
+        var batch_active: u32;
+        if (params.buffer_index == 0u) {
+          batch_active = atomicLoad(&lockBuf.batch_active_0);
+        } else {
+          batch_active = atomicLoad(&lockBuf.batch_active_1);
+        }
+        if (batch_active == 0u) {
+          return;  // Batch skipped due to collision
+        }
+
         if (global_id.x == 0u && global_id.y == 0u && global_id.z == 0u) {
           results.active_count = params.active_count;
           results.start_iter = params.start_iter;
@@ -8666,7 +8842,8 @@ class GpuBoard extends GpuBaseBoard {
       entries: [
         { binding: 0, resource: { buffer: this.buffers.params } },
         { binding: 1, resource: { buffer: this.buffers.pixels } },
-        { binding: 2, resource: { buffer: this.buffers.results } }
+        { binding: 2, resource: { buffer: this.buffers.results } },
+        { binding: 3, resource: { buffer: this.buffers.lock } }
       ],
       label: 'SparseGpu bind group'
     });
@@ -8755,24 +8932,33 @@ class GpuBoard extends GpuBaseBoard {
       paramsU32[11] = workgroupsX * workgroupSize;
       paramsU32[12] = bufferIter;
       paramsU32[13] = checkpointCount;
+
+      const bufferIndex = this.readbackBufferIndex;
+      paramsU32[14] = bufferIndex;  // buffer_index for per-buffer batch_active
+      paramsU32[15] = 0;  // _pad_bi
+
       for (let i = 0; i < 32; i++) {
-        paramsU32[14 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
+        paramsU32[16 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
       }
 
       this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
       const commandEncoder = this.device.createCommandEncoder({ label: 'GpuBoard compute' });
+
+      // Guard pass: try to acquire batch lock (see docs/gpu-batch-locking.md)
+      this.queueGuardPass(commandEncoder, bufferIndex);
+
+      // Compute pass: iterate pixels (will skip if lock not acquired)
       const passEncoder = commandEncoder.beginComputePass({ label: 'GpuBoard pass' });
       passEncoder.setPipeline(this.pipeline);
       passEncoder.setBindGroup(0, this.bindGroup);
       passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
       passEncoder.end();
 
-      const readbackIndex = this.readbackBufferIndex;
-
       // Queue staging shader pass and copy to staging buffer
       // (see docs/gpu-results-readback-design.md)
-      this.queueResultsReadback(commandEncoder, readbackIndex);
+      // Staging shader releases the lock after copying
+      this.queueResultsReadback(commandEncoder, bufferIndex);
 
       this.device.queue.submit([commandEncoder.finish()]);
       // Save batch iter range using half-open interval [start, end)
@@ -8791,9 +8977,9 @@ class GpuBoard extends GpuBaseBoard {
       }
 
       // Set up state for THIS batch (to be processed next frame)
-      this.pendingReadbackIndex = readbackIndex;
+      this.pendingReadbackIndex = bufferIndex;
       this.pendingReadbackPromise = currentPromise;
-      this.readbackBufferIndex = 1 - readbackIndex;
+      this.readbackBufferIndex = 1 - bufferIndex;
       this.pendingIterationsPerBatch = iterationsPerBatch;
       this.hasPendingResults = true;
       // Batch tracking: half-open interval [start, end) for proper invariant checking
@@ -12482,14 +12668,15 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
   }
 
   createBindGroup() {
-    // Unified 3-binding layout for maximum cache coherency
+    // Unified 5-binding layout for maximum cache coherency
     this.bindGroup = this.device.createBindGroup({
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.buffers.params } },
         { binding: 1, resource: { buffer: this.buffers.pixels } },
         { binding: 2, resource: { buffer: this.buffers.iters } },
-        { binding: 3, resource: { buffer: this.buffers.results } }
+        { binding: 3, resource: { buffer: this.buffers.results } },
+        { binding: 4, resource: { buffer: this.buffers.lock } }
       ],
       label: 'Perturbation bind group'
     });
@@ -12713,6 +12900,7 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         workgroups_x: u32,
         start_iter: u32,
         checkpoint_count: u32,
+        buffer_index: u32,      // 0 or 1, for per-buffer batch_active
         ckpt0: u32, ckpt1: u32, ckpt2: u32, ckpt3: u32,
         ckpt4: u32, ckpt5: u32, ckpt6: u32, ckpt7: u32,
         ckpt8: u32, ckpt9: u32, ckpt10: u32, ckpt11: u32,
@@ -12721,10 +12909,10 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         ckpt20: u32, ckpt21: u32, ckpt22: u32, ckpt23: u32,
         ckpt24: u32, ckpt25: u32, ckpt26: u32, ckpt27: u32,
         ckpt28: u32, ckpt29: u32, ckpt30: u32, ckpt31: u32,
+        _pad_ckpt: u32,         // Padding after checkpoints
         loop_enabled: u32,      // 1 if loop enabled, 0 otherwise
         loop_threshold: u32,    // ref_iter threshold to trigger loop
         loop_jump: u32,         // Amount to subtract from ref_iter
-        _padding: u32,          // Alignment padding
         pixel_size: f32,
         aspect_ratio: f32,
         loop_delta_r: f32,      // Delta to add to dzr
@@ -12801,10 +12989,20 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         thread_delta_im: f32,
       }
 
+      // Lock buffer for batch collision prevention (see docs/gpu-batch-locking.md)
+      // Uses per-buffer-index batch_active to avoid cross-batch race conditions
+      struct LockBuffer {
+        lock: atomic<u32>,
+        batch_active_0: atomic<u32>,
+        batch_active_1: atomic<u32>,
+        collision_count: atomic<u32>,
+      }
+
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
       @group(0) @binding(2) var<storage, read> iters: array<IterState>;
       @group(0) @binding(3) var<storage, read_write> results: Results;
+      @group(0) @binding(4) var<storage, read_write> lockBuf: LockBuffer;
 
       // Get threading data from unified iters buffer
       // Returns vec3: [next_index_as_f32, deltaRe, deltaIm]
@@ -12823,6 +13021,17 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
 
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+        // Check per-buffer-index batch_active - skip if guard didn't acquire lock
+        var batch_active: u32;
+        if (params.buffer_index == 0u) {
+          batch_active = atomicLoad(&lockBuf.batch_active_0);
+        } else {
+          batch_active = atomicLoad(&lockBuf.batch_active_1);
+        }
+        if (batch_active == 0u) {
+          return;  // Batch skipped due to collision
+        }
+
         if (global_id.x == 0u && global_id.y == 0u && global_id.z == 0u) {
           results.active_count = params.active_count;
           results.start_iter = params.start_iter;
@@ -13307,6 +13516,8 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     const paramsBuffer = new ArrayBuffer(256);
     const paramsU32 = new Uint32Array(paramsBuffer);
     const paramsF32 = new Float32Array(paramsBuffer);
+    const bufferIndex = this.readbackBufferIndex;
+
     paramsU32[0] = this.config.dimsWidth;
     paramsU32[1] = this.config.dimsHeight;
     paramsU32[2] = iterationsPerBatch;
@@ -13316,34 +13527,39 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     paramsU32[6] = workgroupsX * workgroupSize;
     paramsU32[7] = bufferIter;
     paramsU32[8] = checkpointCount;
+    paramsU32[9] = bufferIndex;  // buffer_index for per-buffer batch_active
 
     for (let i = 0; i < 32; i++) {
-      paramsU32[9 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
+      paramsU32[10 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
     }
 
+    paramsU32[42] = 0;  // _pad_ckpt
     const loop = this.refOrbitLoop || { enabled: false };
-    paramsU32[41] = loop.enabled ? 1 : 0;
-    paramsU32[42] = loop.threshold || 0;
-    paramsU32[43] = loop.jumpAmount || 0;
-    paramsU32[44] = 0;
-    paramsF32[45] = pixelSize;
-    paramsF32[46] = this.config.aspectRatio;
-    paramsF32[47] = loop.deltaR || 0;
-    paramsF32[48] = loop.deltaI || 0;
+    paramsU32[43] = loop.enabled ? 1 : 0;
+    paramsU32[44] = loop.threshold || 0;
+    paramsU32[45] = loop.jumpAmount || 0;
+    paramsF32[46] = pixelSize;
+    paramsF32[47] = this.config.aspectRatio;
+    paramsF32[48] = loop.deltaR || 0;
+    paramsF32[49] = loop.deltaI || 0;
 
     this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
     const commandEncoder = this.device.createCommandEncoder({ label: 'Perturbation compute' });
+
+    // Guard pass: try to acquire batch lock (see docs/gpu-batch-locking.md)
+    this.queueGuardPass(commandEncoder, bufferIndex);
+
+    // Compute pass: iterate pixels (will skip if lock not acquired)
     const passEncoder = commandEncoder.beginComputePass({ label: 'Perturbation pass' });
     passEncoder.setPipeline(this.pipeline);
     passEncoder.setBindGroup(0, this.bindGroup);
     passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
     passEncoder.end();
 
-    const readbackIndex = this.readbackBufferIndex;
-
     // Queue staging shader pass and copy to staging buffer
-    this.queueResultsReadback(commandEncoder, readbackIndex);
+    // Staging shader releases the lock after copying
+    this.queueResultsReadback(commandEncoder, bufferIndex);
 
     const gpuStartTime = performance.now();
     this.device.queue.submit([commandEncoder.finish()]);
@@ -13381,9 +13597,9 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     // ================================================================
     // STEP 7: Update pending state for next iteration
     // ================================================================
-    this.pendingReadbackIndex = readbackIndex;
+    this.pendingReadbackIndex = bufferIndex;
     this.pendingReadbackPromise = currentPromise;
-    this.readbackBufferIndex = 1 - readbackIndex;
+    this.readbackBufferIndex = 1 - bufferIndex;
     this.pendingIterationsPerBatch = iterationsPerBatch;
     this.hasPendingResults = true;
     // Batch tracking: half-open interval [start, end) (see docs/gpu-results-readback-design.md)
@@ -13852,7 +14068,8 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         { binding: 0, resource: { buffer: this.buffers.params } },
         { binding: 1, resource: { buffer: this.buffers.pixels } },
         { binding: 2, resource: { buffer: this.buffers.iters } },
-        { binding: 3, resource: { buffer: this.buffers.results } }
+        { binding: 3, resource: { buffer: this.buffers.results } },
+        { binding: 4, resource: { buffer: this.buffers.lock } }
       ],
       label: 'Adaptive perturbation bind group'
     });
@@ -13997,6 +14214,7 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         workgroups_x: u32,
         start_iter: u32,
         checkpoint_count: u32,
+        buffer_index: u32,      // 0 or 1, for per-buffer batch_active
         ckpt0: u32, ckpt1: u32, ckpt2: u32, ckpt3: u32,
         ckpt4: u32, ckpt5: u32, ckpt6: u32, ckpt7: u32,
         ckpt8: u32, ckpt9: u32, ckpt10: u32, ckpt11: u32,
@@ -14005,10 +14223,12 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         ckpt20: u32, ckpt21: u32, ckpt22: u32, ckpt23: u32,
         ckpt24: u32, ckpt25: u32, ckpt26: u32, ckpt27: u32,
         ckpt28: u32, ckpt29: u32, ckpt30: u32, ckpt31: u32,
+        _pad_ckpt: u32,         // Padding after checkpoints
         loop_enabled: u32,
         loop_threshold: u32,
         loop_jump: u32,
         initial_scale: i32,    // Global scale for dc, bb, threaded_delta
+        _pad_scale: u32,       // Padding for alignment
         pixel_size: f32,
         aspect_ratio: f32,
         loop_delta_r: f32,
@@ -14089,10 +14309,20 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
         thread_delta_im: f32,
       }
 
+      // Lock buffer for batch collision prevention (see docs/gpu-batch-locking.md)
+      // Uses per-buffer-index batch_active to avoid cross-batch race conditions
+      struct LockBuffer {
+        lock: atomic<u32>,
+        batch_active_0: atomic<u32>,
+        batch_active_1: atomic<u32>,
+        collision_count: atomic<u32>,
+      }
+
       @group(0) @binding(0) var<uniform> params: Params;
       @group(0) @binding(1) var<storage, read_write> pixels: array<PixelState>;
       @group(0) @binding(2) var<storage, read> iters: array<IterState>;
       @group(0) @binding(3) var<storage, read_write> results: Results;
+      @group(0) @binding(4) var<storage, read_write> lockBuf: LockBuffer;
 
       fn getThread(idx: u32) -> vec3<f32> {
         if (idx >= params.ref_orbit_length) { return vec3<f32>(-1.0, 0.0, 0.0); }
@@ -14108,6 +14338,17 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
 
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+        // Check per-buffer-index batch_active - skip if guard didn't acquire lock
+        var batch_active: u32;
+        if (params.buffer_index == 0u) {
+          batch_active = atomicLoad(&lockBuf.batch_active_0);
+        } else {
+          batch_active = atomicLoad(&lockBuf.batch_active_1);
+        }
+        if (batch_active == 0u) {
+          return;  // Batch skipped due to collision
+        }
+
         if (global_id.x == 0u && global_id.y == 0u && global_id.z == 0u) {
           results.active_count = params.active_count;
           results.start_iter = params.start_iter;
@@ -14589,6 +14830,7 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       const paramsU32 = new Uint32Array(paramsBuffer);
       const paramsI32 = new Int32Array(paramsBuffer);
       const paramsF32 = new Float32Array(paramsBuffer);
+      const bufferIndex = this.readbackBufferIndex;
 
       paramsU32[0] = this.config.dimsWidth;
       paramsU32[1] = this.config.dimsHeight;
@@ -14599,25 +14841,33 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       paramsU32[6] = workgroupsX * workgroupSize;
       paramsU32[7] = bufferIter;
       paramsU32[8] = checkpointCount;
+      paramsU32[9] = bufferIndex;  // buffer_index for per-buffer batch_active
 
       for (let i = 0; i < 32; i++) {
-        paramsU32[9 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
+        paramsU32[10 + i] = i < checkpointCount ? checkpointOffsets[i] : 0;
       }
 
+      paramsU32[42] = 0;  // _pad_ckpt
       const loop = this.refOrbitLoop || { enabled: false };
-      paramsU32[41] = loop.enabled ? 1 : 0;
-      paramsU32[42] = loop.threshold || 0;
-      paramsU32[43] = loop.jumpAmount || 0;
-      paramsI32[44] = this.initialScale;
-      paramsF32[45] = pixelSize;
-      paramsF32[46] = this.config.aspectRatio;
-      paramsF32[47] = loop.deltaR || 0;
-      paramsF32[48] = loop.deltaI || 0;
+      paramsU32[43] = loop.enabled ? 1 : 0;
+      paramsU32[44] = loop.threshold || 0;
+      paramsU32[45] = loop.jumpAmount || 0;
+      paramsI32[46] = this.initialScale;
+      paramsU32[47] = 0;  // _pad_scale
+      paramsF32[48] = pixelSize;
+      paramsF32[49] = this.config.aspectRatio;
+      paramsF32[50] = loop.deltaR || 0;
+      paramsF32[51] = loop.deltaI || 0;
 
       this.device.queue.writeBuffer(this.buffers.params, 0, paramsBuffer);
 
       const commandEncoder = this.device.createCommandEncoder(
         { label: 'Adaptive perturbation compute' });
+
+      // Guard pass: try to acquire batch lock (see docs/gpu-batch-locking.md)
+      this.queueGuardPass(commandEncoder, bufferIndex);
+
+      // Compute pass: iterate pixels (will skip if lock not acquired)
       const passEncoder = commandEncoder.beginComputePass(
         { label: 'Adaptive perturbation pass' });
       passEncoder.setPipeline(this.pipeline);
@@ -14625,10 +14875,9 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY);
       passEncoder.end();
 
-      const readbackIndex = this.readbackBufferIndex;
-
       // Queue staging shader pass and copy to staging buffer
-      this.queueResultsReadback(commandEncoder, readbackIndex);
+      // Staging shader releases the lock after copying
+      this.queueResultsReadback(commandEncoder, bufferIndex);
 
       const gpuStartTime = performance.now();
       this.device.queue.submit([commandEncoder.finish()]);
@@ -14666,9 +14915,9 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       // ================================================================
       // STEP 7: Update pending state for next iteration
       // ================================================================
-      this.pendingReadbackIndex = readbackIndex;
+      this.pendingReadbackIndex = bufferIndex;
       this.pendingReadbackPromise = currentPromise;
-      this.readbackBufferIndex = 1 - readbackIndex;
+      this.readbackBufferIndex = 1 - bufferIndex;
       this.pendingIterationsPerBatch = iterationsPerBatch;
       this.hasPendingResults = true;
       // Batch tracking: half-open interval [start, end) (see docs/gpu-results-readback-design.md)
