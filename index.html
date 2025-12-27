@@ -15850,28 +15850,6 @@ function slow2Sum(a, b) {
   return [s, (a - (s - c)) + (b - c)];
 }
 
-function ddSplit(a) {
-  const c = (134217729) * a;  // 2^27 + 1, Veltkamp-Dekker constant
-  const x = c - (c - a);
-  const y = a - x;
-  return [x, y];
-}
-
-function twoProduct(a, b) {
-  let p = a * b;
-  let [ah, al] = ddSplit(a);
-  let [bh, bl] = ddSplit(b);
-  let err = ((ah * bh - p) + ah * bl + al * bh) + al * bl;
-  return [p, err];
-}
-
-function twoSquare(a) {
-  let p = a * a;
-  let [ah, al] = ddSplit(a);
-  let err = ((ah * ah - p) + 2 * ah * al) + al * al;
-  return [p, err];
-}
-
 function ddAdd(a, b) {
   let [a1, a0] = a;
   let [b1, b0] = b;

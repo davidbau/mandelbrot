@@ -65,7 +65,7 @@ function fast2Sum(a, b) {
 Multiplication is trickier. The product of two 53-bit mantissas needs up to 106 bits to represent exactly. The solution involves *splitting* each number into high and low halves:
 
 ```javascript
-function qdSplit(a) {
+function ddSplit(a) {
   const c = 134217729 * a;  // 134217729 = 2^27 + 1 (Veltkamp-Dekker constant)
   const x = c - (c - a);       // High 26 bits
   const y = a - x;             // Low 27 bits
@@ -80,8 +80,8 @@ With both numbers split, exact multiplication becomes:
 ```javascript
 function twoProduct(a, b) {
   let p = a * b;              // Rounded product
-  let [ah, al] = qdSplit(a);  // Split a into high/low
-  let [bh, bl] = qdSplit(b);  // Split b into high/low
+  let [ah, al] = ddSplit(a);  // Split a into high/low
+  let [bh, bl] = ddSplit(b);  // Split b into high/low
   // Exact error: ah*bh - p + ah*bl + al*bh + al*bl
   let err = ((ah * bh - p) + ah * bl + al * bh) + al * bl;
   return [p, err];

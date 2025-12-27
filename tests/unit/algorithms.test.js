@@ -17,9 +17,6 @@ const qdFuncs = createTestEnvironment([
   // Low-level helpers
   'fast2Sum',
   'slow2Sum',
-  'ddSplit',
-  'twoProduct',
-  'twoSquare',
   // Core qd functions
   'toDD',
   'ddAdd',

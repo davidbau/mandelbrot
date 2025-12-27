@@ -50,8 +50,8 @@ describe('Quad-Double Arithmetic', () => {
     });
   });
 
-  describe('Quad-Double Addition (In-Place)', () => {
-    test('ArddAdd should add two quad-doubles correctly', () => {
+  describe('Double-Double Addition (In-Place)', () => {
+    test('ArddAdd should add two double-doubles correctly', () => {
       const result = new Float64Array(2);
 
       // 1.0 + 0.5 = 1.5
@@ -87,8 +87,8 @@ describe('Quad-Double Arithmetic', () => {
     });
   });
 
-  describe('Quad-Double Multiplication (In-Place)', () => {
-    test('ArddMul should multiply two quad-doubles', () => {
+  describe('Double-Double Multiplication (In-Place)', () => {
+    test('ArddMul should multiply two double-doubles', () => {
       const result = new Float64Array(2);
 
       // 3.0 * 7.0 = 21.0
@@ -108,7 +108,7 @@ describe('Quad-Double Arithmetic', () => {
     });
   });
 
-  describe('Quad-Double Square (In-Place)', () => {
+  describe('Double-Double Square (In-Place)', () => {
     test('ArddSquare should compute square accurately', () => {
       const result = new Float64Array(2);
 
@@ -130,7 +130,7 @@ describe('Quad-Double Arithmetic', () => {
     });
   });
 
-  describe('Quad-Double Array Utilities', () => {
+  describe('Double-Double Array Utilities', () => {
     test('ArddSet should set values in a Float64Array', () => {
       const r = new Float64Array(2);
       qd.ArddSet(r, 0, 3.14, 1e-10);
@@ -253,24 +253,6 @@ describe('Quad-Double Arithmetic', () => {
   // --- High-Precision & Correctness Verification ---
 
   describe('High-Precision & Correctness Verification', () => {
-    // Veltkamp-Dekker Split verification
-    test('ddSplit should decompose a double into hi + lo exactly', () => {
-      // Use a number with full 53 bits of precision
-      const a = 1.2345678901234567;
-      const [hi, lo] = qd.ddSplit(a);
-
-      // 1. Exact reconstruction
-      expect(hi + lo).toBe(a);
-
-      // 2. 'hi' should have at most 26 bits of significand (Veltkamp split property)
-      // This means hi should be exactly representable with fewer bits.
-      // A quick check: lo should be much smaller than hi
-      expect(Math.abs(lo)).toBeLessThan(Math.abs(hi) * 1e-7);
-      
-      // 3. Verify overlap property: lo should be the "error" of approximating a with hi
-      // This is implicit in hi + lo = a.
-    });
-
     test('Double-Double should handle 1 + 2^-53 (precision boundary)', () => {
       // 2^-53 is approx 1.11e-16, just below machine epsilon (2^-52)
       // In standard double, 1 + 2^-53 === 1.

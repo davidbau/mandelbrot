@@ -157,7 +157,7 @@ Reference orbits are computed using "double-double" (DD) or "quad-double" (QD) a
 
 ```javascript
 // DD number 'a' is [a_high, a_low]
-function qdAdd(a, b) {
+function ddAdd(a, b) {
   let [s1, s0] = twoSum(a[0], b[0]); // Add high parts
   s0 += a[1] + b[1];                // Add low parts and error
   return fast2Sum(s1, s0);          // Renormalize the result
@@ -167,7 +167,7 @@ function qdAdd(a, b) {
 The multiplication algorithm uses the **Veltkamp-Dekker splitting constant** (`2^27 + 1`) to split a `Float64` into two non-overlapping parts without rounding error, a technique from Dekker's 1971 paper.
 
 ```javascript
-function qdSplit(a) {
+function ddSplit(a) {
   const c = 134217729 * a;  // 2^27 + 1
   const x = c - (c - a);    // high 27 bits
   const y = a - x;          // low 26 bits

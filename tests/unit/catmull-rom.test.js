@@ -50,8 +50,6 @@ const {
   'ddNegate',
   'slow2Sum',
   'fast2Sum',
-  'twoProduct',
-  'ddSplit',
   'toQD',
   'toQDAdd',
   'toQDSub',
