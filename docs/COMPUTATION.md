@@ -80,23 +80,37 @@ A "Board" is the computational unit for a single zoom level. It lives in a Web W
 ### Creation
 When you click to zoom, the `Scheduler` picks a worker and sends a `createBoard` message. The worker then instantiates the appropriate Board type based on pixel size (smaller = deeper zoom).
 
-#### GPU Board Selection
+#### Board Selection by Backend
+
+The application uses a three-tier fallback: WebGPU → WebGL2 → CPU. Board selection depends on both zoom depth and available backend.
+
+**WebGPU Boards** (preferred, requires modern GPU):
 
 | Pixel Size | Zoom Level | Board | Precision |
 |------------|------------|-------|-----------|
 | > 1e-7 | < ~10⁷ | `GpuBoard` | float32 (~7 digits) direct iteration |
-| 1e-30 to 1e-7 | ~10⁷ to ~10³⁰ | `GpuZhuoranBoard` | float32 perturbation, DD reference |
-| < 1e-30 | > ~10³⁰ | `GpuAdaptiveBoard` | float32 perturbation, QD reference, adaptive per-pixel scaling |
+| 1e-30 to 1e-7 | ~10⁷ to ~10³⁰ | `GpuZhuoranBoard` | float32 perturbation + DDReferenceOrbitMixin |
+| < 1e-30 | > ~10³⁰ | `GpuAdaptiveBoard` | float32 perturbation + QDReferenceOrbitMixin + adaptive scaling |
 
-#### CPU Fallback (no GPU available)
+**WebGL2 Boards** (fallback when WebGPU unavailable):
+
+| Pixel Size | Zoom Level | Board | Precision |
+|------------|------------|-------|-----------|
+| > 1e-7 | < ~10⁷ | `GlBoard` | float32 (~7 digits) direct iteration |
+| 1e-30 to 1e-7 | ~10⁷ to ~10³⁰ | `GlZhuoranBoard` | float32 perturbation + DDReferenceOrbitMixin |
+| < 1e-30 | > ~10³⁰ | `GlAdaptiveBoard` | float32 perturbation + QDReferenceOrbitMixin + adaptive scaling |
+
+WebGL2 boards use a ping-pong framebuffer architecture with fragment shaders instead of compute shaders. See [GL-PERTURBATION-BOARDS.md](GL-PERTURBATION-BOARDS.md) for details.
+
+**CPU Boards** (fallback when no GPU available):
 
 | Pixel Size | Zoom Level | Board | Precision |
 |------------|------------|-------|-----------|
 | > 1e-15 | < ~10¹⁵ | `CpuBoard` | float64 (~15 digits) direct iteration |
-| 1e-30 to 1e-15 | ~10¹⁵ to ~10³⁰ | `PerturbationBoard` | float64 perturbation, DD reference |
-| < 1e-30 | > ~10³⁰ | `QDZhuoranBoard` | float64 perturbation, QD reference |
+| 1e-30 to 1e-15 | ~10¹⁵ to ~10³⁰ | `DDZhuoranBoard` | float64 perturbation + DDReferenceOrbitMixin |
+| < 1e-30 | > ~10³⁰ | `QDZhuoranBoard` | float64 perturbation + QDReferenceOrbitMixin |
 
-The GPU thresholds are lower than CPU because `float32` has ~7 decimal digits vs `float64`'s ~15 digits. At deep zooms (> 10³⁰), `GpuAdaptiveBoard` uses adaptive per-pixel scaling to correctly detect escape even when the scale exponent exceeds float32's range.
+The GPU thresholds are lower than CPU because `float32` has ~7 decimal digits vs `float64`'s ~15 digits. At deep zooms (> 10³⁰), `GpuAdaptiveBoard` and `GlAdaptiveBoard` use adaptive per-pixel scaling to correctly detect escape even when the scale exponent exceeds float32's range.
 
 ## Data Structures
 Each Board maintains several `TypedArray`s for performance. These map directly to GPU buffers and are much faster to iterate than standard JavaScript objects.

@@ -103,27 +103,53 @@ The actual computation happens inside `Board` objects within the workers. Differ
 
 #### Board Class Hierarchy
 
+The application uses three GPU/rendering backends with automatic fallback:
+
+```
+Backend Selection (in order of preference):
+  1. WebGPU (GpuBaseBoard subclasses) - Best performance, requires modern GPU
+  2. WebGL2 (GlBoard, GlPerturbationBaseBoard subclasses) - Wide compatibility
+  3. CPU (CpuBoard, CpuZhuoranBaseBoard subclasses) - Universal fallback
+```
+
 ```
 Board (abstract base)
-├── CpuBoard                           Float64 CPU, zoom < 10^13
-├── QDCpuBoard                         QD CPU, simple iteration
-├── PerturbationBoard                  DD perturbation, CPU
-├── QDPerturbationBoard                QD perturbation, CPU
 │
-├── CpuZhuoranBaseBoard                Shared CPU Zhuoran logic
-│   ├── DDZhuoranBoard                 DD precision (via DDReferenceOrbitMixin)
-│   └── QDZhuoranBoard                 QD precision (via QDReferenceOrbitMixin)
+├── CPU Boards (universal fallback)
+│   ├── CpuBoard                       Float64 direct iteration, zoom < 10^15
+│   ├── QDCpuBoard                     QD direct iteration (testing only)
+│   └── CpuZhuoranBaseBoard            Shared perturbation logic
+│       ├── DDZhuoranBoard             DD precision (via DDReferenceOrbitMixin)
+│       └── QDZhuoranBoard             QD precision (via QDReferenceOrbitMixin)
 │
-├── GpuBaseBoard                       Shared WebGPU infrastructure
-│   ├── GpuBoard                       Float64 GPU, zoom < 10^13
-│   ├── GpuZhuoranBoard                DD GPU perturbation (via DDReferenceOrbitMixin)
-│   └── GpuAdaptiveBoard               QD GPU perturbation (via QDReferenceOrbitMixin)
+├── WebGPU Boards (preferred when available)
+│   └── GpuBaseBoard                   Shared WebGPU infrastructure
+│       ├── GpuBoard                   Float32 direct iteration, zoom < 10^7
+│       ├── GpuZhuoranBoard            Float32 + DD reference orbit
+│       └── GpuAdaptiveBoard           Float32 + QD reference + adaptive scaling
 │
-└── GlPerturbationBaseBoard            Shared WebGL2 perturbation infrastructure
-    ├── GlZhuoranBoard                 DD WebGL2 perturbation (via DDReferenceOrbitMixin)
-    └── GlAdaptiveBoard                QD WebGL2 perturbation (via QDReferenceOrbitMixin)
-                                       + adaptive per-pixel scaling
+└── WebGL2 Boards (fallback when WebGPU unavailable)
+    ├── GlBoard                        Float32 direct iteration, zoom < 10^7
+    └── GlPerturbationBaseBoard        Shared WebGL2 perturbation infrastructure
+        ├── GlZhuoranBoard             Float32 + DD reference orbit
+        └── GlAdaptiveBoard            Float32 + QD reference + adaptive scaling
 ```
+
+#### GPU Backend Fallback Chain
+
+The application automatically selects the best available backend:
+
+1. **WebGPU** (`GpuBoard`, `GpuZhuoranBoard`, `GpuAdaptiveBoard`): Uses compute shaders for maximum throughput. Requires a modern browser with WebGPU support and a compatible GPU.
+
+2. **WebGL2** (`GlBoard`, `GlZhuoranBoard`, `GlAdaptiveBoard`): Uses fragment shaders with a ping-pong framebuffer architecture. Available on most modern browsers. See [GL-PERTURBATION-BOARDS.md](GL-PERTURBATION-BOARDS.md) for details.
+
+3. **CPU** (`CpuBoard`, `DDZhuoranBoard`, `QDZhuoranBoard`): Pure JavaScript computation. Always available but slower.
+
+The perturbation boards (`GpuZhuoranBoard`, `GlZhuoranBoard`, `DDZhuoranBoard` for medium zoom; `GpuAdaptiveBoard`, `GlAdaptiveBoard`, `QDZhuoranBoard` for deep zoom) share reference orbit computation logic via mixins:
+- **DDReferenceOrbitMixin**: Double-double precision (~31 digits) for 10^7 to 10^30 zoom
+- **QDReferenceOrbitMixin**: Quad-double precision (~62 digits) for beyond 10^30 zoom
+
+The fallback is transparent to users—the application automatically uses the best available option. Debug flags `debug=nogpu` and `debug=nogl` can force fallback for testing.
 
 #### Reference Orbit Mixins
 
@@ -149,13 +175,17 @@ Both classes inherit identical reference orbit logic while maintaining their res
 
 #### Board Selection by Zoom Level
 
-| Zoom Range | Exponent=2 | Exponent>2 |
-|------------|------------|------------|
-| < 10^13    | GpuBoard   | GpuBoard   |
-| 10^13 - 10^28 | GpuZhuoranBoard | GpuZhuoranBoard |
-| > 10^28    | GpuAdaptiveBoard | GpuAdaptiveBoard |
+The board selection depends on both zoom depth and available GPU backend:
 
-The `GpuAdaptiveBoard` uses per-pixel adaptive scaling to handle extreme zoom depths where standard float32 GPU computation fails. See [ADAPTIVE-SCALING.md](ADAPTIVE-SCALING.md) for the design. It can fall back to CPU computation (`QDZhuoranBoard`) when GPU precision is insufficient.
+| Pixel Size | Zoom Level | WebGPU | WebGL2 | CPU |
+|------------|------------|--------|--------|-----|
+| > 1e-7 | < ~10^7 | `GpuBoard` | `GlBoard` | `CpuBoard` |
+| 1e-7 to 1e-30 | ~10^7 to ~10^30 | `GpuZhuoranBoard` | `GlZhuoranBoard` | `DDZhuoranBoard`* |
+| < 1e-30 | > ~10^30 | `GpuAdaptiveBoard` | `GlAdaptiveBoard` | `QDZhuoranBoard` |
+
+*Note: CPU uses `CpuBoard` up to 1e-15 (float64 precision) then switches to `DDZhuoranBoard`.
+
+The GPU thresholds are lower than CPU because `float32` has ~7 decimal digits vs `float64`'s ~15 digits. At deep zooms (> 10^30), `GpuAdaptiveBoard` and `GlAdaptiveBoard` use per-pixel adaptive scaling to correctly detect escape even when the scale exponent exceeds float32's range. See [ADAPTIVE-SCALING.md](ADAPTIVE-SCALING.md) for the design.
 
 ## State Management and URL Synchronization
 
@@ -207,9 +237,40 @@ When a layout change begins, current views move to `stableViews`. Workers contin
 
 ## Rendering, Communication, and Memory
 
-- **Rendering Pipeline:** Views are rendered in layers: 1. Clear, 2. Parent composite, 3. Local pixels, 4. UI Overlay. The composite rendering provides a smooth zoom experience.
-- **Worker Communication:** The main thread sends `createBoard` messages to workers. Workers stream results back via `update` messages containing a `changeList` of newly computed pixels.
-- **Memory:** Heavy pixel data stays in workers to avoid main-thread GC pressure. The `changeList` system ensures only minimal data is transferred.
+### Rendering Pipeline
+
+Views are rendered in layers for smooth zoom experience:
+1. **Clear** - Reset canvas to unknown color
+2. **Parent Composite** - Draw scaled parent view as background (provides instant visual feedback during zoom)
+3. **Local Pixels** - Draw computed pixels on top
+4. **UI Overlay** - Zoom box, coordinates, etc.
+
+### Fast Pixel Drawing
+
+Drawing pixels efficiently is critical for smooth updates. The application uses several optimizations:
+
+**ImageData Caching:** For large updates (>100k pixels), the View caches its `ImageData` object to avoid expensive `getImageData()` readbacks. The cached ImageData is updated incrementally and written back with `putImageData()`. The cache is cleared after computation completes to free memory.
+
+**RGBA Color Tables:** Color themes pre-compute RGBA byte arrays (`colorThemesRGBA`) to avoid per-pixel color function calls. This enables direct memory writes:
+```javascript
+// Fast path: direct byte copy from pre-computed RGBA
+data[idx] = rgba[0];     // R
+data[idx + 1] = rgba[1]; // G
+data[idx + 2] = rgba[2]; // B
+data[idx + 3] = 255;     // A
+```
+
+**Offscreen Canvas Compositing:** When drawing partial updates that need alpha blending, an offscreen canvas is used because `putImageData()` ignores compositing modes.
+
+**Sparse Updates:** Rather than redrawing the entire canvas, only changed pixels are updated via the `changeList` from workers.
+
+### Worker Communication
+
+The main thread sends `createBoard` messages to workers. Workers stream results back via `update` messages containing a `changeList` of newly computed pixels grouped by iteration count. This sparse update mechanism minimizes data transfer and enables incremental rendering.
+
+### Memory Management
+
+Heavy pixel data stays in workers to avoid main-thread GC pressure. The `changeList` system ensures only minimal data is transferred. Converged pixel data (`z` values and periods) is stored in a Map rather than arrays to handle sparse convergence efficiently.
 
 ## Code Organization in `index.html`
 
