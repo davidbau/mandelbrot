@@ -9,7 +9,7 @@ const os = require('os');
 const { setTimeout: sleep } = require('node:timers/promises');
 const { startCoverage, stopCoverage, clearCoverage, isCoverageEnabled } = require('../utils/coverage');
 
-const TEST_TIMEOUT = 60000; // 60 seconds for integration tests
+const TEST_TIMEOUT = 30000; // 30 seconds for integration tests
 const TEST_VIEWPORT = { width: 400, height: 400 };
 
 // Find system Chrome for better headless support

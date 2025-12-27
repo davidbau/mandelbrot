@@ -2,6 +2,7 @@
 .__*
 .*swp
 .vscode
+.env.local
 claude/
 node_modules/
 npm-debug.log

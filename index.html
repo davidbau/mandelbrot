@@ -9896,11 +9896,12 @@ class GlBoard extends Board {
     gl.readPixels(0, 0, this.level2Width, this.level2Height, gl.RGBA, gl.FLOAT, 0);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
 
-    // Flush to ensure commands are submitted
+    // Create fence sync to wait for GPU completion before reading
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     gl.flush();
 
-    // Store pending PBO index
-    this.pendingReadback = { pboIndex };
+    // Store pending PBO index and sync object
+    this.pendingReadback = { pboIndex, sync };
   }
 
   // Wait for pending readback to complete
@@ -9913,6 +9914,7 @@ class GlBoard extends Board {
     const pbo = this.level2PBOs[pending.pboIndex];
     if (!pbo) {
       // PBO was never created or was lost - skip this readback
+      if (pending.sync) gl.deleteSync(pending.sync);
       this.pendingReadback = null;
       this.pendingBatchEndIter = null;
       return;
@@ -9922,7 +9924,13 @@ class GlBoard extends Board {
     this.pendingReadback = null;
     this.pendingBatchEndIter = null;
 
-    // getBufferSubData() blocks until the PBO read is complete
+    // Wait for fence sync to complete before reading (avoids pipeline stall warning)
+    if (pending.sync) {
+      gl.clientWaitSync(pending.sync, 0, 0);  // Don't actually wait, just signal intent
+      gl.deleteSync(pending.sync);
+    }
+
+    // getBufferSubData() reads data after sync is signaled
     const level2Data = new Float32Array(this.level2Width * this.level2Height * 4);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
     gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, level2Data);
@@ -11019,9 +11027,12 @@ class GlPerturbationBaseBoard extends Board {
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.level2PBOs[pboIndex]);
     gl.readPixels(0, 0, this.level2Width, this.level2Height, gl.RGBA, gl.FLOAT, 0);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+
+    // Create fence sync to wait for GPU completion before reading
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     gl.flush();
 
-    this.pendingReadback = { pboIndex };
+    this.pendingReadback = { pboIndex, sync };
   }
 
   runReductionPasses() {
@@ -11072,6 +11083,7 @@ class GlPerturbationBaseBoard extends Board {
 
     const pbo = this.level2PBOs[pending.pboIndex];
     if (!pbo) {
+      if (pending.sync) gl.deleteSync(pending.sync);
       this.pendingReadback = null;
       this.pendingBatchEndIter = null;
       return;
@@ -11080,6 +11092,12 @@ class GlPerturbationBaseBoard extends Board {
     this.pendingReadback = null;
     const batchEndIter = this.pendingBatchEndIter;
     this.pendingBatchEndIter = null;
+
+    // Wait for fence sync to complete before reading (avoids pipeline stall warning)
+    if (pending.sync) {
+      gl.clientWaitSync(pending.sync, 0, 0);  // Don't actually wait, just signal intent
+      gl.deleteSync(pending.sync);
+    }
 
     const level2Data = new Float32Array(this.level2Width * this.level2Height * 4);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);

@@ -66,30 +66,48 @@ describe('Keyboard Navigation Tests', () => {
     }, TEST_TIMEOUT);
 
     test('T key should actually redraw the canvas with new colors', async () => {
-      // Wait for some computation to occur so we have pixels to compare
+      // Wait for substantial computation so we have many colored pixels
       await waitForViewReady(page);
       await page.waitForFunction(() => {
         const view = window.explorer.grid.views[0];
-        return view && view.di > 100;
-      }, { timeout: 10000 });
+        return view && view.di > 1000;  // Need more pixels for reliable color comparison
+      }, { timeout: 15000 });
 
-      // Get canvas pixel data before theme change
-      const beforePixels = await page.evaluate(() => {
-        const canvas = window.explorer.grid.canvas(0);
-        const ctx = canvas.getContext('2d');
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        // Sample some pixels from different locations
-        const samples = [];
-        for (let i = 0; i < 5; i++) {
-          const idx = Math.floor(imageData.data.length / 5 * i);
-          samples.push([
-            imageData.data[idx],
-            imageData.data[idx + 1],
-            imageData.data[idx + 2]
-          ]);
-        }
-        return samples;
-      });
+      // Sample DIVERGED pixels (nn > 0) - these are colored by theme
+      // Converged pixels (nn < 0) are always black regardless of theme
+      const sampleDivergedPixels = async () => {
+        return await page.evaluate(() => {
+          const view = window.explorer.grid.views[0];
+          const config = window.explorer.config;
+          const canvas = window.explorer.grid.canvas(0);
+          const ctx = canvas.getContext('2d');
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+          // Find diverged pixel positions (nn > 0)
+          const samples = [];
+          const dimsWidth = config.dimsWidth;
+          for (let i = 0; i < view.nn.length && samples.length < 10; i++) {
+            if (view.nn[i] > 0) {  // Diverged pixel - will be colored by theme
+              // Convert nn index to canvas pixel position
+              const x = i % dimsWidth;
+              const y = Math.floor(i / dimsWidth);
+              const pixelIdx = (y * canvas.width + x) * 4;
+              if (pixelIdx >= 0 && pixelIdx < imageData.data.length - 3) {
+                samples.push([
+                  imageData.data[pixelIdx],
+                  imageData.data[pixelIdx + 1],
+                  imageData.data[pixelIdx + 2],
+                  pixelIdx
+                ]);
+              }
+            }
+          }
+          return samples;
+        });
+      };
+
+      const beforePixels = await sampleDivergedPixels();
+      expect(beforePixels.length).toBeGreaterThan(0);  // Ensure we have diverged pixels
 
       // Change theme and wait for redraw
       const themeBefore = await page.evaluate(() => window.explorer.config.theme);
@@ -99,23 +117,27 @@ describe('Keyboard Navigation Tests', () => {
         { timeout: 5000 },
         themeBefore
       );
+      const themeAfter = await page.evaluate(() => window.explorer.config.theme);
 
-      // Get canvas pixel data after theme change
-      const afterPixels = await page.evaluate(() => {
+      // Force a redraw - the theme change already calls redrawProcess.start() but we want to ensure
+      // the redraw is complete before sampling pixels
+      await page.evaluate(() => {
+        window.explorer.redrawProcess.start();
+      });
+      // Wait for redraw to complete
+      await page.waitForTimeout(100);
+
+      // Sample the same pixel positions after theme change
+      const afterPixels = await page.evaluate((positions) => {
         const canvas = window.explorer.grid.canvas(0);
         const ctx = canvas.getContext('2d');
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const samples = [];
-        for (let i = 0; i < 5; i++) {
-          const idx = Math.floor(imageData.data.length / 5 * i);
-          samples.push([
-            imageData.data[idx],
-            imageData.data[idx + 1],
-            imageData.data[idx + 2]
-          ]);
-        }
-        return samples;
-      });
+        return positions.map(pos => [
+          imageData.data[pos],
+          imageData.data[pos + 1],
+          imageData.data[pos + 2]
+        ]);
+      }, beforePixels.map(p => p[3]));
 
       // At least some pixels should have changed color
       let changedCount = 0;
@@ -125,6 +147,19 @@ describe('Keyboard Navigation Tests', () => {
         if (before[0] !== after[0] || before[1] !== after[1] || before[2] !== after[2]) {
           changedCount++;
         }
+      }
+      // Log diagnostics on failure
+      if (changedCount === 0) {
+        const dims = await page.evaluate(() => ({
+          dimsWidth: window.explorer.config.dimsWidth,
+          dimsHeight: window.explorer.config.dimsHeight,
+          canvasWidth: window.explorer.grid.canvas(0)?.width,
+          canvasHeight: window.explorer.grid.canvas(0)?.height
+        }));
+        console.log(`Theme: ${themeBefore} -> ${themeAfter}`);
+        console.log(`Dims: config=${dims.dimsWidth}x${dims.dimsHeight}, canvas=${dims.canvasWidth}x${dims.canvasHeight}`);
+        console.log(`Before pixels (${beforePixels.length}):`, beforePixels.slice(0, 3));
+        console.log(`After pixels:`, afterPixels.slice(0, 3));
       }
       expect(changedCount).toBeGreaterThan(0);
     }, TEST_TIMEOUT);
