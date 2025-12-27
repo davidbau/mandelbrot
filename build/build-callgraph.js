@@ -294,28 +294,29 @@ function extractCallGraph(js, scriptRanges = []) {
         name = null; // Don't add as a regular function, we added it as a class
       }
     } else if (node.type === 'AssignmentExpression' && 
-               node.left?.type === 'MemberExpression' &&
                (node.right?.type === 'FunctionExpression' || node.right?.type === 'ArrowFunctionExpression') &&
                isGlobalFunction) {
-      // Handle document.onmousemove = function...
-      const objName = node.left.object?.name || (node.left.object?.type === 'ThisExpression' ? 'this' : null);
-      const propName = node.left.property?.name || node.left.property?.value;
-      
-      if (propName) {
-        if (objName) {
-            name = `${objName}.${propName}`;
-        } else if (node.left.object?.type === 'MemberExpression') {
-            // Handle simple nesting like document.body.onkeydown
-            const parentProp = node.left.object.property?.name || node.left.object.property?.value;
-            const rootObj = node.left.object.object?.name;
-            if (rootObj && parentProp) {
-                name = `${rootObj}.${parentProp}.${propName}`;
+      // Handle document.onmousemove = function... or helper_fn = function...
+      const left = node.left;
+      if (left.type === 'Identifier') {
+          name = left.name;
+      } else if (left.type === 'MemberExpression') {
+          const objName = left.object?.name || (left.object?.type === 'ThisExpression' ? 'this' : null);
+          const propName = left.property?.name || left.property?.value;
+          
+          if (propName) {
+            if (objName) {
+                name = `${objName}.${propName}`;
+            } else if (left.object?.type === 'MemberExpression') {
+                // Handle simple nesting like document.body.onkeydown
+                const parentProp = left.object.property?.name || left.object.property?.value;
+                const rootObj = left.object.object?.name;
+                if (rootObj && parentProp) {
+                    name = `${rootObj}.${parentProp}.${propName}`;
+                }
             }
-        }
-        
-        if (!name && propName) {
-             name = `?.${propName}`; // Fallback
-        }
+            if (!name && propName) name = `?.${propName}`;
+          }
       }
     }
 
@@ -775,24 +776,28 @@ function extractCallGraph(js, scriptRanges = []) {
         const methodName = node.key?.name || node.key?.value;
         funcName = `${className}.${methodName}`;
     } else if (node.type === 'AssignmentExpression' && 
-               node.left?.type === 'MemberExpression' &&
                (node.right?.type === 'FunctionExpression' || node.right?.type === 'ArrowFunctionExpression')) {
-      // Handle document.onmousemove = function...
-      const objName = node.left.object?.name || (node.left.object?.type === 'ThisExpression' ? 'this' : null);
-      const propName = node.left.property?.name || node.left.property?.value;
-      
+      // Handle document.onmousemove = function... or helper_fn = function...
+      const left = node.left;
       let name = null;
-      if (propName) {
-        if (objName) {
-            name = `${objName}.${propName}`;
-        } else if (node.left.object?.type === 'MemberExpression') {
-            const parentProp = node.left.object.property?.name || node.left.object.property?.value;
-            const rootObj = node.left.object.object?.name;
-            if (rootObj && parentProp) {
-                name = `${rootObj}.${parentProp}.${propName}`;
+      if (left.type === 'Identifier') {
+          name = left.name;
+      } else if (left.type === 'MemberExpression') {
+          const objName = left.object?.name || (left.object?.type === 'ThisExpression' ? 'this' : null);
+          const propName = left.property?.name || left.property?.value;
+          
+          if (propName) {
+            if (objName) {
+                name = `${objName}.${propName}`;
+            } else if (left.object?.type === 'MemberExpression') {
+                const parentProp = left.object.property?.name || left.object.property?.value;
+                const rootObj = left.object.object?.name;
+                if (rootObj && parentProp) {
+                    name = `${rootObj}.${parentProp}.${propName}`;
+                }
             }
-        }
-        if (!name && propName) name = `?.${propName}`;
+            if (!name && propName) name = `?.${propName}`;
+          }
       }
       if (name) funcName = name;
     }
