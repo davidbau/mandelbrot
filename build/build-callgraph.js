@@ -277,7 +277,7 @@ function extractCallGraph(js, scriptRanges = []) {
               const methodJsLine = member.loc?.start?.line || offsetToLine(methodLoc, lineOffsets);
               const methodJsEndLine = member.loc?.end?.line || methodJsLine;
               functions.set(`${mixinName}.${methodName}`, {
-                calls: new Set(),
+                calls: new Set(), references: new Set(),
                 loc: methodLoc,
                 type: 'method',
                 script: getScriptIndex(methodLoc, scriptRanges),
@@ -296,7 +296,7 @@ function extractCallGraph(js, scriptRanges = []) {
       const jsLine = node.loc?.start?.line || offsetToLine(loc, lineOffsets);
       const jsEndLine = node.loc?.end?.line || jsLine;
       functions.set(name, {
-        calls: new Set(),
+        calls: new Set(), references: new Set(),
         loc,
         type,
         script: getScriptIndex(loc, scriptRanges),
@@ -390,6 +390,212 @@ function extractCallGraph(js, scriptRanges = []) {
     return bestMatch;
   }
 
+      // Common methods/names to ignore when guessing targets
+
+      const COMMON_METHODS = new Set([
+
+          'add', 'write', 'clear', 'push', 'pop', 'remove', 'delete', 
+
+          'toString', 'keys', 'values', 'entries', 'forEach', 'map', 'url', 'last'
+
+      ]);
+
+  
+
+        // Helper to resolve call/reference targets from a node
+
+  
+
+        function resolveTargets(node, currentClass, scope) {
+
+  
+
+          let targets = [];
+
+  
+
+    
+
+  
+
+          // Case 1: Direct Identifier: func
+
+  
+
+          if (node.type === 'Identifier') {
+
+  
+
+            const callee = node.name;
+
+  
+
+            if (functions.has(callee)) {
+
+  
+
+              // If it's a common name (like "last" or "url"), only resolve if in same script
+
+  
+
+              if (COMMON_METHODS.has(callee)) {
+
+  
+
+                 const callScript = getScriptIndex(node.start || 0, scriptRanges);
+
+  
+
+                 const targetScript = functions.get(callee).script;
+
+  
+
+                 if (callScript === targetScript) {
+
+  
+
+                     targets.push(callee);
+
+  
+
+                 }
+
+  
+
+              } else {
+
+  
+
+                 // Unique name - resolve globally
+
+  
+
+                 targets.push(callee);
+
+  
+
+              }
+
+  
+
+            }
+
+  
+
+          } 
+
+      // Case 2: Member Expression: obj.method
+
+      else if (node.type === 'MemberExpression' && node.property) {
+
+        const methodName = node.property.name || node.property.value;
+
+        const objectNode = node.object;
+
+  
+
+        // 2a. this.method
+
+        if (objectNode.type === 'ThisExpression' && currentClass) {
+
+            const resolved = resolveMethodInClass(currentClass, methodName);
+
+            if (resolved) {
+
+                targets.push(resolved);
+
+            }
+
+        } 
+
+        // 2b. obj.prop.method - Chain guessing
+
+        else if (objectNode.type === 'MemberExpression' && objectNode.property) {
+
+             const propName = objectNode.property.name || objectNode.property.value;
+
+             if (typeof propName === 'string') {
+
+                 const targetClass = guessClassFromVar(propName);
+
+                 if (targetClass) {
+
+                     const resolved = resolveMethodInClass(targetClass, methodName);
+
+                     if (resolved) {
+
+                         targets.push(resolved);
+
+                     }
+
+                 }
+
+             }
+
+        }
+
+        // 2c. variable.method
+
+        else if (objectNode.type === 'Identifier') {
+
+            const varName = objectNode.name;
+
+            let targetClass = scope[varName];
+
+  
+
+            if (!targetClass) {
+
+                targetClass = guessClassFromVar(varName);
+
+            }
+
+  
+
+            if (targetClass) {
+
+                const resolved = resolveMethodInClass(targetClass, methodName);
+
+                if (resolved) {
+
+                    targets.push(resolved);
+
+                } else {
+
+                     if (!COMMON_METHODS.has(methodName) && methodIndex.has(methodName)) {
+
+                         for (const cls of methodIndex.get(methodName)) {
+
+                             targets.push(`${cls}.${methodName}`);
+
+                         }
+
+                     }
+
+                }
+
+            } else {
+
+                if (!COMMON_METHODS.has(methodName) && methodIndex.has(methodName)) {
+
+                    for (const cls of methodIndex.get(methodName)) {
+
+                        targets.push(`${cls}.${methodName}`);
+
+                    }
+
+                }
+
+            }
+
+        }
+
+      }
+
+      return targets;
+
+    }
+
   // Find function calls within each function body
   function findCalls(node, currentFunc = null, currentClass = null, scope = {}) {
     if (!node || typeof node !== 'object') return;
@@ -397,7 +603,6 @@ function extractCallGraph(js, scriptRanges = []) {
     // Update current function/class context
     let funcName = currentFunc;
     let className = currentClass;
-    // Create new scope for this block/function (simple inheritance)
     let currentScope = { ...scope };
 
     if (node.type === 'ClassDeclaration' && node.id?.name) {
@@ -417,119 +622,91 @@ function extractCallGraph(js, scriptRanges = []) {
     } else if (node.type === 'MethodDefinition' && node.key && className) {
       funcName = `${className}.${node.key.name || node.key.value}`;
     } else if (node.type === 'PropertyDefinition' && node.value?.type?.includes('Function') && className) {
-        // Class fields that are functions: class A { field = () => {} }
         const methodName = node.key?.name || node.key?.value;
         funcName = `${className}.${methodName}`;
     }
 
-    // Track variable types: const x = new ClassName()
     if (node.type === 'VariableDeclarator' && node.id?.name && node.init?.type === 'NewExpression') {
         if (node.init.callee?.type === 'Identifier') {
             currentScope[node.id.name] = node.init.callee.name;
         }
     }
 
-    // Detect function calls
+    // Mark children for special handling before recursion
     if (node.type === 'CallExpression') {
-      let targets = [];
+        if (node.callee) node.callee._isCall = true;
+    }
+    if (node.type === 'NewExpression') {
+        if (node.callee) node.callee._isCall = true;
+    }
+    if (node.type === 'MemberExpression') {
+        if (node.property) node.property._isMemberProperty = true;
+    }
 
-      // Case 1: Direct function call: func()
-      if (node.callee?.type === 'Identifier') {
-        const callee = node.callee.name;
-        if (functions.has(callee)) {
-          targets.push(callee);
-        }
-      } 
-      // Case 2: Method call: obj.method()
-      else if (node.callee?.type === 'MemberExpression' && node.callee.property) {
-        const methodName = node.callee.property.name || node.callee.property.value;
-        const objectNode = node.callee.object;
-
-        // 2a. this.method()
-        if (objectNode.type === 'ThisExpression' && className) {
-            const resolved = resolveMethodInClass(className, methodName);
-            if (resolved) {
-                targets.push(resolved);
-            }
-        } 
-        // 2b. obj.prop.method() or this.prop.method() - Chain guessing
-        else if (objectNode.type === 'MemberExpression' && objectNode.property) {
-             const propName = objectNode.property.name || objectNode.property.value;
-             if (typeof propName === 'string') {
-                 // Guess class from the property name itself (e.g. this.config.init() -> "config" implies "Config")
-                 const targetClass = guessClassFromVar(propName);
-                 if (targetClass) {
-                     const resolved = resolveMethodInClass(targetClass, methodName);
-                     if (resolved) {
-                         targets.push(resolved);
-                     }
-                 }
-             }
-        }
-        // 2c. variable.method()
-        else if (objectNode.type === 'Identifier') {
-            const varName = objectNode.name;
-            let targetClass = currentScope[varName];
-
-            // If not in local scope, try to guess from name
-            if (!targetClass) {
-                targetClass = guessClassFromVar(varName);
-            }
-
-            const COMMON_METHODS = new Set([
-                'add', 'write', 'clear', 'push', 'pop', 'remove', 'delete', 
-                'toString', 'keys', 'values', 'entries', 'forEach', 'map'
-            ]);
-
-            if (targetClass) {
-                // Try to resolve in the guessed class
-                const resolved = resolveMethodInClass(targetClass, methodName);
-                if (resolved) {
-                    targets.push(resolved);
-                } else {
-                     // The guessed class doesn't have the method. 
-                     // It might be an interface or abstract class.
-                     // Fallback: Link to ALL classes that have this method, unless it's too generic
-                     if (!COMMON_METHODS.has(methodName) && methodIndex.has(methodName)) {
-                         for (const cls of methodIndex.get(methodName)) {
-                             targets.push(`${cls}.${methodName}`);
-                         }
-                     }
-                }
-            } else {
-                // No clue what class this is.
-                // Fallback: Link to ALL classes that have this method, unless it's too generic
-                if (!COMMON_METHODS.has(methodName) && methodIndex.has(methodName)) {
-                    for (const cls of methodIndex.get(methodName)) {
-                        targets.push(`${cls}.${methodName}`);
-                    }
-                }
-            }
-        }
-      }
-
-      // Add edges
+    // 1. Handle CallExpression (Calls)
+    if (node.type === 'CallExpression') {
+      const targets = resolveTargets(node.callee, className, currentScope);
       if (funcName && functions.has(funcName)) {
         for (const target of targets) {
-            // Avoid self-loops if desired, but they can be valid recursion
             functions.get(funcName).calls.add(target);
         }
       }
     }
 
-    // Detect constructor calls
-    if (node.type === 'NewExpression' && node.callee?.type === 'Identifier') {
-        const targetClass = node.callee.name;
-        // Resolve constructor (check class and ancestors)
-        const constructorName = resolveMethodInClass(targetClass, 'constructor');
-        
-        if (constructorName && funcName && functions.has(funcName)) {
-            functions.get(funcName).calls.add(constructorName);
+    // 2. Handle NewExpression (Constructor Calls)
+    if (node.type === 'NewExpression' && node.callee) {
+        let targetClass = null;
+        if (node.callee.type === 'Identifier') {
+            targetClass = node.callee.name;
+        } else if (node.callee.type === 'MemberExpression' && node.callee.property) {
+            // Handle new obj.Prop() -> Prop
+            const prop = node.callee.property;
+            if (prop.type === 'Identifier') {
+                targetClass = prop.name;
+            } else if (prop.type === 'Literal') {
+                targetClass = prop.value;
+            }
+        }
+
+        if (targetClass) {
+            // Resolve constructor (check class and ancestors)
+            const constructorName = resolveMethodInClass(targetClass, 'constructor');
+            
+            if (constructorName && funcName && functions.has(funcName)) {
+                functions.get(funcName).calls.add(constructorName);
+            }
+        }
+    }
+
+    // 3. Handle References (Identifier or MemberExpression not being called)
+    if ((node.type === 'Identifier' || node.type === 'MemberExpression') && !node._isCall) {
+        if (node.type === 'Identifier' && node._isMemberProperty) {
+            // Do nothing
+        } else {
+            const targets = resolveTargets(node, className, currentScope);
+            if (funcName && functions.has(funcName)) {
+                if (!functions.get(funcName).references) {
+                    functions.get(funcName).references = new Set();
+                }
+                for (const target of targets) {
+                    // Filter out self-references
+                    if (target !== funcName) {
+                        functions.get(funcName).references.add(target);
+                    }
+                }
+            }
         }
     }
 
     for (const key of Object.keys(node)) {
-      if (key === 'type' || key === 'start' || key === 'end') continue;
+      if (key === 'type' || key === 'start' || key === 'end' || key.startsWith('_')) continue;
+
+      // Skip defining properties to avoid artifactual self-references
+      if (node.type === 'FunctionDeclaration' && key === 'id') continue;
+      if (node.type === 'MethodDefinition' && key === 'key') continue;
+      if (node.type === 'PropertyDefinition' && key === 'key') continue;
+      if (node.type === 'VariableDeclarator' && key === 'id') continue;
+
       const child = node[key];
       if (Array.isArray(child)) {
         child.forEach(c => findCalls(c, funcName, className, currentScope));
@@ -562,11 +739,34 @@ function extractCallGraph(js, scriptRanges = []) {
     }
   }
 
+  // Count incoming references to filter out common globals
+  const referenceCounts = new Map();
+  for (const [name, data] of functions) {
+    if (data.references) {
+      for (const ref of data.references) {
+        if (!data.calls.has(ref)) {
+          referenceCounts.set(ref, (referenceCounts.get(ref) || 0) + 1);
+        }
+      }
+    }
+  }
+
   // Add function/method nodes
   for (const [name, data] of functions) {
     nodes.push({ id: name, type: data.type, script: data.script, line: data.line, endLine: data.endLine });
     for (const callee of data.calls) {
       edges.push({ source: name, target: callee, type: 'calls' });
+    }
+    if (data.references) {
+      for (const ref of data.references) {
+        // Avoid adding reference edge if call edge already exists
+        if (!data.calls.has(ref)) {
+          // Heuristic: skip if referenced too many times (likely a global utility)
+          if ((referenceCounts.get(ref) || 0) <= 5) {
+            edges.push({ source: name, target: ref, type: 'reference' });
+          }
+        }
+      }
     }
   }
 

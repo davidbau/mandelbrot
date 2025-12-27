@@ -110,6 +110,12 @@
       stroke-opacity: 0.6;
       stroke-dasharray: 4,2;
     }
+    .link.reference {
+      stroke: #666;
+      stroke-width: 1px;
+      stroke-opacity: 0.4;
+      stroke-dasharray: 1,3;
+    }
     .link.new {
       animation: fadeIn 0.3s ease-out;
     }
@@ -492,7 +498,7 @@
       const yStrength = totalStrength * aspectRatio / (1 + aspectRatio);
 
       simulation = d3.forceSimulation()
-        .force('link', d3.forceLink().id(d => d.id).distance(50))
+        .force('link', d3.forceLink().id(d => d.id).distance(50).strength(d => Math.min(1, 3 / (Math.max(d.source.degree || 1, d.target.degree || 1) + 1))))
         .force('charge', d3.forceManyBody().strength(-80))
         .force('center', d3.forceCenter(0, 0))
         .force('x', d3.forceX(0).strength(xStrength))
@@ -542,18 +548,30 @@
         });
       }
 
+      // Calculate total degree (indegree + outdegree) for this snapshot
+      const degree = new Map();
+      snapshot.edges.forEach(e => {
+        degree.set(e.source, (degree.get(e.source) || 0) + 1);
+        degree.set(e.target, (degree.get(e.target) || 0) + 1);
+      });
+
       // Prepare data with positions preserved from previous frame
       const nodes = snapshot.nodes.map(n => {
         const pos = nodePositions.get(n.id);
         const isNew = n.firstSeen === index;
+        const nodeData = { 
+          ...n, 
+          isNew, 
+          degree: degree.get(n.id) || 0 
+        };
+        
         if (pos) {
           // Existing node: restore position, fix it initially
-          return { ...n, isNew, x: pos.x, y: pos.y, fx: pos.x, fy: pos.y };
+          return { ...nodeData, x: pos.x, y: pos.y, fx: pos.x, fy: pos.y };
         } else {
           // New node: position near center (0,0) with small random offset
           return {
-            ...n,
-            isNew,
+            ...nodeData,
             x: (Math.random() - 0.5) * 100,
             y: (Math.random() - 0.5) * 100
           };
