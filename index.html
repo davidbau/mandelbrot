@@ -833,11 +833,11 @@ class Config {
   // Feigenbaum / Myrberg point (real-axis accumulation point of period doubling)
   // OEIS A218453: 65-digit precision, parsed to quad-double (QD) format
   static get FEIGENBAUM_POINT_QD() {
-    if (!this._FEIGENBAUM_POINT_QD) {
-      this._FEIGENBAUM_POINT_QD = decimalToQD(
+    if (!this.feigenbaumPointQd) {
+      this.feigenbaumPointQd = decimalToQD(
         '-1.4011551890920506005238267878938612922263080433973196089372614966');
     }
-    return this._FEIGENBAUM_POINT_QD;
+    return this.feigenbaumPointQd;
   }
 
   constructor(store) {
@@ -1820,7 +1820,7 @@ class Grid {
     // Holds union of views that can be reused if popstate fires mid-update.
     // Cleared to null when update completes (this.views is then the stable state).
     this.stableViews = null;
-    this._mouseOverBoard = false;  // Track if mouse is over board views
+    this.mouseOverBoard = false;  // Track if mouse is over board views
   }
 
   makeView(k, size, re, im, deferComputation = false) {
@@ -2219,13 +2219,13 @@ class Grid {
     const canvas = this.canvas(k);
     if (canvas && data.changeList.length) {
       // Log first paint timing when debug=t is enabled
-      if (!this._firstPaintLogged && this.config.debug?.includes('t')) {
+      if (!this.firstPaintLogged && this.config.debug?.includes('t')) {
         let totalPx = 0;
         for (const c of data.changeList) {
           totalPx += (c.nn?.length || 0) + (c.vv?.length || 0);
         }
         if (totalPx > 0) {
-          this._firstPaintLogged = true;
+          this.firstPaintLogged = true;
           console.log(`[timing] First paint: ${totalPx} px at ${performance.now().toFixed(0)}ms`);
         }
       }
@@ -2796,7 +2796,7 @@ class Grid {
     if (button && !document.fullscreenElement) {
       // Show button unless mouse is over a board view
       button.style.display = 'block';
-      if (!this._mouseOverBoard) {
+      if (!this.mouseOverBoard) {
         button.style.opacity = '0.7';
       }
     }
@@ -2807,7 +2807,7 @@ class Grid {
     const gridElement = document.getElementById('grid');
     if (!button || !gridElement) return;
 
-    this._mouseOverBoard = false;
+    this.mouseOverBoard = false;
 
     // Check if button overlaps with any visible view
     const buttonOverlapsViews = () => {
@@ -2827,7 +2827,7 @@ class Grid {
     // Update button visibility based on mouse position and view overlap
     const updateButtonVisibility = () => {
       if (document.fullscreenElement) return;
-      if (this._mouseOverBoard && buttonOverlapsViews()) {
+      if (this.mouseOverBoard && buttonOverlapsViews()) {
         button.style.opacity = '0';
         button.style.pointerEvents = 'none';
       } else {
@@ -2838,13 +2838,13 @@ class Grid {
 
     // Fade out button when mouse enters grid AND button overlaps views
     gridElement.addEventListener('mouseenter', (e) => {
-      this._mouseOverBoard = true;
+      this.mouseOverBoard = true;
       updateButtonVisibility();
     }, true);
 
     // Fade in button when mouse leaves the grid entirely
     gridElement.addEventListener('mouseleave', (e) => {
-      this._mouseOverBoard = false;
+      this.mouseOverBoard = false;
       updateButtonVisibility();
     }, true);
 
@@ -5591,15 +5591,15 @@ class PrecomputedPoints {
 
       if (item.iter !== currentIter) {
         if (currentIter !== -1) {
-          this._getRange(currentIter).dCount = i - start;
+          this.getRange(currentIter).dCount = i - start;
         }
         currentIter = item.iter;
         start = i;
-        this._getRange(currentIter).dStart = start;
+        this.getRange(currentIter).dStart = start;
       }
     }
     if (currentIter !== -1) {
-      this._getRange(currentIter).dCount = diverged.length - start;
+      this.getRange(currentIter).dCount = diverged.length - start;
     }
 
     // Fill Converged
@@ -5619,20 +5619,20 @@ class PrecomputedPoints {
 
       if (item.iter !== currentIter) {
         if (currentIter !== -1) {
-          this._getRange(currentIter).cCount = i - start;
+          this.getRange(currentIter).cCount = i - start;
         }
         currentIter = item.iter;
         start = i;
-        this._getRange(currentIter).cStart = start;
+        this.getRange(currentIter).cStart = start;
       }
     }
     if (currentIter !== -1) {
-      this._getRange(currentIter).cCount = converged.length - start;
+      this.getRange(currentIter).cCount = converged.length - start;
     }
     this.knownCount = this.knownPixels.size;
   }
 
-  _getRange(iter) {
+  getRange(iter) {
     if (!this.rangeMap.has(iter)) {
       this.rangeMap.set(iter, { dStart: 0, dCount: 0, cStart: 0, cCount: 0 });
     }
@@ -5663,7 +5663,7 @@ class PrecomputedPoints {
   }
 
   // Helper to reconstruct objects from TypedArrays
-  _extractData(range) {
+  extractData(range) {
     const diverged = [];
     if (range.dCount > 0) {
       for (let i = 0; i < range.dCount; i++) {
@@ -5695,7 +5695,7 @@ class PrecomputedPoints {
     const range = this.rangeMap.get(iter);
     if (!range) return;
 
-    const { diverged, converged } = this._extractData(range);
+    const { diverged, converged } = this.extractData(range);
 
     // Queue the changes for reporting to main thread
     // Note: diverged is just indices (nn), converged is objects (vv)
@@ -5727,11 +5727,11 @@ class PrecomputedPoints {
     const range = this.rangeMap.get(iter);
     if (!range) return null;
     
-    const data = this._extractData(range);
+    const data = this.extractData(range);
     this.rangeMap.delete(iter);
     
     // Consumers expect {diverged: [indices], converged: [objects]}
-    // _extractData provides exactly this.
+    // extractData provides exactly this.
     return data;
   }
 
@@ -5750,7 +5750,7 @@ class PrecomputedPoints {
     const combined = { diverged: [], converged: [] };
     for (const iter of iters) {
       const range = this.rangeMap.get(iter);
-      const data = this._extractData(range);
+      const data = this.extractData(range);
       
       for (const item of data.diverged) combined.diverged.push(item);
       for (const item of data.converged) combined.converged.push(item);
@@ -5785,7 +5785,7 @@ class PrecomputedPoints {
     
     for (const iter of this.rangeMap.keys()) {
       const range = this.rangeMap.get(iter);
-      const data = this._extractData(range);
+      const data = this.extractData(range);
       
       for (const idx of data.diverged) {
         diverged.push({ index: idx, iter });
@@ -6459,13 +6459,13 @@ class SpatialBucket {
   // Uses precision-aware subtraction to avoid catastrophic cancellation
   verifyAndGetDelta(i, j) { throw new Error("subclass must implement verifyAndGetDelta"); }
 
-  _getBucket(re, im) {
+  getBucket(re, im) {
     const bx = Math.floor(re / this.gridSize);
     const by = Math.floor(im / this.gridSize);
     return { bx, by };
   }
 
-  _getKey(bx, by) {
+  getKey(bx, by) {
     return `${bx},${by}`;
   }
 
@@ -6475,8 +6475,8 @@ class SpatialBucket {
   add(i) {
     const pt = this.getF64Point(i);
     if (!pt) return;
-    const { bx, by } = this._getBucket(pt.re, pt.im);
-    const key = this._getKey(bx, by);
+    const { bx, by } = this.getBucket(pt.re, pt.im);
+    const key = this.getKey(bx, by);
     if (!this.buckets.has(key)) {
       this.buckets.set(key, new Set());
     }
@@ -6493,7 +6493,7 @@ class SpatialBucket {
     const pt = this.getF64Point(i);
     if (!pt) return [];
 
-    const { bx, by } = this._getBucket(pt.re, pt.im);
+    const { bx, by } = this.getBucket(pt.re, pt.im);
 
     // Determine which 4 buckets to check based on position within bucket
     // Since gridSize = 2*bucketRadius, checking 4 adjacent buckets guarantees
@@ -6512,7 +6512,7 @@ class SpatialBucket {
 
     const found = [];
     for (const [checkBx, checkBy] of bucketsToCheck) {
-      const key = this._getKey(checkBx, checkBy);
+      const key = this.getKey(checkBx, checkBy);
       const bucket = this.buckets.get(key);
       if (!bucket) continue;
 
@@ -7488,7 +7488,7 @@ class GpuBaseBoard extends Board {
     this.computePromise = null;  // Track current async computation
     this.lastReportedIters = null;
     this.cpuStatus = null;
-    this._readPixelBufferPromise = null;  // Lock for readPixelBuffer
+    this.readPixelBufferPromise = null;  // Lock for readPixelBuffer
     this.effort = 20;  // Default for GPU boards, overridden by subclasses
     this.minBatchIters = 17;  // GPU boards need minimum iterations per batch to amortize overhead
     this.maxBatchIters = 134567;  // Cap to avoid very long batches with few pixels
@@ -7499,7 +7499,7 @@ class GpuBaseBoard extends Board {
     this.batchesToReadback = [];
     this.batchResultsRead = [];
     this.previousBatchEndIter = 1;  // First batch starts at iter=1
-    this._lastFlushedPrecomputedIter = 0;
+    this.lastFlushedPrecomputedIter = 0;
   }
 
   checkSpike(size, re, im) {
@@ -7685,7 +7685,7 @@ class GpuBaseBoard extends Board {
     this.stagingBufferIndex = 0;
     this.hasPendingResults = false;
     this.pendingIterationsPerBatch = 0;
-    this._baseIt = 1;  // Committed iteration count
+    this.baseIt = 1;  // Committed iteration count
 
     // Compaction state - uses bandwidth cost model
     this.activeCount = this.config.dimsArea;
@@ -7722,7 +7722,7 @@ class GpuBaseBoard extends Board {
     this.resultsReadbackBufferSize = this.preStagingSize;
 
     // Reset buffer: 8 u32s for header (count=0, lastStaged=0, others don't matter)
-    this._resultsCounterReset = new Uint32Array([0, 0, 0, 0, 0, 0, 0, 0]);
+    this.resultsCounterReset = new Uint32Array([0, 0, 0, 0, 0, 0, 0, 0]);
 
     if (this.buffers.results?.destroy) {
       this.buffers.results.destroy();
@@ -7768,9 +7768,9 @@ class GpuBaseBoard extends Board {
     this.batchResultsRead = [];   // Accumulated results for current head batch
     this.previousBatchEndIter = 1;  // First batch starts at iter=1
     this.previousFirstEmpty = 0;  // Track firstEmpty for batch size computation
-    this._lastFlushedPrecomputedIter = 0;
+    this.lastFlushedPrecomputedIter = 0;
 
-    this.device.queue.writeBuffer(this.buffers.results, 0, this._resultsCounterReset);
+    this.device.queue.writeBuffer(this.buffers.results, 0, this.resultsCounterReset);
 
     // Batch locking buffer (see docs/gpu-batch-locking.md)
     // Layout: lock(u32), batch_active(u32), collision_count(u32), reserved(u32)
@@ -7784,8 +7784,8 @@ class GpuBaseBoard extends Board {
       label: 'Batch lock buffer'
     });
     // Initialize: lock=0 (unlocked), batch_active=0, collision_count=0, reserved=0
-    this._lockBufferReset = new Uint32Array([0, 0, 0, 0]);
-    this.device.queue.writeBuffer(this.buffers.lock, 0, this._lockBufferReset);
+    this.lockBufferReset = new Uint32Array([0, 0, 0, 0]);
+    this.device.queue.writeBuffer(this.buffers.lock, 0, this.lockBufferReset);
 
     // Collision stats tracking (CPU-side)
     this.batchCollisionCount = 0;
@@ -8325,8 +8325,8 @@ class GpuBaseBoard extends Board {
    * Called before processing a batch's iteration range.
    */
   flushPrecomputedUpTo(maxIter) {
-    if (!this.precomputed || maxIter <= this._lastFlushedPrecomputedIter) return;
-    this._lastFlushedPrecomputedIter = maxIter;
+    if (!this.precomputed || maxIter <= this.lastFlushedPrecomputedIter) return;
+    this.lastFlushedPrecomputedIter = maxIter;
     this.precomputed.flushUpToIteration(maxIter, this);
   }
 
@@ -8371,11 +8371,11 @@ class GpuBaseBoard extends Board {
    * Return iteration count for submitted GPU batches.
    */
   get it() {
-    return this._baseIt;
+    return this.baseIt;
   }
 
   set it(value) {
-    this._baseIt = value;
+    this.baseIt = value;
   }
 
   /**
@@ -8439,8 +8439,8 @@ class GpuBaseBoard extends Board {
     }
 
     // Wait for any pending read to complete before starting a new one
-    if (this._readPixelBufferPromise) {
-      await this._readPixelBufferPromise;
+    if (this.readPixelBufferPromise) {
+      await this.readPixelBufferPromise;
     }
 
     // Create the actual read operation as a promise we can track
@@ -8475,11 +8475,11 @@ class GpuBaseBoard extends Board {
       return pixelData;
     };
 
-    this._readPixelBufferPromise = doRead();
+    this.readPixelBufferPromise = doRead();
     try {
-      return await this._readPixelBufferPromise;
+      return await this.readPixelBufferPromise;
     } finally {
-      this._readPixelBufferPromise = null;
+      this.readPixelBufferPromise = null;
     }
   }
 
@@ -8906,7 +8906,7 @@ class GpuBoard extends GpuBaseBoard {
       // Accelerating batch sizes for fast first paint at shallow zoom:
       // - Batch 1: 1 iter, Batch 2: 2 iters, Batch 3: 4 iters, Batch 4: 8 iters
       // - Only applies at zoom < 30 (size > 0.1) where early escapes are visible
-      const baseIt = this._baseIt;
+      const baseIt = this.baseIt;
       if (this.size > 0.1) {
         if (baseIt === 1) iterationsPerBatch = 1;
         else if (baseIt <= 3) iterationsPerBatch = Math.min(iterationsPerBatch, 3 - baseIt + 1);
@@ -8975,9 +8975,9 @@ class GpuBoard extends GpuBaseBoard {
       // - start = first iter processed in this batch
       // - end = first iter of the next batch (one past the last iter of this batch)
       // Results from this batch have iter in [start, end)
-      const batchStartIter = this._baseIt;
-      this._baseIt += iterationsPerBatch;
-      const batchEndIter = this._baseIt;  // = start + iterationsPerBatch
+      const batchStartIter = this.baseIt;
+      this.baseIt += iterationsPerBatch;
+      const batchEndIter = this.baseIt;  // = start + iterationsPerBatch
       const currentPromise = this.device.queue.onSubmittedWorkDone();
       // GPU is now computing in parallel!
 
@@ -12389,7 +12389,7 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
     this.stagingBufferIndex = 0;
     this.hasPendingResults = false;
     this.pendingIterationsPerBatch = 0;
-    this._baseIt = 1;  // Committed iteration count
+    this.baseIt = 1;  // Committed iteration count
 
     // Compaction state - uses bandwidth cost model
     // Compact when cumulative wasted bandwidth > compaction cost
@@ -12404,11 +12404,11 @@ class GpuZhuoranBaseBoard extends GpuBaseBoard {
 
   // Return iteration count for submitted GPU batches (same as GpuBoard)
   get it() {
-    return this._baseIt;
+    return this.baseIt;
   }
 
   set it(value) {
-    this._baseIt = value;
+    this.baseIt = value;
   }
 
   async flushPendingResults() {
@@ -13592,9 +13592,9 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     const gpuStartTime = performance.now();
     this.device.queue.submit([commandEncoder.finish()]);
     // Save batch iter range using half-open interval [start, end)
-    const batchStartIter = this._baseIt;
-    this._baseIt += iterationsPerBatch;
-    const batchEndIter = this._baseIt;
+    const batchStartIter = this.baseIt;
+    this.baseIt += iterationsPerBatch;
+    const batchEndIter = this.baseIt;
     const currentPromise = this.device.queue.onSubmittedWorkDone();
     // GPU is now computing in parallel!
 
@@ -14910,9 +14910,9 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       const gpuStartTime = performance.now();
       this.device.queue.submit([commandEncoder.finish()]);
       // Save batch iter range using half-open interval [start, end)
-      const batchStartIter = this._baseIt;
-      this._baseIt += iterationsPerBatch;
-      const batchEndIter = this._baseIt;
+      const batchStartIter = this.baseIt;
+      this.baseIt += iterationsPerBatch;
+      const batchEndIter = this.baseIt;
       const currentPromise = this.device.queue.onSubmittedWorkDone();
       // GPU is now computing in parallel!
 
@@ -15210,19 +15210,19 @@ class FractalWorker {
 
     // Fast scheduling using MessageChannel (faster than setTimeout(0))
     // The message queue has higher priority than the timer queue
-    this._scheduleChannel = new MessageChannel();
-    this._schedulePending = false;
-    this._scheduleChannel.port1.onmessage = () => {
-      this._schedulePending = false;
+    this.scheduleChannel = new MessageChannel();
+    this.schedulePending = false;
+    this.scheduleChannel.port1.onmessage = () => {
+      this.schedulePending = false;
       this.iterateBoards();
     };
   }
 
   // Schedule next iteration using MessageChannel (faster than setTimeout(0))
-  _scheduleNextIteration() {
-    if (!this._schedulePending) {
-      this._schedulePending = true;
-      this._scheduleChannel.port2.postMessage(null);
+  scheduleNextIteration() {
+    if (!this.schedulePending) {
+      this.schedulePending = true;
+      this.scheduleChannel.port2.postMessage(null);
     }
   }
 
@@ -15561,7 +15561,7 @@ class FractalWorker {
       }
       return;
     }
-    this._scheduleNextIteration();
+    this.scheduleNextIteration();
   }
 
   // Abstract method to be overridden by subclasses
@@ -18494,12 +18494,12 @@ let LANG_FROM_URL = false;
 <!-- END_MP4MUXER_LIBRARY -->
 <script id="startApp">
 // Start the application with timing markers
-const _t0 = performance.now();
-console.log(`[startup] script execution start: ${_t0.toFixed(0)}ms`);
+const t0 = performance.now();
+console.log(`[startup] script execution start: ${t0.toFixed(0)}ms`);
 window.explorer = new MandelbrotExplorer();
-console.log(`[startup] MandelbrotExplorer constructed: ${(performance.now() - _t0).toFixed(0)}ms`);
+console.log(`[startup] MandelbrotExplorer constructed: ${(performance.now() - t0).toFixed(0)}ms`);
 window.explorer.start();
-console.log(`[startup] explorer.start() complete: ${(performance.now() - _t0).toFixed(0)}ms`);
+console.log(`[startup] explorer.start() complete: ${(performance.now() - t0).toFixed(0)}ms`);
 </script>
 </div> <!-- closes id=text -->
 </body>

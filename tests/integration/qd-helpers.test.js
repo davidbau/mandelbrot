@@ -33,16 +33,16 @@ describe('Oct helpers coverage touch', () => {
     }
   }, TEST_TIMEOUT);
 
-  test('calls ArqdSquare in the app context', async () => {
+  test('calls arQdSquare in the app context', async () => {
     if (launchFailed) {
       return;
     }
     const called = await page.evaluate(() => {
       const buf = new Array(8).fill(0);
-      if (typeof ArqdSquare === 'function') {
-        ArqdSquare(new Array(4).fill(0), 0, 1, 0, 0, 0);
+      if (typeof arQdSquare === 'function') {
+        arQdSquare(new Array(4).fill(0), 0, 1, 0, 0, 0);
       }
-      return typeof ArqdSquare === 'function';
+      return typeof arQdSquare === 'function';
     });
     expect(called).toBe(true);
   }, TEST_TIMEOUT);

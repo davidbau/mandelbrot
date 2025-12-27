@@ -19,21 +19,21 @@ class SpatialBucket {
   getF64Point(i) { throw new Error("subclass must implement getF64Point"); }
   verifyAndGetDelta(i, j) { throw new Error("subclass must implement verifyAndGetDelta"); }
 
-  _getBucket(re, im) {
+  getBucket(re, im) {
     const bx = Math.floor(re / this.gridSize);
     const by = Math.floor(im / this.gridSize);
     return { bx, by };
   }
 
-  _getKey(bx, by) {
+  getKey(bx, by) {
     return `${bx},${by}`;
   }
 
   add(i) {
     const pt = this.getF64Point(i);
     if (!pt) return;
-    const { bx, by } = this._getBucket(pt.re, pt.im);
-    const key = this._getKey(bx, by);
+    const { bx, by } = this.getBucket(pt.re, pt.im);
+    const key = this.getKey(bx, by);
     if (!this.buckets.has(key)) {
       this.buckets.set(key, new Set());
     }
@@ -44,7 +44,7 @@ class SpatialBucket {
     const pt = this.getF64Point(i);
     if (!pt) return [];
 
-    const { bx, by } = this._getBucket(pt.re, pt.im);
+    const { bx, by } = this.getBucket(pt.re, pt.im);
     const fracX = (pt.re / this.gridSize) - bx;
     const fracY = (pt.im / this.gridSize) - by;
     const dx = fracX < 0.5 ? -1 : 1;
@@ -59,7 +59,7 @@ class SpatialBucket {
 
     const found = [];
     for (const [checkBx, checkBy] of bucketsToCheck) {
-      const key = this._getKey(checkBx, checkBy);
+      const key = this.getKey(checkBx, checkBy);
       const bucket = this.buckets.get(key);
       if (!bucket) continue;
 
