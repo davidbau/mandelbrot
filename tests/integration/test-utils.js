@@ -43,6 +43,16 @@ async function waitForViewReady(page, viewIndex = 0) {
 async function setupBrowser() {
   const chromePath = findChrome();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mandelbrot-puppeteer-'));
+  const platform = os.platform();
+
+  // ANGLE backend varies by platform:
+  // - macOS: metal (best performance)
+  // - Linux: vulkan or swiftshader (software fallback for headless)
+  // - Windows: d3d11
+  const angleBackend = platform === 'darwin' ? 'metal'
+                     : platform === 'win32' ? 'd3d11'
+                     : 'swiftshader';  // Linux: use software renderer for reliable headless
+
   const launchOptions = {
     headless: 'new',
     args: [
@@ -55,7 +65,7 @@ async function setupBrowser() {
       '--no-default-browser-check',
       '--enable-unsafe-webgpu',
       '--enable-features=Vulkan',
-      '--use-angle=metal',
+      `--use-angle=${angleBackend}`,
     ]
   };
   launchOptions.userDataDir = userDataDir;
@@ -132,9 +142,32 @@ async function teardownPage(page) {
   await page.close();
 }
 
+// On Linux, swiftshader (software WebGPU) is very slow and has resource contention.
+// Use CPU-only computation for reliable, fast tests.
+const useCpuOnly = os.platform() === 'linux';
+
+// Append CPU-only debug flags to query string if on Linux
+function appendCpuDebugFlags(queryParams) {
+  if (!useCpuOnly) return queryParams;
+  // Parse existing query string
+  const hasQuery = queryParams.startsWith('?');
+  const separator = hasQuery ? '&' : '?';
+  const existingDebug = queryParams.match(/debug=([^&]*)/);
+  if (existingDebug) {
+    // Append to existing debug flags if not already present
+    const flags = existingDebug[1];
+    if (!flags.includes('nogpu')) {
+      return queryParams.replace(/debug=([^&]*)/, `debug=${flags},nogpu,nogl`);
+    }
+    return queryParams;
+  }
+  return `${queryParams}${separator}debug=nogpu,nogl`;
+}
+
 // Navigate to the app and wait for explorer to initialize AND initial view to be ready
 async function navigateToApp(page, queryParams = '') {
-  const htmlPath = `file://${path.join(__dirname, '../../index.html')}${queryParams}`;
+  const adjustedParams = appendCpuDebugFlags(queryParams);
+  const htmlPath = `file://${path.join(__dirname, '../../index.html')}${adjustedParams}`;
   await page.goto(htmlPath, { waitUntil: 'load' });
   await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
   // Wait for initial view to exist and have some computation
@@ -149,7 +182,9 @@ async function navigateToApp(page, queryParams = '') {
 // Navigate to app with full URL and wait for proper preconditions
 // Use this instead of direct page.goto() calls in tests
 async function navigateToUrl(page, url) {
-  await page.goto(url, { waitUntil: 'load' });
+  // Append CPU debug flags to URL if on Linux
+  const adjustedUrl = useCpuOnly ? appendCpuDebugFlagsToUrl(url) : url;
+  await page.goto(adjustedUrl, { waitUntil: 'load' });
   await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
   // Wait for initial view to exist
   await page.waitForFunction(() => {
@@ -160,9 +195,25 @@ async function navigateToUrl(page, url) {
   await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 });
 }
 
+// Append CPU debug flags to a full URL
+// Note: We avoid URL.searchParams to preserve original encoding (commas, plus signs)
+function appendCpuDebugFlagsToUrl(url) {
+  const hasQuery = url.includes('?');
+  const existingDebugMatch = url.match(/[?&]debug=([^&]*)/);
+  if (existingDebugMatch) {
+    const flags = existingDebugMatch[1];
+    if (!flags.includes('nogpu')) {
+      return url.replace(/([?&])debug=([^&]*)/, `$1debug=${flags},nogpu,nogl`);
+    }
+    return url;
+  }
+  return `${url}${hasQuery ? '&' : '?'}debug=nogpu,nogl`;
+}
+
 // Get the base URL for the app
 function getAppUrl(queryString = '') {
-  return `file://${path.join(__dirname, '../../index.html')}${queryString}`;
+  const baseUrl = `file://${path.join(__dirname, '../../index.html')}${queryString}`;
+  return useCpuOnly ? appendCpuDebugFlagsToUrl(baseUrl) : baseUrl;
 }
 
 // Close browser with timeout to prevent hanging in afterAll
@@ -215,5 +266,7 @@ module.exports = {
   getAppUrl,
   closeBrowser,
   clearCoverage,
-  isCoverageEnabled
+  isCoverageEnabled,
+  useCpuOnly,
+  appendCpuDebugFlags
 };

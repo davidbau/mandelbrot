@@ -4,7 +4,7 @@
  */
 
 const path = require('path');
-const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, waitForViewReady, closeBrowser } = require('./test-utils');
+const { TEST_TIMEOUT, setupBrowser, setupPage, navigateToApp, navigateToUrl, getAppUrl, waitForViewReady, closeBrowser } = require('./test-utils');
 
 describe('Browser History View Preservation Tests', () => {
   let browser;
@@ -30,10 +30,8 @@ describe('Browser History View Preservation Tests', () => {
   test('Preserved views should retain all computed pixels after popstate', async () => {
     // This test reproduces an issue where after popstate, preserved views
     // show parent composite but early iteration child pixels are missing
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await navigateToUrl(page, getAppUrl('?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i'));
     await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 5000 });
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 10000 });
 
     // Wait for some computation to occur on view 2 (the child view)
     await page.waitForFunction(() => {
@@ -194,10 +192,8 @@ describe('Browser History View Preservation Tests', () => {
   test('Preserved view at different index should draw correctly', async () => {
     // This test simulates a scenario where a view moves to a different index
     // during popstate (e.g., view 2 becomes view 1 when view 1 is removed)
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await navigateToUrl(page, getAppUrl('?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i'));
     await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 10000 });
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 });
 
     // Wait for some computation on view 2
     await page.waitForFunction(() => {
@@ -308,10 +304,8 @@ describe('Browser History View Preservation Tests', () => {
   test('Rapid back/forward during update should preserve view data', async () => {
     // This test reproduces a race condition where popstate fires while
     // an update process is in progress, causing views to be lost
-    await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i`);
-    await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
+    await navigateToUrl(page, getAppUrl('?c=-0.5+0i,-0.6+0.2i,-0.65+0.25i'));
     await page.waitForFunction(() => window.explorer.grid.views.length >= 3, { timeout: 10000 });
-    await page.waitForFunction(() => !window.explorer.grid.currentUpdateProcess, { timeout: 15000 });
 
     // Wait for computation on view 2 (just needs some pixels computed)
     await page.waitForFunction(() => {

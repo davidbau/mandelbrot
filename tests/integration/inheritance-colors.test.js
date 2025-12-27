@@ -3,9 +3,27 @@
  */
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const puppeteer = require('puppeteer');
 
 const TEST_TIMEOUT = 60000;
+// On Linux, swiftshader (software WebGPU) is very slow - use CPU-only
+const useCpuOnly = os.platform() === 'linux';
+// Replace board=gpu with board=cpu on Linux, and add debug flags
+function fixUrlForPlatform(url) {
+  if (!useCpuOnly) return url;
+  // Replace board=gpu with board=cpu
+  let fixed = url.replace(/board=gpu/g, 'board=cpu');
+  // Add debug=nogpu,nogl if no debug flag, or append to existing
+  if (fixed.includes('debug=')) {
+    if (!fixed.includes('nogpu')) {
+      fixed = fixed.replace(/debug=([^&]*)/, 'debug=$1,nogpu,nogl');
+    }
+  } else {
+    fixed = fixed + (fixed.includes('?') ? '&' : '?') + 'debug=nogpu,nogl';
+  }
+  return fixed;
+}
 
 describe('Inheritance color behavior', () => {
   let browser;
@@ -22,6 +40,11 @@ describe('Inheritance color behavior', () => {
     await new Promise(resolve => server.listen(0, resolve));
     port = server.address().port;
 
+    const platform = os.platform();
+    const angleBackend = platform === 'darwin' ? 'metal'
+                       : platform === 'win32' ? 'd3d11'
+                       : 'swiftshader';
+
     browser = await puppeteer.launch({
       headless: true,
       args: [
@@ -29,6 +52,7 @@ describe('Inheritance color behavior', () => {
         '--disable-setuid-sandbox',
         '--enable-unsafe-webgpu',
         '--enable-features=Vulkan',
+        `--use-angle=${angleBackend}`,
       ]
     });
   }, TEST_TIMEOUT);
@@ -43,7 +67,7 @@ describe('Inheritance color behavior', () => {
     await page.setViewport({ width: 800, height: 600 });
 
     // Use smaller dimensions for faster test - debug=dims:10x10 gives 100 pixels per view
-    await page.goto(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=1&grid=2`, {
+    await page.goto(fixUrlForPlatform(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=1&grid=2`), {
       waitUntil: 'domcontentloaded'
     });
 
@@ -100,7 +124,7 @@ describe('Inheritance color behavior', () => {
 
     // Helper to get child histogram after zooming
     async function getChildHistAfterZoom(inherit) {
-      await page.goto(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=${inherit}&grid=2`, {
+      await page.goto(fixUrlForPlatform(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=${inherit}&grid=2`), {
         waitUntil: 'domcontentloaded'
       });
 
@@ -157,7 +181,7 @@ describe('Inheritance color behavior', () => {
     const page = await browser.newPage();
     await page.setViewport({ width: 800, height: 600 });
 
-    await page.goto(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=1&grid=2`, {
+    await page.goto(fixUrlForPlatform(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=1&grid=2`), {
       waitUntil: 'domcontentloaded'
     });
 
@@ -209,7 +233,7 @@ describe('Inheritance color behavior', () => {
     await page.setViewport({ width: 800, height: 600 });
 
     // This URL has view 2 in deep interior
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095735+0.655091i,-0.0944515+0.6555326i&board=gpu&inherit=1&grid=2&debug=dims:50x50&pixelratio=1`, {
+    await page.goto(fixUrlForPlatform(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095735+0.655091i,-0.0944515+0.6555326i&board=gpu&inherit=1&grid=2&debug=dims:50x50&pixelratio=1`), {
       waitUntil: 'domcontentloaded'
     });
 
@@ -248,7 +272,7 @@ describe('Inheritance color behavior', () => {
     await page.setViewport({ width: 800, height: 600 });
 
     // Use 2-view URL with small dims for speed (30x30 = 900 pixels)
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095804+0.654167i&board=gpu&inherit=1&grid=2&debug=dims:30x30&pixelratio=1`, {
+    await page.goto(fixUrlForPlatform(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095804+0.654167i&board=gpu&inherit=1&grid=2&debug=dims:30x30&pixelratio=1`), {
       waitUntil: 'domcontentloaded'
     });
 
@@ -301,7 +325,7 @@ describe('Inheritance color behavior', () => {
     await page.setViewport({ width: 800, height: 600 });
 
     // Use neon theme with small dims (50x50) for speed
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&debug=dims:50x50&pixelratio=1`, {
+    await page.goto(fixUrlForPlatform(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&debug=dims:50x50&pixelratio=1`), {
       waitUntil: 'domcontentloaded'
     });
 
@@ -390,7 +414,7 @@ describe('Inheritance color behavior', () => {
     await page.setViewport({ width: 1470, height: 827 });
 
     // Use neon theme for clear warm/cool distinction
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2`, {
+    await page.goto(fixUrlForPlatform(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2`), {
       waitUntil: 'domcontentloaded'
     });
 
@@ -505,7 +529,7 @@ describe('Inheritance color behavior', () => {
 
     // Use neon theme with small dims, 16:9 aspect ratio (80x45 ≈ 1.78)
     // Note: debug=dims sets aspect ratio from dimensions, so we use 80x45 for 16:9
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&debug=dims:80x45&pixelratio=1`, {
+    await page.goto(fixUrlForPlatform(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&debug=dims:80x45&pixelratio=1`), {
       waitUntil: 'domcontentloaded'
     });
 
@@ -597,7 +621,7 @@ describe('Inheritance color behavior', () => {
     await page.setViewport({ width: 200, height: 200 });
 
     // Center on cardioid so most pixels converge
-    await page.goto(`http://localhost:${port}?board=gpu&inherit=1&grid=20&c=-0.5+0i&z=2&debug=inherit`, {
+    await page.goto(fixUrlForPlatform(`http://localhost:${port}?board=gpu&inherit=1&grid=20&c=-0.5+0i&z=2&debug=inherit`), {
       waitUntil: 'domcontentloaded'
     });
 
