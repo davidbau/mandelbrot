@@ -8,9 +8,25 @@ Mandelbrot set explorer - a single HTML file that renders fractals with deep zoo
 
 - `npm test` - Run all tests (unit + integration)
 - `npm run test:unit` - Unit tests only
-- `npm run test:integration` - Integration tests only
+- `npm run test:integration` - Integration tests only (sequential by default)
+- `npm run test:integration:fast` - Integration tests with 3 parallel workers
+- `TEST_WORKERS=3 npm run test:integration` - Custom parallelism via env var
 - `npm run test:coverage` - Run with coverage reporting
 - `./build/build.sh` - Build the project
+
+### Test Parallelism
+
+Integration tests run with `--maxWorkers=1` by default for reliability on Linux
+(where swiftshader WebGPU emulation is slow). On Mac/Windows, you can speed up
+tests with parallel execution:
+- `npm run test:integration:fast` - Uses 3 workers
+- `TEST_WORKERS=4 npm run test:integration` - Uses 4 workers
+
+To set a default for your machine, create `.env.local` (gitignored):
+```bash
+TEST_WORKERS=3
+```
+The test scripts use `dotenv-cli` to automatically load this file.
 
 ## Key Principles
 

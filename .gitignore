@@ -13,3 +13,4 @@ tests/benchmark-results/
 .puppeteer-profile/
 .puppeteer-profile-*/
 .chrome-home-*/
+.chrome-home/
