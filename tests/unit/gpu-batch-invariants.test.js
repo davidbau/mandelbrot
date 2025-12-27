@@ -16,7 +16,12 @@ describe('GPU Batch Processing Invariants', () => {
   beforeAll(async () => {
     browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--enable-unsafe-webgpu',
+        '--enable-features=Vulkan',
+      ]
     });
   });
 

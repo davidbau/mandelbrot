@@ -15124,6 +15124,12 @@ function isGlBoardAvailable() {
 function selectBoardClass(pixelSize, dimsArea, gpuMaxBufferSize, forceBoard) {
   if (forceBoard) {
     if (forceBoard in forcedBoardTypes) {
+      // Check if forcing a GPU board type but GPU isn't available
+      const gpuBoardTypes = ['gpu', 'gpuz', 'gpua'];
+      if (gpuBoardTypes.includes(forceBoard) && !gpuMaxBufferSize) {
+        throw new Error(`board=${forceBoard} requested but WebGPU is not available. ` +
+          `Use a CPU board (cpu, ddz, qdz) or WebGL board (gl, glz, gla) instead.`);
+      }
       return forcedBoardTypes[forceBoard];
     } else {
       throw new Error(`Unknown board type: ${forcedBoardType}.` +

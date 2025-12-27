@@ -23,7 +23,7 @@ describe('Precomputed inheritance regressions', () => {
   test('computeInheritance rejects converged regions with mismatched derived periods', async () => {
     const page = await setupPage(browser);
 
-    await page.goto(`file://${indexPath}?dims=5x5&grid=1`, {
+    await page.goto(`file://${indexPath}?debug=dims:5x5&pixelratio=1&grid=1`, {
       waitUntil: 'domcontentloaded'
     });
 
@@ -123,7 +123,7 @@ describe('Precomputed inheritance regressions', () => {
     page.on('console', msg => logs.push(msg.text()));
 
     await page.goto(
-      `file://${indexPath}?dims=20x20&grid=1&board=${boardType}&inherit=1&debug=inherit&c=-0.5+0i&z=2`,
+      `file://${indexPath}?debug=dims:20x20,inherit&pixelratio=1&grid=1&board=${boardType}&inherit=1&c=-0.5+0i&z=2`,
       { waitUntil: 'domcontentloaded' }
     );
 

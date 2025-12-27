@@ -24,7 +24,12 @@ describe('Inheritance color behavior', () => {
 
     browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--enable-unsafe-webgpu',
+        '--enable-features=Vulkan',
+      ]
     });
   }, TEST_TIMEOUT);
 
@@ -37,8 +42,8 @@ describe('Inheritance color behavior', () => {
     const page = await browser.newPage();
     await page.setViewport({ width: 800, height: 600 });
 
-    // Use smaller dimensions for faster test - dims=10x10 gives 100 pixels per view
-    await page.goto(`http://localhost:${port}?dims=10x10&board=gpu&inherit=1&grid=2`, {
+    // Use smaller dimensions for faster test - debug=dims:10x10 gives 100 pixels per view
+    await page.goto(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=1&grid=2`, {
       waitUntil: 'domcontentloaded'
     });
 
@@ -95,7 +100,7 @@ describe('Inheritance color behavior', () => {
 
     // Helper to get child histogram after zooming
     async function getChildHistAfterZoom(inherit) {
-      await page.goto(`http://localhost:${port}?dims=10x10&board=gpu&inherit=${inherit}&grid=2`, {
+      await page.goto(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=${inherit}&grid=2`, {
         waitUntil: 'domcontentloaded'
       });
 
@@ -152,7 +157,7 @@ describe('Inheritance color behavior', () => {
     const page = await browser.newPage();
     await page.setViewport({ width: 800, height: 600 });
 
-    await page.goto(`http://localhost:${port}?dims=10x10&board=gpu&inherit=1&grid=2`, {
+    await page.goto(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=1&grid=2`, {
       waitUntil: 'domcontentloaded'
     });
 
@@ -204,7 +209,7 @@ describe('Inheritance color behavior', () => {
     await page.setViewport({ width: 800, height: 600 });
 
     // This URL has view 2 in deep interior
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095735+0.655091i,-0.0944515+0.6555326i&board=gpu&inherit=1&grid=2&dims=50x50`, {
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095735+0.655091i,-0.0944515+0.6555326i&board=gpu&inherit=1&grid=2&debug=dims:50x50&pixelratio=1`, {
       waitUntil: 'domcontentloaded'
     });
 
@@ -243,7 +248,7 @@ describe('Inheritance color behavior', () => {
     await page.setViewport({ width: 800, height: 600 });
 
     // Use 2-view URL with small dims for speed (30x30 = 900 pixels)
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095804+0.654167i&board=gpu&inherit=1&grid=2&dims=30x30`, {
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095804+0.654167i&board=gpu&inherit=1&grid=2&debug=dims:30x30&pixelratio=1`, {
       waitUntil: 'domcontentloaded'
     });
 
@@ -296,7 +301,7 @@ describe('Inheritance color behavior', () => {
     await page.setViewport({ width: 800, height: 600 });
 
     // Use neon theme with small dims (50x50) for speed
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&dims=50x50`, {
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&debug=dims:50x50&pixelratio=1`, {
       waitUntil: 'domcontentloaded'
     });
 
@@ -498,8 +503,9 @@ describe('Inheritance color behavior', () => {
     const page = await browser.newPage();
     await page.setViewport({ width: 800, height: 600 });
 
-    // Use neon theme with small dims, explicit 16:9 aspect ratio
-    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&dims=50x50&a=16:9`, {
+    // Use neon theme with small dims, 16:9 aspect ratio (80x45 ≈ 1.78)
+    // Note: debug=dims sets aspect ratio from dimensions, so we use 80x45 for 16:9
+    await page.goto(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&debug=dims:80x45&pixelratio=1`, {
       waitUntil: 'domcontentloaded'
     });
 
