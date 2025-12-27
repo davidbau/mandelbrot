@@ -29,6 +29,14 @@
 
 ## Commit & Pull Request Guidelines
 - Follow existing history: use lowercase scope prefixes where helpful (e.g., `docs:`, `tests:`, `build:`) and concise subjects.
+- **Agent Attribution:** AI agents should sign their work by adding a `Co-Authored-By` line to the commit message. Use your specific agent name and a placeholder email (e.g., `Co-Authored-By: Gemini 3 <noreply@google.com>` or `Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>`).
 - PRs should include a brief summary of changes, user-visible impacts, and links to relevant issues/threads.
 - List the commands you ran (e.g., `npm test`, `npm run test:integration`) and attach screenshots or short clips when altering UI or rendering behavior.
 - Keep the HTML self-contained: note any new assets or external calls in the PR description and justify added dependencies.
+
+## Static Analysis & Tooling Standards
+- **Shadowing Awareness:** When building analysis tools, always pre-scan function bodies for local declarations (`var`, `let`, `const`, `function`) and parameters. Common names like `size`, `last`, `url`, and `forceBoard` are frequently shadowed; avoid linking them to global symbols.
+- **Library Unwrapping:** The bundled `mp4-muxer` library is wrapped in multiple IIFEs. Tools should "unwrap" these closures (e.g., by resetting depth counters) to treat its internal classes and functions as high-level architectural components.
+- **Assignment Recognition:** Support `name = function(...)` and `name_fn = function(...)` patterns for method attribution, especially within bundled modules where this pattern is used for internal helpers.
+- **Mixin Roots:** Treat methods defined within Mixin patterns (`const Mixin = (Base) => class extends Base...`) as top-level architectural methods, not nested functions.
+- **Visualization:** Represent recursive self-calls using circular loops (e.g., drawn to the left of the node) to clearly distinguish them from inter-function edges.
