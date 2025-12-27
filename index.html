@@ -3751,6 +3751,8 @@ class EventHandler {
           padding: 6px;
           z-index: 10000;
           font: 13.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          user-select: none;
+          -webkit-user-select: none;
         `;
 
         const createMenuItem = (text) => {
@@ -3764,6 +3766,8 @@ class EventHandler {
             border-radius: 4px;
             color: rgb(35, 35, 35);
             text-align: left;
+            user-select: none;
+            -webkit-user-select: none;
           `;
           item.addEventListener('mouseenter', () => {
             item.style.background = 'rgb(95, 150, 244)';
