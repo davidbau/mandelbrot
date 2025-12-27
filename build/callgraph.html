@@ -706,6 +706,12 @@
 
       simulation.on('tick', () => {
         linkMerge.attr('d', d => {
+          if (d.source.id === d.target.id) {
+            const x = d.source.x;
+            const y = d.source.y;
+            // Draw a circular self-loop to the left
+            return `M${x},${y} C${x-30},${y-25} ${x-30},${y+25} ${x},${y}`;
+          }
           const dx = d.target.x - d.source.x;
           const dy = d.target.y - d.source.y;
           return `M${d.source.x},${d.source.y}L${d.target.x},${d.target.y}`;

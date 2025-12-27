@@ -139,7 +139,7 @@ function extractCallGraph(js, scriptRanges = []) {
   }
 
   // Collect all class and function/method definitions
-  function collectDefinitions(node, currentClass = null) {
+  function collectDefinitions(node, currentClass = null, depth = 0) {
     if (!node || typeof node !== 'object') return;
 
     // Detect class declarations
@@ -181,9 +181,9 @@ function extractCallGraph(js, scriptRanges = []) {
         if (key === 'type' || key === 'start' || key === 'end') continue;
         const child = node[key];
         if (Array.isArray(child)) {
-          child.forEach(c => collectDefinitions(c, className));
+          child.forEach(c => collectDefinitions(c, className, depth + 1));
         } else if (child && typeof child === 'object') {
-          collectDefinitions(child, className);
+          collectDefinitions(child, className, depth + 1);
         }
       }
       return;
@@ -223,14 +223,17 @@ function extractCallGraph(js, scriptRanges = []) {
       });
       
       // Recurse into class body (node.init) with class context
-      collectDefinitions(classNode, className);
+      collectDefinitions(classNode, className, depth + 1);
       return;
     }
 
     let name = null;
     let type = 'function';
 
-    if (node.type === 'FunctionDeclaration' && node.id) {
+    // Only collect global functions (depth <= 4 to account for Program -> VariableDeclaration -> VariableDeclarator)
+    const isGlobalFunction = depth <= 4;
+
+    if (node.type === 'FunctionDeclaration' && node.id && isGlobalFunction) {
       name = node.id.name;
     } else if (node.type === 'MethodDefinition' && node.key && currentClass) {
       const methodName = node.key.name || node.key.value;
@@ -244,7 +247,8 @@ function extractCallGraph(js, scriptRanges = []) {
       classes.get(currentClass)?.methods.add(methodName);
     } else if (node.type === 'VariableDeclarator' &&
                node.id?.name &&
-               (node.init?.type?.includes('Function') || node.init?.type === 'ArrowFunctionExpression')) {
+               (node.init?.type?.includes('Function') || node.init?.type === 'ArrowFunctionExpression') &&
+               isGlobalFunction) {
       name = node.id.name;
 
       // Check if this is a mixin pattern: (Base) => class extends Base { ... }
@@ -289,6 +293,30 @@ function extractCallGraph(js, scriptRanges = []) {
         }
         name = null; // Don't add as a regular function, we added it as a class
       }
+    } else if (node.type === 'AssignmentExpression' && 
+               node.left?.type === 'MemberExpression' &&
+               (node.right?.type === 'FunctionExpression' || node.right?.type === 'ArrowFunctionExpression') &&
+               isGlobalFunction) {
+      // Handle document.onmousemove = function...
+      const objName = node.left.object?.name || (node.left.object?.type === 'ThisExpression' ? 'this' : null);
+      const propName = node.left.property?.name || node.left.property?.value;
+      
+      if (propName) {
+        if (objName) {
+            name = `${objName}.${propName}`;
+        } else if (node.left.object?.type === 'MemberExpression') {
+            // Handle simple nesting like document.body.onkeydown
+            const parentProp = node.left.object.property?.name || node.left.object.property?.value;
+            const rootObj = node.left.object.object?.name;
+            if (rootObj && parentProp) {
+                name = `${rootObj}.${parentProp}.${propName}`;
+            }
+        }
+        
+        if (!name && propName) {
+             name = `?.${propName}`; // Fallback
+        }
+      }
     }
 
     if (name && !name.includes('undefined')) {
@@ -308,10 +336,25 @@ function extractCallGraph(js, scriptRanges = []) {
     for (const key of Object.keys(node)) {
       if (key === 'type' || key === 'start' || key === 'end') continue;
       const child = node[key];
+
+      // Calculate next depth
+      let nextDepth = depth + 1;
+      
+      // Reset depth for IIFE (Immediately Invoked Function Expression)
+      // This allows capturing definitions inside module wrappers
+      if (node.type === 'CallExpression' && key === 'callee' && 
+          child && (child.type === 'FunctionExpression' || child.type === 'ArrowFunctionExpression')) {
+          // Reset to -1 so that the function's body (BlockStatement) becomes depth 0,
+          // and its statements (VariableDeclarations) become depth 1 (Global/Top-level)
+          if (depth < 20) { // Safety limit to prevent infinite recursion or deep resets
+             nextDepth = -1;
+          }
+      }
+
       if (Array.isArray(child)) {
-        child.forEach(c => collectDefinitions(c, currentClass));
+        child.forEach(c => collectDefinitions(c, currentClass, nextDepth));
       } else if (child && typeof child === 'object') {
-        collectDefinitions(child, currentClass);
+        collectDefinitions(child, currentClass, nextDepth);
       }
     }
   }
@@ -396,7 +439,7 @@ function extractCallGraph(js, scriptRanges = []) {
 
           'add', 'write', 'clear', 'push', 'pop', 'remove', 'delete', 
 
-          'toString', 'keys', 'values', 'entries', 'forEach', 'map', 'url', 'last'
+          'toString', 'keys', 'values', 'entries', 'forEach', 'map', 'url', 'last', 'size'
 
       ]);
 
@@ -406,7 +449,7 @@ function extractCallGraph(js, scriptRanges = []) {
 
   
 
-        function resolveTargets(node, currentClass, scope) {
+        function resolveTargets(node, currentClass, scope, currentFunc) {
 
   
 
@@ -418,19 +461,63 @@ function extractCallGraph(js, scriptRanges = []) {
 
   
 
-          // Case 1: Direct Identifier: func
+                    // Case 1: Direct Identifier: func
 
   
 
-          if (node.type === 'Identifier') {
+    
 
   
 
-            const callee = node.name;
+                    if (node.type === 'Identifier') {
 
   
 
-            if (functions.has(callee)) {
+    
+
+  
+
+                      const callee = node.name;
+
+  
+
+    
+
+  
+
+          
+
+  
+
+    
+
+  
+
+                      // Don't create global references for local variables
+
+  
+
+    
+
+  
+
+                      if (scope[callee]) return targets;
+
+  
+
+    
+
+  
+
+          
+
+  
+
+    
+
+  
+
+                      if (functions.has(callee)) {
 
   
 
@@ -484,19 +571,67 @@ function extractCallGraph(js, scriptRanges = []) {
 
           } 
 
-      // Case 2: Member Expression: obj.method
+                  // Case 2: Member Expression: obj.method
 
-      else if (node.type === 'MemberExpression' && node.property) {
+                  else if (node.type === 'MemberExpression' && node.property) {
 
-        const methodName = node.property.name || node.property.value;
+                    if (node.computed && node.property.type !== 'Literal') return targets;
 
-        const objectNode = node.object;
+                    
 
-  
+                    const methodName = node.property.name || node.property.value;
 
-        // 2a. this.method
+            
 
-        if (objectNode.type === 'ThisExpression' && currentClass) {
+                    // If the property is a local variable, don't link to global methods
+
+                    if (node.property.type === 'Identifier' && scope[node.property.name]) return targets;
+
+            
+
+                    const objectNode = node.object;
+
+            
+
+                    // 2x. super.method - Resolve to parent class and suppress same-name calls
+
+                    if (objectNode.type === 'Super' && currentClass) {
+
+                         const classData = classes.get(currentClass);
+
+                         // Resolve explicit extends or mixin base
+
+                         const parentClass = classData?.extends || classData?.mixinBase;
+
+                         
+
+                         if (parentClass) {
+
+                             const resolved = resolveMethodInClass(parentClass, methodName);
+
+                             if (resolved) {
+
+                                 // Suppress if calling super.sameMethod()
+
+                                 const currentMethodName = currentFunc?.split('.').pop();
+
+                                 if (currentMethodName !== methodName) {
+
+                                     targets.push(resolved);
+
+                                 }
+
+                             }
+
+                         }
+
+                    }
+
+              
+
+                    // 2a. this.method
+
+                    else if (objectNode.type === 'ThisExpression' && currentClass) {
 
             const resolved = resolveMethodInClass(currentClass, methodName);
 
@@ -534,21 +669,25 @@ function extractCallGraph(js, scriptRanges = []) {
 
         }
 
-        // 2c. variable.method
+                // 2c. variable.method
 
-        else if (objectNode.type === 'Identifier') {
+                else if (objectNode.type === 'Identifier') {
 
-            const varName = objectNode.name;
+                    const varName = objectNode.name;
 
-            let targetClass = scope[varName];
+                    let targetClass = scope[varName];
 
-  
+        
 
-            if (!targetClass) {
+                    if (targetClass === 'local') targetClass = null;
 
-                targetClass = guessClassFromVar(varName);
+        
 
-            }
+                    if (!targetClass) {
+
+                        targetClass = guessClassFromVar(varName);
+
+                    }
 
   
 
@@ -588,6 +727,14 @@ function extractCallGraph(js, scriptRanges = []) {
 
             }
 
+        } else {
+             // Case 2d. Complex expression: expression.method()
+             // Fallback to guessing by method name if unique-ish
+             if (!COMMON_METHODS.has(methodName) && methodIndex.has(methodName)) {
+                 for (const cls of methodIndex.get(methodName)) {
+                     targets.push(`${cls}.${methodName}`);
+                 }
+             }
         }
 
       }
@@ -603,33 +750,94 @@ function extractCallGraph(js, scriptRanges = []) {
     // Update current function/class context
     let funcName = currentFunc;
     let className = currentClass;
-    let currentScope = { ...scope };
+    let currentScope = scope;
+    let isNewFunc = false;
 
-    if (node.type === 'ClassDeclaration' && node.id?.name) {
+    // 1. Context / Naming Setup
+    if ((node.type === 'ClassDeclaration' || node.type === 'ClassExpression') && node.id?.name) {
       className = node.id.name;
-    }
-
-    if (node.type === 'VariableDeclarator' && node.id?.name) {
+    } else if (node.type === 'VariableDeclarator' && node.id?.name) {
         if (node.init?.type === 'ClassExpression') {
              className = node.id.name;
         } else if (node.init?.type?.includes('Function') || node.init?.type === 'ArrowFunctionExpression') {
              funcName = node.id.name;
+             // Handle mixin pattern
+             const body = node.init.body;
+             if (node.init.type === 'ArrowFunctionExpression' && body?.type === 'ClassExpression') {
+                 className = node.id.name;
+             }
         }
-    }
-    
-    if (node.type === 'FunctionDeclaration' && node.id) {
+    } else if (node.type === 'FunctionDeclaration' && node.id) {
       funcName = node.id.name;
     } else if (node.type === 'MethodDefinition' && node.key && className) {
       funcName = `${className}.${node.key.name || node.key.value}`;
     } else if (node.type === 'PropertyDefinition' && node.value?.type?.includes('Function') && className) {
         const methodName = node.key?.name || node.key?.value;
         funcName = `${className}.${methodName}`;
+    } else if (node.type === 'AssignmentExpression' && 
+               node.left?.type === 'MemberExpression' &&
+               (node.right?.type === 'FunctionExpression' || node.right?.type === 'ArrowFunctionExpression')) {
+      // Handle document.onmousemove = function...
+      const objName = node.left.object?.name || (node.left.object?.type === 'ThisExpression' ? 'this' : null);
+      const propName = node.left.property?.name || node.left.property?.value;
+      
+      let name = null;
+      if (propName) {
+        if (objName) {
+            name = `${objName}.${propName}`;
+        } else if (node.left.object?.type === 'MemberExpression') {
+            const parentProp = node.left.object.property?.name || node.left.object.property?.value;
+            const rootObj = node.left.object.object?.name;
+            if (rootObj && parentProp) {
+                name = `${rootObj}.${parentProp}.${propName}`;
+            }
+        }
+        if (!name && propName) name = `?.${propName}`;
+      }
+      if (name) funcName = name;
     }
 
-    if (node.type === 'VariableDeclarator' && node.id?.name && node.init?.type === 'NewExpression') {
-        if (node.init.callee?.type === 'Identifier') {
-            currentScope[node.id.name] = node.init.callee.name;
+    // 2. Scope Boundary Detection
+    if (node.type === 'FunctionDeclaration' || 
+        node.type === 'FunctionExpression' || 
+        node.type === 'ArrowFunctionExpression') {
+        isNewFunc = true;
+    }
+
+    // If we just entered a function, pre-collect all locals in its scope
+    // Skip collection for module wrappers (IIFEs) so their contents are treated as "globals"
+    if (isNewFunc && !node._isModuleWrapper) {
+        currentScope = { ...scope };
+        const bodyToScan = node;
+        
+        // Add parameters
+        if (bodyToScan.params) {
+            for (const param of bodyToScan.params) {
+                if (param.type === 'Identifier') currentScope[param.name] = 'local';
+                else if (param.type === 'AssignmentPattern' && param.left?.type === 'Identifier') currentScope[param.left.name] = 'local';
+            }
         }
+
+        // Add all declarations in the function body
+        function collectLocals(n) {
+            if (!n || typeof n !== 'object') return;
+            // Don't recurse into nested functions for this scope's locals
+            if (n !== bodyToScan && (n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression')) {
+                 if (n.type === 'FunctionDeclaration' && n.id) currentScope[n.id.name] = 'local';
+                 return;
+            }
+            if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier') {
+                currentScope[n.id.name] = (n.init?.type === 'NewExpression' && n.init.callee?.type === 'Identifier')
+                    ? n.init.callee.name : 'local';
+            }
+            for (const key of Object.keys(n)) {
+                if (key === 'type' || key === 'start' || key === 'end') continue;
+                const child = n[key];
+                if (Array.isArray(child)) child.forEach(collectLocals);
+                else if (child && typeof child === 'object') collectLocals(child);
+            }
+        }
+        collectLocals(bodyToScan.body || bodyToScan);
     }
 
     // Mark children for special handling before recursion
@@ -645,7 +853,7 @@ function extractCallGraph(js, scriptRanges = []) {
 
     // 1. Handle CallExpression (Calls)
     if (node.type === 'CallExpression') {
-      const targets = resolveTargets(node.callee, className, currentScope);
+      const targets = resolveTargets(node.callee, className, currentScope, funcName);
       if (funcName && functions.has(funcName)) {
         for (const target of targets) {
             functions.get(funcName).calls.add(target);
@@ -683,7 +891,7 @@ function extractCallGraph(js, scriptRanges = []) {
         if (node.type === 'Identifier' && node._isMemberProperty) {
             // Do nothing
         } else {
-            const targets = resolveTargets(node, className, currentScope);
+            const targets = resolveTargets(node, className, currentScope, funcName);
             if (funcName && functions.has(funcName)) {
                 if (!functions.get(funcName).references) {
                     functions.get(funcName).references = new Set();
@@ -708,6 +916,13 @@ function extractCallGraph(js, scriptRanges = []) {
       if (node.type === 'VariableDeclarator' && key === 'id') continue;
 
       const child = node[key];
+      
+      // Mark IIFE functions as module wrappers
+      if (node.type === 'CallExpression' && key === 'callee' && 
+          child && (child.type === 'FunctionExpression' || child.type === 'ArrowFunctionExpression')) {
+          child._isModuleWrapper = true;
+      }
+
       if (Array.isArray(child)) {
         child.forEach(c => findCalls(c, funcName, className, currentScope));
       } else if (child && typeof child === 'object') {
