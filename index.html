@@ -4354,20 +4354,29 @@ class MovieMode {
         return;
       }
 
-      const kk = Math.min(frame, totalFrames) / framesteps;
+      // Schedule next frame early to overlap vsync wait with our work
+      frame++;
+      if (frame > totalFrames + endrecord) {
+        this.isRecording = false;
+        statusElement.textContent = 'Encoding video...';
+        setTimeout(() => this.encodeVideo(statusElement), 100);
+      } else if (frame <= totalFrames + endpause) {
+        this.animationTimer = requestAnimationFrame(animate);
+      }
+
+      // Draw current frame (frame-1 since we incremented above)
+      const kk = Math.min(frame - 1, totalFrames) / framesteps;
       this.drawMovieFrame(kk);
 
       // Capture frame for encoding (only during recording period)
-      if (frame <= totalFrames + endrecord) {
+      if (frame - 1 <= totalFrames + endrecord) {
         try {
-          // Create VideoFrame from canvas with duration for 60 FPS
           const videoFrame = new VideoFrame(this.movieCanvas, {
-            timestamp: this.capturedFrames.length * 16667,  // 60 FPS in microseconds
-            duration: 16667  // Frame duration: 1/60 second = 16667 microseconds
+            timestamp: this.capturedFrames.length * 16667,
+            duration: 16667
           });
           this.capturedFrames.push(videoFrame);
 
-          // Update status
           if (this.capturedFrames.length % 60 === 0) {
             statusElement.textContent = `Captured ${this.capturedFrames.length} frames...`;
           }
@@ -4375,19 +4384,6 @@ class MovieMode {
           console.error('Error capturing frame:', e);
           statusElement.textContent = `Error: ${e.message}`;
         }
-      }
-
-      frame++;
-
-      // Check if we're done capturing
-      if (frame > totalFrames + endrecord) {
-        this.isRecording = false;
-        statusElement.textContent = 'Encoding video...';
-        // Start encoding after a brief delay to update UI
-        setTimeout(() => this.encodeVideo(statusElement), 100);
-      } else if (frame <= totalFrames + endpause) {
-        // Continue animation
-        this.animationTimer = requestAnimationFrame(() => animate());
       }
     };
     animate();
@@ -4606,9 +4602,12 @@ class MovieMode {
     let frame = 0;
 
     const animate = () => {
+      // Schedule next frame early to overlap vsync wait with our work
+      this.animationTimer = requestAnimationFrame(animate);
+
       // During main animation
       if (frame <= totalFrames) {
-        const kk = Math.min(frame, totalFrames) / framesteps;
+        const kk = frame / framesteps;
         this.drawMovieFrame(kk);
       }
       // During pause at end - keep showing last frame
@@ -4619,9 +4618,6 @@ class MovieMode {
       if (frame > totalFrames + pauseFrames) {
         frame = 0;
       }
-
-      // Continue animation indefinitely
-      this.animationTimer = requestAnimationFrame(() => animate());
     };
 
     animate();
