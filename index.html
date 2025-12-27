@@ -30,11 +30,10 @@ URL options: ?grid=3           to select 3-column view,
                 &h=1,2         hide views by index (comma-separated),
        &pixelratio=2           subpixel resolution,
              &lang=es          language (en/es/zh/zh-tw/ar/id/pt/fr/ja/ru/de),
-              &gpu=0           disable GPU acceleration,
             &board=gpuz        force algorithm (cpu/gpu/gpuz/ddz/qdz/
                                adaptive/qdcpu),
            &inherit=0          disable parent-to-child inheritance,
-             &debug=w,s        debug flags (w,s,n,t,b,r,inherit).
+             &debug=w,s        debug flags (w,s,n,t,b,r,inherit,nogpu,nogl).
 
 Implementation notes.  To minimize computation, the code identifies both
 points that diverge and points that converge.  It uses a method that can
@@ -593,7 +592,6 @@ class StateStore {
 
         // Computation parameters
         exponent: 2,              // Mandelbrot exponent (z^n + c)
-        enableGPU: true,          // Allow WebGPU acceleration
         forceBoard: null,         // Force specific board type
         debug: null,              // Debug string for controlling behaviors
 
@@ -861,7 +859,6 @@ class Config {
       vw,
       gridcols: dgc,
       exponent: 2,
-      enableGPU: true,
       enableInheritance: true,
       forceBoard: null,
       firstrQD: [-0.5, 0, 0, 0],
@@ -892,7 +889,6 @@ class Config {
   get mobile() { return this.store.getState().config.mobile; }
   get mac() { return this.store.getState().config.mac; }
   get exponent() { return this.store.getState().config.exponent; }
-  get enableGPU() { return this.store.getState().config.enableGPU; }
   get enableInheritance() { return this.store.getState().config.enableInheritance; }
   get forceBoard() { return this.store.getState().config.forceBoard; }
   get debug() { return this.store.getState().config.debug; }
@@ -3197,9 +3193,6 @@ class URLHandler {
     const exponent = params.get('exponent');
     if (exponent && parseInt(exponent) !== this.config.exponent) return true;
 
-    const gpu = params.get('gpu');
-    if (gpu !== null && (parseInt(gpu) !== 0) !== this.config.enableGPU) return true;
-
     const aspectRatio = params.get('a');
     if (aspectRatio) {
       const m = aspectRatio.match(/(\d+):(\d+)/);
@@ -3422,12 +3415,6 @@ class URLHandler {
         }
       },
       {
-        name: 'gpu',
-        parse: (val, configUpdates) => {
-          configUpdates.enableGPU = parseInt(val) !== 0;
-        }
-      },
-      {
         name: 'board',
         parse: (val, configUpdates) => {
           const boardType = val.toLowerCase();
@@ -3647,8 +3634,6 @@ class URLHandler {
         aspectRatioParam +
         (this.config.exponent !== 2
             ? `&exponent=${this.config.exponent}` : '') +
-        (!this.config.enableGPU
-            ? '&gpu=0' : '') +
         (this.config.forceBoard
             ? `&board=${this.config.forceBoard}` : '') +
         (compactc.length
@@ -4761,17 +4746,9 @@ class Scheduler {
     this.balanceInterval = 5000; // Move jobs to load-balance every 5 seconds
     this.reportInterval = 60000; // Report no more than once every 1 minute
     this.workerCount = Math.max(1, Math.ceil(navigator.hardwareConcurrency * 0.75) || 1);
-    this.webGPUWarningShown = false;
   }
 
   addWorker() {
-    // Show WebGPU warning once when first worker is created
-    if (this.workers.length === 0 && this.grid.config.enableGPU &&
-        typeof navigator.gpu === 'undefined' && !this.webGPUWarningShown) {
-      console.log('WebGPU not available in this browser, falling back to CPU boards');
-      this.webGPUWarningShown = true;
-    }
-
     try {
       const t0 = performance.now();
       const workerNum = this.workers.length;
@@ -4865,7 +4842,6 @@ class Scheduler {
           dimsHeight: config.dimsHeight,
           aspectRatio: config.aspectRatio,
           exponent: config.exponent,
-          enableGPU: config.enableGPU,
           forceBoard: config.forceBoard,
           debug: config.debug
         },
@@ -15114,9 +15090,7 @@ let glBoardAvailable = null;
 function isGlBoardAvailable() {
   if (glBoardAvailable === null) {
     glBoardAvailable = GlBoard.isAvailable();
-    if (glBoardAvailable) {
-      console.log('WebGL2 available - GlBoard will be used for shallow zooms');
-    }
+    // Logging is now done at point of use (see worker handleMessage)
   }
   return glBoardAvailable;
 }
@@ -15269,12 +15243,37 @@ class FractalWorker {
     switch (type) {
       case 'addBoard':
         this.workerNumber = data.workerNumber;
-        const enableGPU = data.config.enableGPU;
-        const webGPUAvailable = GpuBoard.isAvailable();
+        // Debug flags to disable GPU backends for testing fallback chain
+        const noGPU = hasDebugFlag(data.config, 'nogpu');
+        const noGL = hasDebugFlag(data.config, 'nogl');
+        const webGPUAvailable = !noGPU && GpuBoard.isAvailable();
 
         // Query GPU limits once on first use
-        if (enableGPU && webGPUAvailable && this.gpuMaxBufferSize === null) {
+        if (webGPUAvailable && this.gpuMaxBufferSize === null) {
           this.gpuMaxBufferSize = await GpuBaseBoard.queryMaxBufferSize();
+        }
+        // Cache WebGL2 availability override for selectBoardClass
+        if (noGL) {
+          glBoardAvailable = false;
+        }
+
+        // Log fallback chain status (only for first board)
+        if (data.k === 0) {
+          if (noGPU) {
+            if (noGL) {
+              console.log('WebGPU disabled, WebGL2 disabled - falling back to CPU boards');
+            } else if (isGlBoardAvailable()) {
+              console.log('WebGPU disabled - falling back to WebGL2 boards');
+            } else {
+              console.log('WebGPU disabled, WebGL2 not available - falling back to CPU boards');
+            }
+          } else if (!this.gpuMaxBufferSize) {
+            if (isGlBoardAvailable()) {
+              console.log('WebGPU not available - falling back to WebGL2 boards');
+            } else {
+              console.log('WebGPU and WebGL2 not available - falling back to CPU boards');
+            }
+          }
         }
 
         // Explicit board selection via board= parameter

@@ -11,7 +11,7 @@ const path = require('path');
   page.on('pageerror', err => console.log('Page error:', err.message));
   page.on('requestfailed', req => console.log('Request failed:', req.url()));
 
-  const params = 'z=1e14&a=16:9&gpu=0&c=-0.5425060105393306400515387573956+0.5082791199098461776529578942116i,,,,,,,,,,,&grid=12&pixelratio=1';
+  const params = 'z=1e14&a=16:9&debug=nogpu&c=-0.5425060105393306400515387573956+0.5082791199098461776529578942116i,,,,,,,,,,,&grid=12&pixelratio=1';
   const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?' + params;
   console.log('Loading:', url);
   await page.goto(url, { waitUntil: 'load' });

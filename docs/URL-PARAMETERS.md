@@ -117,15 +117,6 @@ Sets the exponent `n` in the iteration formula z → z^n + c.
 ?exponent=4       # Quartic Multibrot
 ```
 
-### `gpu` - GPU Acceleration
-
-Controls WebGPU acceleration.
-
-```
-?gpu=1            # Enable GPU (default if available)
-?gpu=0            # Disable GPU (force all computation onto the CPU)
-```
-
 ### `board` - Algorithm Selection
 
 Forces a specific computation algorithm. This is primarily useful for testing
@@ -168,6 +159,9 @@ with `?debug=w` when debugging on the main thread.
 ?debug=b         # Collect batch timing stats
 ?debug=r         # Random batch sizes for benchmarking
 ?debug=inherit   # Log inheritance stats and flash inherited pixels
+?debug=nogpu     # Disable WebGPU (falls back to WebGL2)
+?debug=nogl      # Disable WebGL2 (falls back to CPU)
+?debug=nogpu,nogl  # Force CPU-only computation
 ```
 
 ## Localization
@@ -209,7 +203,7 @@ Sets the UI language for help text and other interface elements.
 
 **Force CPU computation for debugging:**
 ```
-?gpu=0&board=cpu
+?debug=nogpu,nogl&board=cpu
 ```
 
 **Spanish interface with custom grid:**

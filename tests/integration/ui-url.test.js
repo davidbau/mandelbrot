@@ -133,10 +133,8 @@ describe('URL Parameter Tests', () => {
     const exponent = await page.evaluate(() => window.explorer.config.exponent);
     expect(exponent).toBe(3);
 
-    // Test gpu=0 parameter (disable GPU)
-    await navigateToUrl(page, getAppUrl('?gpu=0'));
-    const gpuDisabled = await page.evaluate(() => window.explorer.config.enableGPU);
-    expect(gpuDisabled).toBe(false);
+    // Note: gpu=0 parameter was replaced by debug=nogpu flag
+    // which is tested in gpu-fallback.test.js
 
     // Test board parameter
     await navigateToUrl(page, getAppUrl('?board=cpu'));
