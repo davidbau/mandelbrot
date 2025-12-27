@@ -160,7 +160,12 @@ function main() {
   //  fixed_16_16(0), fixed_16_16(1), fixed_2_30(0),  (row 2)
   //  fixed_16_16(0), fixed_16_16(0), fixed_2_30(1)]  (row 3)
   // Since we always use IDENTITY_MATRIX, we can inline these values directly
-  const inlinedMatrix = '[fixed_16_16(1), fixed_16_16(0), fixed_2_30(0), fixed_16_16(0), fixed_16_16(1), fixed_2_30(0), fixed_16_16(0), fixed_16_16(0), fixed_2_30(1)]';
+  // Format with line breaks for readability
+  const inlinedMatrix = `[
+          fixed_16_16(1), fixed_16_16(0), fixed_2_30(0),
+          fixed_16_16(0), fixed_16_16(1), fixed_2_30(0),
+          fixed_16_16(0), fixed_16_16(0), fixed_2_30(1)
+        ]`;
   code = code.replace(
     /matrixToBytes\(matrix\)/g,
     inlinedMatrix
@@ -793,6 +798,77 @@ function main() {
   );
   console.log('  ✓ Shortened constructor validation errors');
 
+  // Shorten more validation errors
+  code = code.replace(
+    /\. Must be a positive integer\./g,
+    ''
+  );
+  code = code.replace(
+    /\. Has to be 0, 90, 180 or 270\./g,
+    ''
+  );
+  code = code.replace(
+    /Invalid video width: /g,
+    'Bad width: '
+  );
+  code = code.replace(
+    /Invalid video height: /g,
+    'Bad height: '
+  );
+  code = code.replace(
+    /Invalid video rotation: /g,
+    'Bad rotation: '
+  );
+  code = code.replace(
+    /Invalid video transformation matrix: /g,
+    'Bad matrix: '
+  );
+  code = code.replace(
+    /Invalid video frame rate: /g,
+    'Bad frameRate: '
+  );
+  code = code.replace(
+    /Invalid first timestamp behavior: /g,
+    'Bad firstTimestampBehavior: '
+  );
+  console.log('  ✓ Shortened video validation errors');
+
+  // Shorten timestamp error messages
+  code = code.replace(
+    /First chunk must have timestamp 0 \(got DTS=\$\{[\w]+\}\)\. Use firstTimestampBehavior:"offset" to auto-fix\./g,
+    'First chunk DTS must be 0'
+  );
+  code = code.replace(
+    /Timestamps must be monotonically increasing \(DTS went from \$\{[\w.]+\s*\*\s*1e6\} to \$\{[\w]+\s*\*\s*1e6\}\)\./g,
+    'DTS must increase'
+  );
+  code = code.replace(
+    /Cannot add new video or audio chunks after the file has been finalized\./g,
+    'Muxer already finalized'
+  );
+  console.log('  ✓ Shortened timestamp error messages');
+
+  // Shorten JSDoc comments
+  code = code.replace(
+    /\/\*\* Finalizes the file, making it ready for use\. Must be called after all video and audio chunks have been added\. \*\//g,
+    '/** Finalizes the muxer. */'
+  );
+  console.log('  ✓ Shortened JSDoc comments');
+
+  // Shorten long variable names to fit 100 char lines
+  code = code.replace(/sampleCompositionTimeOffset/g, 'sampleCTO');
+  code = code.replace(/compositionTimeOffsetTable/g, 'ctoTable');
+  code = code.replace(/lastCompositionTimeOffsetTableEntry/g, 'lastCTOEntry');
+  code = code.replace(/strictTimestampBehavior/g, 'strictTS');
+  code = code.replace(/currentChunkDuration/g, 'chunkDur');
+  code = code.replace(/firstTimestampBehavior/g, 'firstTSBehavior');
+  // Shorten long comment
+  code = code.replace(
+    /For AVC, description is an AVCDecoderConfigurationRecord, so nothing else to do here/g,
+    'AVC uses AVCDecoderConfigurationRecord directly'
+  );
+  console.log('  ✓ Shortened long variable names');
+
   // 31. Change the export and module format for browser embedding
   // Original format:
   //   "use strict"; var Mp4Muxer = (() => { ... return __toCommonJS(src_exports); })();
@@ -1047,17 +1123,35 @@ function main() {
   const afterTransformSize = code.length;
   console.log(`\nAfter transforms: ${afterTransformSize.toLocaleString()} bytes`);
 
-  // Write intermediate file for minification
+  // Final surgical cleanup for Mandelbrot explorer
+  // Remove i32 (dead)
+  code = code.replace(
+    /\s*var i32 = \(value\) => \{\s*view\.setInt32\(0, value, false\);\s*return \[bytes\[0\], bytes\[1\], bytes\[2\], bytes\[3\]\];\s*\};/,
+    ''
+  );
+  console.log('  ✓ Removed unused i32 helper function');
+
+  // Simplify needsCtts and remove ctts call/definition
+  code = code.replace(
+    /const needsCtts = track\.compositionTimeOffsetTable\.length > 1 \|\|\s*track\.compositionTimeOffsetTable\.some\(\(x\) => x\.sampleCompositionTimeOffset !== 0\);/,
+    'const needsCtts = false;'
+  );
+  code = code.replace(/needsCtts \? ctts\(track\) : null/g, 'null');
+  code = code.replace(
+    /\s*var ctts = \(track\) => \{[\s\S]*?return fullBox\("ctts"[\s\S]*?\};\s*\}\s*\]\);\s*\};/,
+    ''
+  );
+  console.log('  ✓ Removed unused ctts logic');
+
+  // Write intermediate file for esbuild
   const tempFile = path.join(__dirname, '..', 'build', 'mp4Muxer.transformed.js');
   fs.mkdirSync(path.dirname(tempFile), { recursive: true });
   fs.writeFileSync(tempFile, code);
 
-  // Use esbuild for tree shaking (minify only if --minify flag is passed)
-  const shouldMinify = process.argv.includes('--minify');
-  console.log(`\n${shouldMinify ? 'Minifying' : 'Bundling'} with esbuild...`);
+  // Use esbuild for bundling and tree shaking (no minification for readability)
+  console.log('\nBundling with esbuild...');
   try {
-    const minifyFlag = shouldMinify ? '--minify' : '';
-    execSync(`npx esbuild "${tempFile}" --bundle ${minifyFlag} --tree-shaking=true --outfile="${OUTPUT_FILE}"`, {
+    execSync(`npx esbuild "${tempFile}" --bundle --tree-shaking=true --outfile="${OUTPUT_FILE}"`, {
       cwd: path.join(__dirname, '..'),
       stdio: 'pipe'
     });
@@ -1069,86 +1163,57 @@ function main() {
   // Clean up temp file
   fs.unlinkSync(tempFile);
 
-  // Skip line wrapping for unminified builds
-  if (!shouldMinify) {
-    const finalCode = fs.readFileSync(OUTPUT_FILE, 'utf8');
-    const finalSize = finalCode.length;
-    const savings = originalSize - finalSize;
-    const pctSaved = ((savings / originalSize) * 100).toFixed(1);
-    console.log(`\nOutput: ${OUTPUT_FILE}`);
-    console.log(`Final size: ${finalSize.toLocaleString()} bytes`);
-    console.log(`Saved: ${savings.toLocaleString()} bytes (${pctSaved}%)`);
-    console.log(`Lines: ${finalCode.split('\n').length}`);
-
-    // Verify the output works
-    console.log('\nVerifying output...');
-    try {
-      const testCode = `
-        const window = {};
-        ${finalCode}
-        if (!window.Mp4Muxer) throw new Error('Mp4Muxer not defined');
-        if (!window.Mp4Muxer.Muxer) throw new Error('Muxer not defined');
-        if (!window.Mp4Muxer.ArrayBufferTarget) throw new Error('ArrayBufferTarget not defined');
-      `;
-      new Function(testCode)();
-      console.log('  ✓ Module loads correctly');
-      console.log('  ✓ Mp4Muxer.Muxer is defined');
-      console.log('  ✓ Mp4Muxer.ArrayBufferTarget is defined');
-    } catch (e) {
-      console.error(`  ✗ Verification failed: ${e.message}`);
-      process.exit(1);
-    }
-
-    // Optionally update index.html
-    const updateHtml = process.argv.includes('--update-html');
-    if (updateHtml) {
-      console.log('\nUpdating index.html...');
-      const indexPath = path.join(__dirname, '..', 'index.html');
-      let html = fs.readFileSync(indexPath, 'utf8');
-      const scriptStart = html.indexOf('<script id="mp4Muxer">');
-      const scriptEnd = html.indexOf('</script>', scriptStart) + '</script>'.length;
-      if (scriptStart === -1) {
-        console.error('  ✗ Could not find <script id="mp4Muxer"> in index.html');
-        process.exit(1);
-      }
-      const newScript = `<script id="mp4Muxer">\n${finalCode}\n</script>`;
-      html = html.slice(0, scriptStart) + newScript + html.slice(scriptEnd);
-      fs.writeFileSync(indexPath, html);
-      console.log('  ✓ Updated index.html with new mp4Muxer');
-    } else {
-      console.log('\n=== To update index.html ===');
-      console.log('Run with --update-html flag, or manually replace the contents of <script id="mp4Muxer">');
-      console.log(`  cat ${OUTPUT_FILE}`);
-    }
-    process.exit(0);
-  }
-
-  // Wrap to ~80 columns for readability, breaking only at safe points
+  // Wrap lines: try to break before 80, hard limit at 100
   let finalCode = fs.readFileSync(OUTPUT_FILE, 'utf8');
+  const MAX_LINE_LENGTH = 95;
+  const EARLY_BREAK_LENGTH = 50;
   const lines = [];
   let line = '';
   let inString = false;
   let stringChar = '';
-  let parenDepth = 0;   // Track () nesting
-  let bracketDepth = 0; // Track [] nesting
-  let braceDepth = 0;   // Track {} nesting
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
 
   // Helper: check if position i is a good break point (break AFTER ch at i)
-  function isBreakAfter(code, i, ch, next, next6, parenDepth) {
+  function isBreakAfter(code, i, ch, next, next6, parenDepth, bracketDepth, lineLen) {
     if (ch === ';') return true;
     if (ch === '}') {
       return next !== ')' && next !== '.' && next !== ',' && next !== ']' &&
              !next6.startsWith('else') && !next6.startsWith('catch') &&
              !next6.startsWith('final') && !next6.startsWith('while');
     }
+    // Break after comma in var declarations or when line is getting long
     if (ch === ',') {
-      return /[a-zA-Z_$]/.test(next);  // var declaration
+      if (/[a-zA-Z_$]/.test(next)) return true;  // var declaration
+      if (lineLen > 40 && bracketDepth === 0) return true;  // long line, not in array
+      if (lineLen > 60) return true;  // very long line, even in array
+    }
+    // Break after && or || when line is getting long
+    const prevCh = i > 0 ? code[i - 1] : '';
+    if (lineLen > 40 && ((ch === '&' && prevCh === '&') || (ch === '|' && prevCh === '|'))) {
+      return true;
+    }
+    // Break after = in assignments when line is getting long (but not =>)
+    if (ch === '=' && lineLen > 40 && prevCh !== '=' && prevCh !== '!' && prevCh !== '<' && prevCh !== '>' && next !== '=' && next !== '>') {
+      return true;
+    }
+    // Break after ( when it starts an inline function or when line is getting long
+    if (ch === '(') {
+      // Break after ( that starts an arrow function or callback
+      if (next === '(' || next === ')' || (next === '_' || /[a-z]/.test(next))) {
+        if (lineLen > 40) return true;
+      }
+      if (lineLen > 50 && /[a-zA-Z_$]/.test(next)) return true;
+    }
+    // Break after ) or ] when line is getting long
+    if (lineLen > 50 && (ch === ')' || ch === ']') && (next === ',' || next === ')' || next === ']' || next === '.')) {
+      return true;
     }
     return false;
   }
 
   // Helper: check if position i is a good break point (break BEFORE next token)
-  // 'safe' parameter: when true, only allow very safe breaks (for early breaking)
   function isBreakBefore(code, i, ch, parenDepth, lineEndsWith, safe = false) {
     const next5 = code.slice(i + 1, i + 6);
     const next2 = code.slice(i + 1, i + 3);
@@ -1158,19 +1223,59 @@ function main() {
     if (next5.startsWith('throw')) return true;
     if (next5.startsWith('if(') && !lineEndsWith('else')) return true;
     if ((next2 === '&&' || next2 === '||') && parenDepth > 0) return true;
-    // Ternary breaks only when NOT in 'safe' mode (too risky for early breaking)
-    if (!safe && nextCh === '?' && nextCh2 !== '.' && nextCh2 !== '?') return true;
+    // Break before comparison operators when nested
+    const next3 = code.slice(i + 1, i + 4);
+    if (parenDepth > 0 && (next3 === '!==' || next3 === '===')) return true;
+    if (parenDepth > 0 && (next2 === '==' || next2 === '!=') && code[i + 3] !== '=') return true;
+    // Don't break in middle of ?? or before ? if previous char is ?
+    if (!safe && nextCh === '?' && nextCh2 !== '.' && nextCh2 !== '?' && ch !== '?') return true;
     if (!safe && nextCh === ':' && (ch === ')' || ch === ']')) return true;
     return false;
   }
 
+  let inComment = false;
+  let commentIndent = '';
+  let baseIndent = '';  // Track base indentation for continuation lines
+  let breakPositions = [];  // Track positions of ( and [ for midpoint breaking
+
   for (let i = 0; i < finalCode.length; i++) {
     const ch = finalCode[i];
     const prevCh = i > 0 ? finalCode[i - 1] : '';
+
+    // Preserve existing newlines from esbuild
+    if (ch === '\n') {
+      if (line.trim()) lines.push(line);  // Skip empty/whitespace-only lines
+      line = '';
+      baseIndent = '';  // Reset base indent on newline
+      breakPositions = [];
+      inComment = false;
+      commentIndent = '';
+      continue;
+    }
+
     line += ch;
 
-    // Track string state to avoid breaking inside strings
-    if ((ch === '"' || ch === "'" || ch === '`') && prevCh !== '\\') {
+    // Capture base indentation at start of line (before any content)
+    if (baseIndent === '' && ch !== ' ') {
+      const match = line.match(/^(\s*)/);
+      baseIndent = match ? match[1] : '';
+    }
+
+    // Track ( and [ positions for midpoint breaking
+    if ((ch === '(' || ch === '[') && !inString && !inComment) {
+      breakPositions.push(line.length);
+    }
+
+    // Track comment state (single-line comments)
+    if (ch === '/' && prevCh === '/' && !inString) {
+      inComment = true;
+      // Capture indentation for comment continuation
+      const match = line.match(/^(\s*)/);
+      commentIndent = match ? match[1] : '';
+    }
+
+    // Track string state
+    if (!inComment && (ch === '"' || ch === "'" || ch === '`') && prevCh !== '\\') {
       if (!inString) {
         inString = true;
         stringChar = ch;
@@ -1179,8 +1284,8 @@ function main() {
       }
     }
 
-    // Track nesting depth (only when not in string)
-    if (!inString) {
+    // Track nesting depth
+    if (!inString && !inComment) {
       if (ch === '(') parenDepth++;
       else if (ch === ')') parenDepth--;
       else if (ch === '[') bracketDepth++;
@@ -1189,136 +1294,180 @@ function main() {
       else if (ch === '}') braceDepth--;
     }
 
-    if (inString) continue;  // Never break inside strings
+    // For comments, break at spaces and continue with //
+    if (inComment && line.length >= MAX_LINE_LENGTH && ch === ' ') {
+      lines.push(line);
+      line = commentIndent + '//';
+      continue;
+    }
+
+    if (inString || inComment) continue;
 
     const next = finalCode[i + 1] || '';
     const next6 = finalCode.slice(i + 1, i + 7);
 
-    // Check if current position is a break point
-    const canBreakAfter = isBreakAfter(finalCode, i, ch, next, next6, parenDepth);
+    const canBreakAfter = isBreakAfter(finalCode, i, ch, next, next6, parenDepth, bracketDepth, line.length);
     const canBreakBefore = isBreakBefore(finalCode, i, ch, parenDepth, (s) => line.endsWith(s));
 
-    // If line is already >= 80, break at any opportunity
-    if (line.length >= 80 && (canBreakAfter || canBreakBefore)) {
-      lines.push(line);
-      line = '';
+    // Continuation indent: base indent + 4 spaces
+    const contIndent = baseIndent + '    ';
+
+    // Helper: find best ( or [ break near midpoint (prefer positions 40-60% into line)
+    function findMidpointBreak() {
+      if (breakPositions.length === 0) return null;
+      const midpoint = line.length / 2;
+      let bestPos = null;
+      let bestDist = Infinity;
+      for (const pos of breakPositions) {
+        // Prefer ( or [ that's between 40-60% of line length and not too early
+        if (pos >= 30 && pos <= line.length - 10) {
+          const dist = Math.abs(pos - midpoint);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestPos = pos;
+          }
+        }
+      }
+      return bestPos;
     }
-    // If line is >= 60, break early if it would keep line under 80
-    // Only use 'safe' break points (not ternary) to avoid edge cases
+
+    // Helper: push line only if it has non-whitespace content
+    function pushLine(ln) {
+      if (ln.trim()) lines.push(ln);
+    }
+
+    // Helper: break a long line, possibly multiple times
+    function breakLongLine() {
+      while (line.length >= MAX_LINE_LENGTH) {
+        const midBreak = findMidpointBreak();
+        if (midBreak) {
+          pushLine(line.slice(0, midBreak));
+          line = contIndent + line.slice(midBreak);
+          breakPositions = [];
+        } else {
+          // Find any break point in the line (before !==, ===, &&, ||, etc.)
+          let breakAt = -1;
+          for (let j = 30; j < line.length - 10; j++) {
+            const prev = line[j - 1] || '';
+            const c2 = line.slice(j, j + 2);
+            const c3 = line.slice(j, j + 3);
+            // Don't break if previous char is = (would split === into = ==)
+            if (prev === '=' || prev === '!' || prev === '<' || prev === '>') continue;
+            if (c3 === '!==' || c3 === '===' || c2 === '&&' || c2 === '||') {
+              breakAt = j;
+              break;
+            }
+          }
+          if (breakAt > 0) {
+            pushLine(line.slice(0, breakAt));
+            line = contIndent + line.slice(breakAt);
+            breakPositions = [];
+          } else {
+            break;  // Can't find a break point, give up
+          }
+        }
+      }
+    }
+
+    // Break at MAX_LINE_LENGTH
+    if (line.length >= MAX_LINE_LENGTH && (canBreakAfter || canBreakBefore)) {
+      breakLongLine();
+    }
+
+    // Early break if no safe break point ahead that keeps line under 80
+    const TARGET_LINE_LENGTH = 80;
     const canBreakAfterSafe = canBreakAfter;
     const canBreakBeforeSafe = isBreakBefore(finalCode, i, ch, parenDepth, (s) => line.endsWith(s), true);
-    if (line.length >= 60 && (canBreakAfterSafe || canBreakBeforeSafe)) {
-      // Look ahead: would continuing make us go over 80 with no safe break?
+    if (line.length >= EARLY_BREAK_LENGTH && (canBreakAfterSafe || canBreakBeforeSafe)) {
+      // Look ahead to see if there's a break point that keeps line under TARGET
       let foundBreakWithin = false;
       let tempParenDepth = parenDepth;
-      for (let j = i + 1; j < Math.min(i + 80 - line.length, finalCode.length); j++) {
+      const lookAhead = TARGET_LINE_LENGTH - line.length;  // Only look to keep under 80
+      for (let j = i + 1; j < Math.min(i + lookAhead, finalCode.length); j++) {
         const c = finalCode[j];
+        if (c === '\n') { foundBreakWithin = true; break; }
         if (c === '(') tempParenDepth++;
         else if (c === ')') tempParenDepth--;
         const n = finalCode[j + 1] || '';
         const n6 = finalCode.slice(j + 1, j + 7);
-        if (isBreakAfter(finalCode, j, c, n, n6, tempParenDepth) ||
+        if (isBreakAfter(finalCode, j, c, n, n6, tempParenDepth, bracketDepth, line.length + j - i) ||
             isBreakBefore(finalCode, j, c, tempParenDepth, () => false, true)) {
           foundBreakWithin = true;
           break;
         }
       }
-      // If no safe break within remaining chars to 80, break now
       if (!foundBreakWithin) {
-        lines.push(line);
-        line = '';
-      }
-    }
-  }
-  if (line) lines.push(line);
-  finalCode = lines.join('\n');
-
-  // Second pass: split long lines that contain strings by inserting "+" or template concatenation
-  const splitLines = [];
-  for (const ln of finalCode.split('\n')) {
-    if (ln.length <= 80) {
-      splitLines.push(ln);
-      continue;
-    }
-    // Try to split long lines containing strings
-    let result = '';
-    let currentLen = 0;
-    let inStr = false;
-    let strCh = '';
-    let inTemplateLiteral = false;
-    let templateDepth = 0;  // Track ${...} nesting
-
-    for (let i = 0; i < ln.length; i++) {
-      const ch = ln[i];
-      const prevCh = i > 0 ? ln[i - 1] : '';
-      const nextCh = ln[i + 1] || '';
-      result += ch;
-      currentLen++;
-
-      // Track regular string state
-      if ((ch === '"' || ch === "'") && prevCh !== '\\' && !inTemplateLiteral) {
-        if (!inStr) {
-          inStr = true;
-          strCh = ch;
-        } else if (ch === strCh) {
-          inStr = false;
+        breakLongLine();
+        // If still have content after breaking, just push and continue
+        // But don't break if line ends with = (might be mid-operator like ===)
+        const lastCh = line[line.length - 1];
+        const safeToBreak = lastCh !== '=' && lastCh !== '!' && lastCh !== '<' && lastCh !== '>';
+        if (line.length >= EARLY_BREAK_LENGTH && safeToBreak) {
+          pushLine(line);
+          line = contIndent;
         }
       }
+    }
+  }
+  if (line && line.trim()) lines.push(line);
 
-      // Track template literal state
-      if (ch === '`' && prevCh !== '\\' && !inStr) {
-        inTemplateLiteral = !inTemplateLiteral;
+  // Final pass: break any remaining long lines
+  const finalLines = [];
+  for (let ln of lines) {
+    while (ln.length >= MAX_LINE_LENGTH) {
+      let breakAt = -1;
+      for (let j = 30; j < ln.length - 10; j++) {
+        const prev = ln[j - 1] || '';
+        const c2 = ln.slice(j, j + 2);
+        const c3 = ln.slice(j, j + 3);
+        if (prev === '=' || prev === '!' || prev === '<' || prev === '>') continue;
+        if (c3 === '!==' || c3 === '===' || c2 === '&&' || c2 === '||') {
+          breakAt = j;
+          break;
+        }
       }
-      // Track ${...} expressions inside template literals
-      if (inTemplateLiteral && ch === '$' && nextCh === '{') {
-        templateDepth++;
-      }
-      if (inTemplateLiteral && ch === '}' && templateDepth > 0) {
-        templateDepth--;
-      }
-
-      // If we're in a regular string and line is getting long, try to break after a space
-      if (inStr && currentLen >= 70 && ch === ' ') {
-        // Insert closing quote, +, newline, and opening quote
-        result += strCh + '+\n' + strCh;
-        currentLen = 1;
-      }
-
-      // If we're in a template literal (not inside ${}) and line is long, break after space
-      if (inTemplateLiteral && templateDepth === 0 && currentLen >= 70 && ch === ' ') {
-        // For template literals, we close with `, add +, newline, and reopen with `
-        result += '`+\n`';
-        currentLen = 1;
+      if (breakAt > 0) {
+        const baseInd = (ln.match(/^(\s*)/) || ['', ''])[1];
+        finalLines.push(ln.slice(0, breakAt));
+        ln = baseInd + '    ' + ln.slice(breakAt);
+      } else {
+        break;
       }
     }
-    splitLines.push(result);
+    finalLines.push(ln);
   }
-  finalCode = splitLines.join('\n');
+  finalCode = finalLines.join('\n');
 
-  fs.writeFileSync(OUTPUT_FILE, finalCode);
+  // Note: String splitting pass removed - error messages are now short enough
+  // and splitting created ugly output
   const finalSize = finalCode.length;
   const savings = originalSize - finalSize;
   const pctSaved = ((savings / originalSize) * 100).toFixed(1);
+  fs.writeFileSync(OUTPUT_FILE, finalCode);
 
   console.log(`\nOutput: ${OUTPUT_FILE}`);
   console.log(`Final size: ${finalSize.toLocaleString()} bytes`);
   console.log(`Saved: ${savings.toLocaleString()} bytes (${pctSaved}%)`);
+  console.log(`Lines: ${finalCode.split('\n').length}`);
+
+  // Check max line length
+  const maxLineLen = Math.max(...finalCode.split('\n').map(l => l.length));
+  console.log(`Max line length: ${maxLineLen} chars`);
 
   // Verify the output works
   console.log('\nVerifying output...');
   try {
-    // Create a test that loads the module
-    const testCode = finalCode + '\nif(!window.Mp4Muxer||!window.Mp4Muxer.Muxer)throw new Error("Missing exports");';
-    const vm = require('vm');
-    const context = { window: {}, console };
-    vm.runInNewContext(testCode, context);
-    if (context.window.Mp4Muxer && context.window.Mp4Muxer.Muxer) {
-      console.log('  ✓ Module loads correctly');
-      console.log('  ✓ Mp4Muxer.Muxer is defined');
-      console.log('  ✓ Mp4Muxer.ArrayBufferTarget is defined');
-    }
+    const testCode = `
+      const window = {};
+      ${finalCode}
+      if (!window.Mp4Muxer) throw new Error('Mp4Muxer not defined');
+      if (!window.Mp4Muxer.Muxer) throw new Error('Muxer not defined');
+      if (!window.Mp4Muxer.ArrayBufferTarget) throw new Error('ArrayBufferTarget not defined');
+    `;
+    new Function(testCode)();
+    console.log('  ✓ Module loads correctly');
   } catch (e) {
-    console.error('  ✗ Verification failed:', e.message);
+    console.error(`  ✗ Verification failed: ${e.message}`);
     process.exit(1);
   }
 
@@ -1328,28 +1477,18 @@ function main() {
     console.log('\nUpdating index.html...');
     const indexPath = path.join(__dirname, '..', 'index.html');
     let html = fs.readFileSync(indexPath, 'utf8');
-
-    // Find the mp4Muxer script block
     const scriptStart = html.indexOf('<script id="mp4Muxer">');
     const scriptEnd = html.indexOf('</script>', scriptStart) + '</script>'.length;
-
     if (scriptStart === -1) {
       console.error('  ✗ Could not find <script id="mp4Muxer"> in index.html');
       process.exit(1);
     }
-
-    // Build new script block
     const newScript = `<script id="mp4Muxer">\n${finalCode}\n</script>`;
-
-    // Replace
     html = html.slice(0, scriptStart) + newScript + html.slice(scriptEnd);
     fs.writeFileSync(indexPath, html);
     console.log('  ✓ Updated index.html with new mp4Muxer');
-  } else {
-    console.log('\n=== To update index.html ===');
-    console.log('Run with --update-html flag, or manually replace the contents of <script id="mp4Muxer">');
-    console.log(`  cat ${OUTPUT_FILE}`);
   }
+  process.exit(0);
 }
 
 main();

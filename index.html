@@ -17501,14 +17501,11 @@ let LANG_FROM_URL = false;
       view.setUint32(0, value, false);
       return [bytes[0], bytes[1], bytes[2], bytes[3]];
     };
-    var i32 = (value) => {
-      view.setInt32(0, value, false);
-      return [bytes[0], bytes[1], bytes[2], bytes[3]];
-    };
     var u64 = (value) => {
       view.setUint32(0, Math.floor(value / 2 ** 32), false);
       view.setUint32(4, value, false);
-      return [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]];
+      return [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5],
+           bytes[6], bytes[7]];
     };
     var fixed_8_8 = (value) => {
       view.setInt16(0, 2 ** 8 * value, false);
@@ -17523,7 +17520,8 @@ let LANG_FROM_URL = false;
       return [bytes[0], bytes[1], bytes[2], bytes[3]];
     };
     var ascii = (text, nullTerminated = false) => {
-      let bytes2 = Array(text.length).fill(null).map((_, i) => text.charCodeAt(i));
+      let bytes2 = Array(text.length).fill(null).map((_, i) => text.charCodeAt(
+          i));
       if (nullTerminated)
         bytes2.push(0);
       return bytes2;
@@ -17552,8 +17550,8 @@ let LANG_FROM_URL = false;
         return x;
       if (Array.isArray(x))
         return x.map(deepClone);
-      return Object.fromEntries(
-        Object.entries(x).map(([key, value]) => [key, deepClone(value)]));
+      return Object.fromEntries(Object.entries(x).map(([key, value]) => [key,
+           deepClone(value)]));
     };
     var isU32 = (value) => {
       return value >= 0 && value < 2 ** 32;
@@ -17581,8 +17579,10 @@ let LANG_FROM_URL = false;
         ascii("mp41")
       ]);
     };
-    var mdat = (reserveLargeSize) => ({ type: "mdat", largeSize: reserveLargeSize });
-    var moov = (tracks, creationTime, fragmented = false) => box("moov", null, [
+    var mdat = (reserveLargeSize) => ({ type: "mdat",
+         largeSize: reserveLargeSize });
+    var moov = (tracks, creationTime, fragmented = false) => box("moov", null,
+         [
       mvhd(creationTime, tracks),
       ...tracks.map((x) => trak(x, creationTime)),
       null
@@ -17613,9 +17613,17 @@ let LANG_FROM_URL = false;
         // Preferred volume
         Array(10).fill(0),
         // Reserved
-        [fixed_16_16(1), fixed_16_16(0), fixed_2_30(0),
-         fixed_16_16(0), fixed_16_16(1), fixed_2_30(0),
-         fixed_16_16(0), fixed_16_16(0), fixed_2_30(1)],
+        [
+          fixed_16_16(1),
+          fixed_16_16(0),
+          fixed_2_30(0),
+          fixed_16_16(0),
+          fixed_16_16(1),
+          fixed_2_30(0),
+          fixed_16_16(0),
+          fixed_16_16(0),
+          fixed_2_30(1)
+        ],
         // Matrix
         Array(24).fill(0),
         // Pre-defined
@@ -17657,9 +17665,17 @@ let LANG_FROM_URL = false;
         // Volume
         u16(0),
         // Reserved
-        [fixed_16_16(1), fixed_16_16(0), fixed_2_30(0),
-         fixed_16_16(0), fixed_16_16(1), fixed_2_30(0),
-         fixed_16_16(0), fixed_16_16(0), fixed_2_30(1)],
+        [
+          fixed_16_16(1),
+          fixed_16_16(0),
+          fixed_2_30(0),
+          fixed_16_16(0),
+          fixed_16_16(1),
+          fixed_2_30(0),
+          fixed_16_16(0),
+          fixed_16_16(0),
+          fixed_2_30(1)
+        ],
         // Matrix
         fixed_16_16(track.info.type === "video" ? track.info.width : 0),
         // Track width
@@ -17735,8 +17751,8 @@ let LANG_FROM_URL = false;
     ]);
     var url = () => fullBox("url ", 0, 1);
     var stbl = (track) => {
-      const needsCtts = track.compositionTimeOffsetTable.length > 1 ||
-        track.compositionTimeOffsetTable.some((x) => x.sampleCompositionTimeOffset !== 0);
+      const needsCtts = track.ctoTable.length > 1 || track.ctoTable.some((
+          x) => x.sampleCTO !== 0);
       return box("stbl", null, [
         stsd(track),
         stts(track),
@@ -17744,7 +17760,7 @@ let LANG_FROM_URL = false;
         stsc(track),
         stsz(track),
         stco(track),
-        needsCtts ? ctts(track) : null
+        null
       ]);
     };
     var stsd = (track) => fullBox("stsd", 0, 0, [
@@ -17753,7 +17769,8 @@ let LANG_FROM_URL = false;
     ], [
       videoSampleDescription(VIDEO_CODEC_TO_BOX_NAME[track.info.codec], track)
     ]);
-    var videoSampleDescription = (compressionType, track) => box(compressionType, [
+    var videoSampleDescription = (compressionType, track) => box(
+        compressionType, [
       Array(6).fill(0),
       // Reserved
       u16(1),
@@ -17817,7 +17834,8 @@ let LANG_FROM_URL = false;
       // Colour type
       u16(COLOR_PRIMARIES_MAP[track.info.decoderConfig.colorSpace.primaries]),
       // Colour primaries
-      u16(TRANSFER_CHARACTERISTICS_MAP[track.info.decoderConfig.colorSpace.transfer]),
+      u16(TRANSFER_CHARACTERISTICS_MAP[track.info.decoderConfig.colorSpace.transfer]
+          ),
       // Transfer characteristics
       u16(MATRIX_COEFFICIENTS_MAP[track.info.decoderConfig.colorSpace.matrix]),
       // Matrix coefficients
@@ -17825,7 +17843,7 @@ let LANG_FROM_URL = false;
       // Full range flag
     ]);
     var avcC = (track) => track.info.decoderConfig && box("avcC", [
-      // For AVC, description is an AVCDecoderConfigurationRecord, so nothing else to do here
+      // AVC uses AVCDecoderConfigurationRecord directly
       ...new Uint8Array(track.info.decoderConfig.description)
     ]);
     var stts = (track) => {
@@ -17844,8 +17862,8 @@ let LANG_FROM_URL = false;
     var stss = (track) => {
       if (track.samples.every((x) => x.type === "key"))
         return null;
-      let keySamples = [...track.samples.entries()]
-        .filter(([, sample]) => sample.type === "key");
+      let keySamples = [...track.samples.entries()].filter(([, sample]
+          ) => sample.type === "key");
       return fullBox("stss", 0, 0, [
         u32(keySamples.length),
         // Number of entries
@@ -17877,7 +17895,8 @@ let LANG_FROM_URL = false;
       // Sample size table
     ]);
     var stco = (track) => {
-      if (track.finalizedChunks.length > 0 && last(track.finalizedChunks).offset >= 2 ** 32) {
+      if (track.finalizedChunks.length > 0 && last(track.finalizedChunks)
+          .offset >= 2 ** 32) {
         return fullBox("co64", 0, 0, [
           u32(track.finalizedChunks.length),
           // Number of entries
@@ -17894,13 +17913,13 @@ let LANG_FROM_URL = false;
     };
     var ctts = (track) => {
       return fullBox("ctts", 0, 0, [
-        u32(track.compositionTimeOffsetTable.length),
+        u32(track.ctoTable.length),
         // Number of entries
-        track.compositionTimeOffsetTable.map((x) => [
+        track.ctoTable.map((x) => [
           // Time-to-sample table
           u32(x.sampleCount),
           // Sample count
-          u32(x.sampleCompositionTimeOffset)
+          u32(x.sampleCTO)
           // Sample offset
         ])
       ]);
@@ -17913,7 +17932,7 @@ let LANG_FROM_URL = false;
     };
     var VIDEO_CODEC_TO_CONFIGURATION_BOX = { "avc": avcC };
     var AUDIO_CODEC_TO_CONFIGURATION_BOX = {};
-    var isTarget = Symbol("isTarget");
+    var isTarget = /* @__PURE__ */ Symbol("isTarget");
     var Target = class {
     };
     isTarget;
@@ -17928,7 +17947,8 @@ let LANG_FROM_URL = false;
       constructor() {
         this.pos = 0;
         __privateAdd(this, _helper, new Uint8Array(8));
-        __privateAdd(this, _helperView, new DataView(__privateGet(this, _helper).buffer));
+        __privateAdd(this, _helperView, new DataView(__privateGet(this,
+             _helper).buffer));
         this.offsets = /* @__PURE__ */ new WeakMap();
       }
       /** Sets the current position for future writes to a new one. */
@@ -17940,7 +17960,8 @@ let LANG_FROM_URL = false;
         this.write(__privateGet(this, _helper).subarray(0, 4));
       }
       writeU64(value) {
-        __privateGet(this, _helperView).setUint32(0, Math.floor(value / 2 ** 32), false);
+        __privateGet(this, _helperView).setUint32(0, Math.floor(
+            value / 2 ** 32), false);
         __privateGet(this, _helperView).setUint32(4, value, false);
         this.write(__privateGet(this, _helper).subarray(0, 8));
       }
@@ -18011,21 +18032,23 @@ let LANG_FROM_URL = false;
         __privateAdd(this, _ensureSize);
         __privateAdd(this, _target, void 0);
         __privateAdd(this, _buffer, new ArrayBuffer(2 ** 16));
-        __privateAdd(this, _bytes, new Uint8Array(__privateGet(this, _buffer)));
+        __privateAdd(this, _bytes, new Uint8Array(__privateGet(this, _buffer))
+            );
         __privateAdd(this, _maxPos, 0);
         __privateSet(this, _target, target);
       }
       write(data) {
-        __privateMethod(this, _ensureSize, ensureSize_fn).call(this, this.pos + data.byteLength);
+        __privateMethod(this, _ensureSize, ensureSize_fn).call(this,
+             this.pos + data.byteLength);
         __privateGet(this, _bytes).set(data, this.pos);
         this.pos += data.byteLength;
-        __privateSet(this, _maxPos,
-          Math.max(__privateGet(this, _maxPos), this.pos));
+        __privateSet(this, _maxPos, Math.max(__privateGet(this, _maxPos),
+             this.pos));
       }
       finalize() {
         __privateMethod(this, _ensureSize, ensureSize_fn).call(this, this.pos);
-        __privateGet(this, _target).buffer = __privateGet(this, _buffer).slice(0,
-          Math.max(__privateGet(this, _maxPos), this.pos));
+        __privateGet(this, _target).buffer = __privateGet(this, _buffer)
+            .slice(0, Math.max(__privateGet(this, _maxPos), this.pos));
       }
     };
     _target = /* @__PURE__ */ new WeakMap();
@@ -18051,17 +18074,14 @@ let LANG_FROM_URL = false;
     var SUPPORTED_VIDEO_CODECS = ["avc", "hevc", "vp9", "av1"];
     var TIMESTAMP_OFFSET = 2082844800;
     var FIRST_TIMESTAMP_BEHAVIORS = ["strict", "offset", "cross-track-offset"];
-    var _options, _writer, _ftypSize, _mdat, _videoTrack, _creationTime;
-    var _finalizedChunks, _finalized;
-    var _validateOptions, validateOptions_fn;
-    var _writeHeader, writeHeader_fn;
-    var _prepareTracks, prepareTracks_fn;
-    var _createSampleForTrack, createSampleForTrack_fn;
-    var _addSampleToTrack, addSampleToTrack_fn;
-    var _validateTimestamp, validateTimestamp_fn;
-    var _finalizeCurrentChunk, finalizeCurrentChunk_fn;
-    var _maybeFlushStreamingTargetWriter, maybeFlushStreamingTargetWriter_fn;
-    var _ensureNotFinalized, ensureNotFinalized_fn;
+    var _options, _writer, _ftypSize, _mdat, _videoTrack, _creationTime,
+         _finalizedChunks, _finalized, _validateOptions, validateOptions_fn,
+         _writeHeader, writeHeader_fn, _prepareTracks, prepareTracks_fn,
+         _createSampleForTrack, createSampleForTrack_fn, _addSampleToTrack,
+         addSampleToTrack_fn, _validateTimestamp, validateTimestamp_fn,
+         _finalizeCurrentChunk, finalizeCurrentChunk_fn,
+         _maybeFlushStreamingTargetWriter, maybeFlushStreamingTargetWriter_fn,
+         _ensureNotFinalized, ensureNotFinalized_fn;
     var Muxer = class {
       constructor(options) {
         __privateAdd(this, _validateOptions);
@@ -18078,20 +18098,23 @@ let LANG_FROM_URL = false;
         __privateAdd(this, _ftypSize, void 0);
         __privateAdd(this, _mdat, void 0);
         __privateAdd(this, _videoTrack, null);
-        __privateAdd(this, _creationTime, Math.floor(Date.now() / 1e3) + TIMESTAMP_OFFSET);
+        __privateAdd(this, _creationTime, Math.floor(Date.now(
+            ) / 1e3) + TIMESTAMP_OFFSET);
         __privateAdd(this, _finalizedChunks, []);
         __privateAdd(this, _finalized, false);
-        __privateMethod(this, _validateOptions, validateOptions_fn).call(this, options);
+        __privateMethod(this, _validateOptions, validateOptions_fn).call(this,
+             options);
         options.video = deepClone(options.video);
         options.audio = deepClone(options.audio);
         options.fastStart = deepClone(options.fastStart);
         this.target = options.target;
         __privateSet(this, _options, {
-          firstTimestampBehavior: "strict",
+          firstTSBehavior: "strict",
           ...options
         });
         if (options.target instanceof ArrayBufferTarget) {
-          __privateSet(this, _writer, new ArrayBufferTargetWriter(options.target));
+          __privateSet(this, _writer, new ArrayBufferTargetWriter(
+              options.target));
         } else {
           throw new Error(`Invalid target: ${options.target}`);
         }
@@ -18105,13 +18128,14 @@ let LANG_FROM_URL = false;
         if (meta && typeof meta !== "object") {
           throw new TypeError("meta must be object");
         }
-        if (timestamp !== void 0 && (!Number.isFinite(timestamp) || timestamp < 0)) {
+        if (timestamp !== void 0 && (!Number.isFinite(timestamp) ||
+             timestamp < 0)) {
           throw new TypeError(
             "timestamp must be non-negative"
           );
         }
-        if (compositionTimeOffset !== void 0 &&
-            !Number.isFinite(compositionTimeOffset)) {
+        if (compositionTimeOffset !== void 0 && !Number.isFinite(
+            compositionTimeOffset)) {
           throw new TypeError(
             "compositionTimeOffset must be number"
           );
@@ -18127,7 +18151,8 @@ let LANG_FROM_URL = false;
           compositionTimeOffset
         );
       }
-      addVideoChunkRaw(data, type, timestamp, duration, meta, compositionTimeOffset) {
+      addVideoChunkRaw(data, type, timestamp, duration, meta,
+           compositionTimeOffset) {
         if (!(data instanceof Uint8Array)) {
           throw new TypeError("data must be Uint8Array");
         }
@@ -18143,45 +18168,42 @@ let LANG_FROM_URL = false;
         if (meta && typeof meta !== "object") {
           throw new TypeError("meta must be object");
         }
-        if (compositionTimeOffset !== void 0 &&
-            !Number.isFinite(compositionTimeOffset)) {
+        if (compositionTimeOffset !== void 0 && !Number.isFinite(
+            compositionTimeOffset)) {
           throw new TypeError(
             "compositionTimeOffset must be number"
           );
         }
-        __privateMethod(this, _ensureNotFinalized, ensureNotFinalized_fn).call(this);
+        __privateMethod(this, _ensureNotFinalized, ensureNotFinalized_fn).call(
+            this);
         if (!__privateGet(this, _options).video)
           throw new Error("No video track declared.");
-        let videoSample = __privateMethod(
-          this, _createSampleForTrack, createSampleForTrack_fn
-        ).call(
-          this, __privateGet(this, _videoTrack), data, type,
-          timestamp, duration, meta, compositionTimeOffset
-        );
-        __privateMethod(
-          this, _addSampleToTrack, addSampleToTrack_fn
-        ).call(this, __privateGet(this, _videoTrack), videoSample);
+        let videoSample = __privateMethod(this, _createSampleForTrack,
+             createSampleForTrack_fn).call(this, __privateGet(this,
+             _videoTrack), data, type, timestamp, duration, meta,
+             compositionTimeOffset);
+        __privateMethod(this, _addSampleToTrack, addSampleToTrack_fn).call(
+            this, __privateGet(this, _videoTrack), videoSample);
       }
-      /**
-       * Finalizes the file, making it ready for use.
-       * Must be called after all video and audio chunks have been added.
-       */
+      /** Finalizes the muxer. */
       finalize() {
         if (__privateGet(this, _finalized)) {
           throw new Error("Cannot finalize a muxer more than once.");
         }
         if (__privateGet(this, _videoTrack))
-          __privateMethod(
-            this, _finalizeCurrentChunk, finalizeCurrentChunk_fn
-          ).call(this, __privateGet(this, _videoTrack));
+          __privateMethod(this, _finalizeCurrentChunk, finalizeCurrentChunk_fn)
+              .call(this, __privateGet(this, _videoTrack));
         let tracks = [__privateGet(this, _videoTrack)].filter(Boolean);
         if (__privateGet(this, _options).fastStart === "in-memory") {
           let mdatSize;
           for (let i = 0; i < 2; i++) {
             let movieBox2 = moov(tracks, __privateGet(this, _creationTime));
-            let movieBoxSize = __privateGet(this, _writer).measureBox(movieBox2);
-            mdatSize = __privateGet(this, _writer).measureBox(__privateGet(this, _mdat));
-            let currentChunkPos = __privateGet(this, _writer).pos + movieBoxSize + mdatSize;
+            let movieBoxSize = __privateGet(this, _writer).measureBox(
+                movieBox2);
+            mdatSize = __privateGet(this, _writer).measureBox(__privateGet(
+                this, _mdat));
+            let currentChunkPos = __privateGet(this, _writer)
+                .pos + movieBoxSize + mdatSize;
             for (let chunk of __privateGet(this, _finalizedChunks)) {
               chunk.offset = currentChunkPos;
               for (let { data } of chunk.samples) {
@@ -18205,10 +18227,8 @@ let LANG_FROM_URL = false;
             }
           }
         }
-        __privateMethod(
-          this, _maybeFlushStreamingTargetWriter,
-          maybeFlushStreamingTargetWriter_fn
-        ).call(this);
+        __privateMethod(this, _maybeFlushStreamingTargetWriter,
+             maybeFlushStreamingTargetWriter_fn).call(this);
         __privateGet(this, _writer).finalize();
         __privateSet(this, _finalized, true);
       }
@@ -18233,44 +18253,32 @@ let LANG_FROM_URL = false;
         if (!SUPPORTED_VIDEO_CODECS.includes(options.video.codec)) {
           throw new TypeError(`Unsupported video codec: ${options.video.codec}`);
         }
-        if (!Number.isInteger(options.video.width) || options.video.width <= 0) {
-          throw new TypeError(
-            `Invalid video width: ${options.video.width}. Must be a positive integer.`
-          );
+        if (!Number.isInteger(options.video.width) ||
+             options.video.width <= 0) {
+          throw new TypeError(`Bad width: ${options.video.width}`);
         }
-        if (!Number.isInteger(options.video.height) || options.video.height <= 0) {
-          throw new TypeError(
-            `Invalid video height: ${options.video.height}. Must be a positive integer.`
-          );
+        if (!Number.isInteger(options.video.height) ||
+             options.video.height <= 0) {
+          throw new TypeError(`Bad height: ${options.video.height}`);
         }
         const videoRotation = options.video.rotation;
-        if (typeof videoRotation === "number" && ![0, 90, 180, 270].includes(videoRotation)) {
-          throw new TypeError(
-            `Invalid video rotation: ${videoRotation}. Has to be 0, 90, 180 or 270.`
-          );
-        } else if (
-          Array.isArray(videoRotation) &&
-          (videoRotation.length !== 9 ||
-           videoRotation.some((value) => typeof value !== "number"))
-        ) {
-          throw new TypeError(`Invalid video transformation matrix: ${videoRotation.join()}`);
+        if (typeof videoRotation === "number" && ![0, 90, 180, 270].includes(
+            videoRotation)) {
+          throw new TypeError(`Bad rotation: ${videoRotation}`);
+        } else if (Array.isArray(videoRotation) && (videoRotation.length !== 9 
+            || videoRotation.some((value) => typeof value !== "number"))) {
+          throw new TypeError(`Bad matrix: ${videoRotation.join()}`);
         }
-        if (
-          options.video.frameRate !== void 0 &&
-          (!Number.isInteger(options.video.frameRate) ||
-           options.video.frameRate <= 0)
-        ) {
+        if (options.video.frameRate !== void 0 && (!Number.isInteger(
+            options.video.frameRate) || options.video.frameRate <= 0)) {
           throw new TypeError(
-            `Invalid video frame rate: ${options.video.frameRate}. Must be a positive integer.`
+            `Bad frameRate: ${options.video.frameRate}`
           );
         }
       }
-      if (
-        options.firstTimestampBehavior &&
-        !FIRST_TIMESTAMP_BEHAVIORS.includes(options.firstTimestampBehavior)
-      ) {
-        throw new TypeError(
-          `Invalid first timestamp behavior: ${options.firstTimestampBehavior}`);
+      if (options.firstTSBehavior && !FIRST_TIMESTAMP_BEHAVIORS.includes(
+          options.firstTSBehavior)) {
+        throw new TypeError(`Bad firstTSBehavior: ${options.firstTSBehavior}`);
       }
       if (options.fastStart !== "in-memory") {
         throw new TypeError(`'fastStart' must be 'in-memory'.`);
@@ -18284,10 +18292,8 @@ let LANG_FROM_URL = false;
       }));
       __privateSet(this, _ftypSize, __privateGet(this, _writer).pos);
       __privateSet(this, _mdat, mdat(false));
-      __privateMethod(
-        this, _maybeFlushStreamingTargetWriter,
-        maybeFlushStreamingTargetWriter_fn
-      ).call(this);
+      __privateMethod(this, _maybeFlushStreamingTargetWriter,
+           maybeFlushStreamingTargetWriter_fn).call(this);
     };
     _prepareTracks = /* @__PURE__ */ new WeakSet();
     prepareTracks_fn = function() {
@@ -18310,7 +18316,7 @@ let LANG_FROM_URL = false;
           firstDecodeTimestamp: void 0,
           lastDecodeTimestamp: -1,
           timeToSampleTable: [],
-          compositionTimeOffsetTable: [],
+          ctoTable: [],
           lastTimescaleUnits: null,
           lastSample: null,
           compactlyCodedChunkTable: []
@@ -18318,17 +18324,15 @@ let LANG_FROM_URL = false;
       }
     };
     _createSampleForTrack = /* @__PURE__ */ new WeakSet();
-    createSampleForTrack_fn = function(
-      track, data, type, timestamp, duration, meta, compositionTimeOffset
-    ) {
+    createSampleForTrack_fn = function(track, data, type, timestamp, duration,
+         meta, compositionTimeOffset) {
       let presentationTimestampInSeconds = timestamp / 1e6;
-      let decodeTimestampInSeconds = (timestamp - (compositionTimeOffset ?? 0)) / 1e6;
+      let decodeTimestampInSeconds = (timestamp - (compositionTimeOffset ?? 0)
+          ) / 1e6;
       let durationInSeconds = duration / 1e6;
-      let adjusted = __privateMethod(
-        this, _validateTimestamp, validateTimestamp_fn
-      ).call(
-        this, presentationTimestampInSeconds, decodeTimestampInSeconds, track
-      );
+      let adjusted = __privateMethod(this, _validateTimestamp,
+           validateTimestamp_fn).call(this, presentationTimestampInSeconds,
+           decodeTimestampInSeconds, track);
       presentationTimestampInSeconds = adjusted.presentationTimestamp;
       decodeTimestampInSeconds = adjusted.decodeTimestamp;
       if (meta?.decoderConfig) {
@@ -18346,19 +18350,19 @@ let LANG_FROM_URL = false;
         size: data.byteLength,
         type,
         // Will be refined once the next sample comes in
-        timescaleUnitsToNextSample: intoTimescale(durationInSeconds, track.timescale)
+        timescaleUnitsToNextSample: intoTimescale(durationInSeconds,
+             track.timescale)
       };
       return sample;
     };
     _addSampleToTrack = /* @__PURE__ */ new WeakSet();
     addSampleToTrack_fn = function(track, sample) {
       track.samples.push(sample);
-      const sampleCompositionTimeOffset = intoTimescale(
-        sample.presentationTimestamp - sample.decodeTimestamp,
-        track.timescale
-      );
+      const sampleCTO = intoTimescale(sample.presentationTimestamp - sample.decodeTimestamp,
+           track.timescale);
       if (track.lastTimescaleUnits !== null) {
-        let timescaleUnits = intoTimescale(sample.decodeTimestamp, track.timescale, false);
+        let timescaleUnits = intoTimescale(sample.decodeTimestamp,
+             track.timescale, false);
         let delta = Math.round(timescaleUnits - track.lastTimescaleUnits);
         track.lastTimescaleUnits += delta;
         track.lastSample.timescaleUnitsToNextSample = delta;
@@ -18376,16 +18380,13 @@ let LANG_FROM_URL = false;
               sampleDelta: delta
             });
           }
-          const lastCompositionTimeOffsetTableEntry = last(track.compositionTimeOffsetTable);
-          if (
-            lastCompositionTimeOffsetTableEntry.sampleCompositionTimeOffset ===
-            sampleCompositionTimeOffset
-          ) {
-            lastCompositionTimeOffsetTableEntry.sampleCount++;
+          const lastCTOEntry = last(track.ctoTable);
+          if (lastCTOEntry.sampleCTO === sampleCTO) {
+            lastCTOEntry.sampleCount++;
           } else {
-            track.compositionTimeOffsetTable.push({
+            track.ctoTable.push({
               sampleCount: 1,
-              sampleCompositionTimeOffset
+              sampleCTO
             });
           }
         }
@@ -18395,9 +18396,9 @@ let LANG_FROM_URL = false;
           sampleCount: 1,
           sampleDelta: intoTimescale(sample.duration, track.timescale)
         });
-        track.compositionTimeOffsetTable.push({
+        track.ctoTable.push({
           sampleCount: 1,
-          sampleCompositionTimeOffset
+          sampleCTO
         });
       }
       track.lastSample = sample;
@@ -18405,13 +18406,13 @@ let LANG_FROM_URL = false;
       if (!track.currentChunk) {
         beginNewChunk = true;
       } else {
-        let currentChunkDuration = sample.presentationTimestamp -
-          track.currentChunk.startTimestamp;
-        beginNewChunk = currentChunkDuration >= 0.5;
+        let chunkDur = sample.presentationTimestamp - track.currentChunk.startTimestamp;
+        beginNewChunk = chunkDur >= 0.5;
       }
       if (beginNewChunk) {
         if (track.currentChunk) {
-          __privateMethod(this, _finalizeCurrentChunk, finalizeCurrentChunk_fn).call(this, track);
+          __privateMethod(this, _finalizeCurrentChunk, finalizeCurrentChunk_fn)
+              .call(this, track);
         }
         track.currentChunk = {
           startTimestamp: sample.presentationTimestamp,
@@ -18421,25 +18422,22 @@ let LANG_FROM_URL = false;
       track.currentChunk.samples.push(sample);
     };
     _validateTimestamp = /* @__PURE__ */ new WeakSet();
-    validateTimestamp_fn = function(presentationTimestamp, decodeTimestamp, track) {
-      const strictTimestampBehavior =
-        __privateGet(this, _options).firstTimestampBehavior === "strict";
+    validateTimestamp_fn = function(presentationTimestamp, decodeTimestamp,
+         track) {
+      const strictTS = __privateGet(this, _options).firstTSBehavior === "strict";
       const noLastDecodeTimestamp = track.lastDecodeTimestamp === -1;
       const timestampNonZero = decodeTimestamp !== 0;
-      if (strictTimestampBehavior && noLastDecodeTimestamp && timestampNonZero) {
+      if (strictTS && noLastDecodeTimestamp && timestampNonZero) {
         throw new Error(
-          `First chunk must have timestamp 0 (got DTS=${decodeTimestamp}). ` +
-          `Use firstTimestampBehavior:"offset" to auto-fix.`
+          `First chunk DTS must be 0`
         );
-      } else if (
-        __privateGet(this, _options).firstTimestampBehavior === "offset" ||
-        __privateGet(this, _options).firstTimestampBehavior === "cross-track-offset"
-      ) {
+      } else if (__privateGet(this, _options).firstTSBehavior === "offset" ||
+           __privateGet(this, _options).firstTSBehavior === "cross-track-offset") {
         if (track.firstDecodeTimestamp === void 0) {
           track.firstDecodeTimestamp = decodeTimestamp;
         }
         let baseDecodeTimestamp;
-        if (__privateGet(this, _options).firstTimestampBehavior === "offset") {
+        if (__privateGet(this, _options).firstTSBehavior === "offset") {
           baseDecodeTimestamp = track.firstDecodeTimestamp;
         } else {
           baseDecodeTimestamp = Math.min(
@@ -18452,8 +18450,7 @@ let LANG_FROM_URL = false;
       }
       if (decodeTimestamp < track.lastDecodeTimestamp) {
         throw new Error(
-          `Timestamps must be monotonically increasing ` +
-          `(DTS went from ${track.lastDecodeTimestamp * 1e6} to ${decodeTimestamp * 1e6}).`
+          `DTS must increase`
         );
       }
       track.lastDecodeTimestamp = decodeTimestamp;
@@ -18465,11 +18462,9 @@ let LANG_FROM_URL = false;
         return;
       track.finalizedChunks.push(track.currentChunk);
       __privateGet(this, _finalizedChunks).push(track.currentChunk);
-      if (
-        track.compactlyCodedChunkTable.length === 0 ||
-        last(track.compactlyCodedChunkTable).samplesPerChunk !==
-        track.currentChunk.samples.length
-      ) {
+      if (track.compactlyCodedChunkTable.length === 0 || last(
+          track.compactlyCodedChunkTable).samplesPerChunk 
+              !== track.currentChunk.samples.length) {
         track.compactlyCodedChunkTable.push({
           firstChunk: track.finalizedChunks.length,
           // 1-indexed
@@ -18486,14 +18481,12 @@ let LANG_FROM_URL = false;
     _ensureNotFinalized = /* @__PURE__ */ new WeakSet();
     ensureNotFinalized_fn = function() {
       if (__privateGet(this, _finalized)) {
-        throw new Error(
-          "Cannot add new video or audio chunks after the file has been finalized.");
+        throw new Error("Muxer already finalized");
       }
     };
     window.Mp4Muxer = { Muxer, ArrayBufferTarget };
   })();
 })();
-
 </script>
 <!-- END_MP4MUXER_LIBRARY -->
 <script id="startApp">
