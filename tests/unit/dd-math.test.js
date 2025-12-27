@@ -16,18 +16,18 @@ describe('Quad-Double Arithmetic', () => {
   // --- Array-based In-Place Operations ---
 
   describe('Two-Sum operations', () => {
-    test('Afast2Sum should compute exact sum of two floats', () => {
+    test('arFast2Sum should compute exact sum of two floats', () => {
       const result = new Float64Array(2);
-      qd.Afast2Sum(result, 0, 1.0, 1e-16);
+      qd.arFast2Sum(result, 0, 1.0, 1e-16);
 
       // Result should be sum and error
       expect(result[0]).toBeCloseTo(1.0, 15);
       expect(result[1]).toBeCloseTo(1e-16, 30);
     });
 
-    test('Aslow2Sum should handle any order', () => {
+    test('arSlow2Sum should handle any order', () => {
       const result = new Float64Array(2);
-      qd.Aslow2Sum(result, 0, 1e-16, 1.0);
+      qd.arSlow2Sum(result, 0, 1e-16, 1.0);
 
       expect(result[0]).toBeCloseTo(1.0, 15);
       expect(result[1]).toBeCloseTo(1e-16, 30);
@@ -35,42 +35,42 @@ describe('Quad-Double Arithmetic', () => {
   });
 
   describe('Two-Product operations', () => {
-    test('AtwoProduct should compute exact product', () => {
+    test('arTwoProduct should compute exact product', () => {
       const result = new Float64Array(2);
-      qd.AtwoProduct(result, 0, 3.0, 7.0);
+      qd.arTwoProduct(result, 0, 3.0, 7.0);
 
       expect(result[0] + result[1]).toBe(21.0);
     });
 
-    test('AtwoSquare should compute exact square', () => {
+    test('arTwoSquare should compute exact square', () => {
       const result = new Float64Array(2);
-      qd.AtwoSquare(result, 0, 3.0);
+      qd.arTwoSquare(result, 0, 3.0);
 
       expect(result[0] + result[1]).toBe(9.0);
     });
   });
 
   describe('Double-Double Addition (In-Place)', () => {
-    test('ArddAdd should add two double-doubles correctly', () => {
+    test('arDdAdd should add two double-doubles correctly', () => {
       const result = new Float64Array(2);
 
       // 1.0 + 0.5 = 1.5
-      qd.ArddAdd(result, 0, 1.0, 0.0, 0.5, 0.0);
+      qd.arDdAdd(result, 0, 1.0, 0.0, 0.5, 0.0);
       expect(result[0] + result[1]).toBe(1.5);
     });
 
-    test('ArddAdd should handle high-precision addition', () => {
+    test('arDdAdd should handle high-precision addition', () => {
       const result = new Float64Array(2);
 
       // Add a large number and a tiny number that would be lost in float64
-      qd.ArddAdd(result, 0, 1.0, 1e-17, 1e-16, 0.0);
+      qd.arDdAdd(result, 0, 1.0, 1e-17, 1e-16, 0.0);
 
       // The sum should preserve both the high and low precision parts
       expect(result[0]).toBeCloseTo(1.0, 15);
       expect(result[0] + result[1]).toBeCloseTo(1.0 + 1e-16 + 1e-17, 25);
     });
 
-    test('ArddAdd should accumulate small values precisely', () => {
+    test('arDdAdd should accumulate small values precisely', () => {
       const result = new Float64Array(2);
 
       // Start with zero
@@ -79,7 +79,7 @@ describe('Quad-Double Arithmetic', () => {
 
       // Add 0.1 ten times
       for (let i = 0; i < 10; i++) {
-        qd.ArddAdd(result, 0, result[0], result[1], 0.1, 0.0);
+        qd.arDdAdd(result, 0, result[0], result[1], 0.1, 0.0);
       }
 
       // Should be exactly 1.0 (or very close due to quad-double precision)
@@ -88,19 +88,19 @@ describe('Quad-Double Arithmetic', () => {
   });
 
   describe('Double-Double Multiplication (In-Place)', () => {
-    test('ArddMul should multiply two double-doubles', () => {
+    test('arDdMul should multiply two double-doubles', () => {
       const result = new Float64Array(2);
 
       // 3.0 * 7.0 = 21.0
-      qd.ArddMul(result, 0, 3.0, 0.0, 7.0, 0.0);
+      qd.arDdMul(result, 0, 3.0, 0.0, 7.0, 0.0);
       expect(result[0] + result[1]).toBe(21.0);
     });
 
-    test('ArddMul should handle high-precision multiplication', () => {
+    test('arDdMul should handle high-precision multiplication', () => {
       const result = new Float64Array(2);
 
       // Multiply two values with low-order bits
-      qd.ArddMul(result, 0, 1.0, 1e-16, 2.0, 0.0);
+      qd.arDdMul(result, 0, 1.0, 1e-16, 2.0, 0.0);
 
       // Result should be 2.0 + 2e-16
       expect(result[0]).toBeCloseTo(2.0, 15);
@@ -109,19 +109,19 @@ describe('Quad-Double Arithmetic', () => {
   });
 
   describe('Double-Double Square (In-Place)', () => {
-    test('ArddSquare should compute square accurately', () => {
+    test('arDdSquare should compute square accurately', () => {
       const result = new Float64Array(2);
 
       // 3.0^2 = 9.0
-      qd.ArddSquare(result, 0, 3.0, 0.0);
+      qd.arDdSquare(result, 0, 3.0, 0.0);
       expect(result[0] + result[1]).toBe(9.0);
     });
 
-    test('ArddSquare should preserve precision', () => {
+    test('arDdSquare should preserve precision', () => {
       const result = new Float64Array(2);
 
       // Square a value with low-order bits
-      qd.ArddSquare(result, 0, 1.0, 1e-16);
+      qd.arDdSquare(result, 0, 1.0, 1e-16);
 
       // (1 + 1e-16)^2 ≈ 1 + 2e-16 + 1e-32
       expect(result[0]).toBeCloseTo(1.0, 15);
@@ -131,9 +131,9 @@ describe('Quad-Double Arithmetic', () => {
   });
 
   describe('Double-Double Array Utilities', () => {
-    test('ArddSet should set values in a Float64Array', () => {
+    test('arDdSet should set values in a Float64Array', () => {
       const r = new Float64Array(2);
-      qd.ArddSet(r, 0, 3.14, 1e-10);
+      qd.arDdSet(r, 0, 3.14, 1e-10);
       expect(r[0]).toBe(3.14);
       expect(r[1]).toBe(1e-10);
     });
@@ -150,10 +150,10 @@ describe('Quad-Double Arithmetic', () => {
       a[1] = 1e-16;
 
       // b = a * a (should be (1 + 1e-16)^2)
-      qd.ArddMul(b, 0, a[0], a[1], a[0], a[1]);
+      qd.arDdMul(b, 0, a[0], a[1], a[0], a[1]);
 
       // c = b + a (should be (1 + 1e-16)^2 + (1 + 1e-16))
-      qd.ArddAdd(c, 0, b[0], b[1], a[0], a[1]);
+      qd.arDdAdd(c, 0, b[0], b[1], a[0], a[1]);
 
       // Expected: 1 + 2e-16 + 1e-32 + 1 + 1e-16 = 2 + 3e-16 + 1e-32
       expect(c[0]).toBeCloseTo(2.0, 15);
@@ -165,7 +165,7 @@ describe('Quad-Double Arithmetic', () => {
       const result = new Float64Array(2);
 
       // Compute (1 + 1e-10) - 1 which would lose precision in float64
-      qd.ArddAdd(result, 0, 1.0, 1e-10, -1.0, 0.0);
+      qd.arDdAdd(result, 0, 1.0, 1e-10, -1.0, 0.0);
 
       expect(result[0] + result[1]).toBeCloseTo(1e-10, 12);
     });

@@ -201,15 +201,15 @@ By building the number incrementally in DD or QD precision, digits beyond the 15
 For performance-critical inner loops, the code provides "array in-place" variants that avoid allocating new arrays:
 
 ```javascript
-function ArddAdd(r, i, a1, a2, b1, b2) {
+function arDdAdd(r, i, a1, a2, b1, b2) {
   // Writes result to r[i] and r[i+1]
-  Aslow2Sum(r, i, a1, b1);
+  arSlow2Sum(r, i, a1, b1);
   const h1 = r[i], h2 = r[i+1];
-  Aslow2Sum(r, i, a2, b2);
+  arSlow2Sum(r, i, a2, b2);
   const l1 = r[i], l2 = r[i+1];
-  Afast2Sum(r, i, h1, h2 + l1);
+  arFast2Sum(r, i, h1, h2 + l1);
   const v1 = r[i], v2 = r[i+1];
-  Afast2Sum(r, i, v1, v2 + l2);
+  arFast2Sum(r, i, v1, v2 + l2);
 }
 ```
 

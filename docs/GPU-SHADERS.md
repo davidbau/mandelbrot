@@ -567,9 +567,9 @@ for (let i = THREADING_CAPACITY - SEARCH_WINDOW; i < THREADING_CAPACITY; i++) {
   const pt = this.refOrbit[i];
 
   // Compute difference in QD precision (all 4 components)
-  ArqdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
+  arQdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
                  -pt[0], -pt[1], -pt[2], -pt[3]);  // dr in QD
-  ArqdAdd(tt, 4, endpoint[4], endpoint[5], endpoint[6], endpoint[7],
+  arQdAdd(tt, 4, endpoint[4], endpoint[5], endpoint[6], endpoint[7],
                  -pt[4], -pt[5], -pt[6], -pt[7]);  // di in QD
 
   // Sum QD components for final distance

@@ -41,19 +41,19 @@ Complex QD-precision numbers use 8 components: `[r0, r1, r2, r3, i0, i1, i2, i3]
 
 ### Renormalization
 
-After arithmetic operations, components may have overlapping ranges. The `ArqdRenorm` function restores the non-overlapping property:
+After arithmetic operations, components may have overlapping ranges. The `arQdRenorm` function restores the non-overlapping property:
 
 ```javascript
-function ArqdRenorm(a, a0, a1, a2, a3) {
+function arQdRenorm(a, a0, a1, a2, a3) {
   // Cascade two-sum operations to ensure non-overlapping
-  [a0, a1] = AquickTwoSum(a0, a1);
-  [a1, a2] = AquickTwoSum(a1, a2);
-  [a2, a3] = AquickTwoSum(a2, a3);
+  [a0, a1] = arQuickTwoSum(a0, a1);
+  [a1, a2] = arQuickTwoSum(a1, a2);
+  [a2, a3] = arQuickTwoSum(a2, a3);
   // Second pass for full accuracy
-  [a0, a1] = AquickTwoSum(a0, a1);
-  [a1, a2] = AquickTwoSum(a1, a2);
-  [a0, a1] = AquickTwoSum(a0, a1);
-  ArqdSet(a, a0, a1, a2, a3);
+  [a0, a1] = arQuickTwoSum(a0, a1);
+  [a1, a2] = arQuickTwoSum(a1, a2);
+  [a0, a1] = arQuickTwoSum(a0, a1);
+  arQdSet(a, a0, a1, a2, a3);
 }
 ```
 
@@ -78,7 +78,7 @@ function toQDAdd(a, b) {
 The product of two QD-precision numbers requires computing many cross-terms. We use Bailey's "sloppy_mul" algorithm which computes all cross-terms that contribute to the final precision:
 
 ```javascript
-function ArqdMul(r, a, b) {
+function arQdMul(r, a, b) {
   // Key cross-products contribute to different precision levels
   // a0*b0 → highest order
   // a0*b1 + a1*b0 → second order
@@ -155,10 +155,10 @@ This codebase follows the naming conventions of the QD library by Hida, Li, and 
 
 | Precision | Doubles | Bits | Digits | Prefix | Example |
 |-----------|---------|------|--------|--------|---------|
-| Double-double (DD) | 2 | ~106 | ~31 | `dd`, `Ardd` | `ddAdd`, `ArddSplit` |
-| Quad-double (QD) | 4 | ~212 | ~62 | `qd`, `Arqd` | `toQD`, `ArqdMul` |
+| Double-double (DD) | 2 | ~106 | ~31 | `dd`, `arDd` | `ddAdd`, `arDdSplit` |
+| Quad-double (QD) | 4 | ~212 | ~62 | `qd`, `arQd` | `toQD`, `arQdMul` |
 
-The `Ar` prefix denotes "Array" operations that write results to pre-allocated arrays for performance.
+The `ar` prefix denotes "Array" operations that write results to pre-allocated arrays for performance.
 
 ## References
 

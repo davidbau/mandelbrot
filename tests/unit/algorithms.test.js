@@ -29,15 +29,15 @@ const qdFuncs = createTestEnvironment([
   'toQDAdd',
   'toQDSub',
   'toQDScale',
-  'ArqdAdd',
-  'ArqdMul',
-  'ArqdSet',
-  'ArqdRenorm',
-  'ArqdThreeSum',
-  'ArqdTwoProduct',
-  'AquickTwoSum',
-  'AsymmetricTwoSum',
-  'AtwoProduct'
+  'arQdAdd',
+  'arQdMul',
+  'arQdSet',
+  'arQdRenorm',
+  'arQdThreeSum',
+  'arQdTwoProduct',
+  'arQuickTwoSum',
+  'arSymmetricTwoSum',
+  'arTwoProduct'
 ]);
 
 describe('Fibonacci Period Algorithm', () => {

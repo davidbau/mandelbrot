@@ -1,33 +1,33 @@
 const { createTestEnvironment } = require('../utils/extract-code');
 
 const {
-  ArqdAdd,
-  ArqdMul,
-  ArqdSquare,
-  ArqdSet,
-  AsymmetricTwoSum,
-  AquickTwoSum,
-  ArqdThreeSum,
-  ArqdTwoProduct,
-  ArqdTwoSquare,
-  ArqdRenorm,
-  AtwoProduct,
-  AtwoSquare,
-  ArddSplit
+  arQdAdd,
+  arQdMul,
+  arQdSquare,
+  arQdSet,
+  arSymmetricTwoSum,
+  arQuickTwoSum,
+  arQdThreeSum,
+  arQdTwoProduct,
+  arQdTwoSquare,
+  arQdRenorm,
+  arTwoProduct,
+  arTwoSquare,
+  arDdSplit
 } = createTestEnvironment([
-  'ArqdAdd',
-  'ArqdMul',
-  'ArqdSquare',
-  'ArqdSet',
-  'AsymmetricTwoSum',
-  'AquickTwoSum',
-  'ArqdThreeSum',
-  'ArqdTwoProduct',
-  'ArqdTwoSquare',
-  'ArqdRenorm',
-  'AtwoProduct',
-  'AtwoSquare',
-  'ArddSplit'
+  'arQdAdd',
+  'arQdMul',
+  'arQdSquare',
+  'arQdSet',
+  'arSymmetricTwoSum',
+  'arQuickTwoSum',
+  'arQdThreeSum',
+  'arQdTwoProduct',
+  'arQdTwoSquare',
+  'arQdRenorm',
+  'arTwoProduct',
+  'arTwoSquare',
+  'arDdSplit'
 ]);
 
 const toMagnitude = (coeff, exp) => coeff * Math.pow(10, -exp);
@@ -53,9 +53,9 @@ function sumParts(parts) {
 }
 
 describe('oct-double arithmetic helpers', () => {
-  // Removed test for ArqdSet and ArqdcCopy as ArqdcCopy is removed
+  // Removed test for arQdSet and ArqdcCopy as ArqdcCopy is removed
 
-  test('ArqdAdd preserves deep cancellation components', () => {
+  test('arQdAdd preserves deep cancellation components', () => {
     const aCoeffs = [
       { coeff: 1, exp: 0 },
       { coeff: 5, exp: 16 },
@@ -73,7 +73,7 @@ describe('oct-double arithmetic helpers', () => {
     const b = bCoeffs.map(c => toMagnitude(c.coeff, c.exp));
 
     const result = new Array(4).fill(0);
-    ArqdAdd(result, 0, ...a, ...b);
+    arQdAdd(result, 0, ...a, ...b);
 
     const expected = exactValue([...aCoeffs, ...bCoeffs]);
     const actual = sumParts(result);
@@ -81,7 +81,7 @@ describe('oct-double arithmetic helpers', () => {
     expect(Math.abs(actual - expected)).toBeLessThan(1e-30);
   });
 
-  test('ArqdMul tracks cross-terms beyond double precision', () => {
+  test('arQdMul tracks cross-terms beyond double precision', () => {
     const xCoeffs = [
       { coeff: 1, exp: 0 },
       { coeff: 2, exp: 16 },
@@ -105,13 +105,13 @@ describe('oct-double arithmetic helpers', () => {
     const expectedProduct = Number(productNum) / Number(productScale);
 
     const result = new Array(4).fill(0);
-    ArqdMul(result, 0, ...x, ...y);
+    arQdMul(result, 0, ...x, ...y);
     const actual = sumParts(result);
 
     expect(Math.abs(actual - expectedProduct)).toBeLessThan(1e-28);
   });
 
-  test('ArqdSquare matches ArqdMul self-products', () => {
+  test('arQdSquare matches arQdMul self-products', () => {
     const coeffs = [
       { coeff: 3, exp: 0 },
       { coeff: -4, exp: 16 },
@@ -122,30 +122,30 @@ describe('oct-double arithmetic helpers', () => {
 
     const expected = sumParts((() => {
       const tmp = new Array(4).fill(0);
-      ArqdMul(tmp, 0, ...parts, ...parts);
+      arQdMul(tmp, 0, ...parts, ...parts);
       return tmp;
     })());
 
     const result = new Array(4).fill(0);
-    ArqdSquare(result, 0, ...parts);
+    arQdSquare(result, 0, ...parts);
     const actual = sumParts(result);
 
     expect(Math.abs(actual - expected)).toBeLessThan(1e-32);
   });
 
-  test('ArqdTwoProduct captures error term for wide-magnitude factors', () => {
+  test('arQdTwoProduct captures error term for wide-magnitude factors', () => {
     const a = 1e16;
     const b = 1e-16 + 1e-32;
-    const [p, e] = ArqdTwoProduct(a, b);
+    const [p, e] = arQdTwoProduct(a, b);
     const expected = a * b; // true value: 1 + 1e-16
     expect(p + e).toBeCloseTo(expected);
     expect(Math.abs(e)).toBeGreaterThan(0);
   });
 
-  test('ArqdRenorm flattens five-term sums into four limbs', () => {
+  test('arQdRenorm flattens five-term sums into four limbs', () => {
     const out = new Array(4).fill(0);
     // Force cascading renormalization with mixed magnitudes
-    ArqdRenorm(out, 0, 1, 1e-12, 1e-24, 1e-36, 1e-48);
+    arQdRenorm(out, 0, 1, 1e-12, 1e-24, 1e-36, 1e-48);
     expect(out.length).toBe(4);
     // Sum should match the original components
     const total = 1 + 1e-12 + 1e-24 + 1e-36 + 1e-48;

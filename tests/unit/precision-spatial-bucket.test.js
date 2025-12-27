@@ -49,7 +49,7 @@ function ddSub(a, b) {
 }
 
 // Mock oct arithmetic using array-based operations
-function ArqdAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
+function arQdAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   // Simplified oct add - accumulates with error tracking
   let s1 = a1 + b1;
   let e1 = (a1 - s1) + b1;
@@ -77,7 +77,7 @@ function toQDAdd(a, b) {
   const aa = toQD(a);
   const bb = toQD(b);
   const out = new Array(4);
-  ArqdAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+  arQdAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
   return out;
 }
 

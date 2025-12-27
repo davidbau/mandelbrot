@@ -16,19 +16,19 @@ const {
   toQDSquare,
   qdToNumber,
   toQDScale,
-  ArqdAdd,
-  ArqdMul,
-  ArqdSquare,
-  AsymmetricTwoSum,
-  AquickTwoSum,
-  ArqdThreeSum,
-  ArqdTwoProduct,
-  ArqdTwoSquare,
-  ArqdRenorm,
-  ArqdSet,
-  AtwoProduct,
-  AtwoSquare,
-  ArddSplit
+  arQdAdd,
+  arQdMul,
+  arQdSquare,
+  arSymmetricTwoSum,
+  arQuickTwoSum,
+  arQdThreeSum,
+  arQdTwoProduct,
+  arQdTwoSquare,
+  arQdRenorm,
+  arQdSet,
+  arTwoProduct,
+  arTwoSquare,
+  arDdSplit
 } = createTestEnvironment([
   'toQD',
   'toQDAdd',
@@ -37,19 +37,19 @@ const {
   'toQDSquare',
   'qdToNumber',
   'toQDScale',
-  'ArqdAdd',
-  'ArqdMul',
-  'ArqdSquare',
-  'AsymmetricTwoSum',
-  'AquickTwoSum',
-  'ArqdThreeSum',
-  'ArqdTwoProduct',
-  'ArqdTwoSquare',
-  'ArqdRenorm',
-  'ArqdSet',
-  'AtwoProduct',
-  'AtwoSquare',
-  'ArddSplit'
+  'arQdAdd',
+  'arQdMul',
+  'arQdSquare',
+  'arSymmetricTwoSum',
+  'arQuickTwoSum',
+  'arQdThreeSum',
+  'arQdTwoProduct',
+  'arQdTwoSquare',
+  'arQdRenorm',
+  'arQdSet',
+  'arTwoProduct',
+  'arTwoSquare',
+  'arDdSplit'
 ]);
 
 describe('QD-style oct precision tests', () => {
@@ -108,9 +108,9 @@ describe('QD-style oct precision tests', () => {
     const a = 1 + 1e-10;
     const b = 1 + 2e-10;
 
-    // AtwoProduct uses array output: result[i] = product, result[i+1] = error
+    // arTwoProduct uses array output: result[i] = product, result[i+1] = error
     const result = [0, 0, 0, 0];
-    AtwoProduct(result, 0, a, b);
+    arTwoProduct(result, 0, a, b);
     const p = result[0];
     const e = result[1];
 
@@ -182,7 +182,7 @@ describe('QD-style oct precision tests', () => {
     // 1. two_prod for a[0]*b[0], a[0]*b[1], a[1]*b[0], a[0]*b[2], a[1]*b[1], a[2]*b[0]
     // 2. Plain multiply for a[0]*b[3] + a[1]*b[2] + a[2]*b[1] + a[3]*b[0]
     //
-    // Our ArqdMul computes:
+    // Our arQdMul computes:
     // 1. two_prod for a[0]*b[0], a[0]*b[1], a[1]*b[0] (only 3!)
     // 2. Plain multiply for rest
     //
@@ -345,7 +345,7 @@ describe('QD-style oct precision tests', () => {
   });
 
   test('cross-term preservation when main term has large error', () => {
-    // This test catches a specific bug in ArqdMul where small cross terms
+    // This test catches a specific bug in arQdMul where small cross terms
     // are lost because the TwoProduct error (e0) from the main product
     // swamps them during renormalization.
     //

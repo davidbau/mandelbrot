@@ -6191,18 +6191,18 @@ class QDCpuBoard extends Board {
     // Format: [r0, r1, r2, r3, i0, i1, i2, i3] for each complex number
     for (let y = 0; y < this.config.dimsHeight; y++) {
       const jFrac = (0.5 - (y / this.config.dimsHeight));
-      // Use ArqdMul instead of toQDScale to capture error terms
+      // Use arQdMul instead of toQDScale to capture error terms
       // jFrac is treated as QD [jFrac, 0, 0, 0]
-      ArqdMul(tempQD, 0, sizeOverAspect[0], sizeOverAspect[1], sizeOverAspect[2], sizeOverAspect[3], jFrac, 0, 0, 0);
-      ArqdAdd(jQD, 0, imQD[0], imQD[1], imQD[2], imQD[3], tempQD[0], tempQD[1], tempQD[2], tempQD[3]);
+      arQdMul(tempQD, 0, sizeOverAspect[0], sizeOverAspect[1], sizeOverAspect[2], sizeOverAspect[3], jFrac, 0, 0, 0);
+      arQdAdd(jQD, 0, imQD[0], imQD[1], imQD[2], imQD[3], tempQD[0], tempQD[1], tempQD[2], tempQD[3]);
       
       for (let x = 0; x < this.config.dimsWidth; x++) {
         const rFrac = ((x / this.config.dimsWidth) - 0.5);
-        // Use ArqdMul instead of toQDScale to capture error terms
+        // Use arQdMul instead of toQDScale to capture error terms
         // size (if double) is [size, 0, 0, 0] as QD
         const sz = this.size;
-        ArqdMul(tempQD, 0, sz, 0, 0, 0, rFrac, 0, 0, 0);
-        ArqdAdd(rQD, 0, reQD[0], reQD[1], reQD[2], reQD[3], tempQD[0], tempQD[1], tempQD[2], tempQD[3]);
+        arQdMul(tempQD, 0, sz, 0, 0, 0, rFrac, 0, 0, 0);
+        arQdAdd(rQD, 0, reQD[0], reQD[1], reQD[2], reQD[3], tempQD[0], tempQD[1], tempQD[2], tempQD[3]);
 
         // Store c as 8 floats: [r0, r1, r2, r3, i0, i1, i2, i3]
         this.cc.push(rQD[0], rQD[1], rQD[2], rQD[3], jQD[0], jQD[1], jQD[2], jQD[3]);
@@ -6767,8 +6767,8 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
     // ref is DD: [r_hi, r_lo, i_hi, i_lo], returns DDc with proper DD addition
     // Optimized to avoid allocations
     const out = new Array(4);
-    ArddAdd(out, 0, ref[0], ref[1], dzr, 0);
-    ArddAdd(out, 2, ref[2], ref[3], dzi, 0);
+    arDdAdd(out, 0, ref[0], ref[1], dzr, 0);
+    arDdAdd(out, 2, ref[2], ref[3], dzi, 0);
     return out;
   }
 
@@ -6784,9 +6784,9 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
     const j2 = last[3];
 
     // Check for escape
-    ArddSquare(tt, 0, r1, r2);                    // rsq = r**2
-    ArddSquare(tt, 2, j1, j2);                    // jsq = j**2
-    ArddAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
+    arDdSquare(tt, 0, r1, r2);                    // rsq = r**2
+    arDdSquare(tt, 2, j1, j2);                    // jsq = j**2
+    arDdAdd(tt, 4, tt[0], tt[1], tt[2], tt[3]);   // d = rsq + jsq
 
     if (tt[4] > 1e10) {
       this.refOrbitEscaped = true;
@@ -6794,23 +6794,23 @@ const DDReferenceOrbitMixin = (Base) => class extends Base {
     }
 
     // Compute z^n for general exponent
-    ArddMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // ja = 2*r*j
-    ArddAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // ra = rsq - jsq
+    arDdMul(tt, 6, 2 * r1, 2 * r2, j1, j2);       // ja = 2*r*j
+    arDdAdd(tt, 8, tt[0], tt[1], -tt[2], -tt[3]); // ra = rsq - jsq
 
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      ArddMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
-      ArddMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
-      ArddAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
-      ArddMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
-      ArddMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
-      ArddAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
-      ArddSet(tt, 8, tt[4], tt[5]);                // ra = rt
+      arDdMul(tt, 0, j1, j2, tt[6], tt[7]);         // j * ja
+      arDdMul(tt, 2, r1, r2, tt[8], tt[9]);         // r * ra
+      arDdAdd(tt, 4, -tt[0], -tt[1], tt[2], tt[3]); // rt = r*ra - j*ja
+      arDdMul(tt, 0, r1, r2, tt[6], tt[7]);         // r * ja
+      arDdMul(tt, 2, j1, j2, tt[8], tt[9]);         // j * ra
+      arDdAdd(tt, 6, tt[0], tt[1], tt[2], tt[3]);   // ja = r*ja + j*ra
+      arDdSet(tt, 8, tt[4], tt[5]);                // ra = rt
     }
 
     // Add c to get next z
     const newZ = [0, 0, 0, 0];
-    ArddAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
-    ArddAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
+    arDdAdd(newZ, 0, tt[8], tt[9], this.refC[0], this.refC[1]);      // real part
+    arDdAdd(newZ, 2, tt[6], tt[7], this.refC[2], this.refC[3]);      // imag part
 
     this.refOrbit.push(newZ);
     this.refIterations++;
@@ -6877,8 +6877,8 @@ const QDReferenceOrbitMixin = (Base) => class extends Base {
     // ref is QD: [r0,r1,r2,r3, i0,i1,i2,i3], returns QDc
     // Optimized to avoid allocations
     const out = new Array(8);
-    ArqdAdd(out, 0, ref[0], ref[1], ref[2], ref[3], dzr, 0, 0, 0);
-    ArqdAdd(out, 4, ref[4], ref[5], ref[6], ref[7], dzi, 0, 0, 0);
+    arQdAdd(out, 0, ref[0], ref[1], ref[2], ref[3], dzr, 0, 0, 0);
+    arQdAdd(out, 4, ref[4], ref[5], ref[6], ref[7], dzi, 0, 0, 0);
     return out;
   }
 
@@ -6900,35 +6900,35 @@ const QDReferenceOrbitMixin = (Base) => class extends Base {
 
     // Compute z^n for general exponent
     // z^2 = (zr + zi*i)^2 = zr^2 - zi^2 + 2*zr*zi*i
-    ArqdSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
-    ArqdSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
-    ArqdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3],
+    arQdSquare(tt, 0, rr[0], rr[1], rr[2], rr[3]);   // rsq = r^2
+    arQdSquare(tt, 4, ri[0], ri[1], ri[2], ri[3]);   // jsq = j^2
+    arQdMul(tt, 8, 2*rr[0], 2*rr[1], 2*rr[2], 2*rr[3],
       ri[0], ri[1], ri[2], ri[3]);  // ja = 2*r*j
-    ArqdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3],
+    arQdAdd(tt, 16, tt[0], tt[1], tt[2], tt[3],
       -tt[4], -tt[5], -tt[6], -tt[7]);     // ra = rsq - jsq
 
     for (let ord = 2; ord < this.config.exponent; ord++) {
-      ArqdMul(tt, 0, ri[0], ri[1], ri[2], ri[3],
+      arQdMul(tt, 0, ri[0], ri[1], ri[2], ri[3],
         tt[8], tt[9], tt[10], tt[11]);         // j * ja
-      ArqdMul(tt, 4, rr[0], rr[1], rr[2], rr[3],
+      arQdMul(tt, 4, rr[0], rr[1], rr[2], rr[3],
         tt[16], tt[17], tt[18], tt[19]);       // r * ra
-      ArqdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3],
+      arQdAdd(tt, 12, -tt[0], -tt[1], -tt[2], -tt[3],
         tt[4], tt[5], tt[6], tt[7]);      // rt = r*ra - j*ja
-      ArqdMul(tt, 0, rr[0], rr[1], rr[2], rr[3],
+      arQdMul(tt, 0, rr[0], rr[1], rr[2], rr[3],
         tt[8], tt[9], tt[10], tt[11]);         // r * ja
-      ArqdMul(tt, 4, ri[0], ri[1], ri[2], ri[3],
+      arQdMul(tt, 4, ri[0], ri[1], ri[2], ri[3],
         tt[16], tt[17], tt[18], tt[19]);       // j * ra
-      ArqdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3],
+      arQdAdd(tt, 8, tt[0], tt[1], tt[2], tt[3],
         tt[4], tt[5], tt[6], tt[7]);           // ja = r*ja + j*ra
-      ArqdSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);  // ra = rt
+      arQdSet(tt, 16, tt[12], tt[13], tt[14], tt[15]);  // ra = rt
     }
 
     // Add c to get next z
     const nzrQD = new Array(4);
     const nziQD = new Array(4);
-    ArqdAdd(nzrQD, 0, tt[16], tt[17], tt[18], tt[19],
+    arQdAdd(nzrQD, 0, tt[16], tt[17], tt[18], tt[19],
       this.refC_qd[0], this.refC_qd[1], this.refC_qd[2], this.refC_qd[3]);
-    ArqdAdd(nziQD, 0, tt[8], tt[9], tt[10], tt[11],
+    arQdAdd(nziQD, 0, tt[8], tt[9], tt[10], tt[11],
       this.refC_qd[4], this.refC_qd[5], this.refC_qd[6], this.refC_qd[7]);
 
     this.qdRefOrbit.push([nzrQD[0], nzrQD[1], nzrQD[2], nzrQD[3],
@@ -11307,15 +11307,15 @@ class GlZhuoranBoard extends DDReferenceOrbitMixin(GlPerturbationBaseBoard) {
 
     for (let y = 0; y < dimsHeight; y++) {
       const yFrac = (dimsHeight / 2 - y) / dimsHeight;
-      ArddMul(temp, 0, yFrac, 0, sizeY_dd[0], sizeY_dd[1]);
-      ArddAdd(ci_dd, 0, im_dd[0], im_dd[1], temp[0], temp[1]);
-      ArddAdd(dci_dd, 0, ci_dd[0], ci_dd[1], -this.refC[2], -this.refC[3]);
+      arDdMul(temp, 0, yFrac, 0, sizeY_dd[0], sizeY_dd[1]);
+      arDdAdd(ci_dd, 0, im_dd[0], im_dd[1], temp[0], temp[1]);
+      arDdAdd(dci_dd, 0, ci_dd[0], ci_dd[1], -this.refC[2], -this.refC[3]);
 
       for (let x = 0; x < dimsWidth; x++) {
         const xFrac = (x - dimsWidth / 2) / dimsWidth;
-        ArddMul(temp, 0, xFrac, 0, size_dd[0], size_dd[1]);
-        ArddAdd(cr_dd, 0, re_dd[0], re_dd[1], temp[0], temp[1]);
-        ArddAdd(dcr_dd, 0, cr_dd[0], cr_dd[1], -this.refC[0], -this.refC[1]);
+        arDdMul(temp, 0, xFrac, 0, size_dd[0], size_dd[1]);
+        arDdAdd(cr_dd, 0, re_dd[0], re_dd[1], temp[0], temp[1]);
+        arDdAdd(dcr_dd, 0, cr_dd[0], cr_dd[1], -this.refC[0], -this.refC[1]);
 
         const index = y * dimsWidth + x;
         const index2 = index * 2;
@@ -12538,22 +12538,22 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
       const yFrac = (dimsHeight / 2 - y) / dimsHeight;
 
       // ci_dd = im_dd + yFrac * sizeY_dd (in DD precision)
-      ArddMul(temp, 0, yFrac, 0, sizeY_dd[0], sizeY_dd[1]);
-      ArddAdd(ci_dd, 0, im_dd[0], im_dd[1], temp[0], temp[1]);
+      arDdMul(temp, 0, yFrac, 0, sizeY_dd[0], sizeY_dd[1]);
+      arDdAdd(ci_dd, 0, im_dd[0], im_dd[1], temp[0], temp[1]);
 
       // dci_dd = ci_dd - refC_imag
-      ArddAdd(dci_dd, 0, ci_dd[0], ci_dd[1], -this.refC[2], -this.refC[3]);
+      arDdAdd(dci_dd, 0, ci_dd[0], ci_dd[1], -this.refC[2], -this.refC[3]);
 
       for (let x = 0; x < dimsWidth; x++) {
         // Use integer arithmetic to avoid float64 rounding: (x - dims/2) / dims
         const xFrac = (x - dimsWidth / 2) / dimsWidth;
 
         // cr_dd = re_dd + xFrac * size_dd (in DD precision)
-        ArddMul(temp, 0, xFrac, 0, size_dd[0], size_dd[1]);
-        ArddAdd(cr_dd, 0, re_dd[0], re_dd[1], temp[0], temp[1]);
+        arDdMul(temp, 0, xFrac, 0, size_dd[0], size_dd[1]);
+        arDdAdd(cr_dd, 0, re_dd[0], re_dd[1], temp[0], temp[1]);
 
         // dcr_dd = cr_dd - refC_real
-        ArddAdd(dcr_dd, 0, cr_dd[0], cr_dd[1], -this.refC[0], -this.refC[1]);
+        arDdAdd(dcr_dd, 0, cr_dd[0], cr_dd[1], -this.refC[0], -this.refC[1]);
 
         const index = y * dimsWidth + x;
         const index2 = index * 2;
@@ -12869,8 +12869,8 @@ class GpuZhuoranBoard extends DDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     // Compute delta in DD precision
     const closestPt = this.refOrbit[closestIter];
     const tt = this.tt;
-    ArddAdd(tt, 0, endpoint[0], endpoint[1], -closestPt[0], -closestPt[1]); // real delta
-    ArddAdd(tt, 2, endpoint[2], endpoint[3], -closestPt[2], -closestPt[3]); // imag delta
+    arDdAdd(tt, 0, endpoint[0], endpoint[1], -closestPt[0], -closestPt[1]); // real delta
+    arDdAdd(tt, 2, endpoint[2], endpoint[3], -closestPt[2], -closestPt[3]); // imag delta
 
     // Store loop parameters
     this.refOrbitLoop = {
@@ -13828,9 +13828,9 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
     for (let i = THREADING_CAPACITY - SEARCH_WINDOW; i < THREADING_CAPACITY; i++) {
       const pt = this.qdRefOrbit[i];
       // Compute difference in QD precision
-      ArqdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
+      arQdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
                      -pt[0], -pt[1], -pt[2], -pt[3]); // dr
-      ArqdAdd(tt, 4, endpoint[4], endpoint[5], endpoint[6], endpoint[7],
+      arQdAdd(tt, 4, endpoint[4], endpoint[5], endpoint[6], endpoint[7],
                      -pt[4], -pt[5], -pt[6], -pt[7]); // di
 
       // Chebyshev distance: max(|dr|, |di|)
@@ -13846,9 +13846,9 @@ class GpuAdaptiveBoard extends QDReferenceOrbitMixin(GpuZhuoranBaseBoard) {
 
     // Compute delta in QD precision
     const closestPt = this.qdRefOrbit[closestIter];
-    ArqdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
+    arQdAdd(tt, 0, endpoint[0], endpoint[1], endpoint[2], endpoint[3],
                    -closestPt[0], -closestPt[1], -closestPt[2], -closestPt[3]); // real delta
-    ArqdAdd(tt, 4, endpoint[4], endpoint[5], endpoint[6], endpoint[7],
+    arQdAdd(tt, 4, endpoint[4], endpoint[5], endpoint[6], endpoint[7],
                    -closestPt[4], -closestPt[5], -closestPt[6], -closestPt[7]); // imag delta
 
     // Store loop parameters with QD precision delta
@@ -15606,7 +15606,7 @@ function toDDAdd(a, b) {
   const aa = toDD(a);
   const bb = toDD(b);
   const out = [0, 0];
-  ArddAdd(out, 0, aa[0], aa[1], bb[0], bb[1]);
+  arDdAdd(out, 0, aa[0], aa[1], bb[0], bb[1]);
   return out;
 }
 
@@ -15643,7 +15643,7 @@ function toQDAdd(a, b) {
   const aa = toQD(a);
   const bb = toQD(b);
   const out = new Array(4);
-  ArqdAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+  arQdAdd(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
   return out;
 }
 
@@ -15656,14 +15656,14 @@ function toQDMul(a, b) {
   const aa = toQD(a);
   const bb = toQD(b);
   const out = new Array(4);
-  ArqdMul(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
+  arQdMul(out, 0, aa[0], aa[1], aa[2], aa[3], bb[0], bb[1], bb[2], bb[3]);
   return out;
 }
 
 function toQDSquare(a) {
   const aa = toQD(a);
   const out = new Array(4);
-  ArqdSquare(out, 0, aa[0], aa[1], aa[2], aa[3]);
+  arQdSquare(out, 0, aa[0], aa[1], aa[2], aa[3]);
   return out;
 }
 
@@ -15754,7 +15754,7 @@ function decimalToQD(decimalString) {
   }
   // Normalize the result to ensure consistent representation across all QD operations.
   // Without this, limbs may not satisfy |limb[i]| < ulp(limb[i-1])/2, causing
-  // ArqdAdd/toQDAdd to produce different representations when adding zero.
+  // arQdAdd/toQDAdd to produce different representations when adding zero.
   // Uses quickTwoSum cascade to renormalize (fully inlined to avoid dependency issues).
   let s0 = limbs[0] + limbs[1], e0 = limbs[1] - (s0 - limbs[0]);
   let s1 = e0 + limbs[2], e1 = limbs[2] - (s1 - e0);
@@ -15895,20 +15895,20 @@ function qdEq(a, s) {
 // Array in-place DD precision, allows fast computation
 // by avoiding array constructors
 
-function Afast2Sum(r, i, a, b) {
+function arFast2Sum(r, i, a, b) {
   let s = a + b;
   r[i] = s;
   r[i+1] = b - (s - a);
 }
 
-function Aslow2Sum(r, i, a, b) {
+function arSlow2Sum(r, i, a, b) {
   let s = a + b;
   let c = s - a;
   r[i] = s;
   r[i+1] = (a - (s - c)) + (b - c);
 }
 
-function ArddSplit(r, i, a) {
+function arDdSplit(r, i, a) {
   const c = (134217729) * a;  // 2^27 + 1, Veltkamp-Dekker constant
   const x = c - (c - a);
   const y = a - x;
@@ -15916,12 +15916,12 @@ function ArddSplit(r, i, a) {
   r[i+1] = y;
 }
 
-function AtwoProduct(r, i, a, b) {
+function arTwoProduct(r, i, a, b) {
   const p = a * b;
-  ArddSplit(r, i, a);
+  arDdSplit(r, i, a);
   const ah = r[i];
   const al = r[i+1];
-  ArddSplit(r, i, b);
+  arDdSplit(r, i, b);
   const bh = r[i];
   const bl = r[i+1];
   const err = ((ah * bh - p) + ah * bl + al * bh) + al * bl;
@@ -15929,9 +15929,9 @@ function AtwoProduct(r, i, a, b) {
   r[i+1] = err;
 }
 
-function AtwoSquare(r, i, a) {
+function arTwoSquare(r, i, a) {
   const p = a * a;
-  ArddSplit(r, i, a);
+  arDdSplit(r, i, a);
   const ah = r[i];
   const al = r[i+1];
   const err = ((ah * ah - p) + 2 * ah * al) + al * al;
@@ -15939,12 +15939,12 @@ function AtwoSquare(r, i, a) {
   r[i+1] = err;
 }
 
-function AquickTwoSum(a, b) {
+function arQuickTwoSum(a, b) {
   const s = a + b;
   return [s, b - (s - a)];
 }
 
-function AsymmetricTwoSum(a, b) {
+function arSymmetricTwoSum(a, b) {
   const s = a + b;
   const bb = s - a;
   return [s, (a - (s - bb)) + (b - bb)];
@@ -15952,87 +15952,87 @@ function AsymmetricTwoSum(a, b) {
 
 // Three-sum from QD library: combines three values with proper error propagation
 // Returns [sum, err1, err2] where sum + err1 + err2 = a + b + c (exactly)
-function ArqdThreeSum(a, b, c) {
-  let [t1, t2] = AsymmetricTwoSum(a, b);
-  let [newA, t3] = AsymmetricTwoSum(c, t1);
-  let [newB, newC] = AsymmetricTwoSum(t2, t3);
+function arQdThreeSum(a, b, c) {
+  let [t1, t2] = arSymmetricTwoSum(a, b);
+  let [newA, t3] = arSymmetricTwoSum(c, t1);
+  let [newB, newC] = arSymmetricTwoSum(t2, t3);
   return [newA, newB, newC];
 }
 
-function ArddAdd(r, i, a1, a2, b1, b2) {
-  Aslow2Sum(r, i, a1, b1);
+function arDdAdd(r, i, a1, a2, b1, b2) {
+  arSlow2Sum(r, i, a1, b1);
   const h1 = r[i];
   const h2 = r[i+1];
-  Aslow2Sum(r, i, a2, b2);
+  arSlow2Sum(r, i, a2, b2);
   const l1 = r[i];
   const l2 = r[i+1];
-  Afast2Sum(r, i, h1, h2 + l1);
+  arFast2Sum(r, i, h1, h2 + l1);
   const v1 = r[i];
   const v2 = r[i+1];
-  Afast2Sum(r, i, v1, v2 + l2);
+  arFast2Sum(r, i, v1, v2 + l2);
 }
 
-function ArddMul(r, i, a1, a2, b1, b2) {
-  AtwoProduct(r, i, a1, b1);
+function arDdMul(r, i, a1, a2, b1, b2) {
+  arTwoProduct(r, i, a1, b1);
   const p1 = r[i];
   const p2 = r[i+1];
-  Afast2Sum(r, i, p1, p2 + a1 * b2 + b1 * a2);
+  arFast2Sum(r, i, p1, p2 + a1 * b2 + b1 * a2);
 }
 
-function ArddSet(r, i, a1, a2) {
+function arDdSet(r, i, a1, a2) {
   r[i] = a1;
   r[i+1] = a2;
 }
 
 
-function ArddSquare(r, i, a1, a2) {
-  AtwoSquare(r, i, a1);
+function arDdSquare(r, i, a1, a2) {
+  arTwoSquare(r, i, a1);
   const p1 = r[i];
   const p2 = r[i+1];
-  Afast2Sum(r, i, p1, p2 + 2 * a1 * a2);
+  arFast2Sum(r, i, p1, p2 + 2 * a1 * a2);
 }
 
 
 // Oct-double (four-limb) helpers for deeper precision
 
-function ArqdTwoProduct(a, b) {
+function arQdTwoProduct(a, b) {
   const tmp = [];
-  AtwoProduct(tmp, 0, a, b);
+  arTwoProduct(tmp, 0, a, b);
   return [tmp[0], tmp[1]];
 }
 
-function ArqdTwoSquare(a) {
+function arQdTwoSquare(a) {
   const tmp = [];
-  AtwoSquare(tmp, 0, a);
+  arTwoSquare(tmp, 0, a);
   return [tmp[0], tmp[1]];
 }
 
 // Renormalization algorithm from QD library (Hida, Li, Bailey)
 // Takes 5 inputs and produces 4 normalized outputs
-function ArqdRenorm(r, i, c0, c1, c2, c3, c4) {
+function arQdRenorm(r, i, c0, c1, c2, c3, c4) {
   let t0, t1, t2, t3, s;
 
   // First pass: propagate from bottom to top, collecting errors
-  [s, t3] = AquickTwoSum(c3, c4);
-  [s, t2] = AquickTwoSum(c2, s);
-  [s, t1] = AquickTwoSum(c1, s);
-  [c0, t0] = AquickTwoSum(c0, s);
+  [s, t3] = arQuickTwoSum(c3, c4);
+  [s, t2] = arQuickTwoSum(c2, s);
+  [s, t1] = arQuickTwoSum(c1, s);
+  [c0, t0] = arQuickTwoSum(c0, s);
 
   // Second pass: combine error terms
-  [s, t2] = AquickTwoSum(t2, t3);
-  [s, t1] = AquickTwoSum(t1, s);
-  [c1, t0] = AquickTwoSum(t0, s);
+  [s, t2] = arQuickTwoSum(t2, t3);
+  [s, t1] = arQuickTwoSum(t1, s);
+  [c1, t0] = arQuickTwoSum(t0, s);
 
   // Third pass: final cleanup
-  [s, t1] = AquickTwoSum(t1, t2);
-  [c2, t0] = AquickTwoSum(t0, s);
+  [s, t1] = arQuickTwoSum(t1, t2);
+  [c2, t0] = arQuickTwoSum(t0, s);
 
   c3 = t0 + t1;
 
-  ArqdSet(r, i, c0, c1, c2, c3);
+  arQdSet(r, i, c0, c1, c2, c3);
 }
 
-function ArqdSet(r, i, a1, a2, a3, a4) {
+function arQdSet(r, i, a1, a2, a3, a4) {
   r[i] = a1;
   r[i+1] = a2;
   r[i+2] = a3;
@@ -16040,101 +16040,101 @@ function ArqdSet(r, i, a1, a2, a3, a4) {
 }
 
 
-function ArqdAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
+function arQdAdd(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   let s0, s1, s2, s3, s4, t0, t1, t2;
-  [s0, t0] = AsymmetricTwoSum(a1, b1);
-  [s1, t1] = AsymmetricTwoSum(a2, b2);
-  [s2, t2] = AsymmetricTwoSum(a3, b3);
+  [s0, t0] = arSymmetricTwoSum(a1, b1);
+  [s1, t1] = arSymmetricTwoSum(a2, b2);
+  [s2, t2] = arSymmetricTwoSum(a3, b3);
   s3 = a4 + b4;
 
-  [s1, t0] = AsymmetricTwoSum(s1, t0);
-  [s2, t1] = AsymmetricTwoSum(s2, t1);
+  [s1, t0] = arSymmetricTwoSum(s1, t0);
+  [s2, t1] = arSymmetricTwoSum(s2, t1);
   s3 += t2;
 
-  [s2, t0] = AsymmetricTwoSum(s2, t0);
+  [s2, t0] = arSymmetricTwoSum(s2, t0);
   s3 += t1;
 
-  [s3, s4] = AsymmetricTwoSum(s3, t0);
+  [s3, s4] = arSymmetricTwoSum(s3, t0);
 
-  [s0, s1] = AquickTwoSum(s0, s1);
-  [s1, s2] = AquickTwoSum(s1, s2);
-  [s2, s3] = AquickTwoSum(s2, s3);
-  [s3, s4] = AquickTwoSum(s3, s4);
+  [s0, s1] = arQuickTwoSum(s0, s1);
+  [s1, s2] = arQuickTwoSum(s1, s2);
+  [s2, s3] = arQuickTwoSum(s2, s3);
+  [s3, s4] = arQuickTwoSum(s3, s4);
 
   s2 += s4;
-  [s2, s3] = AquickTwoSum(s2, s3);
-  [s1, s2] = AquickTwoSum(s1, s2);
+  [s2, s3] = arQuickTwoSum(s2, s3);
+  [s1, s2] = arQuickTwoSum(s1, s2);
 
-  ArqdSet(r, i, s0, s1, s2, s3);
+  arQdSet(r, i, s0, s1, s2, s3);
 }
 
 // QD library sloppy_mul algorithm (Hida, Li, Bailey)
 // Uses TwoProduct for 6 products (levels 0-2) for nearly full 212-bit precision
-function ArqdMul(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
+function arQdMul(r, i, a1, a2, a3, a4, b1, b2, b3, b4) {
   // Level 0: a[0]*b[0]
-  let [p0, q0] = ArqdTwoProduct(a1, b1);
+  let [p0, q0] = arQdTwoProduct(a1, b1);
 
   // Level 1: a[0]*b[1], a[1]*b[0]
-  let [p1, q1] = ArqdTwoProduct(a1, b2);
-  let [p2, q2] = ArqdTwoProduct(a2, b1);
+  let [p1, q1] = arQdTwoProduct(a1, b2);
+  let [p2, q2] = arQdTwoProduct(a2, b1);
 
   // Level 2: a[0]*b[2], a[1]*b[1], a[2]*b[0]
-  let [p3, q3] = ArqdTwoProduct(a1, b3);
-  let [p4, q4] = ArqdTwoProduct(a2, b2);
-  let [p5, q5] = ArqdTwoProduct(a3, b1);
+  let [p3, q3] = arQdTwoProduct(a1, b3);
+  let [p4, q4] = arQdTwoProduct(a2, b2);
+  let [p5, q5] = arQdTwoProduct(a3, b1);
 
   // Accumulate terms using three_sum
-  [p1, p2, q0] = ArqdThreeSum(p1, p2, q0);
-  [p2, q1, q2] = ArqdThreeSum(p2, q1, q2);
-  [p3, p4, p5] = ArqdThreeSum(p3, p4, p5);
+  [p1, p2, q0] = arQdThreeSum(p1, p2, q0);
+  [p2, q1, q2] = arQdThreeSum(p2, q1, q2);
+  [p3, p4, p5] = arQdThreeSum(p3, p4, p5);
 
   // Further combining
-  let [s0, t0] = AsymmetricTwoSum(p2, p3);
-  let [s1, t1] = AsymmetricTwoSum(q1, p4);
+  let [s0, t0] = arSymmetricTwoSum(p2, p3);
+  let [s1, t1] = arSymmetricTwoSum(q1, p4);
   let s2 = q2 + p5;
-  [s1, t0] = AsymmetricTwoSum(s1, t0);
+  [s1, t0] = arSymmetricTwoSum(s1, t0);
   s2 += t0 + t1;
 
   // Level 3 cross-products and remaining error terms
   s1 += a1 * b4 + a2 * b3 + a3 * b2 + a4 * b1 + q0 + q3 + q4 + q5;
 
   // Renormalize
-  ArqdRenorm(r, i, p0, p1, s0, s1, s2);
+  arQdRenorm(r, i, p0, p1, s0, s1, s2);
 }
 
 // QD library optimized sqr algorithm (Hida, Li, Bailey)
 // Exploits symmetry: a[i]*a[j] = a[j]*a[i], so compute once and double
 // Uses TwoSquare (cheaper than TwoProduct) where possible
-function ArqdSquare(r, i, a1, a2, a3, a4) {
+function arQdSquare(r, i, a1, a2, a3, a4) {
   // Level 0: a[0]² - use TwoSquare
-  let [p0, q0] = ArqdTwoSquare(a1);
+  let [p0, q0] = arQdTwoSquare(a1);
 
   // Level 1: 2*a[0]*a[1] - single TwoProduct with doubled arg
-  let [p1, q1] = ArqdTwoProduct(2 * a1, a2);
+  let [p1, q1] = arQdTwoProduct(2 * a1, a2);
 
   // Level 2: 2*a[0]*a[2] + a[1]²
-  let [p2, q2] = ArqdTwoProduct(2 * a1, a3);
-  let [p3, q3] = ArqdTwoSquare(a2);
+  let [p2, q2] = arQdTwoProduct(2 * a1, a3);
+  let [p3, q3] = arQdTwoSquare(a2);
 
   // Accumulate level 1
-  [p1, p2, q0] = ArqdThreeSum(p1, q0, p2);
+  [p1, p2, q0] = arQdThreeSum(p1, q0, p2);
 
   // Accumulate level 2
-  [p2, q1, q2] = ArqdThreeSum(p2, q1, q2);
-  [p3, q3] = AsymmetricTwoSum(p3, q3);
+  [p2, q1, q2] = arQdThreeSum(p2, q1, q2);
+  [p3, q3] = arSymmetricTwoSum(p3, q3);
 
   // Combine accumulated values
-  let [s0, t0] = AsymmetricTwoSum(p2, p3);
-  let [s1, t1] = AsymmetricTwoSum(q1, q3);
+  let [s0, t0] = arSymmetricTwoSum(p2, p3);
+  let [s1, t1] = arSymmetricTwoSum(q1, q3);
   let s2 = q2;
-  [s1, t0] = AsymmetricTwoSum(s1, t0);
+  [s1, t0] = arSymmetricTwoSum(s1, t0);
   s2 += t0 + t1;
 
   // Level 3: 2*a[0]*a[3] + 2*a[1]*a[2] (plain multiply)
   s1 += 2 * a1 * a4 + 2 * a2 * a3 + q0;
 
   // Renormalize
-  ArqdRenorm(r, i, p0, p1, s0, s1, s2);
+  arQdRenorm(r, i, p0, p1, s0, s1, s2);
 }
 
 
