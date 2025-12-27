@@ -223,7 +223,7 @@
 <body>
   <div id="container">
     <div id="header">
-      <h1><a href="https://github.com/davidbau/mandelbrot/commits/main" style="color: inherit; text-decoration: none;">Mandelbrot Call Graph Evolution</a></h1>
+      <h1><a href="../" style="color: inherit; text-decoration: none;">Mandelbrot</a> <a href="https://github.com/davidbau/mandelbrot/commits/main" style="color: inherit; text-decoration: none;">Call Graph Evolution</a> <a href="https://github.com/davidbau/mandelbrot#readme" style="color: inherit; text-decoration: none;" title="View source on GitHub"><svg viewBox="0 0 512 512" style="width:14px;height:14px;vertical-align:-1px"><circle cx="256" cy="256" r="256" fill="#181717"/><path fill="#fff" d="M335 499c-13 0-16-6-16-12l1-70c0-24-8-40-18-48 57-6 117-28 117-126 0-28-10-51-26-69 3-6 11-32-3-67 0 0-21-7-70 26-42-12-86-12 -128 0-49-33-70-26-70-26-14 35-6 61-3 67-16 18-26 41-26 69 0 98 59 120 116 126-7 7-14 18-16 35-15 6-52 17-74-22 0 0-14-24-40-26 0 0-25 0-1 16 0 0 16 7 28 37 0 0 15 50 86 34l1 44c0 6-3 12-16 12-14 0-12 17-12 17H347s2 -17-12-17Z"/></svg></a></h1>
       <div id="stats">Loading...</div>
     </div>
     <div id="graph-container">
@@ -464,7 +464,7 @@
       const height = container.clientHeight;
 
       // Use centered coordinate system: (0,0) is at center of viewport
-      const svg = d3.select('svg')
+      const svg = d3.select('#graph-container svg')
         .attr('viewBox', [-width / 2, -height / 2, width, height]);
 
       // Add zoom behavior
@@ -536,7 +536,7 @@
       msgEl.innerHTML = renderCoauthorBadges(snapshot) + escaped;
       document.getElementById('hash').textContent = snapshot.hash;
 
-      const svg = d3.select('svg');
+      const svg = d3.select('#graph-container svg');
       const g = svg.select('g');
 
       // Save current node positions before updating
@@ -802,7 +802,7 @@
       if (!isPlaying || !zoomBehavior || !simulation) return;
       const nodes = simulation.nodes();
       if (!nodes || nodes.length === 0) return;
-      const svg = d3.select('svg');
+      const svg = d3.select('#graph-container svg');
       const transform = d3.zoomTransform(svg.node());
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       let hasStable = false;
@@ -854,7 +854,7 @@
       if (width === 0 || height === 0) return;
 
       // Update centered viewBox - graph stays centered automatically
-      d3.select('svg').attr('viewBox', [-width / 2, -height / 2, width, height]);
+      d3.select('#graph-container svg').attr('viewBox', [-width / 2, -height / 2, width, height]);
 
       // Update force strengths for new aspect ratio
       const aspectRatio = width / height;
