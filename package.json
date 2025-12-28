@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "build": "./build/build.sh",
-    "test": "npm run test:unit && npm run test:integration",
+    "test": "dotenv -e .env.local -- jest tests --maxWorkers=${TEST_WORKERS:-3}",
     "test:watch": "jest --watch",
     "test:unit": "jest tests/unit",
     "test:integration": "dotenv -e .env.local -- jest tests/integration --maxWorkers=${TEST_WORKERS:-2}",
