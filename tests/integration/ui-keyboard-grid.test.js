@@ -125,8 +125,8 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
           // Either computation completed (un=0) or we made progress (di increased)
           return view.un === 0 || view.di > baseline.di;
         },
-        { timeout: 30000 },
-        stateAfterLayout
+        stateAfterLayout,
+        { timeout: 30000 }
       );
 
       // Verify computation made progress
@@ -189,8 +189,8 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
           // Either un decreased, all complete, or di increased
           return totalUn < baseline.totalUn || totalUn === 0 || totalDi > baseline.totalDi;
         },
-        { timeout: 30000 },
-        stateAfterLayout
+        stateAfterLayout,
+        { timeout: 30000 }
       );
 
       // Check progress
@@ -256,8 +256,8 @@ describe('Keyboard Grid Grow/Shrink Tests', () => {
           // Either computation completed (un=0) or we made progress (di increased)
           return view.un === 0 || view.di > baseline.di;
         },
-        { timeout: 20000 },
-        stateAfterLayout
+        stateAfterLayout,
+        { timeout: 20000 }
       );
 
       const stateFinal = await page.evaluate(() => ({

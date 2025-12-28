@@ -56,16 +56,16 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       await page.keyboard.press('f');
       await page.waitForFunction(
         (init) => window.explorer.config.pixelRatio === init + 1,
-        { timeout: 5000 },
-        initialRatio
+        initialRatio,
+        { timeout: 5000 }
       );
       expect(await page.evaluate(() => window.explorer.config.pixelRatio)).toBe(initialRatio + 1);
 
       await page.keyboard.press('d');
       await page.waitForFunction(
         (init) => window.explorer.config.pixelRatio === init,
-        { timeout: 5000 },
-        initialRatio
+        initialRatio,
+        { timeout: 5000 }
       );
       expect(await page.evaluate(() => window.explorer.config.pixelRatio)).toBe(initialRatio);
     }, TEST_TIMEOUT);
@@ -117,8 +117,8 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       await page.keyboard.press('u');
       await page.waitForFunction(
         (init) => window.explorer.config.unknowncolor !== init,
-        { timeout: 5000 },
-        initialColor
+        initialColor,
+        { timeout: 5000 }
       );
       const afterU = await page.evaluate(() => window.explorer.config.unknowncolor);
       expect(afterU).not.toBe(initialColor);
@@ -129,8 +129,8 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       await page.keyboard.up('Shift');
       await page.waitForFunction(
         (init) => window.explorer.config.unknowncolor === init,
-        { timeout: 5000 },
-        initialColor
+        initialColor,
+        { timeout: 5000 }
       );
       const afterShiftU = await page.evaluate(() => window.explorer.config.unknowncolor);
       expect(afterShiftU).toBe(initialColor);
@@ -159,8 +159,8 @@ describe('Keyboard Exponent/Resolution/Help Tests', () => {
       await page.keyboard.press('Backspace');
       await page.waitForFunction(
         (before) => window.explorer.grid.views.length === before - 1,
-        { timeout: 5000 },
-        viewsBefore
+        viewsBefore,
+        { timeout: 5000 }
       );
 
       const viewsAfter = await page.evaluate(() => window.explorer.grid.views.length);
