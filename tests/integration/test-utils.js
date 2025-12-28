@@ -279,11 +279,17 @@ async function closeBrowser(browser, timeout = 10000) {
       try { await context.close(); } catch (e) { /* ignore */ }
     }));
 
-    // Close browser with timeout
+    // Close browser with timeout - use unref() to prevent blocking Jest exit
+    let timeoutId;
     await Promise.race([
       browser.close(),
-      new Promise(resolve => setTimeout(resolve, timeout))
+      new Promise(resolve => {
+        timeoutId = setTimeout(resolve, timeout);
+        // unref() allows the process to exit even if this timer is still pending
+        if (timeoutId.unref) timeoutId.unref();
+      })
     ]);
+    clearTimeout(timeoutId);
   } catch (e) { /* ignore */ }
 }
 

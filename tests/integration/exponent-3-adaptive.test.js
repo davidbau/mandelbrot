@@ -25,7 +25,7 @@ describe('Exponent 3 - GpuAdaptiveBoard vs GpuZhuoranBoard', () => {
     // Test GpuZhuoranBoard
     const page1 = await setupPage(browser);
     page1.setDefaultTimeout(TEST_TIMEOUT);
-    await page1.setViewport({ width: 160, height: 90 });
+    await page1.setViewportSize({ width: 160, height: 90 });
     await page1.goto(`file://${htmlPath}?${params}&board=gpuz`, { waitUntil: 'load' });
     await page1.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
     await page1.waitForFunction(() => {
@@ -60,7 +60,7 @@ describe('Exponent 3 - GpuAdaptiveBoard vs GpuZhuoranBoard', () => {
     // Test GpuAdaptiveBoard
     const page2 = await setupPage(browser);
     page2.setDefaultTimeout(TEST_TIMEOUT);
-    await page2.setViewport({ width: 160, height: 90 });
+    await page2.setViewportSize({ width: 160, height: 90 });
     await page2.goto(`file://${htmlPath}?${params}&board=gpua`, { waitUntil: 'load' });
     await page2.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
     await page2.waitForFunction(() => {
