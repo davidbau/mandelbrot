@@ -15506,13 +15506,11 @@ class FractalWorker {
       const timeSinceUpdate = now - board.lastTime;
       const isFocused = this.focusedBoardK == board.k;
       const hasChanges = board.updateSize > 0 || !board.unfinished();
-      const enoughChanges = isFocused ?
-        (board.updateSize >= 1429 || timeSinceUpdate >= 100) :
-        (board.updateSize >= 4673 || timeSinceUpdate >= 500);
-      // Also send iteration-only updates every 200ms to show progress
-      const iterOnlyUpdate = timeSinceUpdate >= 200;
+      // Send updates at least every 100ms, or earlier if enough pixels changed
+      const enoughPixels = isFocused ?
+        (board.updateSize >= 1429) : (board.updateSize >= 4673);
 
-      if ((hasChanges && enoughChanges) || iterOnlyUpdate) {
+      if (timeSinceUpdate >= 100 || (hasChanges && enoughPixels)) {
         const boardEffort = board.un * board.effort;
         const remainingWork = pri.map(b => b.un * b.effort).reduce((a, b) => a + b, 0);
         const workerInfo = `${this.name}: ` + (board.unfinished() ?
