@@ -28,7 +28,7 @@ describe('Converged z position (red dots)', () => {
 
     const page = await setupPage(browser);
     page.setDefaultTimeout(TEST_TIMEOUT);
-    await page.setViewport({ width: 160, height: 90 });
+    await page.setViewportSize({ width: 160, height: 90 });
     await page.goto(`file://${htmlPath}?${params}&board=gpua`, { waitUntil: 'load' });
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
 
@@ -120,7 +120,7 @@ describe('Converged z position (red dots)', () => {
 
     const page = await setupPage(browser);
     page.setDefaultTimeout(TEST_TIMEOUT);
-    await page.setViewport({ width: 160, height: 90 });
+    await page.setViewportSize({ width: 160, height: 90 });
     await page.goto(`file://${htmlPath}?${params}&board=gpu`, { waitUntil: 'load' });
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 15000 });
 

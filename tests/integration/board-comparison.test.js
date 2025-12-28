@@ -13,7 +13,7 @@ const { TEST_TIMEOUT, setupBrowser, setupPage, closeBrowser } = require('./test-
 const VIEWPORT_SIZE = 30;
 
 async function runBoardTest(page, boardType) {
-  await page.setViewport({ width: VIEWPORT_SIZE, height: VIEWPORT_SIZE });
+  await page.setViewportSize({ width: VIEWPORT_SIZE, height: VIEWPORT_SIZE });
 
   const url = `?grid=1&board=${boardType}`;
   const htmlPath = `file://${path.join(__dirname, '../../index.html')}${url}`;

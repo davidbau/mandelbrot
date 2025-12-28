@@ -33,7 +33,7 @@ describe('Scheduler rebalancing', () => {
 
     const page = await setupPage(browser);
     page.setDefaultTimeout(TEST_TIMEOUT);
-    await page.setViewport({ width: 800, height: 600 });
+    await page.setViewportSize({ width: 800, height: 600 });
 
     // Collect console messages looking for transfer events
     const consoleLogs = [];

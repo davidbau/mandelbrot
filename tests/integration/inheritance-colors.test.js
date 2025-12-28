@@ -4,9 +4,8 @@
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
-const puppeteer = require('puppeteer');
+const { TEST_TIMEOUT, setupBrowser, setupPage, closeBrowser } = require('./test-utils');
 
-const TEST_TIMEOUT = 60000;
 // On Linux, swiftshader (software WebGPU) is very slow - use CPU-only
 const useCpuOnly = os.platform() === 'linux';
 // Replace board=gpu with board=cpu on Linux, and add debug flags
@@ -40,31 +39,17 @@ describe('Inheritance color behavior', () => {
     await new Promise(resolve => server.listen(0, resolve));
     port = server.address().port;
 
-    const platform = os.platform();
-    const angleBackend = platform === 'darwin' ? 'metal'
-                       : platform === 'win32' ? 'd3d11'
-                       : 'swiftshader';
-
-    browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--enable-unsafe-webgpu',
-        '--enable-features=Vulkan',
-        `--use-angle=${angleBackend}`,
-      ]
-    });
+    browser = await setupBrowser();
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
     if (server) server.close();
-  });
+  }, TEST_TIMEOUT);
 
   test('child view histogram should match parent histogram shape', async () => {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 800, height: 600 });
+    const page = await setupPage(browser);
+    await page.setViewportSize({ width: 800, height: 600 });
 
     // Use smaller dimensions for faster test - debug=dims:10x10 gives 100 pixels per view
     await page.goto(fixUrlForPlatform(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=1&grid=2`), {
@@ -119,8 +104,8 @@ describe('Inheritance color behavior', () => {
   }, TEST_TIMEOUT);
 
   test('child colors with inheritance should match colors without inheritance', async () => {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 800, height: 600 });
+    const page = await setupPage(browser);
+    await page.setViewportSize({ width: 800, height: 600 });
 
     // Helper to get child histogram after zooming
     async function getChildHistAfterZoom(inherit) {
@@ -178,8 +163,8 @@ describe('Inheritance color behavior', () => {
   }, TEST_TIMEOUT);
 
   test('precomputed pixels should have correct iteration values', async () => {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 800, height: 600 });
+    const page = await setupPage(browser);
+    await page.setViewportSize({ width: 800, height: 600 });
 
     await page.goto(fixUrlForPlatform(`http://localhost:${port}?debug=dims:10x10&pixelratio=1&board=gpu&inherit=1&grid=2`), {
       waitUntil: 'domcontentloaded'
@@ -229,8 +214,8 @@ describe('Inheritance color behavior', () => {
     // When zooming into deep interior (all pixels converge slowly),
     // GPU may not report any results for many batches. Precomputed
     // pixels from the parent should still be flushed.
-    const page = await browser.newPage();
-    await page.setViewport({ width: 800, height: 600 });
+    const page = await setupPage(browser);
+    await page.setViewportSize({ width: 800, height: 600 });
 
     // This URL has view 2 in deep interior
     await page.goto(fixUrlForPlatform(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095735+0.655091i,-0.0944515+0.6555326i&board=gpu&inherit=1&grid=2&debug=dims:50x50&pixelratio=1`), {
@@ -268,8 +253,8 @@ describe('Inheritance color behavior', () => {
   test('histogram should not have duplicate iterations (stripe detection)', async () => {
     // Stripes are caused by duplicate histogram entries at the same iteration
     // with different fracK values. This test verifies no duplicates exist.
-    const page = await browser.newPage();
-    await page.setViewport({ width: 800, height: 600 });
+    const page = await setupPage(browser);
+    await page.setViewportSize({ width: 800, height: 600 });
 
     // Use 2-view URL with small dims for speed (30x30 = 900 pixels)
     await page.goto(fixUrlForPlatform(`http://localhost:${port}?z=1.25e2&c=-0.10551+0.65076i,-0.095804+0.654167i&board=gpu&inherit=1&grid=2&debug=dims:30x30&pixelratio=1`), {
@@ -321,8 +306,8 @@ describe('Inheritance color behavior', () => {
     // Stripes appear as sharp color transitions between precomputed (green) and
     // GPU-computed (pink) pixels. This test zooms in using 'i' and checks for
     // excessive warm/cool transitions in the rendered canvas.
-    const page = await browser.newPage();
-    await page.setViewport({ width: 800, height: 600 });
+    const page = await setupPage(browser);
+    await page.setViewportSize({ width: 800, height: 600 });
 
     // Use neon theme with small dims (50x50) for speed
     await page.goto(fixUrlForPlatform(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2&debug=dims:50x50&pixelratio=1`), {
@@ -410,8 +395,8 @@ describe('Inheritance color behavior', () => {
   test('third view (2 zooms) should not have stripes or transparent pixels', async () => {
     // After pressing 'i' twice, the 3rd view should still have smooth colors
     // with no stripes or transparent pixels from unflushed precomputed data.
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1470, height: 827 });
+    const page = await setupPage(browser);
+    await page.setViewportSize({ width: 1470, height: 827 });
 
     // Use neon theme for clear warm/cool distinction
     await page.goto(fixUrlForPlatform(`http://localhost:${port}?z=1.25e2&c=-0.09786+0.65105i&theme=neon&inherit=1&grid=2`), {
@@ -524,8 +509,8 @@ describe('Inheritance color behavior', () => {
   test('16:9 aspect ratio should not cause coordinate mapping errors', async () => {
     // Test that inheritance works correctly with 16:9 aspect ratio.
     // A bug in coordinate mapping would cause stripes or misaligned pixels.
-    const page = await browser.newPage();
-    await page.setViewport({ width: 800, height: 600 });
+    const page = await setupPage(browser);
+    await page.setViewportSize({ width: 800, height: 600 });
 
     // Use neon theme with small dims, 16:9 aspect ratio (80x45 ≈ 1.78)
     // Note: debug=dims sets aspect ratio from dimensions, so we use 80x45 for 16:9
@@ -616,9 +601,9 @@ describe('Inheritance color behavior', () => {
 
   test('converged pixels only inherit when period matches', async () => {
     // Inheritance should reject converged neighbors when the period differs.
-    const page = await browser.newPage();
+    const page = await setupPage(browser);
     // Small viewport with grid=20 gives ~10x10 pixels per view
-    await page.setViewport({ width: 200, height: 200 });
+    await page.setViewportSize({ width: 200, height: 200 });
 
     // Center on cardioid so most pixels converge
     await page.goto(fixUrlForPlatform(`http://localhost:${port}?board=gpu&inherit=1&grid=20&c=-0.5+0i&z=2&debug=inherit`), {
@@ -657,7 +642,7 @@ describe('Inheritance color behavior', () => {
     await page.waitForFunction(() => window.explorer?.grid?.views?.length >= 2, { timeout: 10000 });
 
     // Wait a moment for inheritance to be computed and sent to worker
-    await new Promise(r => setTimeout(r, 500));
+    await page.waitForTimeout(500);
 
     // Check inheritance - the child view's nn array should have inherited values
     const inheritanceStats = await page.evaluate(() => {

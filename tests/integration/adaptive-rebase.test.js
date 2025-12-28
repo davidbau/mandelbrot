@@ -8,40 +8,25 @@
  * The fix was to remove the guard, matching ScaledGpuZhuoranBoard's behavior.
  */
 
-const puppeteer = require('puppeteer');
 const path = require('path');
-
-const TEST_TIMEOUT = 60000;
+const { TEST_TIMEOUT, setupBrowser, setupPage, closeBrowser } = require('./test-utils');
 
 describe('GpuAdaptiveBoard rebase behavior', () => {
   let browser;
   let page;
 
   beforeAll(async () => {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--enable-unsafe-webgpu']
-    });
+    browser = await setupBrowser();
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) {
-      // Terminate all workers before closing browser to prevent exit warnings
-      for (const page of await browser.pages()) {
-        try {
-          await page.evaluate(() => {
-            if (window.worker0) window.worker0.terminate?.();
-          });
-        } catch (e) { /* page may already be closed */ }
-      }
-      await browser.close();
-    }
-  });
+    await closeBrowser(browser);
+  }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await browser.newPage();
-    await page.setViewport({ width: 320, height: 180 });  // Small viewport for speed
-  });
+    page = await setupPage(browser);
+    await page.setViewportSize({ width: 320, height: 180 });  // Small viewport for speed
+  }, TEST_TIMEOUT);
 
   afterEach(async () => {
     if (page) {
@@ -52,7 +37,7 @@ describe('GpuAdaptiveBoard rebase behavior', () => {
       } catch (e) { /* ignore */ }
       await page.close();
     }
-  });
+  }, TEST_TIMEOUT);
 
   test('GpuAdaptiveBoard rebases correctly when orbit passes near zero', async () => {
     // This location at z=1e29 causes the reference orbit to pass near zero
@@ -100,8 +85,8 @@ describe('GpuAdaptiveBoard rebase behavior', () => {
   test('GpuAdaptiveBoard matches QDZ refiter sequence', async () => {
     // Collect refiter sequence for both boards and verify they match
     async function collectRefiterSequence(boardType) {
-      const testPage = await browser.newPage();
-      await testPage.setViewport({ width: 320, height: 180 });
+      const testPage = await setupPage(browser);
+      await testPage.setViewportSize({ width: 320, height: 180 });
 
       const params = new URLSearchParams({
         z: '1e29',

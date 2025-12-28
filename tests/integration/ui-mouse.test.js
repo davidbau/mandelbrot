@@ -382,7 +382,7 @@ describe('Mouse UI Tests', () => {
 
   describe('Error Handling', () => {
     test('Should handle WebGPU unavailable gracefully', async () => {
-      await page.evaluateOnNewDocument(() => {
+      await page.addInitScript(() => {
         Object.defineProperty(navigator, 'gpu', {
           get: () => undefined
         });

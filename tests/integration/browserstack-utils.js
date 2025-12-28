@@ -4,10 +4,10 @@
  * Usage: Set BROWSERSTACK=1 environment variable to use BrowserStack instead of local browser
  * Requires: BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY in environment
  *
- * Based on: https://github.com/browserstack/puppeteer-browserstack
+ * Based on: https://github.com/browserstack/playwright-browserstack
  */
 
-const puppeteer = require('puppeteer');
+const { chromium } = require('playwright');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -128,7 +128,7 @@ function getCaps(platform = 'windows') {
   }
 }
 
-// Setup browser - connects to BrowserStack
+// Setup browser - connects to BrowserStack via CDP
 async function setupBrowserStack() {
   if (!isBrowserStack()) {
     throw new Error('BrowserStack credentials not configured. Set BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY.');
@@ -141,9 +141,10 @@ async function setupBrowserStack() {
   const platform = getTargetPlatform();
   const caps = getCaps(platform);
 
-  const browser = await puppeteer.connect({
-    browserWSEndpoint: `wss://cdp.browserstack.com/puppeteer?caps=${encodeURIComponent(JSON.stringify(caps))}`
-  });
+  // Connect to BrowserStack via CDP endpoint
+  const browser = await chromium.connectOverCDP(
+    `wss://cdp.browserstack.com/playwright?caps=${encodeURIComponent(JSON.stringify(caps))}`
+  );
 
   // Store cleanup info on browser object
   browser._browserstack = true;
@@ -153,13 +154,15 @@ async function setupBrowserStack() {
 
 // Setup page for BrowserStack
 async function setupPageBrowserStack(browser) {
-  const page = await browser.newPage();
-  await page.setViewport(TEST_VIEWPORT);
+  // Get the default context (BrowserStack provides one)
+  const context = browser.contexts()[0] || await browser.newContext({ viewport: TEST_VIEWPORT });
+  const page = await context.newPage();
 
-  // Polyfill for page.waitForTimeout (removed in Puppeteer v22+)
-  if (!page.waitForTimeout) {
-    page.waitForTimeout = (ms) => new Promise(r => setTimeout(r, ms));
-  }
+  // Set viewport
+  await page.setViewportSize(TEST_VIEWPORT);
+
+  // Add waitForTimeout helper for compatibility
+  page.waitForTimeout = (ms) => page.evaluate(ms => new Promise(r => setTimeout(r, ms)), ms);
 
   // Wrap page.goto to automatically transform file:// URLs to HTTP URLs
   // This allows tests to work without modification on BrowserStack
@@ -212,17 +215,20 @@ async function closeBrowserStack(browser) {
   if (!browser) return;
 
   try {
-    const pages = await browser.pages();
-    await Promise.all(pages.map(async (page) => {
-      try {
-        await page.evaluate(() => {
-          if (window.explorer?.scheduler?.workers) {
-            window.explorer.scheduler.workers.forEach(w => w.terminate());
-            window.explorer.scheduler.workers = [];
-          }
-        });
-      } catch (e) { /* page may be closed */ }
-      try { await page.close(); } catch (e) { /* ignore */ }
+    const contexts = browser.contexts();
+    await Promise.all(contexts.map(async (context) => {
+      const pages = context.pages();
+      await Promise.all(pages.map(async (page) => {
+        try {
+          await page.evaluate(() => {
+            if (window.explorer?.scheduler?.workers) {
+              window.explorer.scheduler.workers.forEach(w => w.terminate());
+              window.explorer.scheduler.workers = [];
+            }
+          });
+        } catch (e) { /* page may be closed */ }
+        try { await page.close(); } catch (e) { /* ignore */ }
+      }));
     }));
 
     await browser.close();

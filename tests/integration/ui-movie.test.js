@@ -168,7 +168,7 @@ describe('Movie Mode Tests', () => {
 
     // Navigate with minimal views for fast encoding
     // Use a very small viewport and pixelratio=1 to keep canvas small
-    await page.setViewport({ width: 64, height: 64 });
+    await page.setViewportSize({ width: 64, height: 64 });
     await page.goto(`file://${path.join(__dirname, '../../index.html')}?c=-0.5+0i,-0.6+0.1i&s=3,2&pixelratio=1&grid=64`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
     await page.waitForFunction(() => window.explorer.grid.views.length >= 2, { timeout: 5000 });

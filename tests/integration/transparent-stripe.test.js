@@ -3,9 +3,7 @@
  */
 const http = require('http');
 const fs = require('fs');
-const puppeteer = require('puppeteer');
-
-const TEST_TIMEOUT = 60000;
+const { TEST_TIMEOUT, setupBrowser, setupPage, closeBrowser } = require('./test-utils');
 
 describe('Transparent pixel stripe bug', () => {
   let browser;
@@ -22,22 +20,19 @@ describe('Transparent pixel stripe bug', () => {
     await new Promise(resolve => server.listen(0, resolve));
     port = server.address().port;
 
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+    browser = await setupBrowser();
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
+    await closeBrowser(browser);
     if (server) server.close();
-  });
+  }, TEST_TIMEOUT);
 
   test('second view should not have transparent stripes after completion', async () => {
     // This reproduces the bug where the second view has transparent pixel stripes
     // when using unk=transparent and the fast pixel cache path
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1470, height: 827 });
+    const page = await setupPage(browser);
+    await page.setViewportSize({ width: 1470, height: 827 });
 
     // Load the URL that triggers the bug
     await page.goto(`http://localhost:${port}?c=,0.319-0.5176i&unk=transparent`, {

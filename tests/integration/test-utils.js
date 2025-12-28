@@ -1,15 +1,14 @@
 /**
  * Shared utilities for integration tests
  *
- * Supports both local Puppeteer and BrowserStack modes.
+ * Supports both local Playwright and BrowserStack modes.
  * Set BROWSERSTACK=1 environment variable to use BrowserStack.
  */
 
-const puppeteer = require('puppeteer');
+const { chromium } = require('playwright');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { setTimeout: sleep } = require('node:timers/promises');
 const { startCoverage, stopCoverage, clearCoverage, isCoverageEnabled } = require('../utils/coverage');
 
 // BrowserStack mode detection
@@ -31,7 +30,7 @@ function findChrome() {
   for (const p of chromePaths) {
     if (fs.existsSync(p)) return p;
   }
-  return null;  // Fall back to Puppeteer's bundled Chrome
+  return null;  // Fall back to Playwright's bundled Chromium
 }
 
 // Helper function to wait for initial view to be ready (has computed some pixels)
@@ -41,8 +40,8 @@ async function waitForViewReady(page, viewIndex = 0) {
       const view = window.explorer?.grid?.views?.[idx];
       return view && !view.uninteresting();
     },
-    { timeout: 10000 },
-    viewIndex
+    viewIndex,
+    { timeout: 10000 }
   );
 }
 
@@ -54,7 +53,6 @@ async function setupBrowser() {
   }
 
   const chromePath = findChrome();
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mandelbrot-puppeteer-'));
   const platform = os.platform();
 
   // ANGLE backend varies by platform:
@@ -66,7 +64,7 @@ async function setupBrowser() {
                      : 'swiftshader';  // Linux: use software renderer for reliable headless
 
   const launchOptions = {
-    headless: 'new',
+    headless: true,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -80,16 +78,10 @@ async function setupBrowser() {
       `--use-angle=${angleBackend}`,
     ]
   };
-  launchOptions.userDataDir = userDataDir;
   if (chromePath) {
     launchOptions.executablePath = chromePath;
   }
-  const browser = await puppeteer.launch(launchOptions);
-  const originalClose = browser.close.bind(browser);
-  browser.close = async () => {
-    await originalClose();
-    fs.rmSync(userDataDir, { recursive: true, force: true });
-  };
+  const browser = await chromium.launch(launchOptions);
   return browser;
 }
 
@@ -100,13 +92,14 @@ async function setupPage(browser, options = {}) {
     return browserStackUtils.setupPageBrowserStack(browser);
   }
 
-  const page = await browser.newPage();
-  await page.setViewport(TEST_VIEWPORT);
+  const context = await browser.newContext({
+    viewport: TEST_VIEWPORT,
+    permissions: ['clipboard-read', 'clipboard-write']
+  });
+  const page = await context.newPage();
 
-  // Polyfill for page.waitForTimeout (removed in Puppeteer v22+)
-  if (!page.waitForTimeout) {
-    page.waitForTimeout = (ms) => sleep(ms);
-  }
+  // Add waitForTimeout helper for compatibility
+  page.waitForTimeout = (ms) => page.evaluate(ms => new Promise(r => setTimeout(r, ms)), ms);
 
   // Start coverage collection if enabled
   if (isCoverageEnabled()) {
@@ -118,7 +111,7 @@ async function setupPage(browser, options = {}) {
     await startCoverage(page, testName);
   }
 
-  // Wrap page.close to terminate workers and collect coverage before closing
+  // Store original close for cleanup
   const originalClose = page.close.bind(page);
   page.close = async function() {
     // Terminate workers before closing to prevent hanging
@@ -133,7 +126,14 @@ async function setupPage(browser, options = {}) {
     if (isCoverageEnabled()) {
       await stopCoverage(page);
     }
-    return originalClose();
+
+    // Close context (which closes the page)
+    try {
+      await context.close();
+    } catch (e) {
+      // Fall back to page close if context close fails
+      try { await originalClose(); } catch (e2) { /* ignore */ }
+    }
   };
 
   // Capture console messages (optional, can be noisy)
@@ -184,8 +184,11 @@ function appendCpuDebugFlags(queryParams) {
 // Navigate to the app and wait for explorer to initialize AND initial view to be ready
 async function navigateToApp(page, queryParams = '') {
   // Use BrowserStack navigation if enabled
-  if (browserStackUtils && page.browser && (await page.browser())._browserstack) {
-    return browserStackUtils.navigateToAppBrowserStack(page, queryParams);
+  if (browserStackUtils) {
+    const browser = page.context().browser();
+    if (browser && browser._browserstack) {
+      return browserStackUtils.navigateToAppBrowserStack(page, queryParams);
+    }
   }
 
   const adjustedParams = appendCpuDebugFlags(queryParams);
@@ -258,35 +261,28 @@ async function closeBrowser(browser, timeout = 10000) {
   }
 
   try {
-    // Close all pages first to terminate workers
-    const pages = await browser.pages();
-    await Promise.all(pages.map(async (page) => {
-      try {
-        // Terminate workers and wait briefly for cleanup
-        await page.evaluate(() => {
-          if (window.explorer?.scheduler?.workers) {
-            window.explorer.scheduler.workers.forEach(w => w.terminate());
-            window.explorer.scheduler.workers = [];
-          }
-        });
-      } catch (e) { /* page may be closed */ }
-      try { await page.close(); } catch (e) { /* ignore */ }
+    // Close all contexts/pages first to terminate workers
+    const contexts = browser.contexts();
+    await Promise.all(contexts.map(async (context) => {
+      const pages = context.pages();
+      await Promise.all(pages.map(async (page) => {
+        try {
+          // Terminate workers
+          await page.evaluate(() => {
+            if (window.explorer?.scheduler?.workers) {
+              window.explorer.scheduler.workers.forEach(w => w.terminate());
+              window.explorer.scheduler.workers = [];
+            }
+          });
+        } catch (e) { /* page may be closed */ }
+      }));
+      try { await context.close(); } catch (e) { /* ignore */ }
     }));
 
-    // Delay before browser close to allow worker threads to finish terminating
-    await new Promise(r => setTimeout(r, 200));
-
-    // Race browser.close() against timeout, ensuring timer is cleaned up
-    const proc = browser.process();
-    let timeoutId;
+    // Close browser with timeout
     await Promise.race([
-      browser.close().finally(() => clearTimeout(timeoutId)),
-      new Promise(resolve => {
-        timeoutId = setTimeout(() => {
-          if (proc) proc.kill('SIGKILL');
-          resolve();
-        }, timeout);
-      })
+      browser.close(),
+      new Promise(resolve => setTimeout(resolve, timeout))
     ]);
   } catch (e) { /* ignore */ }
 }

@@ -122,7 +122,7 @@ describe('GpuAdaptiveBoard', () => {
     const TRAPEZOID_ZOOM = '5.00e+29';
 
     // Set viewport to match the test parameters (256x144 at 16:9)
-    await page.setViewport({ width: 256, height: 144 });
+    await page.setViewportSize({ width: 256, height: 144 });
 
     // Run gpuz as reference (doesn't have the bug)
     const cwd = process.cwd();
@@ -145,7 +145,7 @@ describe('GpuAdaptiveBoard', () => {
 
     await page.close();
     page = await setupPage(browser, {}, TEST_TIMEOUT);
-    await page.setViewport({ width: 256, height: 144 });
+    await page.setViewportSize({ width: 256, height: 144 });
 
     // Run adaptive board
     const adaptiveUrl = `file://${path.join(cwd, 'index.html')}?z=${TRAPEZOID_ZOOM}&c=${TRAPEZOID_CENTER}&board=gpua&grid=1&maxiter=3000&width=256&height=144&a=16:9&pixelratio=1`;

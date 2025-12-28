@@ -10,9 +10,8 @@ describe('Context Menu UI Tests', () => {
 
   beforeAll(async () => {
     browser = await setupBrowser();
-    // Enable clipboard permissions
-    const context = browser.defaultBrowserContext();
-    await context.overridePermissions('file://', ['clipboard-read', 'clipboard-write']);
+    // Note: Clipboard permissions are granted per-context in Playwright
+    // via setupPage's context creation with permissions
   }, TEST_TIMEOUT);
 
   beforeEach(async () => {
@@ -133,7 +132,7 @@ describe('Context Menu UI Tests', () => {
     await page.waitForTimeout(200);
 
     // Click at a safe location (near the bottom right corner of the viewport)
-    const viewport = page.viewport();
+    const viewport = page.viewportSize();
     await page.mouse.click(viewport.width - 10, viewport.height - 10);
     
     // Wait for menu to be removed
