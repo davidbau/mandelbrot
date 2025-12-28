@@ -43,8 +43,8 @@ describe('Mouse UI Tests', () => {
 
       await page.waitForFunction(
         (prevCount) => window.explorer.grid.views.length > prevCount,
-        { timeout: 5000 },
-        viewsBefore
+        viewsBefore,
+        { timeout: 5000 }
       );
 
       const viewsAfter = await page.evaluate(() => window.explorer.grid.views.length);
@@ -105,14 +105,13 @@ describe('Mouse UI Tests', () => {
       // Wait for the view count to decrease (closebox on deepest view deletes it)
       // or for the view to be hidden (if it's not the deepest view)
       await page.waitForFunction(
-        (before, idx) => {
+        ({ before, idx }) => {
           const visibleViews = window.explorer.grid.views.filter(v => v !== null).length;
           const viewHidden = window.explorer.grid.hiddencanvas && window.explorer.grid.hiddencanvas(idx);
           return visibleViews < before || viewHidden;
         },
-        { timeout: 15000 },
-        viewsBefore,
-        lastViewIdx
+        { before: viewsBefore, idx: lastViewIdx },
+        { timeout: 15000 }
       );
 
       // Wait for any update process to complete

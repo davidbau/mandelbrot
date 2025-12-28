@@ -41,8 +41,8 @@ describe('GPU results readback', () => {
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 10000 });
     await page.waitForFunction(
       (expected) => window.explorer?.grid?.views?.[0]?.boardType === expected,
-      { timeout: 10000 },
-      name
+      name,
+      { timeout: 10000 }
     );
 
     await page.waitForFunction(() => {

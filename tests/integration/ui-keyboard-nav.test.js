@@ -42,8 +42,8 @@ describe('Keyboard Navigation Tests', () => {
       // Wait for theme to change
       await page.waitForFunction(
         (init) => window.explorer.config.theme !== init,
-        { timeout: 5000 },
-        initialTheme
+        initialTheme,
+        { timeout: 5000 }
       );
       const newTheme = await page.evaluate(() => window.explorer.config.theme);
       expect(newTheme).not.toBe(initialTheme);
@@ -58,8 +58,8 @@ describe('Keyboard Navigation Tests', () => {
       await page.keyboard.up('Shift');
       await page.waitForFunction(
         (init) => window.explorer.config.theme !== init,
-        { timeout: 5000 },
-        initialTheme
+        initialTheme,
+        { timeout: 5000 }
       );
       const newTheme = await page.evaluate(() => window.explorer.config.theme);
       expect(newTheme).not.toBe(initialTheme);
@@ -114,8 +114,8 @@ describe('Keyboard Navigation Tests', () => {
       await page.keyboard.press('t');
       await page.waitForFunction(
         (init) => window.explorer.config.theme !== init,
-        { timeout: 5000 },
-        themeBefore
+        themeBefore,
+        { timeout: 5000 }
       );
       const themeAfter = await page.evaluate(() => window.explorer.config.theme);
 
@@ -171,8 +171,8 @@ describe('Keyboard Navigation Tests', () => {
       await page.keyboard.press('u');
       await page.waitForFunction(
         (init) => window.explorer.config.unknowncolor !== init,
-        { timeout: 5000 },
-        initialColor
+        initialColor,
+        { timeout: 5000 }
       );
       const newColor = await page.evaluate(() => window.explorer.config.unknowncolor);
       expect(newColor).not.toBe(initialColor);
@@ -189,8 +189,8 @@ describe('Keyboard Navigation Tests', () => {
       await page.keyboard.press('i');
       await page.waitForFunction(
         (before) => window.explorer.grid.views.length > before,
-        { timeout: 5000 },
-        viewsBefore
+        viewsBefore,
+        { timeout: 5000 }
       );
 
       const viewsAfter = await page.evaluate(() => window.explorer.grid.views.length);
@@ -308,8 +308,8 @@ describe('Keyboard Navigation Tests', () => {
       await page.keyboard.press('h');
       await page.waitForFunction(
         (init) => window.explorer.config.gridcols === init + 1,
-        { timeout: 5000 },
-        initialCols
+        initialCols,
+        { timeout: 5000 }
       );
       const newCols = await page.evaluate(() => window.explorer.config.gridcols);
       expect(newCols).toBe(initialCols + 1);
@@ -322,16 +322,16 @@ describe('Keyboard Navigation Tests', () => {
       await page.keyboard.press('h');
       await page.waitForFunction(
         (init) => window.explorer.config.gridcols === init + 1,
-        { timeout: 5000 },
-        startCols
+        startCols,
+        { timeout: 5000 }
       );
       const initialCols = await page.evaluate(() => window.explorer.config.gridcols);
 
       await page.keyboard.press('g');
       await page.waitForFunction(
         (init) => window.explorer.config.gridcols === init - 1,
-        { timeout: 5000 },
-        initialCols
+        initialCols,
+        { timeout: 5000 }
       );
       const newCols = await page.evaluate(() => window.explorer.config.gridcols);
       expect(newCols).toBe(initialCols - 1);
@@ -346,8 +346,8 @@ describe('Keyboard Navigation Tests', () => {
       await page.keyboard.press('h');
       await page.waitForFunction(
         (init) => window.explorer.config.gridcols === init + 3,
-        { timeout: 5000 },
-        initialCols
+        initialCols,
+        { timeout: 5000 }
       );
       const finalCols = await page.evaluate(() => window.explorer.config.gridcols);
       expect(finalCols).toBe(initialCols + 3);
