@@ -3,32 +3,31 @@
  * produce equivalent color values.
  */
 
-const puppeteer = require('puppeteer');
+const { setupBrowser, setupPage, closeBrowser } = require('../integration/test-utils');
+
+const TEST_TIMEOUT = 30000;
 
 describe('Color Theme Equivalence', () => {
   let browser;
   let page;
 
   beforeAll(async () => {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-  });
+    browser = await setupBrowser();
+  }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
-  });
+    await closeBrowser(browser);
+  }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await browser.newPage();
+    page = await setupPage(browser);
     await page.goto(`file://${process.cwd()}/index.html?debug=dims:100x100`);
     await page.waitForFunction(() => window.explorer !== undefined, { timeout: 30000 });
-  });
+  }, TEST_TIMEOUT);
 
   afterEach(async () => {
     if (page) await page.close();
-  });
+  }, TEST_TIMEOUT);
 
   const themes = ['warm', 'neon', 'iceblue', 'tiedye', 'gray'];
 
@@ -45,7 +44,7 @@ describe('Color Theme Equivalence', () => {
 
   for (const theme of themes) {
     test(`${theme} theme: string and RGBA versions match`, async () => {
-      const results = await page.evaluate((themeName, cases) => {
+      const results = await page.evaluate(({ themeName, cases }) => {
         const config = window.explorer.config;
         const stringFn = config.colorThemes[themeName];
         const rgbaFn = config.colorThemesRGBA[themeName];
@@ -87,12 +86,12 @@ describe('Color Theme Equivalence', () => {
         }
 
         return { mismatches };
-      }, theme, testCases);
+      }, { themeName: theme, cases: testCases });
 
       if (results.mismatches.length > 0) {
         console.log(`Mismatches for ${theme}:`, results.mismatches);
       }
       expect(results.mismatches).toHaveLength(0);
-    });
+    }, TEST_TIMEOUT);
   }
 });

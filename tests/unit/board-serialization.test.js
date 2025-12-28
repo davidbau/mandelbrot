@@ -12,9 +12,8 @@
  * GPU boards are compared against CPU equivalents (tolerance allowed)
  */
 
-const puppeteer = require('puppeteer');
 const path = require('path');
-const fs = require('fs');
+const { setupBrowser, setupPage, closeBrowser } = require('../integration/test-utils');
 const { setTimeout: sleep } = require('node:timers/promises');
 
 // Test parameters
@@ -50,37 +49,8 @@ describe('Board Serialization', () => {
   let page;
 
   beforeAll(async () => {
-    const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath();
-    // Use unique profile directory to avoid conflicts with parallel tests
-    const userDataDir = path.join(__dirname, '../../.puppeteer-profile-serialization');
-    const chromeHome = path.join(__dirname, '../../.chrome-home-serialization');
-    fs.mkdirSync(userDataDir, { recursive: true });
-    fs.mkdirSync(chromeHome, { recursive: true });
-
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-crash-reporter',
-        '--disable-features=Crashpad,Breakpad',
-        `--user-data-dir=${userDataDir}`,
-        '--enable-unsafe-webgpu',
-        '--enable-features=Vulkan',
-        '--use-angle=metal',
-      ],
-      userDataDir,
-      executablePath: chromePath || undefined,
-      env: {
-        ...process.env,
-        HOME: chromeHome,
-        XDG_CONFIG_HOME: chromeHome,
-        XDG_CACHE_HOME: chromeHome,
-      }
-    });
-
-    page = await browser.newPage();
+    browser = await setupBrowser();
+    page = await setupPage(browser);
 
     // Load the page
     const htmlPath = `file://${path.join(__dirname, '../../index.html')}`;
@@ -96,28 +66,15 @@ describe('Board Serialization', () => {
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) {
-      if (page) {
-        try {
-          await page.evaluate(() => {
-            if (window.explorer?.scheduler?.workers) {
-              window.explorer.scheduler.workers.forEach(w => w.terminate());
-              window.explorer.scheduler.workers = [];
-            }
-          });
-        } catch (e) { /* ignore */ }
-      }
-      await new Promise(r => setTimeout(r, 200));
-      await browser.close();
-    }
-  });
+    await closeBrowser(browser);
+  }, TEST_TIMEOUT);
 
   /**
    * Test serialization for a CPU board type
    * Compares interrupted+serialized run against uninterrupted run
    */
   async function testCpuBoardSerialization(boardTypeName) {
-    return await page.evaluate(async (typeName, loc, dims, totalIters, serializeAt) => {
+    return await page.evaluate(async ({ typeName, loc, dims, totalIters, serializeAt }) => {
       const config = {
         dimsWidth: dims.width,
         dimsHeight: dims.height,
@@ -266,7 +223,7 @@ describe('Board Serialization', () => {
         comparison,
         serializedSize: JSON.stringify(serialized).length,
       };
-    }, boardTypeName, TEST_LOCATION, SMALL_GRID, TOTAL_ITERATIONS, SERIALIZE_AT);
+    }, { typeName: boardTypeName, loc: TEST_LOCATION, dims: SMALL_GRID, totalIters: TOTAL_ITERATIONS, serializeAt: SERIALIZE_AT });
   }
 
   // Test each CPU board type
@@ -297,7 +254,7 @@ describe('Board Serialization', () => {
 
   describe('Serialization data integrity', () => {
     test('CpuBoard serialized data contains required fields', async () => {
-      const result = await page.evaluate(async (loc, dims) => {
+      const result = await page.evaluate(async ({ loc, dims }) => {
         const config = {
           dimsWidth: dims.width,
           dimsHeight: dims.height,
@@ -335,7 +292,7 @@ describe('Board Serialization', () => {
           it: serialized.it,
           ssLength: serialized.ss?.length,
         };
-      }, TEST_LOCATION, SMALL_GRID);
+      }, { loc: TEST_LOCATION, dims: SMALL_GRID });
 
       expect(result.hasType).toBe(true);
       expect(result.hasK).toBe(true);
@@ -351,7 +308,7 @@ describe('Board Serialization', () => {
     }, TEST_TIMEOUT);
 
     test('DDZhuoranBoard serialized data contains reference orbit', async () => {
-      const result = await page.evaluate(async (loc, dims) => {
+      const result = await page.evaluate(async ({ loc, dims }) => {
         const config = {
           dimsWidth: dims.width,
           dimsHeight: dims.height,
@@ -384,7 +341,7 @@ describe('Board Serialization', () => {
           refOrbitLength: serialized.refOrbit?.length,
           refIterations: board.refIterations,
         };
-      }, TEST_LOCATION, SMALL_GRID);
+      }, { loc: TEST_LOCATION, dims: SMALL_GRID });
 
       expect(result.error).toBeUndefined();
       expect(result.hasRefOrbit).toBe(true);
@@ -394,7 +351,7 @@ describe('Board Serialization', () => {
     }, TEST_TIMEOUT);
 
     test('QDZhuoranBoard serialized data contains QD reference orbit', async () => {
-      const result = await page.evaluate(async (loc, dims) => {
+      const result = await page.evaluate(async ({ loc, dims }) => {
         const config = {
           dimsWidth: dims.width,
           dimsHeight: dims.height,
@@ -429,7 +386,7 @@ describe('Board Serialization', () => {
           hasPixelIndexes: 'pixelIndexes' in serialized,
           type: serialized.type,
         };
-      }, TEST_LOCATION, SMALL_GRID);
+      }, { loc: TEST_LOCATION, dims: SMALL_GRID });
 
       expect(result.error).toBeUndefined();
       expect(result.hasQdRefOrbit).toBe(true);
@@ -445,7 +402,7 @@ describe('Board Serialization', () => {
 
   describe('Edge cases', () => {
     test('Serialization works before any iterate() calls', async () => {
-      const result = await page.evaluate(async (loc, dims) => {
+      const result = await page.evaluate(async ({ loc, dims }) => {
         const config = {
           dimsWidth: dims.width,
           dimsHeight: dims.height,
@@ -489,7 +446,7 @@ describe('Board Serialization', () => {
           pixelMatches: matches,
           totalPixels: config.dimsArea,
         };
-      }, TEST_LOCATION, SMALL_GRID);
+      }, { loc: TEST_LOCATION, dims: SMALL_GRID });
 
       // Boards start at iteration 1 (z = c) per constructor
       expect(result.serializedIt).toBe(1);
@@ -498,7 +455,7 @@ describe('Board Serialization', () => {
     }, TEST_TIMEOUT);
 
     test('Serialization works after all pixels complete', async () => {
-      const result = await page.evaluate(async (loc, dims) => {
+      const result = await page.evaluate(async ({ loc, dims }) => {
         const config = {
           dimsWidth: dims.width,
           dimsHeight: dims.height,
@@ -531,7 +488,7 @@ describe('Board Serialization', () => {
           restoredIt: restored.it,
           ssLength: serialized.ss?.length, // Should be 0 - no active pixels
         };
-      }, TEST_LOCATION, SMALL_GRID);
+      }, { loc: TEST_LOCATION, dims: SMALL_GRID });
 
       expect(result.originalUn).toBe(0);
       expect(result.restoredUn).toBe(0);
@@ -547,7 +504,7 @@ describe('Board Serialization', () => {
      * GPU boards use async initialization and compute, so we need to handle that
      */
     async function testGpuBoardSerialization(boardTypeName, cpuEquivalentName) {
-      return await page.evaluate(async (gpuTypeName, cpuTypeName, loc, dims, totalIters, serializeAt) => {
+      return await page.evaluate(async ({ gpuTypeName, cpuTypeName, loc, dims, totalIters, serializeAt }) => {
         const config = {
           dimsWidth: dims.width,
           dimsHeight: dims.height,
@@ -724,7 +681,7 @@ describe('Board Serialization', () => {
           serializedSize: JSON.stringify(serialized).length,
           hasGpuPixelData: !!serialized.gpuPixelData,
         };
-      }, boardTypeName, cpuEquivalentName, TEST_LOCATION, SMALL_GRID, TOTAL_ITERATIONS, SERIALIZE_AT);
+      }, { gpuTypeName: boardTypeName, cpuTypeName: cpuEquivalentName, loc: TEST_LOCATION, dims: SMALL_GRID, totalIters: TOTAL_ITERATIONS, serializeAt: SERIALIZE_AT });
     }
 
     test('GpuBoard serialization preserves computation state', async () => {
@@ -807,7 +764,7 @@ describe('Board Serialization', () => {
     }, TEST_TIMEOUT);
 
     test('GpuBoard serialized data contains required fields', async () => {
-      const result = await page.evaluate(async (loc, dims) => {
+      const result = await page.evaluate(async ({ loc, dims }) => {
         const config = {
           dimsWidth: dims.width,
           dimsHeight: dims.height,
@@ -853,7 +810,7 @@ describe('Board Serialization', () => {
           type: serialized.type,
           gpuPixelDataLength: serialized.gpuPixelData?.length,
         };
-      }, TEST_LOCATION, SMALL_GRID);
+      }, { loc: TEST_LOCATION, dims: SMALL_GRID });
 
       if (result.skip) {
         console.log(`Test skipped: ${result.reason}`);
@@ -870,7 +827,7 @@ describe('Board Serialization', () => {
     }, TEST_TIMEOUT);
 
     test('GpuZhuoranBoard serialized data contains reference orbit', async () => {
-      const result = await page.evaluate(async (loc, dims) => {
+      const result = await page.evaluate(async ({ loc, dims }) => {
         const config = {
           dimsWidth: dims.width,
           dimsHeight: dims.height,
@@ -915,7 +872,7 @@ describe('Board Serialization', () => {
           refOrbitLength: serialized.refOrbit?.length,
           refIterations: serialized.refIterations,
         };
-      }, TEST_LOCATION, SMALL_GRID);
+      }, { loc: TEST_LOCATION, dims: SMALL_GRID });
 
       if (result.skip) {
         console.log(`Test skipped: ${result.reason}`);
@@ -932,7 +889,7 @@ describe('Board Serialization', () => {
     }, TEST_TIMEOUT);
 
     test('GpuAdaptiveBoard serialized data contains QD reference orbit', async () => {
-      const result = await page.evaluate(async (loc, dims) => {
+      const result = await page.evaluate(async ({ loc, dims }) => {
         const config = {
           dimsWidth: dims.width,
           dimsHeight: dims.height,
@@ -977,7 +934,7 @@ describe('Board Serialization', () => {
           type: serialized.type,
           qdRefOrbitLength: serialized.qdRefOrbit?.length,
         };
-      }, TEST_LOCATION, SMALL_GRID);
+      }, { loc: TEST_LOCATION, dims: SMALL_GRID });
 
       if (result.skip) {
         console.log(`Test skipped: ${result.reason}`);

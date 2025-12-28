@@ -7,36 +7,30 @@
  * 3. UI receives results monotonically (no duplicates, no out-of-order iterations)
  */
 
-const puppeteer = require('puppeteer');
+const { setupBrowser, setupPage, closeBrowser } = require('../integration/test-utils');
+
+const TEST_TIMEOUT = 60000;
 
 describe('GPU Batch Processing Invariants', () => {
   let browser;
   let page;
 
   beforeAll(async () => {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--enable-unsafe-webgpu',
-        '--enable-features=Vulkan',
-      ]
-    });
-  });
+    browser = await setupBrowser();
+  }, TEST_TIMEOUT);
 
   afterAll(async () => {
-    if (browser) await browser.close();
-  });
+    await closeBrowser(browser);
+  }, TEST_TIMEOUT);
 
   beforeEach(async () => {
-    page = await browser.newPage();
-    await page.setViewport({ width: 800, height: 600 });
-  });
+    page = await setupPage(browser);
+    await page.setViewportSize({ width: 800, height: 600 });
+  }, TEST_TIMEOUT);
 
   afterEach(async () => {
     if (page) await page.close();
-  });
+  }, TEST_TIMEOUT);
 
   test('UI view never receives duplicate pixel indices', async () => {
     await page.goto(`file://${process.cwd()}/index.html?board=gpu&debug=dims:80x45,w,s`);
@@ -75,7 +69,7 @@ describe('GPU Batch Processing Invariants', () => {
     // Step through computation
     for (let i = 0; i < 20; i++) {
       await page.evaluate(() => window.step && window.step());
-      await new Promise(r => setTimeout(r, 200));
+      await page.waitForTimeout(200);
     }
 
     const result = await page.evaluate(() => ({
@@ -84,7 +78,7 @@ describe('GPU Batch Processing Invariants', () => {
     }));
 
     expect(result.duplicates).toHaveLength(0);
-  }, 60000);
+  }, TEST_TIMEOUT);
 
   test('UI view receives iterations in monotonic order', async () => {
     await page.goto(`file://${process.cwd()}/index.html?board=gpu&debug=dims:80x45,w,s`);
@@ -122,7 +116,7 @@ describe('GPU Batch Processing Invariants', () => {
     // Step through computation
     for (let i = 0; i < 20; i++) {
       await page.evaluate(() => window.step && window.step());
-      await new Promise(r => setTimeout(r, 200));
+      await page.waitForTimeout(200);
     }
 
     const result = await page.evaluate(() => ({
@@ -133,7 +127,7 @@ describe('GPU Batch Processing Invariants', () => {
     // Iterations should arrive in monotonic order - batch processing ensures
     // we never send results from iteration N after results from iteration N+1
     expect(result.outOfOrder).toHaveLength(0);
-  }, 60000);
+  }, TEST_TIMEOUT);
 
   test('view.un and actual unknown pixel count should match', async () => {
     await page.goto(`file://${process.cwd()}/index.html?board=gpu&debug=dims:80x45,w,s`);
@@ -146,7 +140,7 @@ describe('GPU Batch Processing Invariants', () => {
     // Step through computation
     for (let i = 0; i < 20; i++) {
       await page.evaluate(() => window.step && window.step());
-      await new Promise(r => setTimeout(r, 200));
+      await page.waitForTimeout(200);
     }
 
     const result = await page.evaluate(() => {
@@ -165,5 +159,5 @@ describe('GPU Batch Processing Invariants', () => {
     // Allow off-by-one for timing issues
     const diff = Math.abs(result.viewUn - result.actualUnknown);
     expect(diff).toBeLessThanOrEqual(1);
-  }, 60000);
+  }, TEST_TIMEOUT);
 });
