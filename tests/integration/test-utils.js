@@ -1,8 +1,8 @@
 /**
  * Shared utilities for integration tests
  *
- * Supports both local Playwright and BrowserStack modes.
- * Set BROWSERSTACK=1 environment variable to use BrowserStack.
+ * Supports local Playwright, BrowserStack, and LambdaTest modes.
+ * Set BROWSERSTACK=1 or LAMBDATEST=1 environment variable to use cloud browsers.
  */
 
 const { chromium } = require('playwright');
@@ -10,11 +10,12 @@ const path = require('path');
 const os = require('os');
 const { startCoverage, stopCoverage, clearCoverage, isCoverageEnabled } = require('../utils/coverage');
 
-// BrowserStack mode detection
+// Cloud provider mode detection
 const browserStackUtils = process.env.BROWSERSTACK === '1' ? require('./browserstack-utils') : null;
+const lambdaTestUtils = process.env.LAMBDATEST === '1' ? require('./lambdatest-utils') : null;
 
-// BrowserStack tests need longer timeout for remote browser startup
-const TEST_TIMEOUT = browserStackUtils ? 120000 : 30000;
+// Cloud tests need longer timeout for remote browser startup
+const TEST_TIMEOUT = (browserStackUtils || lambdaTestUtils) ? 120000 : 30000;
 const TEST_VIEWPORT = { width: 400, height: 400 };
 
 // Helper function to wait for initial view to be ready (has computed some pixels)
@@ -31,9 +32,12 @@ async function waitForViewReady(page, viewIndex = 0) {
 
 // Standard browser setup for tests
 async function setupBrowser() {
-  // Use BrowserStack if enabled
+  // Use cloud provider if enabled
   if (browserStackUtils) {
     return browserStackUtils.setupBrowserStack();
+  }
+  if (lambdaTestUtils) {
+    return lambdaTestUtils.setupLambdaTest();
   }
 
   const platform = os.platform();
@@ -69,9 +73,12 @@ async function setupBrowser() {
 
 // Standard page setup for tests
 async function setupPage(browser, options = {}) {
-  // Use BrowserStack page setup if enabled
+  // Use cloud provider page setup if enabled
   if (browserStackUtils && browser._browserstack) {
     return browserStackUtils.setupPageBrowserStack(browser);
+  }
+  if (lambdaTestUtils && browser._lambdatest) {
+    return lambdaTestUtils.setupPageLambdaTest(browser);
   }
 
   const context = await browser.newContext({
@@ -165,11 +172,17 @@ function appendCpuDebugFlags(queryParams) {
 
 // Navigate to the app and wait for explorer to initialize AND initial view to be ready
 async function navigateToApp(page, queryParams = '') {
-  // Use BrowserStack navigation if enabled
+  // Use cloud provider navigation if enabled
   if (browserStackUtils) {
     const browser = page.context().browser();
     if (browser && browser._browserstack) {
       return browserStackUtils.navigateToAppBrowserStack(page, queryParams);
+    }
+  }
+  if (lambdaTestUtils) {
+    const browser = page.context().browser();
+    if (browser && browser._lambdatest) {
+      return lambdaTestUtils.navigateToAppLambdaTest(page, queryParams);
     }
   }
 
@@ -219,9 +232,12 @@ function appendCpuDebugFlagsToUrl(url) {
 
 // Get the base URL for the app
 function getAppUrl(queryString = '') {
-  // Use BrowserStack URL if enabled (requires HTTP server to be running)
+  // Use cloud provider URL if enabled (requires HTTP server to be running)
   if (browserStackUtils) {
     return browserStackUtils.getAppUrlBrowserStack(queryString);
+  }
+  if (lambdaTestUtils) {
+    return lambdaTestUtils.getAppUrlLambdaTest(queryString);
   }
 
   const baseUrl = `file://${path.join(__dirname, '../../index.html')}${queryString}`;
@@ -233,13 +249,26 @@ function isBrowserStack() {
   return browserStackUtils !== null;
 }
 
+// Check if running in LambdaTest mode
+function isLambdaTest() {
+  return lambdaTestUtils !== null;
+}
+
+// Check if running in any cloud provider mode
+function isCloudProvider() {
+  return browserStackUtils !== null || lambdaTestUtils !== null;
+}
+
 // Close browser with timeout to prevent hanging in afterAll
 async function closeBrowser(browser, timeout = 10000) {
   if (!browser) return;
 
-  // Use BrowserStack cleanup if enabled
+  // Use cloud provider cleanup if enabled
   if (browserStackUtils && browser._browserstack) {
     return browserStackUtils.closeBrowserStack(browser);
+  }
+  if (lambdaTestUtils && browser._lambdatest) {
+    return lambdaTestUtils.closeLambdaTest(browser);
   }
 
   try {
@@ -290,5 +319,7 @@ module.exports = {
   isCoverageEnabled,
   useCpuOnly,
   appendCpuDebugFlags,
-  isBrowserStack
+  isBrowserStack,
+  isLambdaTest,
+  isCloudProvider
 };

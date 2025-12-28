@@ -17,7 +17,10 @@
     "callgraph": "node build/build-callgraph.js",
     "browserstack": "npm run test:unit && dotenv -e .env.local -v BROWSERSTACK=1 -- jest tests/integration --runInBand",
     "browserstack:windows": "dotenv -e .env.local -v BROWSERSTACK=1 -v BROWSERSTACK_PLATFORM=windows -- jest tests/integration --runInBand",
-    "browserstack:mac": "dotenv -e .env.local -v BROWSERSTACK=1 -v BROWSERSTACK_PLATFORM=mac -- jest tests/integration --runInBand"
+    "browserstack:mac": "dotenv -e .env.local -v BROWSERSTACK=1 -v BROWSERSTACK_PLATFORM=mac -- jest tests/integration --runInBand",
+    "lambdatest": "npm run test:unit && dotenv -e .env.local -v LAMBDATEST=1 -- jest tests/integration --runInBand",
+    "lambdatest:windows": "dotenv -e .env.local -v LAMBDATEST=1 -v LAMBDATEST_PLATFORM=windows -- jest tests/integration --runInBand",
+    "lambdatest:mac": "dotenv -e .env.local -v LAMBDATEST=1 -v LAMBDATEST_PLATFORM=mac -- jest tests/integration --runInBand"
   },
   "jest": {
     "testEnvironment": "node",
@@ -27,6 +30,7 @@
     ]
   },
   "devDependencies": {
+    "@lambdatest/node-tunnel": "^4.0.9",
     "browserstack-local": "^1.5.8",
     "c8": "^10.1.3",
     "dotenv-cli": "^11.0.0",
