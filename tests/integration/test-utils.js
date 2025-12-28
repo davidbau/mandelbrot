@@ -7,7 +7,6 @@
 
 const { chromium } = require('playwright');
 const path = require('path');
-const fs = require('fs');
 const os = require('os');
 const { startCoverage, stopCoverage, clearCoverage, isCoverageEnabled } = require('../utils/coverage');
 
@@ -17,21 +16,6 @@ const browserStackUtils = process.env.BROWSERSTACK === '1' ? require('./browsers
 // BrowserStack tests need longer timeout for remote browser startup
 const TEST_TIMEOUT = browserStackUtils ? 120000 : 30000;
 const TEST_VIEWPORT = { width: 400, height: 400 };
-
-// Find system Chrome for better headless support
-function findChrome() {
-  const chromePaths = [
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',  // macOS
-    '/usr/bin/google-chrome',  // Linux
-    '/usr/bin/chromium-browser',  // Linux Chromium
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',  // Windows
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'  // Windows x86
-  ];
-  for (const p of chromePaths) {
-    if (fs.existsSync(p)) return p;
-  }
-  return null;  // Fall back to Playwright's bundled Chromium
-}
 
 // Helper function to wait for initial view to be ready (has computed some pixels)
 async function waitForViewReady(page, viewIndex = 0) {
@@ -52,7 +36,6 @@ async function setupBrowser() {
     return browserStackUtils.setupBrowserStack();
   }
 
-  const chromePath = findChrome();
   const platform = os.platform();
 
   // ANGLE backend varies by platform:
@@ -78,9 +61,8 @@ async function setupBrowser() {
       `--use-angle=${angleBackend}`,
     ]
   };
-  if (chromePath) {
-    launchOptions.executablePath = chromePath;
-  }
+  // Use Playwright's bundled Chromium - it runs truly headless without dock icons
+  // System Chrome (findChrome) would show dock icon on macOS
   const browser = await chromium.launch(launchOptions);
   return browser;
 }
@@ -296,7 +278,6 @@ async function closeBrowser(browser, timeout = 10000) {
 module.exports = {
   TEST_TIMEOUT,
   TEST_VIEWPORT,
-  findChrome,
   waitForViewReady,
   setupBrowser,
   setupPage,
