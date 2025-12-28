@@ -1,5 +1,8 @@
 /**
  * Shared utilities for integration tests
+ *
+ * Supports both local Puppeteer and BrowserStack modes.
+ * Set BROWSERSTACK=1 environment variable to use BrowserStack.
  */
 
 const puppeteer = require('puppeteer');
@@ -9,7 +12,11 @@ const os = require('os');
 const { setTimeout: sleep } = require('node:timers/promises');
 const { startCoverage, stopCoverage, clearCoverage, isCoverageEnabled } = require('../utils/coverage');
 
-const TEST_TIMEOUT = 30000; // 30 seconds for integration tests
+// BrowserStack mode detection
+const browserStackUtils = process.env.BROWSERSTACK === '1' ? require('./browserstack-utils') : null;
+
+// BrowserStack tests need longer timeout for remote browser startup
+const TEST_TIMEOUT = browserStackUtils ? 120000 : 30000;
 const TEST_VIEWPORT = { width: 400, height: 400 };
 
 // Find system Chrome for better headless support
@@ -41,6 +48,11 @@ async function waitForViewReady(page, viewIndex = 0) {
 
 // Standard browser setup for tests
 async function setupBrowser() {
+  // Use BrowserStack if enabled
+  if (browserStackUtils) {
+    return browserStackUtils.setupBrowserStack();
+  }
+
   const chromePath = findChrome();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mandelbrot-puppeteer-'));
   const platform = os.platform();
@@ -83,6 +95,11 @@ async function setupBrowser() {
 
 // Standard page setup for tests
 async function setupPage(browser, options = {}) {
+  // Use BrowserStack page setup if enabled
+  if (browserStackUtils && browser._browserstack) {
+    return browserStackUtils.setupPageBrowserStack(browser);
+  }
+
   const page = await browser.newPage();
   await page.setViewport(TEST_VIEWPORT);
 
@@ -166,6 +183,11 @@ function appendCpuDebugFlags(queryParams) {
 
 // Navigate to the app and wait for explorer to initialize AND initial view to be ready
 async function navigateToApp(page, queryParams = '') {
+  // Use BrowserStack navigation if enabled
+  if (browserStackUtils && page.browser && (await page.browser())._browserstack) {
+    return browserStackUtils.navigateToAppBrowserStack(page, queryParams);
+  }
+
   const adjustedParams = appendCpuDebugFlags(queryParams);
   const htmlPath = `file://${path.join(__dirname, '../../index.html')}${adjustedParams}`;
   await page.goto(htmlPath, { waitUntil: 'load' });
@@ -212,13 +234,29 @@ function appendCpuDebugFlagsToUrl(url) {
 
 // Get the base URL for the app
 function getAppUrl(queryString = '') {
+  // Use BrowserStack URL if enabled (requires HTTP server to be running)
+  if (browserStackUtils) {
+    return browserStackUtils.getAppUrlBrowserStack(queryString);
+  }
+
   const baseUrl = `file://${path.join(__dirname, '../../index.html')}${queryString}`;
   return useCpuOnly ? appendCpuDebugFlagsToUrl(baseUrl) : baseUrl;
+}
+
+// Check if running in BrowserStack mode
+function isBrowserStack() {
+  return browserStackUtils !== null;
 }
 
 // Close browser with timeout to prevent hanging in afterAll
 async function closeBrowser(browser, timeout = 10000) {
   if (!browser) return;
+
+  // Use BrowserStack cleanup if enabled
+  if (browserStackUtils && browser._browserstack) {
+    return browserStackUtils.closeBrowserStack(browser);
+  }
+
   try {
     // Close all pages first to terminate workers
     const pages = await browser.pages();
@@ -268,5 +306,6 @@ module.exports = {
   clearCoverage,
   isCoverageEnabled,
   useCpuOnly,
-  appendCpuDebugFlags
+  appendCpuDebugFlags,
+  isBrowserStack
 };

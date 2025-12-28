@@ -78,7 +78,7 @@ describe('GpuAdaptiveBoard', () => {
     expect(octResult.diverged).toBeGreaterThan(0);
 
     await page.close();
-    page = await browser.newPage();
+    page = await setupPage(browser);
 
     const adaptiveResult = await runBoard('gpua', '1e20', TEST_CENTER, 200);
     const comparison = compareIterations(adaptiveResult.nn, octResult.nn);
@@ -104,7 +104,7 @@ describe('GpuAdaptiveBoard', () => {
     expect(gpuResult.converged).toBeGreaterThan(0);
 
     await page.close();
-    page = await browser.newPage();
+    page = await setupPage(browser);
 
     const adaptiveResult = await runBoard('gpua', '5', CONVERGENT_CENTER, 500);
     // Expect reasonable convergence detection
