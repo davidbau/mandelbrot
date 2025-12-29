@@ -141,7 +141,7 @@ The application automatically selects the best available backend:
 
 1. **WebGPU** (`GpuBoard`, `GpuZhuoranBoard`, `GpuAdaptiveBoard`): Uses compute shaders for maximum throughput. Requires a modern browser with WebGPU support and a compatible GPU.
 
-2. **WebGL2** (`GlBoard`, `GlZhuoranBoard`, `GlAdaptiveBoard`): Uses fragment shaders with a ping-pong framebuffer architecture. Available on most modern browsers. See [GL-PERTURBATION-BOARDS.md](GL-PERTURBATION-BOARDS.md) for details.
+2. **WebGL2** (`GlBoard`, `GlZhuoranBoard`, `GlAdaptiveBoard`): Uses fragment shaders with a ping-pong framebuffer architecture. Available on most modern browsers. See [WEBGL-SHADERS.md](WEBGL-SHADERS.md) for details.
 
 3. **CPU** (`CpuBoard`, `DDZhuoranBoard`, `QDZhuoranBoard`): Pure JavaScript computation. Always available but slower.
 
@@ -295,5 +295,5 @@ The line numbers are approximate and shift as the code evolves. The script IDs a
 - [ALGORITHMS.md](ALGORITHMS.md): The mathematical algorithms.
 - [COLORS.md](COLORS.md): The histogram-based coloring system.
 - [MOVIES.md](MOVIES.md): How smooth animations and videos are generated.
-- [GL-PERTURBATION-BOARDS.md](GL-PERTURBATION-BOARDS.md): WebGL2 perturbation board architecture.
-- [webgl-pingpong-design.md](webgl-pingpong-design.md): WebGL2 ping-pong rendering design.
+- [GPU-SHADERS.md](GPU-SHADERS.md): WebGPU compute shader architecture.
+- [WEBGL-SHADERS.md](WEBGL-SHADERS.md): WebGL2 fragment shader GPGPU architecture.

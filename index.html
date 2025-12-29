@@ -9171,7 +9171,7 @@ class GpuBoard extends GpuBaseBoard {
 // WebGL2 board using fragment shaders for gap-free GPU iteration.
 // Unlike WebGPU, WebGL's driver manages cross-command synchronization,
 // allowing continuous GPU pipelining without CPU round-trips between batches.
-// See docs/webgl-pingpong-design.md for detailed design rationale.
+// See docs/WEBGL-SHADERS.md for detailed design rationale.
 class GlBoard extends Board {
   static TILE_SIZE = 16;  // Tile size for hierarchical reduction
 

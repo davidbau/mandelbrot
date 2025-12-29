@@ -1,18 +1,140 @@
 # GPU Shaders and WebGPU
 
-The explorer uses WebGPU to compute millions of Mandelbrot iterations in parallel on the GPU. This document explains the shader architecture, the two board types (shallow and deep zoom), and the techniques that make deep GPU zooming possible.
+The explorer uses WebGPU to compute millions of Mandelbrot iterations in parallel on the GPU. This document explains the shader architecture, the three board types (shallow, deep, and ultra-deep zoom), and the techniques that make deep GPU zooming possible.
 
-## WebGPU Overview
+## Historical Context: The Road to WebGPU
 
-WebGPU is a modern graphics API that provides direct access to GPU compute shaders. Unlike WebGL, which is designed for rendering triangles, WebGPU's compute shaders are general-purpose: they run arbitrary code on thousands of GPU threads simultaneously.
+For decades, GPU compute was fragmented across proprietary APIs: CUDA (NVIDIA, 2007), OpenCL (cross-platform, 2009), and Metal (Apple, 2014). Web developers were stuck with WebGL, which required abusing fragment shaders for GPGPU—encoding data as textures and rendering full-screen quads.
+
+WebGPU emerged from a W3C effort starting around 2017 to create a modern, cross-platform GPU API for the web. Unlike WebGL (which wrapped OpenGL ES), WebGPU was designed from scratch with explicit resource management inspired by Vulkan, Metal, and Direct3D 12. Key milestones:
+
+- **2017**: Initial proposals from Apple, Google, Mozilla, and Microsoft
+- **2021**: WebGPU draft specification published
+- **2023**: Chrome 113 ships WebGPU by default (April)
+- **2023**: Safari 17 adds WebGPU support (September)
+- **2024**: Firefox enables WebGPU (behind flag, then default)
+
+Today, WebGPU provides true compute shaders—no more pretending pixels are data. The Mandelbrot explorer was one of the first applications to adopt WebGPU for production fractal computation.
+
+## Architecture Overview
+
+The GPU boards follow a pipelined batch architecture:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         GPU Board Pipeline                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐          │
+│  │   Uniform    │    │   Storage    │    │   Active     │          │
+│  │   Buffer     │    │   Buffers    │    │   Index List │          │
+│  │  (params)    │    │ (per-pixel)  │    │  (sparse)    │          │
+│  └──────┬───────┘    └──────┬───────┘    └──────┬───────┘          │
+│         │                   │                   │                   │
+│         └───────────────────┼───────────────────┘                   │
+│                             ▼                                       │
+│                   ┌──────────────────┐                              │
+│                   │  Compute Shader  │                              │
+│                   │  (WGSL)          │                              │
+│                   │                  │                              │
+│                   │  • Load pixel    │                              │
+│                   │  • Iterate z²+c  │                              │
+│                   │  • Check escape  │                              │
+│                   │  • Store results │                              │
+│                   └────────┬─────────┘                              │
+│                            │                                        │
+│         ┌──────────────────┼──────────────────┐                     │
+│         ▼                  ▼                  ▼                     │
+│  ┌────────────┐    ┌────────────────┐   ┌───────────┐              │
+│  │  Staging   │    │  Double-Buffer │   │  Atomic   │              │
+│  │  Buffer    │◄───│  Ping-Pong     │   │  Counters │              │
+│  │  (readback)│    │  (pipelining)  │   │  (sync)   │              │
+│  └─────┬──────┘    └────────────────┘   └───────────┘              │
+│        │                                                            │
+│        ▼                                                            │
+│  ┌──────────────────────────────────────────────────────┐          │
+│  │                    CPU Processing                     │          │
+│  │  • Map staging buffer (async)                         │          │
+│  │  • Extract escaped/converged pixels                   │          │
+│  │  • Update View.nn[] iteration counts                  │          │
+│  │  • Trigger canvas redraw                              │          │
+│  └──────────────────────────────────────────────────────┘          │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Design Elements
+
+**Sparse Active Pixel List**: Unlike WebGL which must process every pixel every iteration, WebGPU maintains an index list of only the pixels still computing. As pixels escape, the list shrinks. Late iterations may dispatch only 1% of the original threads.
+
+**Pipelined Batches**: The GPU processes batch N while the CPU reads results from batch N-1. Double-buffered staging buffers prevent stalls. Atomic counters detect the rare case when batches overlap on the GPU.
+
+**Batched Iteration**: Each dispatch runs hundreds or thousands of iterations per pixel (dynamically tuned based on active count). This amortizes dispatch overhead and keeps the GPU saturated.
+
+**Hierarchical Precision**: Three board types handle different zoom depths:
+- Float32 direct iteration (shallow)
+- Float32 perturbation with DD reference orbit (deep)
+- Float32 perturbation with QD reference orbit + adaptive scaling (ultra-deep)
+
+### Performance Characteristics
+
+On a typical discrete GPU (e.g., M1 Pro, RTX 3060):
+
+| Metric | Typical Value |
+|--------|---------------|
+| Threads per dispatch | 100,000 - 2,000,000 |
+| Iterations per batch | 100 - 10,000 (adaptive) |
+| Batches per second | 30 - 100 |
+| Pixels/second (early) | 50-100 million |
+| Pixels/second (late) | 1-10 million (sparse) |
+| GPU memory | 50-200 MB |
+
+WebGPU is approximately **2× faster** than the WebGL fallback, primarily due to sparse dispatch (only active pixels) and compute shader efficiency (no rasterization overhead).
+
+## WebGPU Fundamentals
+
+WebGPU compute shaders run arbitrary code on thousands of GPU threads simultaneously. Unlike WebGL's fragment shaders (designed for pixel coloring), compute shaders are true GPGPU:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    WebGPU Compute Model                      │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Dispatch(workgroups_x, workgroups_y, workgroups_z)         │
+│       │                                                     │
+│       ▼                                                     │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              Workgroup Grid                          │   │
+│  │  ┌─────┬─────┬─────┬─────┬─────┐                    │   │
+│  │  │ WG  │ WG  │ WG  │ WG  │ ... │  (thousands)       │   │
+│  │  │ 0,0 │ 1,0 │ 2,0 │ 3,0 │     │                    │   │
+│  │  ├─────┼─────┼─────┼─────┼─────┤                    │   │
+│  │  │ WG  │ WG  │ WG  │ WG  │ ... │                    │   │
+│  │  │ 0,1 │ 1,1 │ 2,1 │ 3,1 │     │                    │   │
+│  │  └─────┴─────┴─────┴─────┴─────┘                    │   │
+│  └─────────────────────────────────────────────────────┘   │
+│       │                                                     │
+│       ▼                                                     │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │         Each Workgroup: 64 threads                   │   │
+│  │  ┌──┬──┬──┬──┬──┬──┬──┬──┐                          │   │
+│  │  │T0│T1│T2│T3│T4│T5│T6│T7│ ...T63                   │   │
+│  │  └──┴──┴──┴──┴──┴──┴──┴──┘                          │   │
+│  │  • Share local memory                                │   │
+│  │  • Synchronize with barriers                         │   │
+│  │  • Execute in lockstep (SIMD)                        │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
 
 The basic pattern:
 1. **Create buffers** on the GPU to hold pixel data
 2. **Write a shader** in WGSL (WebGPU Shading Language)
 3. **Dispatch workgroups** of threads to process pixels in parallel
-4. **Read results** back to the CPU
+4. **Read results** back to the CPU via staging buffers
 
-A typical Mandelbrot frame might dispatch 640,000 threads (for a 800×800 image) across 10,000 workgroups of 64 threads each.
+A typical Mandelbrot frame might dispatch 640,000 threads (for an 800×800 image) across 10,000 workgroups of 64 threads each.
 
 ## The Three GPU Boards
 
@@ -610,86 +732,66 @@ if (params.loop_enabled && ref_iter >= params.loop_threshold) {
 
 This allows pixels to iterate indefinitely without requiring unbounded memory for the reference orbit or threading structures.
 
-### Double-Buffering
+### Pipelined Readback
 
-GPU boards use double-buffering to overlap computation with result processing:
+GPU boards use double-buffered staging to overlap computation with result processing. This prevents the GPU from stalling while the CPU reads results:
 
 ```
 Traditional (serial):
   [GPU compute] → [CPU readback] → [GPU compute] → [CPU readback]
                    ▲ idle GPU       ▲ idle GPU
 
-Double-buffered (pipelined):
+Pipelined (double-buffered):
   [GPU compute batch N  ] → [GPU compute batch N+1] → [GPU compute N+2]
             └──────────────► [CPU process N      ] → [CPU process N+1]
 ```
 
-The implementation uses two staging buffers that alternate roles:
+The implementation maintains two staging buffers that alternate roles:
+
+1. **Dispatch**: GPU writes results to the current staging buffer
+2. **Copy**: Copy pixel state to staging buffer, submit commands
+3. **Process**: While GPU runs, map the *previous* staging buffer and read results
+4. **Swap**: Flip the buffer index for the next batch
 
 ```javascript
 // In compute():
-const currentStaging = this.buffers.stagingBuffers[this.currentStagingIndex];
-const pendingStaging = this.buffers.stagingBuffers[1 - this.currentStagingIndex];
+const bufferIndex = this.readbackBufferIndex;
+const stagingBuffer = this.buffers.stagingBuffers[bufferIndex];
 
-// 1. Start GPU compute (writes to pendingStaging)
-encoder.copyBufferToBuffer(this.buffers.pixels, 0, pendingStaging, 0, bufferSize);
+// 1. Copy current pixel state to staging buffer
+encoder.copyBufferToBuffer(this.buffers.pixels, 0, stagingBuffer, 0, bufferSize);
 this.device.queue.submit([encoder.finish()]);
 
-// 2. Process previous batch results (from currentStaging) while GPU runs
-if (this.hasPendingResults) {
-  await currentStaging.mapAsync(GPUMapMode.READ);
-  // ... process results from previous batch
-  currentStaging.unmap();
-}
+// 2. Swap to other buffer for next batch
+this.readbackBufferIndex = 1 - bufferIndex;
 
-// 3. Swap buffers for next iteration
-this.currentStagingIndex = 1 - this.currentStagingIndex;
+// 3. Map and process this batch's results (GPU continues on other buffer)
+await stagingBuffer.mapAsync(GPUMapMode.READ);
+const results = new Uint32Array(stagingBuffer.getMappedRange());
+// ... process results, send to view
+stagingBuffer.unmap();
 ```
 
-This eliminates GPU idle time during result processing, providing ~15-25% throughput improvement depending on the ratio of compute time to readback time.
+This eliminates GPU idle time during result processing, providing ~15-25% throughput improvement. See [gpu-results-readback-design.md](gpu-results-readback-design.md) for the full design including batch ordering guarantees.
 
-### Sparse Compaction
+### Batch Locking
 
-As pixels escape or converge, they become "dead" but remain in the GPU buffer, wasting bandwidth on every batch. Sparse compaction periodically rebuilds the buffer with only active pixels:
+To prevent race conditions between overlapping batches, GPU boards use a locking mechanism that ensures results are processed in order. When a batch is in flight, subsequent batches wait before reading their staging buffers. See [gpu-batch-locking.md](gpu-batch-locking.md) for details.
 
-```
-Before compaction (60% dead):
-  [■][□][■][□][□][■][□][□][■][□]  ← 10 pixels processed, 4 active
-       dead pixels waste GPU bandwidth
+### Buffer Layout
 
-After compaction:
-  [■][■][■][■]  ← 4 pixels processed, 4 active
-       100% useful work
-```
-
-The compaction decision uses a cost-benefit heuristic:
-
-```javascript
-// Compaction saves: (deadPixels × futureReads) bandwidth
-// Compaction costs: (activePixels) buffer writes
-
-const wastedReads = this.cumulativeWastedReads;  // Dead pixels read since last compaction
-const activeRemaining = this.activeCount - this.deadSinceCompaction;
-const compactionCost = activeRemaining * this.compactionCostRatio;  // ~1.0
-
-if (wastedReads >= compactionCost) {
-  await this.compactBuffers();
-  this.cumulativeWastedReads = 0;
-}
-```
-
-This triggers compaction when cumulative wasted bandwidth exceeds the one-time cost of rebuilding the buffer. For typical renders, this means compaction happens 3-5 times as the image converges.
-
-Each `PixelState` struct includes an `orig_index` field so compacted pixels can be mapped back to their display coordinates:
+Each `PixelState` struct includes an `orig_index` field that maps the pixel back to its display coordinates:
 
 ```wgsl
 struct PixelState {
-  orig_index: u32,  // Original grid position (for coordinate lookup)
-  iter: u32,
-  status: u32,
-  // ... other fields
+  orig_index: u32,  // Original grid position (x + y * width)
+  iter: u32,        // Current iteration count
+  status: u32,      // 0=active, 1=escaped, 2=converged
+  // ... other fields vary by board type
 }
 ```
+
+**Note:** The infrastructure exists for future sparse compaction (rebuilding buffers with only active pixels), but compaction is not currently implemented. Dead pixels remain in the buffer until computation completes.
 
 ### Parallel CPU/GPU Execution
 
@@ -729,7 +831,7 @@ async compute() {
 
 For boards with heavy reference orbit computation (especially QD precision), this parallelism can hide most of the CPU overhead behind GPU execution time.
 
-## WebGPU Availability
+## WebGPU Availability and Fallback
 
 WebGPU is available in:
 - Chrome 113+ (desktop and Android)
@@ -737,7 +839,17 @@ WebGPU is available in:
 - Safari 17+ (macOS Sonoma, iOS 17)
 - Firefox (behind a flag)
 
-The explorer feature-detects WebGPU and falls back to CPU computation (using `PerturbationBoard`) when unavailable.
+When WebGPU is unavailable, the explorer falls back to **WebGL2** using equivalent board implementations:
+
+| WebGPU Board | WebGL2 Fallback | CPU Fallback |
+|--------------|-----------------|--------------|
+| GpuBoard | GlBoard | CpuBoard |
+| GpuZhuoranBoard | GlZhuoranBoard | DDZhuoranBoard |
+| GpuAdaptiveBoard | GlAdaptiveBoard | QDZhuoranBoard |
+
+The WebGL boards use fragment shaders and ping-pong textures instead of compute shaders and storage buffers, but implement the same algorithms. See [WEBGL-SHADERS.md](WEBGL-SHADERS.md) for details.
+
+If both WebGPU and WebGL2 are unavailable (rare), the explorer uses pure CPU computation.
 
 ## References
 

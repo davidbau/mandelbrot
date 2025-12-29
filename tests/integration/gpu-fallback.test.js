@@ -3,6 +3,11 @@
  *
  * Tests GPU fallback chain: WebGPU → WebGL2 → CPU
  *
+ * Board classes by zoom level and GPU capability:
+ *   Shallow zoom (pixelSize > 1e-7):  GpuBoard → GlBoard → CpuBoard
+ *   Medium zoom (1e-30 to 1e-7):      GpuZhuoranBoard → GlZhuoranBoard → DDZhuoranBoard
+ *   Deep zoom (< 1e-30):              GpuAdaptiveBoard → GlAdaptiveBoard → QDZhuoranBoard
+ *
  * Uses debug flags (nogpu, nogl) to simulate different capability scenarios
  * without requiring actual cross-platform testing infrastructure.
  */

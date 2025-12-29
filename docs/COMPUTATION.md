@@ -100,7 +100,7 @@ The application uses a three-tier fallback: WebGPU → WebGL2 → CPU. Board sel
 | 1e-30 to 1e-7 | ~10⁷ to ~10³⁰ | `GlZhuoranBoard` | float32 perturbation + DDReferenceOrbitMixin |
 | < 1e-30 | > ~10³⁰ | `GlAdaptiveBoard` | float32 perturbation + QDReferenceOrbitMixin + adaptive scaling |
 
-WebGL2 boards use a ping-pong framebuffer architecture with fragment shaders instead of compute shaders. See [GL-PERTURBATION-BOARDS.md](GL-PERTURBATION-BOARDS.md) for details.
+WebGL2 boards use a ping-pong framebuffer architecture with fragment shaders instead of compute shaders. See [WEBGL-SHADERS.md](WEBGL-SHADERS.md) for details.
 
 **CPU Boards** (fallback when no GPU available):
 
@@ -264,3 +264,6 @@ By using DD or QD precision math for the intermediate subtractions, we avoid cat
 
 - [ALGORITHMS.md](ALGORITHMS.md): The mathematical algorithms inside the boards.
 - [ARCHITECTURE.md](ARCHITECTURE.md): The overall application structure.
+- [GPU-SHADERS.md](GPU-SHADERS.md): WebGPU compute shader implementation.
+- [WEBGL-SHADERS.md](WEBGL-SHADERS.md): WebGL2 fragment shader implementation.
+- [PRECOMPUTED-INHERITANCE.md](PRECOMPUTED-INHERITANCE.md): How zoomed views inherit precomputed results.
